@@ -7,6 +7,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$env:RUSTUP_DIST_SERVER = 'https://rsproxy.cn'
+$env:RUSTUP_UPDATE_ROOT = 'https://rsproxy.cn/rustup'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sourceDir = Join-Path $repoRoot 'p0\ffi'
