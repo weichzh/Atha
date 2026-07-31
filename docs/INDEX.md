@@ -12,9 +12,20 @@
 
 ## 当前里程碑
 
-- `docs/milestones/M0-current.md`
-  - 作用：完成项目工作流和既有项目记忆迁移。
-  - 读取时机：审阅或关闭 M0。
+- `docs/milestones/M1-windows-backend-foundation.md`
+  - 作用：约束正式 Cargo workspace 和最小后端 crate 的初始化。
+  - 读取时机：当前 M1 规格、计划、实施或评审。
+
+## 当前规格
+
+- `docs/specs/SPEC-0001-windows-backend-foundation.md`
+  - 状态：`self-reviewed`，等待用户确认。
+  - 作用：定义 M1 的范围、行为、验收标准和边界情况。
+
+## 已完成里程碑
+
+- `docs/milestones/M0-document-workflow.md`
+  - 作用：记录项目工作流和既有项目记忆迁移的完成状态。
 
 ## 架构
 

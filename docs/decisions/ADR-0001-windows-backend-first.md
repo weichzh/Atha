@@ -35,7 +35,8 @@ accepted
 
 ## 相关文档
 
-- 里程碑：`docs/milestones/M0-current.md`
+- 当前里程碑：`docs/milestones/M1-windows-backend-foundation.md`
+- 已完成里程碑：`docs/milestones/M0-document-workflow.md`
 - 架构：`docs/architecture/OVERVIEW.md`
 - 路线图：`docs/roadmap/ROADMAP.md`
 - 历史研究：`docs/studies/ARCHIVE-0001-mobile-architecture-v0.1.md`
