@@ -1,0 +1,16 @@
+.bail on
+PRAGMA foreign_keys = ON;
+PRAGMA synchronous = NORMAL;
+
+BEGIN IMMEDIATE;
+INSERT INTO message VALUES (
+    X'00000000000000000000000000000008',
+    X'00000000000000000000000000000003',
+    'user', 'user_text', NULL, NULL, 3, NULL
+);
+INSERT INTO outbox_event VALUES (
+    X'00000000000000000000000000000007',
+    'message', X'00000000000000000000000000000008',
+    'message.created', '{"message_id":"0008"}', 3, 0, NULL
+);
+COMMIT;
