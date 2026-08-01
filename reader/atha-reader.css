@@ -1,0 +1,189 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  background: #dfe5e7;
+  color: #182226;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  display: grid;
+  place-items: start center;
+}
+
+button,
+select {
+  min-height: 44px;
+  font: inherit;
+}
+
+button:focus-visible,
+select:focus-visible {
+  outline: 3px solid #176b87;
+  outline-offset: 2px;
+}
+
+.reader {
+  --reader-width: 1264px;
+  --reader-height: 1680px;
+  --page-inline-margin: 112px;
+  --page-top-margin: 96px;
+  --page-bottom-margin: 128px;
+  --page-gap: 224px;
+  --content-width: calc(var(--reader-width) - 2 * var(--page-inline-margin));
+  --content-height: calc(
+    var(--reader-height) - var(--page-top-margin) - var(--page-bottom-margin)
+  );
+  position: relative;
+  width: var(--reader-width);
+  height: var(--reader-height);
+  background: #fffdf8;
+  transform: scale(var(--fit-scale, 1));
+  transform-origin: top center;
+}
+
+.page {
+  position: absolute;
+  top: var(--page-top-margin);
+  left: var(--page-inline-margin);
+  width: var(--content-width);
+  height: var(--content-height);
+  overflow: hidden;
+}
+
+#book-host {
+  display: block;
+  width: var(--content-width);
+  height: var(--content-height);
+}
+
+.book {
+  width: var(--content-width);
+  height: calc(var(--content-height) - 4px);
+  margin-top: 2px;
+  column-width: var(--content-width);
+  column-gap: var(--page-gap);
+  column-fill: auto;
+  font-size: 32px;
+  line-height: 1.6;
+  overflow: visible;
+}
+
+.book > :first-child,
+.book > :first-child > :first-child {
+  margin-top: 0;
+}
+
+.book img.math-inline,
+.book img.math-display {
+  box-sizing: border-box;
+  max-width: 100%;
+  background: #fff;
+  color-scheme: light;
+}
+
+.book img.math-inline {
+  display: inline-block;
+}
+
+.book img.math-display {
+  display: block;
+  margin: 0.9em auto !important;
+  break-inside: avoid;
+}
+
+.book figure,
+.book table,
+.book tr,
+.book pre,
+.book blockquote {
+  break-inside: avoid;
+}
+
+.toolbar {
+  position: absolute;
+  right: 48px;
+  bottom: 28px;
+  left: 48px;
+  display: grid;
+  grid-template-columns: max-content 1fr max-content max-content;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid #ccd4d6;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 8px 32px rgb(25 39 43 / 14%);
+}
+
+.toolbar output {
+  text-align: center;
+}
+
+.toolbar label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.error {
+  position: absolute;
+  inset: 96px 112px auto;
+  z-index: 2;
+  padding: 20px;
+  border: 2px solid #a32921;
+  background: #fff0ee;
+  color: #781e18;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #0f1518;
+    color: #e9eeee;
+  }
+
+  .reader,
+  .book {
+    background: #182226;
+    color: #e9eeee;
+  }
+
+  .book img.math-inline,
+  .book img.math-display {
+    background: transparent;
+    filter: invert(0.88) hue-rotate(180deg);
+  }
+
+  .book img:not(.math-inline):not(.math-display) {
+    filter: none;
+  }
+
+  button,
+  select,
+  .toolbar {
+    border-color: #40545c;
+    background: #202c30;
+    color: #e9eeee;
+  }
+
+  .toolbar {
+    box-shadow: 0 8px 32px rgb(0 0 0 / 35%);
+  }
+
+  .error {
+    border-color: #ff8a80;
+    background: #3b2020;
+    color: #ffb3ad;
+  }
+}

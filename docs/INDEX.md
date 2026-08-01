@@ -15,35 +15,60 @@
 
 ## 当前里程碑
 
+- 暂无；M2 已完成，下一里程碑尚未选择。
 - `docs/milestones/M1-windows-backend-foundation.md`
   - 状态：`completed`。
   - 作用：记录正式 Cargo workspace 和最小后端 crate 的初始化结果。
-  - 读取时机：开始 M2 或审阅工程基线。
+  - 读取时机：审阅工程基线。
+
+## 产品定义
+
+- `docs/product/OVERVIEW.md`
+  - 作用：定义 Atha 要解决的问题、核心阅读与共读体验、长期边界和验收原则。
+  - 读取时机：讨论产品方向，或为规格和计划选择实现切片。
 
 ## 当前规格
 
+- `docs/specs/SPEC-0002-html-paged-reader-slice.md`
+  - 状态：`accepted`；三样本与夜间模式扩展已复审。
+  - 作用：定义本地 XHTML、公式缩放和无行裁切分页的首个行为边界。
 - `docs/specs/SPEC-0001-windows-backend-foundation.md`
   - 状态：`accepted`。
   - 作用：定义 M1 的范围、行为、验收标准和边界情况。
 
 ## 当前计划
 
+- `docs/plans/PLAN-0002-html-paged-reader-slice.md`
+  - 状态：`implemented`；本轮三样本与夜间模式扩展已复审并验收。
+  - 作用：定义首个阅读切片的技术预检、实现步骤和验收。
 - `docs/plans/PLAN-0001-windows-backend-foundation.md`
   - 状态：`implemented`。
   - 作用：定义 M1 的逐文件实现、验证和回滚。
 
 ## 已完成里程碑
 
+- `docs/milestones/M2-html-reader-core-foundation.md`
+  - 作用：建立本地 XHTML 的首个分页阅读切片、三样本验收与系统夜间模式。
 - `docs/milestones/M0-document-workflow.md`
   - 作用：记录项目工作流和既有项目记忆迁移的完成状态。
 
 ## 架构
 
 - `docs/architecture/OVERVIEW.md`
-  - 作用：当前产品方向、范围、质量优先级和后端边界。
+  - 作用：系统分层、长期边界和架构入口。
   - 读取时机：任务影响领域、存储、平台或模块边界。
+- `docs/architecture/READER-CORE.md`
+  - 作用：定义 HTML 阅读内核、样式覆盖、安全边界与性能原则。
+  - 读取时机：渲染、缓存、样式、外部资源或阅读位置相关任务。
+- `docs/architecture/MESSAGE-READING.md`
+  - 作用：定义消息式摘录、引用存档与未来 AI 书友的边界。
+  - 读取时机：消息、引用、搜索、存储或共读相关任务。
 
 ## 已接受决策
+
+- `docs/decisions/ADR-0003-webview2-reader-host.md`
+  - 作用：固定 Windows 阅读 host、自定义资源协议、安全边界、公式倍率和分页模型。
+  - 读取时机：实现或审阅 HTML 阅读切片。
 
 - `docs/decisions/ADR-0001-windows-backend-first.md`
   - 作用：确定 Windows 当前唯一实施平台、后端先于前端以及 RsProxy。
@@ -67,6 +92,8 @@
 
 ## 评审
 
+- `docs/reviews/REVIEW-0003-html-paged-reader-slice.md`
+  - 作用：M2 阅读切片、公式反馈修复和 Windows 本地验收结果。
 - `docs/reviews/REVIEW-0001-doc-workflow-bootstrap.md`
   - 作用：M0 工作流初始化和迁移结果。
 - `docs/reviews/REVIEW-0002-windows-backend-foundation.md`

@@ -7,33 +7,23 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$env:RUSTUP_DIST_SERVER = 'https://rsproxy.cn'
-$env:RUSTUP_UPDATE_ROOT = 'https://rsproxy.cn/rustup'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sourceDir = Join-Path $repoRoot 'p0\ffi'
 $buildDir = Join-Path $repoRoot 'build\p0-ffi'
 $rustManifest = Join-Path $sourceDir 'rust\Cargo.toml'
+. (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
 
-cmake -S $sourceDir -B $buildDir -G 'Visual Studio 18 2026' -A x64
+& $env:ATHA_CMAKE -S $sourceDir -B $buildDir -G 'Visual Studio 18 2026' -A x64
 if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed.' }
 
-cmake --build $buildDir --config Release
+& $env:ATHA_CMAKE --build $buildDir --config Release
 if ($LASTEXITCODE -ne 0) { throw 'C++ build failed.' }
 
-ctest --test-dir $buildDir -C Release --output-on-failure
+& $env:ATHA_CTEST --test-dir $buildDir -C Release --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw 'C++ ABI check failed.' }
 
-$cargoCommand = Get-Command cargo.exe -ErrorAction SilentlyContinue
-if ($null -eq $cargoCommand) {
-    $userProfile = [Environment]::GetFolderPath('UserProfile')
-    $cargoPath = Join-Path $userProfile '.cargo\bin\cargo.exe'
-    if (-not (Test-Path -LiteralPath $cargoPath -PathType Leaf)) {
-        throw 'cargo.exe was not found.'
-    }
-} else {
-    $cargoPath = $cargoCommand.Source
-}
+$cargoPath = $env:ATHA_CARGO
 
 & $cargoPath fmt --manifest-path $rustManifest --check
 if ($LASTEXITCODE -ne 0) { throw 'Rust formatting check failed.' }

@@ -4,22 +4,11 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$env:RUSTUP_DIST_SERVER = 'https://rsproxy.cn'
-$env:RUSTUP_UPDATE_ROOT = 'https://rsproxy.cn/rustup'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
-
-$cargoCommand = Get-Command cargo.exe -ErrorAction SilentlyContinue
-if ($null -eq $cargoCommand) {
-    $userProfile = [Environment]::GetFolderPath('UserProfile')
-    $cargoPath = Join-Path $userProfile '.cargo\bin\cargo.exe'
-    if (-not (Test-Path -LiteralPath $cargoPath -PathType Leaf)) {
-        throw 'cargo.exe was not found.'
-    }
-} else {
-    $cargoPath = $cargoCommand.Source
-}
+. (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
+$cargoPath = $env:ATHA_CARGO
 
 & $cargoPath fmt --manifest-path $manifestPath --all --check
 if ($LASTEXITCODE -ne 0) { throw 'Backend formatting check failed.' }

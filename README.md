@@ -15,6 +15,10 @@ Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系
 pwsh -NoProfile -File .\scripts\check-backend.ps1
 ```
 
+## 本地开发环境
+
+每台电脑在开始开发前复制 `env/example.ps1` 为 `env/local.ps1`，并填写本机的 `cargo`、`cmake`、`ctest` 和 `sqlite3` 路径。`env/local.ps1` 已被 Git 忽略；检查脚本统一加载它，不依赖当前 Shell 的 `PATH`。
+
 ## 项目入口
 
 - 当前状态：`docs/ACTIVE.md`

@@ -1,3 +1,5 @@
 .tmp/
 build/
 target/
+env/local.ps1
+fixtures/local/

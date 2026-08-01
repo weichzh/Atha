@@ -8,31 +8,47 @@
 - M0 工作流提交：`fc104e0`
 - M1 规格提交：`5d255e4`
 - 当前没有远程仓库。
-- 当前已有根 Cargo workspace 和正式后端 crate；没有前端工程。
+- 当前已有根 Cargo workspace、正式后端 crate、Windows WebView2 阅读 host 与原生 HTML/CSS/JavaScript 阅读页；没有前端框架。
 
 ## 顶层结构
 
 | 路径 | 责任 | 状态 |
 |---|---|---|
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
-| `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M1 已验证 |
-| `backend/atha-backend/` | 正式零依赖后端库 | M1 工程基线 |
+| `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M2 已验证 |
+| `backend/atha-backend/` | 正式零依赖后端库、书根资源边界与阅读遥测校验 | M2 阅读切片 |
+| `reader/atha-reader-host/` | Wry/Tao Windows WebView2 承载、自定义协议与宿主边界 | M2 阅读切片 |
+| `reader/atha-reader.*` | 唯一阅读页实现：内容校验、公式适配、CSS 多栏分页与自检 | M2 阅读切片 |
+| `reader/samples.json` | 三个本地验收样本的入口、边界与内容断言清单 | M2 已验证 |
 | `p0/ffi/` | Rust/C++ 共享 C ABI 调用与所有权对照 | 本地 P0 实验 |
 | `p0/sqlite/` | SQLite、FTS5、Outbox schema 与故障检查 | 本地 P0 实验 |
 | `scripts/check-backend.ps1` | 正式后端 fmt、clippy、test 和 doc | M1 已通过 |
 | `scripts/check-p0-ffi.ps1` | 构建两个 FFI 实现并运行统一 runner | 已通过 |
 | `scripts/check-p0-sqlite.ps1` | 重建数据库并验证事务、FTS 与 10k 冒烟 | 已通过 |
+| `scripts/check-reader-slice.ps1` | 构建实际 host，运行安全、布局和性能验收 | M2 已通过 |
+| `scripts/export_reader_sample.py` | 安全、可重复地从 EPUB 导出整页或 section 验收样本 | M2 已通过 |
+| `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页和单一样本 | M2 已通过 |
+| `scripts/check-reader-samples.ps1` | 三样本实际 host 与明暗主题截图总验收 | M2 已通过 |
 | `docs/` | 项目权威记忆、规格、计划、决策和评审 | 已建立 |
 
 `p0/` 只保存技术验证，不是生产后端。后续正式代码不得直接在 P0 目录上堆叠。
 
 ### 正式后端基线
 
-- workspace 只有 `atha-backend` 一个成员，并显式排除 P0 Rust crate；
+- workspace 包含 `atha-backend` 与 `atha-reader-host`，并显式排除 P0 Rust crate；
 - 版本 `0.1.0`、edition 2024、Rust `1.97.1` 和禁止 unsafe 的 lint 由 workspace 统一；
 - 后端 crate 没有外部依赖、公共业务接口或占位 trait；
-- 根锁文件只包含正式后端包，P0 继续保留独立锁文件；
-- SQLite 与迁移政策已固定，但数据库依赖和实现延后到 M2。
+- 根锁文件包含正式后端与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
+- SQLite 与迁移政策已固定，但数据库依赖和实现留待后续数据库里程碑。
+
+### HTML 阅读切片
+
+- `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；
+- `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
+- 阅读页先校验 XHTML、CSS 与 SVG，再导入闭合 Shadow DOM；
+- 公式按源尺寸随字号缩放，行间公式使用独立 `1.5` 倍率并在逻辑内容列中居中；
+- 固定 1264 × 1680 逻辑页使用 CSS 多栏，文字、公式和原子内容均有布局后裁切检查；
+- 宿主 IPC 只接收固定、限长、非内容性的性能与状态事件。
 
 ## 已实现能力
 
@@ -60,6 +76,11 @@
 - Rust 1.97.1 单元测试 2/2 通过；
 - CTest 1/1 通过；
 - 正式后端 fmt、clippy、零测试编译和 warnings-as-errors 文档构建通过；
+- M2 Rust 资源与遥测集成测试 3/3 通过；实际 Windows WebView2 host 在 24/32/40px 下完成公式、安全与分页自检；
+- 行间公式 6/6 在 32px 下为 `3×` 源尺寸、中心偏差 0px、宽高比误差 0；Agent Browser 首尾翻页与 40px 重排截图通过；
+- 三样本实际 host 与 Agent Browser 明暗验收通过：逻辑样本 154 个公式，宏观经济学样本 58 个公式和 1 张普通图，范畴论样本 0 个公式、8 个代码块和 2 张普通 PNG；
+- 明暗正文对比度分别为 15.94 和 13.84；暗色下只反色公式，普通图始终为 `filter: none`；
+- 最近一次 10 样本基准中位数：冷启动 1391.530ms、首个稳定页面 512.400ms、热打开 20.750ms、翻页 13.900ms、字号重排 20.800ms；
 - metadata 证明正式 workspace 只有一个零依赖包；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
@@ -70,9 +91,9 @@
 
 - P0 schema 含 SQLite CLI 指令，尚未转为正式版本化迁移；
 - 正式后端尚未添加或编译已决策的随包 SQLite；
-- 没有应用服务、领域 API、错误模型或跨进程接口；
+- 除受限阅读遥测外，没有应用服务、领域 API 或通用跨进程接口；
 - 没有导入解析、Locator 重锚定或富文本迁移；
-- 没有 CI、Windows 安装包或真实产品链路；
+- 没有 CI、Windows 安装包或书籍导入产品链路；
 - 性能数据未记录设备指纹，也没有重复样本统计。
 
 ## 正式代码约定

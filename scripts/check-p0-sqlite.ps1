@@ -10,16 +10,13 @@ $sqlDir = Join-Path $repoRoot 'p0\sqlite'
 $buildDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'build\p0-sqlite'))
 $databasePath = [System.IO.Path]::GetFullPath((Join-Path $buildDir 'atha-p0.sqlite'))
 $buildPrefix = $buildDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+. (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
 
 if (-not $databasePath.StartsWith($buildPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'Generated database path escaped the build directory.'
 }
 
-$sqliteCommand = Get-Command sqlite3.exe -ErrorAction SilentlyContinue
-if ($null -eq $sqliteCommand) {
-    throw 'sqlite3.exe was not found.'
-}
-$sqlitePath = $sqliteCommand.Source
+$sqlitePath = $env:ATHA_SQLITE3
 
 New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
 foreach ($generatedPath in @($databasePath, "$databasePath-wal", "$databasePath-shm")) {

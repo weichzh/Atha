@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Atha Reader</title>
+    <link id="reader-style-source" rel="stylesheet" href="atha-reader.css" />
+    <script src="atha-reader.js" defer></script>
+  </head>
+  <body>
+    <main class="reader" aria-label="分页阅读器">
+      <section id="page" class="page" aria-label="书籍内容">
+        <div id="book-host"></div>
+      </section>
+      <p id="error" class="error" role="alert" hidden>无法安全打开这份内容。</p>
+      <nav class="toolbar" aria-label="阅读控制">
+        <button id="previous" type="button">上一页</button>
+        <output id="position" aria-live="polite">加载中</output>
+        <label>
+          字号
+          <select id="font-size" aria-label="正文字号">
+            <option value="24">24px</option>
+            <option value="32" selected>32px</option>
+            <option value="40">40px</option>
+          </select>
+        </label>
+        <button id="next" type="button">下一页</button>
+      </nav>
+    </main>
+  </body>
+</html>
