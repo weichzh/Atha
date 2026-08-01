@@ -13,14 +13,21 @@
 ## 当前里程碑
 
 - `docs/milestones/M1-windows-backend-foundation.md`
-  - 作用：约束正式 Cargo workspace 和最小后端 crate 的初始化。
-  - 读取时机：当前 M1 规格、计划、实施或评审。
+  - 状态：`completed`。
+  - 作用：记录正式 Cargo workspace 和最小后端 crate 的初始化结果。
+  - 读取时机：开始 M2 或审阅工程基线。
 
 ## 当前规格
 
 - `docs/specs/SPEC-0001-windows-backend-foundation.md`
-  - 状态：`self-reviewed`，等待用户确认。
+  - 状态：`accepted`。
   - 作用：定义 M1 的范围、行为、验收标准和边界情况。
+
+## 当前计划
+
+- `docs/plans/PLAN-0001-windows-backend-foundation.md`
+  - 状态：`implemented`。
+  - 作用：定义 M1 的逐文件实现、验证和回滚。
 
 ## 已完成里程碑
 
@@ -38,6 +45,9 @@
 - `docs/decisions/ADR-0001-windows-backend-first.md`
   - 作用：确定 Windows 当前唯一实施平台、后端先于前端以及 RsProxy。
   - 读取时机：平台、顺序、工具链或前后端边界发生疑问。
+- `docs/decisions/ADR-0002-sqlite-and-migrations.md`
+  - 作用：固定 M2 的随包 SQLite 依赖和顺序迁移政策。
+  - 读取时机：数据库依赖、连接初始化、迁移或 SQLite 升级。
 
 ## 代码库记忆
 
@@ -56,6 +66,8 @@
 
 - `docs/reviews/REVIEW-0001-doc-workflow-bootstrap.md`
   - 作用：M0 工作流初始化和迁移结果。
+- `docs/reviews/REVIEW-0002-windows-backend-foundation.md`
+  - 作用：M1 工程初始化、计划符合性和本地验证结果。
 
 ## 历史研究
 

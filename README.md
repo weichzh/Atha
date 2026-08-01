@@ -2,7 +2,18 @@
 
 Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系统。
 
-当前只推进 Windows，并遵循“后端先于前端”。移动平台、Windows 前端和正式产品后端都尚未开始；现有 `p0/` 仅为 FFI 与 SQLite 技术验证。
+当前只推进 Windows，并遵循“后端先于前端”。正式 Rust 后端工程基线已经建立，但尚无产品用例；移动平台和 Windows 前端仍未开始。现有 `p0/` 只用于 FFI 与 SQLite 技术验证，不属于正式后端。
+
+## 工程入口
+
+- 根 `Cargo.toml`：正式 workspace；
+- `backend/atha-backend/`：零依赖后端库；
+- `scripts/check-backend.ps1`：fmt、clippy、test 和 doc 统一检查；
+- `p0/`：独立实验，不进入根 workspace。
+
+```powershell
+pwsh -NoProfile -File .\scripts\check-backend.ps1
+```
 
 ## 项目入口
 

@@ -1,0 +1,13 @@
+[workspace]
+members = ["backend/atha-backend"]
+exclude = ["p0/ffi/rust"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

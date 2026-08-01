@@ -2,48 +2,50 @@
 
 ## 当前模式
 
-specification
+discussion
 
 ## 当前里程碑
 
 - 文件：`docs/milestones/M1-windows-backend-foundation.md`
 - 目标：建立正式根 Cargo workspace、最小后端 crate 和单一验证入口。
-- 状态：active
+- 状态：completed
 
 ## 当前任务
 
 - 任务：`BACKEND-INIT-0001`
-- 类型：Windows 后端工程初始化规格。
-- 规格：`docs/specs/SPEC-0001-windows-backend-foundation.md`，状态 `self-reviewed`。
-- 计划：规格被用户接受后创建。
-- 评审：计划完成后由独立 reviewer 或子 agent 交叉审阅。
+- 类型：已完成的 Windows 后端工程初始化。
+- 规格：`docs/specs/SPEC-0001-windows-backend-foundation.md`，状态 `accepted`。
+- 计划：`docs/plans/PLAN-0001-windows-backend-foundation.md`，状态 `implemented`。
+- 评审：`docs/reviews/REVIEW-0002-windows-backend-foundation.md`，状态 `approved`。
 - 分支：`main`
 
 ## 允许动作
 
 - [x] 讨论；
-- [x] 修改规格和相关项目文档；
+- [x] 起草下一里程碑和规格；
 - [ ] 修改测试；
 - [ ] 修改生产代码；
 - [ ] 推送或发布。
 
-在规格被接受、计划被接受、交叉审阅通过和用户批准实施前，生产代码保持冻结。
+M1 已关闭。M2 的 active 里程碑、accepted 规格、accepted 计划、交叉审阅和用户批准建立前，生产代码保持冻结。
 
 ## 当前状态
 
-- 已完成：M0 工作流初始化，提交 `fc104e0`。
-- 已完成：M1 里程碑和工程初始化规格草案。
-- 已完成：规格自审；正式 workspace 限定为一个零依赖后端 crate。
-- 进行中：等待用户确认 `SPEC-0001`。
-- 阻塞：无技术阻塞；规格确认是下一道流程门禁。
-- 风险：正式后端尚未初始化，不能把 P0 实验继续扩写为生产代码。
+- 已完成：用户接受 `SPEC-0001` 并批准实施。
+- 已完成：`PLAN-0001` 经独立 reviewer 修订复审后 `approved` 并已实施。
+- 已完成：根 workspace、零依赖后端 crate、检查入口和 SQLite 迁移 ADR。
+- 已完成：正式后端检查、失败路径探针、P0 FFI 回归和全部文档检查。
+- 进行中：无。
+- 阻塞：无。
+- 风险：正式后端仍无产品行为；不能在空 crate 中直接追加 M2 代码。
 
 ## 当前权威文档
 
 - `docs/milestones/M1-windows-backend-foundation.md`
 - `docs/specs/SPEC-0001-windows-backend-foundation.md`
-- `docs/decisions/ADR-0001-windows-backend-first.md`
-- `docs/architecture/OVERVIEW.md`
+- `docs/plans/PLAN-0001-windows-backend-foundation.md`
+- `docs/reviews/REVIEW-0002-windows-backend-foundation.md`
+- `docs/decisions/ADR-0002-sqlite-and-migrations.md`
 - `docs/codebase/MAP.md`
 - `docs/codebase/DATABASE.md`
 - `docs/roadmap/ROADMAP.md`
@@ -54,33 +56,44 @@ specification
 
 1. `AGENTS.md`；
 2. `docs/ACTIVE.md`；
-3. `docs/milestones/M1-windows-backend-foundation.md`；
-4. `docs/specs/SPEC-0001-windows-backend-foundation.md`。
+3. `docs/roadmap/ROADMAP.md`；
+4. 创建 M2 规格时再读架构、数据库基线、SQLite ADR 和 P0 schema。
 
 ## 检查
 
-- M1 规格自审：通过；
+- `cargo metadata --format-version 1 --no-deps`：通过，一个零依赖 workspace 包；
+- `pwsh -NoProfile -File scripts/check-backend.ps1`：fmt、clippy、test、doc 通过；
+- 检查脚本负向探针：通过，clippy 阶段非零退出；
+- `pwsh -NoProfile -File scripts/check-p0-ffi.ps1`：CTest 1/1、Rust 2/2 通过；
 - 中文 Markdown `autocorrect --fix`：完成；
 - 项目 Markdown formatter：未配置；
 - 中文 Markdown `autocorrect --lint`：通过；
 - `python scripts/doc_guard.py`：通过；
 - `python scripts/doc_length_check.py`：通过；
-- `git diff --check`：通过。
+- 暂存区 `git diff --check`：通过。
 
 ## 本次触碰文档
 
+- `README.md`
 - `docs/ACTIVE.md`
 - `docs/INDEX.md`
-- `docs/decisions/ADR-0001-windows-backend-first.md`
-- `docs/roadmap/ROADMAP.md`
-- `docs/milestones/M0-document-workflow.md`
+- `docs/codebase/MAP.md`
+- `docs/codebase/DATABASE.md`
+- `docs/decisions/ADR-0002-sqlite-and-migrations.md`
 - `docs/milestones/M1-windows-backend-foundation.md`
 - `docs/specs/SPEC-0001-windows-backend-foundation.md`
+- `docs/plans/PLAN-0001-windows-backend-foundation.md`
+- `docs/reviews/REVIEW-0002-windows-backend-foundation.md`
 
 ## 本次触碰代码
 
-无。
+- `Cargo.toml`
+- `Cargo.lock`
+- `rust-toolchain.toml`
+- `backend/atha-backend/Cargo.toml`
+- `backend/atha-backend/src/lib.rs`
+- `scripts/check-backend.ps1`
 
 ## 下一动作
 
-请用户审阅并确认 `SPEC-0001`。接受后进入 planning 模式，起草逐文件实施计划并执行独立交叉审阅；门禁完成前不初始化后端代码。
+创建 M2“首个后端纵向切片”的里程碑和规格，先定义真实用例、输入边界、迁移与事务验收；规格接受前不添加依赖或业务代码。
