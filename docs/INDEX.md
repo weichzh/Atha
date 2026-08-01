@@ -9,6 +9,9 @@
 - `docs/ACTIVE.md`：当前状态和下一动作。
 - `docs/workflow/PROTOCOL.md`：完整文档协作协议。
 - `.agents/skills/project-workflow/SKILL.md`：项目工作流技能。
+- `docs/agents/issue-tracker.md`：工程技能使用的 GitHub issue tracker 约定。
+- `docs/agents/triage-labels.md`：工程技能使用的默认 triage 标签映射。
+- `docs/agents/domain.md`：工程技能读取领域文档和 ADR 的 single-context 约定。
 
 ## 当前里程碑
 
