@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 LIMITS = {
-    "docs/ACTIVE.md": 150,
+    "docs/ACTIVE.md": 80,
     "docs/INDEX.md": 250,
 }
 

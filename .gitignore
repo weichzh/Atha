@@ -1,5 +1,7 @@
 .tmp/
+__pycache__/
 build/
 target/
 env/local.ps1
 fixtures/local/
+artifacts/local/

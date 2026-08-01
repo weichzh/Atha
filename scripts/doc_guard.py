@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -36,22 +37,7 @@ CODE_FILES = {
     "makefile",
 }
 
-DOC_PREFIXES = (
-    "docs/",
-    ".agents/",
-    ".codex/",
-)
-
-DOC_FILES = {
-    "AGENTS.md",
-    "README.md",
-}
-
-REQUIRED_DOC_FILES = {
-    "docs/ACTIVE.md",
-}
-
-REQUIRED_DOC_PREFIXES = (
+FULL_PATH_DOC_PREFIXES = (
     "docs/specs/",
     "docs/plans/",
     "docs/reviews/",
@@ -101,12 +87,10 @@ def is_code(path: str) -> bool:
     return path in CODE_FILES or has_prefix(path, CODE_PREFIXES)
 
 
-def is_doc(path: str) -> bool:
-    return path in DOC_FILES or has_prefix(path, DOC_PREFIXES)
-
-
-def is_required_doc(path: str) -> bool:
-    return path in REQUIRED_DOC_FILES or has_prefix(path, REQUIRED_DOC_PREFIXES)
+def active_flow(root: Path) -> str | None:
+    text = (root / "docs/ACTIVE.md").read_text(encoding="utf-8")
+    match = re.search(r"^- 流程：(fast|full)\s*$", text, re.MULTILINE)
+    return match.group(1) if match else None
 
 
 def main() -> int:
@@ -114,20 +98,33 @@ def main() -> int:
     changed = changed_files()
 
     code_changed = any(is_code(path) for path in changed)
-    required_doc_changed = any(is_required_doc(path) for path in changed)
+    active_changed = "docs/ACTIVE.md" in changed
+    flow = active_flow(root)
 
-    if code_changed and not required_doc_changed:
-        print("BLOCKED: code changed but ACTIVE/spec/plan/review docs were not updated.")
+    if code_changed and (not active_changed or flow not in {"fast", "full"}):
+        print("BLOCKED: code changed without an updated ACTIVE flow declaration.")
         print()
         print(f"Repository: {root}")
         print("Changed files:")
         for path in changed:
             print(f" - {path}")
         print()
-        print("Update docs/ACTIVE.md and the relevant spec, plan, or review before continuing.")
+        print("Update docs/ACTIVE.md with '- 流程：fast' or '- 流程：full'.")
         return 1
 
-    print("doc_guard: ok")
+    if code_changed and flow == "full":
+        missing = [
+            prefix
+            for prefix in FULL_PATH_DOC_PREFIXES
+            if not any(path.startswith(prefix) for path in changed)
+        ]
+        if missing:
+            print("BLOCKED: full-path code changed without spec, plan, and review updates.")
+            for prefix in missing:
+                print(f" - missing change under {prefix}")
+            return 1
+
+    print(f"doc_guard: ok ({flow or 'docs-only'})")
     return 0
 
 
