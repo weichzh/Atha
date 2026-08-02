@@ -37,10 +37,15 @@ CODE_FILES = {
     "makefile",
 }
 
-FULL_PATH_DOC_PREFIXES = (
-    "docs/specs/",
-    "docs/plans/",
-    "docs/reviews/",
+CHANGE_HEADINGS = (
+    "## Problem",
+    "## Scope",
+    "## Acceptance Criteria",
+    "## Files And Steps",
+    "## Checks",
+    "## Result",
+    "## Review",
+    "## Evidence And Residual Risks",
 )
 
 
@@ -87,10 +92,21 @@ def is_code(path: str) -> bool:
     return path in CODE_FILES or has_prefix(path, CODE_PREFIXES)
 
 
-def active_flow(root: Path) -> str | None:
+def active_changes(root: Path) -> list[str]:
     text = (root / "docs/ACTIVE.md").read_text(encoding="utf-8")
-    match = re.search(r"^- 流程：(fast|full)\s*$", text, re.MULTILINE)
-    return match.group(1) if match else None
+    return re.findall(r"^- `change`：.*→ `([^`]+)`\s*$", text, re.MULTILINE)
+
+
+def accepted_change(root: Path, relative: str) -> bool:
+    path = Path(relative)
+    if path.is_absolute() or ".." in path.parts or path.parts[:2] != ("docs", "changes"):
+        return False
+    target = root / path
+    if not target.is_file():
+        return False
+    text = target.read_text(encoding="utf-8")
+    status = re.search(r"^## Status\s*$\n+\s*(accepted|implemented)\s*$", text, re.MULTILINE)
+    return status is not None and all(heading in text for heading in CHANGE_HEADINGS)
 
 
 def main() -> int:
@@ -98,33 +114,22 @@ def main() -> int:
     changed = changed_files()
 
     code_changed = any(is_code(path) for path in changed)
-    active_changed = "docs/ACTIVE.md" in changed
-    flow = active_flow(root)
+    changes = active_changes(root)
 
-    if code_changed and (not active_changed or flow not in {"fast", "full"}):
-        print("BLOCKED: code changed without an updated ACTIVE flow declaration.")
+    if code_changed and not any(
+        path in changed and accepted_change(root, path) for path in changes
+    ):
+        print("BLOCKED: code changed without an updated accepted change.")
         print()
         print(f"Repository: {root}")
         print("Changed files:")
         for path in changed:
             print(f" - {path}")
         print()
-        print("Update docs/ACTIVE.md with '- 流程：fast' or '- 流程：full'.")
+        print("Point docs/ACTIVE.md at a changed accepted/implemented docs/changes/*.md file.")
         return 1
 
-    if code_changed and flow == "full":
-        missing = [
-            prefix
-            for prefix in FULL_PATH_DOC_PREFIXES
-            if not any(path.startswith(prefix) for path in changed)
-        ]
-        if missing:
-            print("BLOCKED: full-path code changed without spec, plan, and review updates.")
-            for prefix in missing:
-                print(f" - missing change under {prefix}")
-            return 1
-
-    print(f"doc_guard: ok ({flow or 'docs-only'})")
+    print(f"doc_guard: ok ({'change' if code_changed else 'docs-only'})")
     return 0
 
 

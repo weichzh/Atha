@@ -11,6 +11,14 @@ param(
     [string]$Phase,
     [ValidateSet('success', 'failure', 'blocked', 'cancelled')]
     [string]$Status = 'success',
+    [ValidateSet('check', 'station')]
+    [string]$WorkflowCommand,
+    [string]$Target,
+    [ValidateSet('none', 'research', 'specification', 'planning', 'implementation', 'validation', 'documentation', 'review', 'waiting')]
+    [string]$Activity,
+    [string]$Scope,
+    [Nullable[int]]$ExitCode,
+    [string]$ErrorType,
     [switch]$Json
 )
 
@@ -26,6 +34,14 @@ function Assert-Token {
         $Value.Length -gt $Maximum -or
         $Value -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
         throw "$Name must be a stable ASCII identifier of at most $Maximum characters."
+    }
+}
+
+function Assert-OptionalToken {
+    param([string]$Value, [string]$Name, [int]$Maximum = 96)
+
+    if (-not [string]::IsNullOrWhiteSpace($Value)) {
+        Assert-Token $Value $Name $Maximum
     }
 }
 
@@ -77,19 +93,24 @@ function New-Event {
         [string]$EventTask,
         [string]$EventPhase,
         [string]$EventStatus,
-        [Nullable[long]]$DurationMs
+        [Nullable[long]]$DurationMs,
+        [Collections.IDictionary]$Metadata
     )
 
-    return [ordered]@{
-        schema = 1
+    $record = [ordered]@{
+        schema = 2
         timestamp_utc = [DateTimeOffset]::UtcNow.ToString('o')
         event = $Event
         run_id = $EventRunId
         task = $EventTask
-        phase = $EventPhase
-        status = $EventStatus
+        phase = if ([string]::IsNullOrWhiteSpace($EventPhase)) { $null } else { $EventPhase }
+        status = if ([string]::IsNullOrWhiteSpace($EventStatus)) { $null } else { $EventStatus }
         duration_ms = $DurationMs
     }
+    if ($null -ne $Metadata) {
+        foreach ($key in $Metadata.Keys) { $record[$key] = $Metadata[$key] }
+    }
+    return $record
 }
 
 function Get-RunEvents {
@@ -104,14 +125,44 @@ function Get-RunEvents {
 }
 
 function Start-Run {
-    param([string]$EventTask)
+    param(
+        [string]$EventTask,
+        [string]$EventCommand,
+        [string]$EventTarget,
+        [string]$EventActivity,
+        [string]$EventScope
+    )
 
     Assert-Token $EventTask 'Task' 64
+    Assert-OptionalToken $EventTarget 'Target' 64
+    Assert-OptionalToken $EventScope 'Scope' 80
     $id = '{0}-{1}-{2}' -f
         [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'),
         $EventTask.ToLowerInvariant(),
         [Guid]::NewGuid().ToString('N').Substring(0, 8)
-    Write-Event (New-Event 'run_start' $id $EventTask $null $null $null)
+    $previous = @(
+        Read-Events |
+            Where-Object event -EQ 'run_end' |
+            Sort-Object { [DateTimeOffset]$_.timestamp_utc } |
+            Select-Object -Last 1
+    )
+    $interval = if ($previous.Count) {
+        [Math]::Max(
+            0,
+            [long]([DateTimeOffset]::UtcNow - [DateTimeOffset]$previous[0].timestamp_utc).TotalMilliseconds
+        )
+    } else { $null }
+    $metadata = [ordered]@{
+        command = if ($EventCommand) { $EventCommand } else { $null }
+        target = if ($EventTarget) { $EventTarget } else { $null }
+        activity = if ($EventActivity) { $EventActivity } else { $null }
+        scope = if ($EventScope) { $EventScope } else { $null }
+        exit_code = $null
+        error_type = $null
+        previous_run_id = if ($previous.Count) { $previous[0].run_id } else { $null }
+        interval_ms = $interval
+    }
+    Write-Event (New-Event 'run_start' $id $EventTask $null $null $null $metadata)
     return $id
 }
 
@@ -144,7 +195,12 @@ function End-Phase {
 }
 
 function Finish-Run {
-    param([string]$EventRunId, [string]$EventStatus)
+    param(
+        [string]$EventRunId,
+        [string]$EventStatus,
+        [Nullable[int]]$EventExitCode,
+        [string]$EventErrorType
+    )
 
     $events = @(Get-RunEvents $EventRunId)
     if (@($events | Where-Object event -EQ 'run_end').Count -gt 0) { throw 'Workflow run is already finished.' }
@@ -158,7 +214,17 @@ function Finish-Run {
         0,
         [long]([DateTimeOffset]::UtcNow - [DateTimeOffset]::Parse($start.timestamp_utc)).TotalMilliseconds
     )
-    Write-Event (New-Event 'run_end' $EventRunId $start.task $null $EventStatus $duration)
+    $metadata = [ordered]@{
+        command = $start.command
+        target = $start.target
+        activity = $start.activity
+        scope = $start.scope
+        exit_code = $EventExitCode
+        error_type = if ($EventErrorType) { $EventErrorType } else { $null }
+        previous_run_id = $start.previous_run_id
+        interval_ms = $start.interval_ms
+    }
+    Write-Event (New-Event 'run_end' $EventRunId $start.task $null $EventStatus $duration $metadata)
     return $duration
 }
 
@@ -192,6 +258,9 @@ function Get-Report {
                 [pscustomobject]@{
                     run_id = $_.run_id
                     task = $_.task
+                    command = $_.command
+                    target = $_.target
+                    activity = $_.activity
                     timestamp_utc = ([DateTimeOffset]$_.timestamp_utc).ToUniversalTime().ToString('o')
                 }
             }
@@ -204,6 +273,7 @@ function Get-Report {
                 phase = 'total'
                 status = $_.status
                 duration_ms = $_.duration_ms
+                timestamp_utc = $_.timestamp_utc
             }
         }
     )
@@ -213,22 +283,47 @@ function Get-Report {
             ForEach-Object {
                 $values = @($_.Group | ForEach-Object { [double]$_.duration_ms })
                 $median = Get-Median $values
+                $failures = @($_.Group | Where-Object status -NE 'success')
                 [pscustomobject]@{
                     task = $_.Group[0].task
                     phase = $_.Group[0].phase
                     samples = $values.Count
-                    failures = @($_.Group | Where-Object status -NE 'success').Count
+                    failures = $failures.Count
                     median_ms = [Math]::Round($median, 1)
-                    p95_ms = [Math]::Round((Get-Percentile $values 0.95), 1)
-                    slow_runs = if ($values.Count -ge 5) { @($values | Where-Object { $_ -gt 2 * $median }).Count } else { 0 }
+                    p95_ms = if ($values.Count -ge 5) { [Math]::Round((Get-Percentile $values 0.95), 1) } else { $null }
+                    slow_runs = if ($values.Count -ge 5) { @($values | Where-Object { $_ -gt 2 * $median }).Count } else { $null }
+                    recent_failure_utc = if ($failures.Count) {
+                        @($failures | Sort-Object { [DateTimeOffset]$_.timestamp_utc } | Select-Object -Last 1)[0].timestamp_utc
+                    } else { $null }
                 }
             } |
             Sort-Object task, phase
+    )
+    $repeatedFailures = @(
+        $completed |
+            Group-Object task |
+            ForEach-Object {
+                $previousFailed = $false
+                $occurrences = 0
+                foreach ($event in @($_.Group | Sort-Object { [DateTimeOffset]$_.timestamp_utc })) {
+                    $failed = $event.status -eq 'failure'
+                    if ($failed -and $previousFailed) { $occurrences++ }
+                    $previousFailed = $failed
+                }
+                if ($occurrences) {
+                    [pscustomobject]@{ task = $_.Name; occurrences = $occurrences }
+                }
+            }
     )
     return [ordered]@{
         completed_runs = $completed.Count
         unfinished_runs = $unfinished
         metrics = $rows
+        friction = [ordered]@{
+            unfinished_runs = $unfinished.Count
+            blocked_runs = @($completed | Where-Object status -EQ 'blocked').Count
+            repeated_failures = $repeatedFailures
+        }
     }
 }
 
@@ -239,24 +334,35 @@ function Invoke-SelfCheck {
     $originalLog = $script:logPath
     $script:logPath = $testLog
     try {
-        $testRun = Start-Run 'self-check'
+        $testRun = Start-Run 'self-check' 'check' 'docs' 'validation' 'self-check'
         Begin-Phase $testRun 'validation'
         $phaseDuration = End-Phase $testRun 'validation' 'success'
-        $runDuration = Finish-Run $testRun 'success'
-        $unfinishedRun = Start-Run 'self-check'
+        $runDuration = Finish-Run $testRun 'success' 0 $null
+        $unfinishedRun = Start-Run 'self-check-pending' 'check' 'docs' 'validation' $null
         Begin-Phase $unfinishedRun 'validation'
         End-Phase $unfinishedRun 'validation' 'failure' | Out-Null
+        foreach ($unused in 1..2) {
+            $failedRun = Start-Run 'self-check-failure' 'check' 'docs' 'validation' $null
+            Finish-Run $failedRun 'failure' 7 'nonzero_exit' | Out-Null
+        }
+        $blockedRun = Start-Run 'self-check-station' 'station' $null 'waiting' $null
+        Finish-Run $blockedRun 'blocked' 0 $null | Out-Null
         $events = @(Read-Events)
         $report = Get-Report
-        if ($events.Count -ne 7 -or $phaseDuration -lt 0 -or $runDuration -lt 0) {
+        if ($events.Count -ne 13 -or $phaseDuration -lt 0 -or $runDuration -lt 0) {
             throw 'Workflow event self-check failed.'
         }
         $validation = @($report.metrics | Where-Object phase -EQ 'validation')
-        if ($report.completed_runs -ne 1 -or
-            $report.metrics.Count -ne 2 -or
+        $failedMetric = @($report.metrics | Where-Object task -EQ 'self-check-failure')
+        if ($report.completed_runs -ne 4 -or
+            $report.metrics.Count -ne 5 -or
             $report.unfinished_runs.Count -ne 1 -or
-            $validation.Count -ne 1 -or
-            $validation[0].failures -ne 1) {
+            $validation.Count -ne 2 -or
+            $failedMetric.Count -ne 1 -or
+            $failedMetric[0].failures -ne 2 -or
+            $null -ne $failedMetric[0].p95_ms -or
+            $report.friction.blocked_runs -ne 1 -or
+            $report.friction.repeated_failures.Count -ne 1) {
             throw 'Workflow report self-check failed.'
         }
         Write-Output 'workflow_log: ok'
@@ -271,7 +377,7 @@ function Invoke-SelfCheck {
 switch ($Action) {
     'Start' {
         if ([string]::IsNullOrWhiteSpace($Task)) { throw 'Task is required.' }
-        Start-Run $Task
+        Start-Run $Task $WorkflowCommand $Target $Activity $Scope
     }
     'Begin' {
         Begin-Phase $RunId $Phase
@@ -280,7 +386,8 @@ switch ($Action) {
         End-Phase $RunId $Phase $Status
     }
     'Finish' {
-        Finish-Run $RunId $Status
+        Assert-OptionalToken $ErrorType 'ErrorType' 80
+        Finish-Run $RunId $Status $ExitCode $ErrorType
     }
     'Report' {
         $report = Get-Report
@@ -290,7 +397,12 @@ switch ($Action) {
         else {
             Write-Host "Completed runs: $($report.completed_runs)"
             Write-Host "Unfinished runs: $($report.unfinished_runs.Count)"
+            Write-Host "Blocked runs: $($report.friction.blocked_runs)"
             if ($report.metrics.Count) { $report.metrics | Format-Table -AutoSize }
+            if ($report.friction.repeated_failures.Count) {
+                Write-Host 'Repeated failures:'
+                $report.friction.repeated_failures | Format-Table -AutoSize
+            }
             if ($report.unfinished_runs.Count) {
                 Write-Host 'Unfinished:'
                 $report.unfinished_runs | Format-Table -AutoSize

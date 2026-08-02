@@ -8,12 +8,17 @@ Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系
 
 - 根 `Cargo.toml`：正式 workspace；
 - `backend/atha-backend/`：零依赖后端库；
+- `scripts/Invoke-Atha.ps1`：统一运行已登记检查并记录本机流程；
 - `scripts/check-backend.ps1`：fmt、clippy、test 和 doc 统一检查；
 - `p0/`：独立实验，不进入根 workspace。
 
 ```powershell
-pwsh -NoProfile -File .\scripts\check-backend.ps1
+pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 check docs -Activity documentation
+pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 station -Activity implementation -Scope backend
+pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 report
 ```
+
+当前统一入口只试点 `docs` target；其他检查仍直接运行既有脚本，待真实样本证明有价值后再接入。
 
 ## 本地开发环境
 
