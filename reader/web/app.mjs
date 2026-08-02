@@ -24,6 +24,25 @@ const content = createContent({
   readerStyleSource: document.querySelector("#reader-style-source"),
   fail,
 });
+const preferences = createPreferences({
+  root: document.documentElement,
+  reader,
+  content,
+  controls: {
+    theme: document.querySelector("#theme"),
+    fontSize: document.querySelector("#font-size"),
+    fontFamily: document.querySelector("#font-family"),
+    density: document.querySelector("#density"),
+    sourceStyles: document.querySelector("#source-styles"),
+    userStylesEnabled: document.querySelector("#user-styles-enabled"),
+    userStylesheet: document.querySelector("#user-stylesheet"),
+    applyUserStyle: document.querySelector("#apply-user-style"),
+    resetApplication: document.querySelector("#reset-application-preferences"),
+    resetBook: document.querySelector("#reset-book-preferences"),
+    status: document.querySelector("#preferences-status"),
+  },
+  assert,
+});
 const pagination = createPagination({
   book: content.book,
   reader,
@@ -57,6 +76,7 @@ const navigation = createNavigation({
   session,
   pagination,
   locator,
+  preferences,
   toc: document.querySelector("#toc"),
   previous: document.querySelector("#previous"),
   next: document.querySelector("#next"),
@@ -75,6 +95,7 @@ const diagnostics = createDiagnostics({
   session,
   locator,
   navigation,
+  preferences,
   reader,
   renderCachedSource,
   emit,

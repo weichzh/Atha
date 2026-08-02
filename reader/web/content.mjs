@@ -12,6 +12,11 @@ export function createContent({ host, readerStyleSource, fail }) {
   let declaredResources;
   let cachedXhtml;
   let cachedCss;
+  let sourceStyles = true;
+  let userStylesEnabled = true;
+  let userStylesheet = "";
+  let inlineStyles = [];
+  const validatedCss = new Map();
   let silentFailure = false;
   let selfChecked = false;
 
@@ -37,9 +42,59 @@ export function createContent({ host, readerStyleSource, fail }) {
     return url.href;
   }
 
-  function validateCss(css) {
+  function validateCss(css, declarations = false) {
+    const cacheKey = `${declarations ? "declaration" : "stylesheet"}:${css}`;
+    if (validatedCss.has(cacheKey)) return validatedCss.get(cacheKey);
     ensure(!/@import|url\s*\(/i.test(css), "css-subresource");
     ensure(!/:host(?:-context)?\b|::part\b|::slotted\b/i.test(css), "active-style");
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(declarations ? `.atha-inline { ${css} }` : css);
+    const inspect = (rules) => {
+      for (const rule of rules) {
+        ensure(!/url\s*\(|image-set\s*\(/i.test(rule.cssText), "css-subresource");
+        ensure(
+          !/:host(?:-context)?\b|::part\b|::slotted\b/i.test(rule.cssText),
+          "active-style",
+        );
+        if (rule.cssRules) inspect(rule.cssRules);
+      }
+    };
+    inspect(sheet.cssRules);
+    if (validatedCss.size >= 256) validatedCss.delete(validatedCss.keys().next().value);
+    validatedCss.set(cacheKey, sheet);
+    return sheet;
+  }
+
+  function validateUserStylesheet(css) {
+    ensure(typeof css === "string" && css.length <= 32768, "invalid-user-style");
+    const previous = silentFailure;
+    silentFailure = true;
+    try {
+      const sheet = validateCss(css);
+      ensure(!css.trim() || sheet.cssRules.length > 0, "invalid-user-style");
+    } finally {
+      silentFailure = previous;
+    }
+  }
+
+  function setStyles(value) {
+    ensure(
+      value &&
+        typeof value === "object" &&
+        typeof value.sourceStyles === "boolean" &&
+        typeof value.userStylesEnabled === "boolean",
+      "invalid-user-style",
+    );
+    validateUserStylesheet(value.userStylesheet);
+    sourceStyles = value.sourceStyles;
+    userStylesEnabled = value.userStylesEnabled;
+    userStylesheet = value.userStylesheet;
+    bookStyle.textContent = sourceStyles ? cachedCss || "" : "";
+    userStyle.textContent = userStylesEnabled ? userStylesheet : "";
+    for (const [element, style] of inlineStyles) {
+      if (sourceStyles) element.setAttribute("style", style);
+      else element.removeAttribute("style");
+    }
   }
 
   function validateMarkup(documentNode) {
@@ -56,7 +111,7 @@ export function createContent({ host, readerStyleSource, fail }) {
       for (const attribute of element.attributes) {
         const attributeName = attribute.name.toLowerCase();
         ensure(!attributeName.startsWith("on"), "event-handler");
-        if (attributeName === "style") validateCss(attribute.value);
+        if (attributeName === "style") validateCss(attribute.value, true);
         if (["srcset", "poster", "action", "formaction", "ping"].includes(attributeName)) {
           reject("unsupported-resource-attribute");
         }
@@ -91,6 +146,19 @@ export function createContent({ host, readerStyleSource, fail }) {
     }
   }
 
+  function detachSourceStyles(documentNode) {
+    return [...documentNode.querySelectorAll("style, link[rel='stylesheet'][href]")].map(
+      (element) => {
+        const source =
+          element.localName.toLowerCase() === "style"
+            ? { css: element.textContent }
+            : { url: localBookUrl(element.getAttribute("href")) };
+        element.remove();
+        return source;
+      },
+    );
+  }
+
   function parseSvg(svgText) {
     const svg = new DOMParser().parseFromString(svgText, "image/svg+xml");
     ensure(!svg.querySelector("parsererror") && !svg.doctype, "invalid-svg");
@@ -102,7 +170,7 @@ export function createContent({ host, readerStyleSource, fail }) {
         if (name === "href" || name.endsWith(":href")) {
           ensure(attribute.value.startsWith("#"), "svg-external-resource");
         }
-        if (name === "style") validateCss(attribute.value);
+        if (name === "style") validateCss(attribute.value, true);
       }
       if (element.localName.toLowerCase() === "style") validateCss(element.textContent);
     }
@@ -148,9 +216,26 @@ export function createContent({ host, readerStyleSource, fail }) {
     );
     validateMarkup(samePage);
     ensure(samePage.querySelector("a").getAttribute("href") === "#x", "active-link");
-    for (const css of ["@import 'x.css';", "p{background:url(x)}", ":host{display:none}"]) {
+    for (const css of [
+      "@import 'x.css';",
+      "p{background:url(x)}",
+      "p{background:u\\72l(x)}",
+      ":host{display:none}",
+      ":\\68ost{display:none}",
+      "@scope (:\\68ost) { :scope { display: none; } }",
+    ]) {
       ensure(rejected(() => validateCss(css)), "active-style");
     }
+    const embeddedStyle = new DOMParser().parseFromString(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><style>p{color:red}</style><p>x</p></body></html>",
+      "application/xhtml+xml",
+    );
+    validateMarkup(embeddedStyle);
+    const detached = detachSourceStyles(embeddedStyle);
+    ensure(
+      detached[0].css.includes("color:red") && !embeddedStyle.querySelector("style"),
+      "active-style",
+    );
     for (const svg of [
       "<svg xmlns='http://www.w3.org/2000/svg'><script/></svg>",
       "<svg xmlns='http://www.w3.org/2000/svg'><image href='https://example.com/x'/></svg>",
@@ -178,21 +263,17 @@ export function createContent({ host, readerStyleSource, fail }) {
     cachedXhtml = await response.text();
     const source = new DOMParser().parseFromString(cachedXhtml, "application/xhtml+xml");
     validateMarkup(source);
-    const inlineCss = [...source.querySelectorAll("head > style")].map(
-      (style) => style.textContent,
-    );
-    const stylesheetUrls = [...source.querySelectorAll("link[rel='stylesheet'][href]")].map(
-      (link) => localBookUrl(link.getAttribute("href")),
-    );
-    ensure(stylesheetUrls.length > 0, "missing-stylesheet");
+    const styleSources = detachSourceStyles(source);
+    ensure(styleSources.some(({ url }) => url), "missing-stylesheet");
     const stylesheets = await Promise.all(
-      stylesheetUrls.map(async (url) => {
+      styleSources.map(async ({ css, url }) => {
+        if (css !== undefined) return css;
         const styleResponse = await fetch(url);
         ensure(styleResponse.ok, "stylesheet-load");
         return styleResponse.text();
       }),
     );
-    cachedCss = [...inlineCss, ...stylesheets].join("\n");
+    cachedCss = stylesheets.join("\n");
     validateCss(cachedCss);
 
     const svgUrls = [
@@ -204,10 +285,17 @@ export function createContent({ host, readerStyleSource, fail }) {
   async function renderCached() {
     const source = new DOMParser().parseFromString(cachedXhtml, "application/xhtml+xml");
     validateMarkup(source);
+    detachSourceStyles(source);
     validateCss(cachedCss);
-    bookStyle.textContent = cachedCss;
+    bookStyle.textContent = sourceStyles ? cachedCss : "";
+    userStyle.textContent = userStylesEnabled ? userStylesheet : "";
     const imported = document.importNode(source.body, true);
     book.replaceChildren(...imported.childNodes);
+    inlineStyles = [...book.querySelectorAll("[style]")].map((element) => [
+      element,
+      element.getAttribute("style"),
+    ]);
+    setStyles({ sourceStyles, userStylesEnabled, userStylesheet });
     await Promise.all(
       [...book.querySelectorAll("img")].map(async (image) => {
         try {
@@ -229,7 +317,26 @@ export function createContent({ host, readerStyleSource, fail }) {
     declaredResources = undefined;
     cachedXhtml = undefined;
     cachedCss = undefined;
+    inlineStyles = [];
+    validatedCss.clear();
   }
 
-  return Object.freeze({ book, close, initialize, loadSection, renderCached });
+  function styleSnapshot() {
+    return Object.freeze({
+      sourceStyles,
+      userStylesEnabled,
+      bookStyleApplied: bookStyle.textContent.length > 0,
+      userStyleApplied: userStyle.textContent.length > 0,
+    });
+  }
+
+  return Object.freeze({
+    book,
+    close,
+    initialize,
+    loadSection,
+    renderCached,
+    setStyles,
+    styleSnapshot,
+  });
 }

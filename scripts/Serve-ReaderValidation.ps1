@@ -126,6 +126,7 @@ try {
                 $source = @(
                     'web/content.mjs',
                     'web/locator.mjs',
+                    'web/preferences.mjs',
                     'web/pagination.mjs',
                     'web/session.mjs',
                     'web/navigation.mjs',

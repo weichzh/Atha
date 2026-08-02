@@ -8,6 +8,7 @@ export function createNavigation({
   session,
   pagination,
   locator,
+  preferences,
   toc,
   previous,
   next,
@@ -126,8 +127,21 @@ export function createNavigation({
   }
 
   async function setFontSize(value) {
+    return setPreferences("application", { fontSize: Number(value) });
+  }
+
+  async function setPreferences(scope, patch) {
     const anchor = current();
-    await pagination.setFontSize(value, anchor.start.offset);
+    const state = preferences.update(scope, patch);
+    await pagination.setFontSize(state.effective.fontSize, anchor.start.offset);
+    syncControls();
+    return anchor;
+  }
+
+  async function resetPreferences(scope) {
+    const anchor = current();
+    const state = preferences.reset(scope);
+    await pagination.setFontSize(state.effective.fontSize, anchor.start.offset);
     syncControls();
     return anchor;
   }
@@ -147,6 +161,10 @@ export function createNavigation({
       onPrevious: () => run(previousPage),
       onNext: () => run(nextPage),
       onFontSize: (value) => run(() => setFontSize(value)),
+    });
+    preferences.bind({
+      onUpdate: (scope, patch) => run(() => setPreferences(scope, patch)),
+      onReset: (scope) => run(() => resetPreferences(scope)),
     });
     toc.addEventListener("change", () => {
       const index = Number(toc.value);
@@ -186,7 +204,9 @@ export function createNavigation({
     goToToc: (index) => run(() => goToToc(index)),
     next: () => run(nextPage),
     previous: () => run(previousPage),
+    resetPreferences: (scope) => run(() => resetPreferences(scope)),
     setFontSize: (value) => run(() => setFontSize(value)),
+    setPreferences: (scope, patch) => run(() => setPreferences(scope, patch)),
     snapshot,
   });
 }

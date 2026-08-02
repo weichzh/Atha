@@ -32,13 +32,16 @@ body {
 }
 
 button,
-select {
+select,
+textarea {
   min-height: 44px;
   font: inherit;
 }
 
 button:focus-visible,
-select:focus-visible {
+select:focus-visible,
+summary:focus-visible,
+textarea:focus-visible {
   outline: 3px solid #176b87;
   outline-offset: 2px;
 }
@@ -82,14 +85,22 @@ select:focus-visible {
 
 .book {
   width: var(--content-width);
-  height: calc(var(--content-height) - 4px);
-  margin-top: 2px;
+  height: calc(var(--content-height) - 8px);
+  margin-top: 4px;
   column-width: var(--content-width);
   column-gap: var(--page-gap);
   column-fill: auto;
   font-size: 32px;
-  line-height: 1.6;
+  line-height: var(--reader-line-height, 1.6);
   overflow: visible;
+}
+
+.book[data-font-family="serif"] {
+  font-family: Georgia, "Noto Serif CJK SC", "Songti SC", serif;
+}
+
+.book[data-font-family="sans"] {
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
 }
 
 .book > :first-child,
@@ -123,6 +134,16 @@ select:focus-visible {
   break-inside: avoid;
 }
 
+.book h1,
+.book h2,
+.book h3,
+.book h4,
+.book h5,
+.book h6 {
+  break-inside: avoid;
+  break-after: avoid;
+}
+
 .toolbar {
   position: fixed;
   right: 48px;
@@ -137,6 +158,89 @@ select:focus-visible {
   border-radius: 14px;
   background: rgb(255 255 255 / 94%);
   box-shadow: 0 8px 32px rgb(25 39 43 / 14%);
+}
+
+.preferences {
+  position: relative;
+}
+
+.preferences > summary,
+.advanced-preferences > summary {
+  cursor: pointer;
+}
+
+.preferences > summary {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #ccd4d6;
+  border-radius: 8px;
+  list-style-position: inside;
+}
+
+.preferences-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 16px);
+  display: grid;
+  width: min(420px, calc(100vw - 96px));
+  max-height: calc(100vh - 140px);
+  gap: 12px;
+  padding: 18px;
+  overflow: auto;
+  border: 1px solid #ccd4d6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 32px rgb(25 39 43 / 20%);
+}
+
+.preferences-panel label:not(.checkbox-label) {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+}
+
+.preferences-panel hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid #ccd4d6;
+}
+
+.checkbox-label {
+  justify-content: start;
+}
+
+.checkbox-label input {
+  width: 22px;
+  height: 22px;
+}
+
+.advanced-preferences {
+  display: grid;
+  gap: 10px;
+}
+
+.advanced-preferences[open] {
+  display: grid;
+}
+
+#user-stylesheet {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+
+.preference-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#preferences-status {
+  min-height: 1.5em;
+  text-align: left;
+}
+
+#preferences-status[data-error="true"] {
+  color: #a32921;
 }
 
 .toolbar output {
@@ -194,6 +298,9 @@ select:focus-visible {
 
   button,
   select,
+  textarea,
+  .preferences > summary,
+  .preferences-panel,
   .toolbar {
     border-color: #40545c;
     background: #202c30;
@@ -209,4 +316,66 @@ select:focus-visible {
     background: #3b2020;
     color: #ffb3ad;
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  background: #dfe5e7;
+  color: #182226;
+}
+
+:root[data-theme="light"] .reader,
+.book[data-theme="light"] {
+  background: #fffdf8;
+  color: #182226;
+}
+
+.book[data-theme="light"] img.math-inline,
+.book[data-theme="light"] img.math-display {
+  background: #fff;
+  filter: none;
+}
+
+:root[data-theme="light"] button,
+:root[data-theme="light"] select,
+:root[data-theme="light"] textarea,
+:root[data-theme="light"] .preferences > summary,
+:root[data-theme="light"] .preferences-panel,
+:root[data-theme="light"] .toolbar {
+  border-color: #ccd4d6;
+  background: #fff;
+  color: #182226;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  background: #0f1518;
+  color: #e9eeee;
+}
+
+:root[data-theme="dark"] .reader,
+.book[data-theme="dark"] {
+  background: #182226;
+  color: #e9eeee;
+}
+
+.book[data-theme="dark"] img.math-inline,
+.book[data-theme="dark"] img.math-display {
+  background: transparent;
+  filter: invert(0.88) hue-rotate(180deg);
+}
+
+.book[data-theme="dark"] img:not(.math-inline):not(.math-display) {
+  filter: none;
+}
+
+:root[data-theme="dark"] button,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .preferences > summary,
+:root[data-theme="dark"] .preferences-panel,
+:root[data-theme="dark"] .toolbar {
+  border-color: #40545c;
+  background: #202c30;
+  color: #e9eeee;
 }

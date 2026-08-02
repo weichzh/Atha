@@ -7,6 +7,7 @@ export function createDiagnostics({
   session,
   locator,
   navigation,
+  preferences,
   reader,
   renderCachedSource,
   emit,
@@ -16,6 +17,7 @@ export function createDiagnostics({
   let verifiedHeadings = [];
   let releasedSections = 0;
   let navigationEvidence = {};
+  let preferencesEvidence = {};
 
   function heading() {
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
@@ -109,6 +111,106 @@ export function createDiagnostics({
     };
   }
 
+  async function verifyPreferences() {
+    if (pagination.snapshot().pages > 1) await pagination.show(1);
+    const compactAnchor = await navigation.setPreferences("application", {
+      theme: "dark",
+      fontSize: 24,
+      fontFamily: "serif",
+      density: "compact",
+    });
+    assert(pagination.isOffsetVisible(compactAnchor.start.offset), "sample-boundary");
+    assert(document.documentElement.dataset.theme === "dark", "sample-boundary");
+    assert(content.book.dataset.fontFamily === "serif", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-inline-margin") === "80px", "sample-boundary");
+    const compactStyle = getComputedStyle(content.book);
+    assert(compactStyle.backgroundColor === "rgb(24, 34, 38)", "sample-boundary");
+    assert(compactStyle.color === "rgb(233, 238, 238)", "sample-boundary");
+    assert(compactStyle.fontFamily.includes("Georgia"), "sample-boundary");
+    assert(Math.abs(parseFloat(compactStyle.lineHeight) - 34.8) < 0.1, "sample-boundary");
+    const formula = content.book.querySelector("img.math-inline, img.math-display");
+    const ordinary = content.book.querySelector("img:not(.math-inline):not(.math-display)");
+    if (formula) assert(getComputedStyle(formula).filter !== "none", "sample-boundary");
+    if (ordinary) assert(getComputedStyle(ordinary).filter === "none", "sample-boundary");
+    assert(pagination.countCutRects() === 0, "layout-cut");
+
+    const comfortableAnchor = await navigation.setPreferences("application", {
+      theme: "light",
+      fontSize: 40,
+      fontFamily: "sans",
+      density: "comfortable",
+    });
+    assert(pagination.isOffsetVisible(comfortableAnchor.start.offset), "sample-boundary");
+    assert(document.documentElement.dataset.theme === "light", "sample-boundary");
+    assert(content.book.dataset.fontFamily === "sans", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-inline-margin") === "144px", "sample-boundary");
+    const comfortableStyle = getComputedStyle(content.book);
+    assert(comfortableStyle.backgroundColor === "rgb(255, 253, 248)", "sample-boundary");
+    assert(comfortableStyle.color === "rgb(24, 34, 38)", "sample-boundary");
+    assert(comfortableStyle.fontFamily.includes("Microsoft YaHei"), "sample-boundary");
+    assert(Math.abs(parseFloat(comfortableStyle.lineHeight) - 72) < 0.1, "sample-boundary");
+    if (formula) assert(getComputedStyle(formula).filter === "none", "sample-boundary");
+    if (ordinary) assert(getComputedStyle(ordinary).filter === "none", "sample-boundary");
+    assert(pagination.countCutRects() === 0, "layout-cut");
+
+    const bookAnchor = await navigation.setPreferences("book", { sourceStyles: false });
+    assert(pagination.isOffsetVisible(bookAnchor.start.offset), "sample-boundary");
+    assert(!content.styleSnapshot().bookStyleApplied, "sample-boundary");
+    const userCss = ".book { --atha-user-style-probe: applied; }";
+    await navigation.setPreferences("book", { userStylesheet: userCss });
+    assert(content.styleSnapshot().userStyleApplied, "sample-boundary");
+    assert(
+      getComputedStyle(content.book).getPropertyValue("--atha-user-style-probe") === "applied",
+      "sample-boundary",
+    );
+    await navigation.setPreferences("book", { userStylesEnabled: false });
+    assert(!content.styleSnapshot().userStyleApplied, "sample-boundary");
+    assert(
+      !getComputedStyle(content.book).getPropertyValue("--atha-user-style-probe"),
+      "sample-boundary",
+    );
+    await navigation.setPreferences("book", { userStylesEnabled: true });
+    assert(content.styleSnapshot().userStyleApplied, "sample-boundary");
+    assert(
+      getComputedStyle(content.book).getPropertyValue("--atha-user-style-probe") === "applied",
+      "sample-boundary",
+    );
+
+    let unsafeRejected = false;
+    try {
+      await navigation.setPreferences("book", {
+        userStylesheet: ".book { background: url(https://example.com/x); }",
+      });
+    } catch (error) {
+      unsafeRejected = error instanceof Error && error.message === "css-subresource";
+    }
+    assert(unsafeRejected, "sample-boundary");
+    assert(preferences.snapshot().book.userStylesheet === userCss, "sample-boundary");
+
+    await navigation.resetPreferences("book");
+    assert(content.styleSnapshot().bookStyleApplied, "sample-boundary");
+    assert(!content.styleSnapshot().userStyleApplied, "sample-boundary");
+    await navigation.resetPreferences("application");
+    const restored = preferences.snapshot();
+    assert(
+      restored.application.theme === "system" &&
+        restored.application.fontSize === 32 &&
+        restored.application.fontFamily === "book" &&
+        restored.application.density === "standard" &&
+        !document.documentElement.dataset.theme &&
+        !content.book.dataset.fontFamily,
+      "sample-boundary",
+    );
+    preferencesEvidence = {
+      scopesSeparated: true,
+      locatorRestored: true,
+      sourceStylesToggled: true,
+      userStylesApplied: true,
+      userStylesToggled: true,
+      unsafeStylesRejected: true,
+    };
+  }
+
   async function verify() {
     const initial = session.snapshot();
     assert(initial.state === "layout-stable" && initial.sections > 0, "sample-boundary");
@@ -135,6 +237,7 @@ export function createDiagnostics({
     );
     await session.open(0);
     await verifyNavigation();
+    await verifyPreferences();
     await pagination.verifySizes();
     pagination.verifyFormulaLayout();
     pagination.verifyDisplayGeometry();
@@ -201,6 +304,11 @@ export function createDiagnostics({
         releasedSections,
       },
       navigation: { ...navigation.snapshot(), ...navigationEvidence },
+      preferences: {
+        ...preferences.snapshot(),
+        ...preferencesEvidence,
+        styles: content.styleSnapshot(),
+      },
     };
   }
 

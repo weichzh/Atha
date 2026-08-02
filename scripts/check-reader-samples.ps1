@@ -124,6 +124,29 @@ $themeProbe = @'
     toc.dispatchEvent(new Event('change', { bubbles: true }));
     await waitForSection(expectedSequence[0]);
   }
+  const preferences = document.querySelector('.preferences');
+  const status = document.querySelector('#preferences-status');
+  const readerBefore = document.querySelector('.reader').getBoundingClientRect();
+  preferences.open = true;
+  if (!preferences.open || !document.querySelector('#user-stylesheet')) throw new Error('preferences-control');
+  const waitForPreference = async (message) => {
+    for (let frame = 0; frame < 120; frame += 1) {
+      if (status.textContent === message && status.dataset.error !== 'true') return;
+      await new Promise(requestAnimationFrame);
+    }
+    throw new Error('preferences-control');
+  };
+  status.textContent = '';
+  const density = document.querySelector('#density');
+  density.value = 'compact';
+  density.dispatchEvent(new Event('change', { bubbles: true }));
+  await waitForPreference('已应用');
+  status.textContent = '';
+  document.querySelector('#reset-application-preferences').click();
+  await waitForPreference('已恢复应用默认');
+  preferences.open = false;
+  const readerAfter = document.querySelector('.reader').getBoundingClientRect();
+  if (readerBefore.width !== readerAfter.width || readerBefore.height !== readerAfter.height) throw new Error('preferences-control');
   const result = globalThis.__athaReaderDiagnostics?.snapshot();
   if (!result) throw new Error('missing-reader-diagnostics');
   const rgb = (value) => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
@@ -173,6 +196,7 @@ try {
         'reader/web/locator.mjs',
         'reader/web/navigation.mjs',
         'reader/web/pagination.mjs',
+        'reader/web/preferences.mjs',
         'reader/web/session.mjs'
     )) {
         Invoke-Checked 'node' @('--check', $module)

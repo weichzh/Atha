@@ -304,6 +304,7 @@ export function createPagination({
 
   async function setFontSize(value, anchor = captureOffset()) {
     state.fontSize = Number(value);
+    await document.fonts.ready;
     layout();
     await waitForStableLayout();
     await showOffset(anchor);
