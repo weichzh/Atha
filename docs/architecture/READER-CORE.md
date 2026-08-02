@@ -38,6 +38,10 @@ schema 1 Locator 是同一书籍内容版本内的内容坐标：起点由 secti
 
 `Navigation` 组合 reading session、Locator 与 pagination，统一处理页内移动、section 边界和 TOC 跳转；当前工具栏的原生 TOC 控件只是可验收入口，不预先决定最终沉浸控制层。
 
+### 翻页输入
+
+`Interaction` 只把键盘、滚轮、鼠标页区和单指横向滑动解释为前后翻页意图，再交给 Navigation 串行执行。它不直接修改分页或 section；控件、链接、编辑区与非折叠文本选择保留浏览器原生行为。滚轮按累计阈值识别一次物理手势，并在空闲窗口结束前抑制惯性尾流。
+
 ### 首个验收基线
 
 长期验收样本位于本机忽略目录 `fixtures/local/`。当前清单包含三个既有单章节样本，以及从《数学及其历史 (2026)》固定哈希源文件重复导出的“1.1 算术与几何”“1.2 勾股数组”“1.3 圆上的有理点”三章节 R1 样本；源 EPUB 不修改，也不提交样本内容到仓库。`scripts/export_reader_sample.py` 支持导出单章节或带 manifest 的多章节样本，`scripts/check-reader-samples.ps1` 统一运行实际 Windows host 与明暗主题截图验收。

@@ -66,6 +66,7 @@ textarea:focus-visible {
   background: #fffdf8;
   transform: scale(var(--page-scale));
   transform-origin: top left;
+  touch-action: pan-y;
 }
 
 .page {

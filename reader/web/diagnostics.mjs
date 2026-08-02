@@ -8,6 +8,7 @@ export function createDiagnostics({
   locator,
   navigation,
   preferences,
+  interaction,
   reader,
   renderCachedSource,
   emit,
@@ -18,6 +19,7 @@ export function createDiagnostics({
   let releasedSections = 0;
   let navigationEvidence = {};
   let preferencesEvidence = {};
+  let interactionEvidence = {};
 
   function heading() {
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
@@ -211,6 +213,169 @@ export function createDiagnostics({
     };
   }
 
+  async function waitFor(predicate) {
+    for (let frame = 0; frame < 120; frame += 1) {
+      if (predicate()) return;
+      await new Promise(requestAnimationFrame);
+    }
+    assert(false, "sample-boundary");
+  }
+
+  async function verifyInteraction() {
+    const key = (value, target = document, options = {}) => {
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true, ...options }));
+    };
+    const pointer = (type, options, target = reader) =>
+      target.dispatchEvent(
+        new PointerEvent(type, { bubbles: true, pointerType: "mouse", isPrimary: true, ...options }),
+      );
+    const rect = reader.getBoundingClientRect();
+
+    await pagination.show(0);
+    key("ArrowRight");
+    await waitFor(() => pagination.snapshot().page === 1);
+    key("PageUp");
+    await waitFor(() => pagination.snapshot().page === 0);
+
+    const beforeProtected = interaction.snapshot();
+    key("ArrowRight", document.querySelector("#font-size"));
+    key("ArrowRight", document, { ctrlKey: true });
+    key("ArrowRight", document, { shiftKey: true });
+    key(" ", document, { shiftKey: true });
+    await new Promise(requestAnimationFrame);
+    assert(pagination.snapshot().page === 0, "sample-boundary");
+    assert(
+      interaction.snapshot().controlProtected === beforeProtected.controlProtected + 1,
+      "sample-boundary",
+    );
+
+    for (const deltaY of [20, 20, 20, 100]) {
+      reader.dispatchEvent(
+        new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY, deltaMode: 0 }),
+      );
+    }
+    await waitFor(() => pagination.snapshot().page === 1);
+    assert(interaction.snapshot().wheel === 1, "sample-boundary");
+
+    await pagination.show(0);
+    const right = rect.right - 20;
+    pointer("pointerdown", { pointerId: 1, button: 0, clientX: right, clientY: rect.top + 40 });
+    pointer("pointerup", { pointerId: 1, button: 0, clientX: right, clientY: rect.top + 40 });
+    await waitFor(() => pagination.snapshot().page === 1);
+    const left = rect.left + 20;
+    pointer("pointerdown", { pointerId: 1, button: 0, clientX: left, clientY: rect.top + 40 });
+    pointer("pointerup", { pointerId: 1, button: 0, clientX: left, clientY: rect.top + 40 });
+    await waitFor(() => pagination.snapshot().page === 0);
+
+    pointer("pointerdown", {
+      pointerId: 2,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer("pointerup", {
+      pointerId: 2,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.left + 80,
+      clientY: rect.top + 84,
+    });
+    await waitFor(() => pagination.snapshot().page === 1);
+
+    await pagination.show(0);
+    const walker = document.createTreeWalker(content.book, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) =>
+        node.data.trim().length >= 2 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
+    });
+    const text = walker.nextNode();
+    assert(text, "sample-boundary");
+    const selection = content.book.getRootNode().getSelection?.();
+    assert(selection, "sample-boundary");
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 2);
+    selection.removeAllRanges();
+
+    const link = document.createElement("a");
+    link.href = "#interaction-probe";
+    link.textContent = "probe";
+    link.hidden = true;
+    content.book.append(link);
+    const contentProtected = interaction.snapshot().contentProtected;
+    pointer("pointerdown", { pointerId: 4, button: 0, clientX: right, clientY: rect.top + 120 }, link);
+    pointer("pointerup", { pointerId: 4, button: 0, clientX: right, clientY: rect.top + 120 }, link);
+    link.remove();
+    await new Promise(requestAnimationFrame);
+    assert(
+      pagination.snapshot().page === 0 &&
+        interaction.snapshot().contentProtected === contentProtected + 1,
+      "sample-boundary",
+    );
+
+    pointer("pointerdown", {
+      pointerId: 5,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer("pointerdown", {
+      pointerId: 6,
+      pointerType: "touch",
+      isPrimary: false,
+      button: 0,
+      clientX: rect.right - 60,
+      clientY: rect.top + 80,
+    });
+    pointer("pointerup", {
+      pointerId: 5,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.left + 80,
+      clientY: rect.top + 84,
+    });
+    await new Promise(requestAnimationFrame);
+    assert(
+      pagination.snapshot().page === 0 && interaction.snapshot().multiTouchProtected === 1,
+      "sample-boundary",
+    );
+    selection.addRange(range);
+    const selectionCount = interaction.snapshot().selectionProtected;
+    pointer("pointerdown", { pointerId: 3, button: 0, clientX: right, clientY: rect.top + 120 });
+    pointer("pointerup", { pointerId: 3, button: 0, clientX: right, clientY: rect.top + 120 });
+    await new Promise(requestAnimationFrame);
+    assert(
+      pagination.snapshot().page === 0 &&
+        interaction.snapshot().selectionProtected === selectionCount + 1,
+      "sample-boundary",
+    );
+    selection.removeAllRanges();
+
+    if (session.snapshot().sections > 1) {
+      await session.open(0);
+      await pagination.show(pagination.snapshot().pages - 1);
+      key("PageDown");
+      await waitFor(() => session.snapshot().currentIndex === 1);
+      key("PageUp");
+      await waitFor(() => session.snapshot().currentIndex === 0);
+    }
+    await session.open(0);
+    await pagination.show(0);
+    const counts = interaction.snapshot();
+    interactionEvidence = {
+      ...counts,
+      keyboardVerified: counts.keyboard >= 2,
+      wheelVerified: counts.wheel === 1,
+      mouseVerified: counts.mouse === 2,
+      touchVerified: counts.touch === 1,
+      selectionVerified: counts.selectionProtected === 1,
+      controlsVerified: counts.controlProtected === 1,
+      linksVerified: counts.contentProtected === 1,
+      multiTouchVerified: counts.multiTouchProtected === 1,
+    };
+  }
+
   async function verify() {
     const initial = session.snapshot();
     assert(initial.state === "layout-stable" && initial.sections > 0, "sample-boundary");
@@ -238,6 +403,7 @@ export function createDiagnostics({
     await session.open(0);
     await verifyNavigation();
     await verifyPreferences();
+    await verifyInteraction();
     await pagination.verifySizes();
     pagination.verifyFormulaLayout();
     pagination.verifyDisplayGeometry();
@@ -309,6 +475,7 @@ export function createDiagnostics({
         ...preferencesEvidence,
         styles: content.styleSnapshot(),
       },
+      interaction: { ...interactionEvidence },
     };
   }
 

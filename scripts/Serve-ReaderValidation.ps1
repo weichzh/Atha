@@ -130,6 +130,7 @@ try {
                     'web/pagination.mjs',
                     'web/session.mjs',
                     'web/navigation.mjs',
+                    'web/interaction.mjs',
                     'web/diagnostics.mjs',
                     'web/app.mjs'
                 ) | ForEach-Object {

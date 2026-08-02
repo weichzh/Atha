@@ -179,6 +179,7 @@ $themeProbe = @'
   if (result.session.contentLoads < expectedSections + 1 || result.session.stableLayouts < expectedSections + 1 || result.session.closes < expectedSections) throw new Error('session-lifecycle');
   if (!result.navigation.locatorRoundTrip || !result.navigation.rangeCompared || !result.navigation.reflowRestored || result.navigation.fallback !== 'locator-version') throw new Error('locator-navigation');
   if (expectedSections > 1 && (result.navigation.tocSection !== expectedSequence[1] || result.navigation.previousSection !== expectedSequence[0] || result.navigation.nextSection !== expectedSequence[1])) throw new Error('section-navigation');
+  if (!result.interaction.keyboardVerified || !result.interaction.wheelVerified || !result.interaction.mouseVerified || !result.interaction.touchVerified || !result.interaction.selectionVerified || !result.interaction.controlsVerified || !result.interaction.linksVerified || !result.interaction.multiTouchVerified) throw new Error('page-input');
   return result;
 })()
 '@
@@ -193,6 +194,7 @@ try {
         'reader/web/app.mjs',
         'reader/web/content.mjs',
         'reader/web/diagnostics.mjs',
+        'reader/web/interaction.mjs',
         'reader/web/locator.mjs',
         'reader/web/navigation.mjs',
         'reader/web/pagination.mjs',

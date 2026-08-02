@@ -87,6 +87,7 @@ const navigation = createNavigation({
   assert,
   fail,
 });
+const interaction = createInteraction({ reader, content, navigation, assert, fail });
 
 const diagnostics = createDiagnostics({
   params,
@@ -96,6 +97,7 @@ const diagnostics = createDiagnostics({
   locator,
   navigation,
   preferences,
+  interaction,
   reader,
   renderCachedSource,
   emit,
@@ -109,6 +111,7 @@ async function start() {
   const firstStableStarted = performance.now();
   await session.open();
   navigation.bindControls();
+  interaction.bind();
   diagnostics.recordFirstStable(firstStableStarted);
 
   if (params.has("verify")) await diagnostics.verify();
