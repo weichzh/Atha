@@ -161,14 +161,16 @@ export function createReadingSession({ params, content, render, onState, assert,
     const path = params.get("manifest");
     if (!path) {
       const url = configuredBookUrl();
+      const contentVersion = params.get("version");
+      assert(/^[a-f0-9]{64}$/.test(contentVersion || ""), "missing-content-version");
       manifest = Object.freeze({
-        contentVersion: null,
+        contentVersion,
         sections: Object.freeze([Object.freeze({ id: "entry", href: url.pathname, url })]),
         resources: null,
         toc: Object.freeze([]),
         strictResources: false,
         description: Object.freeze({
-          contentVersion: null,
+          contentVersion,
           sections: Object.freeze([
             Object.freeze({ id: "entry", href: url.pathname, url: url.href }),
           ]),

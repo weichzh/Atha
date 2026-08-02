@@ -14,6 +14,8 @@ export function createNavigation({
   next,
   fontSizeControl,
   onFallback,
+  onPreferences,
+  onStable,
   assert,
   fail,
 }) {
@@ -21,7 +23,10 @@ export function createNavigation({
   let pending = Promise.resolve();
 
   function run(action) {
-    const result = pending.then(action);
+    const result = pending.then(action).then((value) => {
+      onStable();
+      return value;
+    });
     pending = result.catch(() => undefined);
     return result;
   }
@@ -164,6 +169,7 @@ export function createNavigation({
     const state = preferences.update(scope, patch);
     await pagination.setFontSize(state.effective.fontSize, anchor.start.offset);
     syncControls();
+    if (onPreferences(scope) === false) throw new Error("state-write");
     return anchor;
   }
 
@@ -172,6 +178,7 @@ export function createNavigation({
     const state = preferences.reset(scope);
     await pagination.setFontSize(state.effective.fontSize, anchor.start.offset);
     syncControls();
+    if (onPreferences(scope) === false) throw new Error("state-write");
     return anchor;
   }
 

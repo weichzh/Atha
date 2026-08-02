@@ -2,7 +2,7 @@ mod diagnostics;
 mod launch;
 mod protocol;
 
-use std::{error::Error, process, time::Instant};
+use std::{error::Error, fs, process, time::Instant};
 
 use atha_backend::reader::{
     resources::BookRoot,
@@ -25,7 +25,16 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let startup = Instant::now();
     let arguments = Arguments::parse()?;
     let book_root = BookRoot::new(&arguments.book_root)?;
-    book_root.read(&format!("/{}", arguments.source.path()))?;
+    let source_resource = book_root.read(&format!("/{}", arguments.source.path()))?;
+    let canonical_source = fs::canonicalize(arguments.book_root.join(arguments.source.path()))?;
+    let mut state_key = launch::state_key(&canonical_source);
+    if arguments.state_probe.is_some() {
+        state_key.push_str("-probe");
+    }
+    let content_version = match &arguments.source {
+        launch::BookSource::Entry(_) => Some(launch::content_fingerprint(&source_resource.bytes)),
+        launch::BookSource::Manifest(_) => None,
+    };
     let mut diagnostics = Diagnostics::new(
         startup,
         arguments.verify_sample,
@@ -46,7 +55,12 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         .with_inner_size(window_size)
         .build(&event_loop)?;
     let proxy = event_loop.create_proxy();
-    let url = reader_url(&arguments, diagnostics.network_probe());
+    let url = reader_url(
+        &arguments,
+        diagnostics.network_probe(),
+        &state_key,
+        content_version.as_deref(),
+    );
     let book_resources = book_root.clone();
 
     let builder = WebViewBuilder::new()
@@ -57,7 +71,6 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             protocol::book_response(&book_resources, request)
         })
         .with_url(url)
-        .with_incognito(true)
         .with_devtools(false)
         .with_clipboard(false)
         .with_general_autofill_enabled(false)

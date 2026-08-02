@@ -23,9 +23,19 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     if (!condition) throw new Error("invalid-preference");
   }
 
+  function exact(value, defaults) {
+    return (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === Object.keys(defaults).length &&
+      Object.keys(value).every((key) => Object.hasOwn(defaults, key))
+    );
+  }
+
   function validateApplication(value) {
     ensure(
-      value &&
+      exact(value, APPLICATION_DEFAULTS) &&
         ["system", "light", "dark"].includes(value.theme) &&
         [24, 32, 40].includes(value.fontSize) &&
         ["book", "serif", "sans"].includes(value.fontFamily) &&
@@ -37,7 +47,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
 
   function validateBook(value) {
     ensure(
-      value &&
+      exact(value, BOOK_DEFAULTS) &&
         typeof value.sourceStyles === "boolean" &&
         typeof value.userStylesEnabled === "boolean" &&
         typeof value.userStylesheet === "string" &&
@@ -99,6 +109,11 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     if (scope === "application") return apply({ ...APPLICATION_DEFAULTS }, book);
     ensure(scope === "book");
     return apply(application, { ...BOOK_DEFAULTS });
+  }
+
+  function restore(value) {
+    ensure(value && typeof value === "object" && !Array.isArray(value));
+    return apply(validateApplication(value.application), validateBook(value.book));
   }
 
   function snapshot() {
@@ -165,5 +180,5 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     assert(rejected, "sample-boundary");
   }
   apply();
-  return Object.freeze({ bind, reset, snapshot, update });
+  return Object.freeze({ bind, reset, restore, snapshot, update });
 }

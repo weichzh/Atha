@@ -34,7 +34,23 @@ pub(super) struct Arguments {
     pub(super) book_root: PathBuf,
     pub(super) source: BookSource,
     pub(super) verify_sample: bool,
+    pub(super) state_probe: Option<StateProbe>,
     pub(super) benchmark: Option<Benchmark>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum StateProbe {
+    Write,
+    Read,
+}
+
+impl StateProbe {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Write => "write",
+            Self::Read => "read",
+        }
+    }
 }
 
 pub(super) enum BookSource {
@@ -60,6 +76,7 @@ impl Arguments {
         let mut entry = None;
         let mut manifest = None;
         let mut verify_sample = false;
+        let mut state_probe = None;
         let mut run_id = None;
         let mut process_sample = None;
         let mut mode = None;
@@ -81,6 +98,13 @@ impl Arguments {
                     )
                 }
                 Some("--verify-sample") => verify_sample = true,
+                Some("--state-probe") => {
+                    state_probe = match required(&mut values, "state probe")?.to_str() {
+                        Some("write") => Some(StateProbe::Write),
+                        Some("read") => Some(StateProbe::Read),
+                        _ => return Err("state probe must be write or read".into()),
+                    }
+                }
                 Some("--benchmark-run") => {
                     run_id = Some(
                         required(&mut values, "benchmark run")?
@@ -128,16 +152,25 @@ impl Arguments {
         if benchmark.is_some() && !verify_sample {
             return Err("benchmarks require --verify-sample".into());
         }
+        if state_probe.is_some() && (!verify_sample || benchmark.is_some()) {
+            return Err("state probe requires non-benchmark verification".into());
+        }
         Ok(Self {
             book_root,
             source,
             verify_sample,
+            state_probe,
             benchmark,
         })
     }
 }
 
-pub(super) fn reader_url(arguments: &Arguments, probe: Option<&TcpListener>) -> String {
+pub(super) fn reader_url(
+    arguments: &Arguments,
+    probe: Option<&TcpListener>,
+    state_key: &str,
+    content_version: Option<&str>,
+) -> String {
     let mut query = vec![match &arguments.source {
         BookSource::Entry(path) => format!("entry={}", percent_encode(path)),
         BookSource::Manifest(path) => format!("manifest={}", percent_encode(path)),
@@ -154,10 +187,48 @@ pub(super) fn reader_url(arguments: &Arguments, probe: Option<&TcpListener>) -> 
             percent_encode(&format!("http://127.0.0.1:{port}/blocked.png"))
         ));
     }
+    query.push(format!("state={state_key}"));
+    if let Some(version) = content_version {
+        query.push(format!("version={version}"));
+    }
+    if let Some(state_probe) = arguments.state_probe {
+        query.push("persist=1".into());
+        query.push(format!("state-probe={}", state_probe.as_str()));
+    }
     if let Some(benchmark) = &arguments.benchmark {
         query.push(format!("benchmark={}", benchmark.mode.as_str()));
     }
     format!("atha://localhost/atha-reader.html?{}", query.join("&"))
+}
+
+pub(super) fn state_key(source: &std::path::Path) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in source
+        .to_string_lossy()
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+pub(super) fn content_fingerprint(bytes: &[u8]) -> String {
+    [
+        0xcbf29ce484222325,
+        0x84222325cbf29ce4,
+        0x9e3779b185ebca87,
+        0xd6e8feb86659fd93,
+    ]
+    .map(|mut hash| {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        format!("{hash:016x}")
+    })
+    .join("")
 }
 
 pub(super) fn initial_window_size(
@@ -253,5 +324,26 @@ mod tests {
         ] {
             assert!(Arguments::parse_values(values(&invalid)).is_err());
         }
+    }
+
+    #[test]
+    fn state_key_is_stable_without_exposing_the_path() {
+        let first = state_key(std::path::Path::new(r"C:\Books\one\book.json"));
+        let repeated = state_key(std::path::Path::new(r"C:\Books\one\book.json"));
+        let other = state_key(std::path::Path::new(r"C:\Books\two\book.json"));
+
+        assert_eq!(first, repeated);
+        assert_ne!(first, other);
+        assert_eq!(first.len(), 16);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn content_fingerprint_tracks_legacy_entry_bytes() {
+        let first = content_fingerprint(b"first");
+        assert_eq!(first, content_fingerprint(b"first"));
+        assert_ne!(first, content_fingerprint(b"second"));
+        assert_eq!(first.len(), 64);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
     }
 }

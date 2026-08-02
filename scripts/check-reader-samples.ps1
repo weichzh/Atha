@@ -70,7 +70,9 @@ function Get-AgentBrowserScriptValue {
 function Invoke-ReaderHost {
     param(
         [string]$BookRoot,
-        [object]$Sample
+        [object]$Sample,
+        [ValidateSet('write', 'read')]
+        [string]$StateProbe
     )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
@@ -82,7 +84,8 @@ function Invoke-ReaderHost {
     else {
         @('--entry', [string]$Sample.entry)
     }
-    foreach ($argument in @('--book-root', $BookRoot) + $source + @('--verify-sample')) {
+    $probeArguments = if ($StateProbe) { @('--state-probe', $StateProbe) } else { @() }
+    foreach ($argument in @('--book-root', $BookRoot) + $source + @('--verify-sample') + $probeArguments) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
     $process = [Diagnostics.Process]::Start($startInfo)
@@ -218,6 +221,8 @@ $themeProbe = @'
   if (!result.interaction.keyboardVerified || !result.interaction.wheelVerified || !result.interaction.mouseVerified || !result.interaction.touchVerified || !result.interaction.selectionVerified || !result.interaction.controlsVerified || !result.interaction.linksVerified || !result.interaction.multiTouchVerified) throw new Error('page-input');
   if (!result.contentActions.selectionCopied || !result.contentActions.sameSection || !result.contentActions.tailFragmentRecovered || !result.contentActions.missingTargetRecovered || !result.contentActions.unknownSectionRecovered || !result.contentActions.auxiliaryActivation || !result.contentActions.externalBlocked || !result.contentActions.footnoteDialog || !result.contentActions.dialogInputProtected || !result.contentActions.focusRestored) throw new Error('content-actions');
   if (expectedSections > 1 && !result.contentActions.crossSection) throw new Error('content-link-section');
+  if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
+  if (!result.bookmarks.created || !result.bookmarks.duplicatePrevented || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
   return result;
 })()
 '@
@@ -233,6 +238,8 @@ try {
         'reader/web/content.mjs',
         'reader/web/content-actions.mjs',
         'reader/web/structured-actions.mjs',
+        'reader/web/reader-state.mjs',
+        'reader/web/bookmarks.mjs',
         'reader/web/diagnostics.mjs',
         'reader/web/interaction.mjs',
         'reader/web/locator.mjs',
@@ -315,9 +322,18 @@ try {
                 'book=' + [Uri]::EscapeDataString("/book/$($sample.entry)")
             }
             $probeUrl = [Uri]::EscapeDataString('https://example.com/blocked.png')
-            $url = "http://127.0.0.1:$port/reader/atha-reader.html?$sourceQuery&verify=1&probe=$probeUrl"
+            $versionQuery = if ($sample.manifest) {
+                ''
+            }
+            else {
+                $entryPath = Join-Path $bookRoot ([string]$sample.entry)
+                '&version=' + (Get-FileHash -LiteralPath $entryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            $url = "http://127.0.0.1:$port/reader/atha-reader.html?$sourceQuery&verify=1&probe=$probeUrl&state=$($sample.id)&persist=1$versionQuery"
             Invoke-AgentBrowser @('--session', $session, '--allowed-domains', '127.0.0.1', 'open', $url)
             Invoke-AgentBrowser @('--session', $session, 'set', 'viewport', '1264', '1680')
+            [void](Get-AgentBrowserScriptValue -Session $session -Script 'localStorage.clear(); true')
+            Invoke-AgentBrowser @('--session', $session, 'reload')
             foreach ($theme in @('light', 'dark')) {
                 Write-Host "  Rendering $theme mode..."
                 Invoke-AgentBrowser @('--session', $session, 'set', 'media', $theme)
@@ -410,6 +426,59 @@ try {
                 Invoke-AgentBrowser @('--session', $session, 'screenshot', $screenshot)
                 Invoke-AgentBrowser @('--session', $session, 'errors')
                 Invoke-AgentBrowser @('--session', $session, 'network', 'requests', '--filter', 'example.com')
+            }
+            if ($sample.id -eq 'math-history-r1') {
+                Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                $positionBefore = Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#position').textContent" | ConvertFrom-Json
+                Invoke-AgentBrowser @('--session', $session, 'click', '#next')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent !== '$positionBefore'")
+                Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
+                Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '24')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "JSON.parse(localStorage.getItem('atha.reader.application.v1')).preferences.fontSize === 24")
+                Invoke-AgentBrowser @('--session', $session, 'select', '#theme', 'dark')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.theme === 'dark' && JSON.parse(localStorage.getItem('atha.reader.application.v1')).preferences.theme === 'dark'")
+                $savedPosition = Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#position').textContent" | ConvertFrom-Json
+                $restoreUrl = $url.Replace('verify=1&', '')
+                Invoke-AgentBrowser @('--session', $session, 'open', $restoreUrl)
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.status === 'pass'")
+                $restored = Get-AgentBrowserScriptValue -Session $session -Script @'
+(() => ({
+  position: document.querySelector('#position').textContent,
+  fontSize: document.querySelector('#font-size').value,
+  theme: document.querySelector('#theme').value,
+                  bookmarks: document.querySelector('#bookmarks').value ? 1 : 0,
+                }))()
+'@ | ConvertFrom-Json
+                if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1) {
+                    throw "Persistent reader state did not restore. expectedPosition=$savedPosition actual=$($restored | ConvertTo-Json -Compress)"
+                }
+                Invoke-AgentBrowser @('--session', $session, 'click', '#next')
+                Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                Invoke-AgentBrowser @('--session', $session, 'click', '#go-bookmark')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent === '$savedPosition'")
+                Invoke-AgentBrowser @('--session', $session, 'click', '#delete-bookmark')
+                $bookmarkCount = [int](Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#bookmarks option').value ? 1 : 0")
+                if ($bookmarkCount -ne 0) { throw 'Bookmark deletion did not persist in memory.' }
+                [void](Get-AgentBrowserScriptValue -Session $session -Script @'
+(() => {
+  const key = Object.keys(localStorage).find((value) => value.startsWith('atha.reader.progress.'));
+  if (!key) return false;
+  localStorage.setItem(key, '{');
+  return true;
+})()
+'@)
+                Invoke-AgentBrowser @('--session', $session, 'reload')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.status === 'pass'")
+                $fallbackPosition = Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#position').textContent" | ConvertFrom-Json
+                if (-not $fallbackPosition.StartsWith('1 / ')) { throw 'Corrupt progress did not fall back safely.' }
+                $persistenceScreenshot = Join-Path $screenshots 'math-history-r1-persistence.png'
+                Invoke-AgentBrowser @('--session', $session, 'screenshot', $persistenceScreenshot)
+                [void](Get-AgentBrowserScriptValue -Session $session -Script 'localStorage.clear(); true')
+            }
+            if ($sample.id -eq 'math-history-r1') {
+                Write-Host '  Verifying WebView2 state across host processes...'
+                Invoke-ReaderHost -BookRoot $bookRoot -Sample $sample -StateProbe write
+                Invoke-ReaderHost -BookRoot $bookRoot -Sample $sample -StateProbe read
             }
         }
         finally {

@@ -19,6 +19,15 @@ function assert(condition, code) {
   if (!condition) fail(code);
 }
 
+function durableStorage() {
+  if (params.has("verify") && !params.has("persist")) return null;
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
 const content = createContent({
   host: document.querySelector("#book-host"),
   readerStyleSource: document.querySelector("#reader-style-source"),
@@ -72,6 +81,7 @@ const session = createReadingSession({
 });
 
 const locator = createLocator({ assert });
+let readerState;
 const navigation = createNavigation({
   session,
   pagination,
@@ -84,8 +94,34 @@ const navigation = createNavigation({
   onFallback(reason) {
     document.documentElement.dataset.locatorFallback = reason;
   },
+  onPreferences: (scope) => readerState?.savePreferences(scope),
+  onStable: () => readerState?.scheduleProgress(),
   assert,
   fail,
+});
+readerState = createReaderState({
+  storage: durableStorage(),
+  keyPrefix: params.has("state-probe") ? "atha.reader.probe" : "atha.reader",
+  bookKey: params.get("state"),
+  session,
+  navigation,
+  pagination,
+  preferences,
+  locator,
+  assert,
+});
+const bookmarks = createBookmarks({
+  state: readerState,
+  navigation,
+  session,
+  controls: {
+    add: document.querySelector("#add-bookmark"),
+    list: document.querySelector("#bookmarks"),
+    go: document.querySelector("#go-bookmark"),
+    remove: document.querySelector("#delete-bookmark"),
+    status: document.querySelector("#bookmarks-status"),
+  },
+  assert,
 });
 const contentActions = createContentActions({
   content,
@@ -123,6 +159,8 @@ const diagnostics = createDiagnostics({
   interaction,
   contentActions,
   structuredActions,
+  readerState,
+  bookmarks,
   reader,
   renderCachedSource,
   emit,
@@ -136,12 +174,17 @@ async function start() {
   const firstStableStarted = performance.now();
   await session.open();
   navigation.bindControls();
+  await readerState.restore();
+  readerState.bind();
+  bookmarks.bind();
   contentActions.bind();
   structuredActions.bind();
   interaction.bind();
   diagnostics.recordFirstStable(firstStableStarted);
 
-  if (params.has("verify")) await diagnostics.verify();
+  const stateProbe = params.get("state-probe");
+  if (stateProbe) await readerState.verifyPersistence(stateProbe);
+  else if (params.has("verify")) await diagnostics.verify();
   if (params.get("benchmark") === "hot") await diagnostics.benchmark();
 
   diagnostics.complete();

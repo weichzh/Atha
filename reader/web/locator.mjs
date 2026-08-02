@@ -21,12 +21,15 @@ export function createLocator({ assert }) {
     return new Map(book.sections.map((section, index) => [section.id, index]));
   }
 
-  function validatePoint(value, order) {
+  function validatePoint(value, order = null) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       invalid("locator-format");
     }
     exactKeys(value, ["section", "offset"]);
-    if (!order.has(value.section)) invalid("locator-section");
+    if (typeof value.section !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(value.section)) {
+      invalid("locator-section");
+    }
+    if (order && !order.has(value.section)) invalid("locator-section");
     if (
       !Number.isInteger(value.offset) ||
       value.offset < 0 ||
@@ -42,7 +45,7 @@ export function createLocator({ assert }) {
     return sectionDifference || left.offset - right.offset;
   }
 
-  function validate(value, book) {
+  function decode(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       invalid("locator-format");
     }
@@ -50,15 +53,25 @@ export function createLocator({ assert }) {
     if (Object.hasOwn(value, "end")) keys.push("end");
     exactKeys(value, keys);
     if (value.schema !== 1) invalid("locator-format");
-    if (value.contentVersion !== book.contentVersion) invalid("locator-version");
-    const order = sectionOrder(book);
-    const start = validatePoint(value.start, order);
-    const end = Object.hasOwn(value, "end") ? validatePoint(value.end, order) : null;
+    if (value.contentVersion !== null && !/^[a-f0-9]{64}$/.test(value.contentVersion)) {
+      invalid("locator-format");
+    }
+    const start = validatePoint(value.start);
+    const end = Object.hasOwn(value, "end") ? validatePoint(value.end) : null;
     if (end && end.section !== start.section) invalid("locator-range");
-    if (end && comparePoints(start, end, order) > 0) invalid("locator-range");
-    const locator = { schema: 1, contentVersion: book.contentVersion, start };
-    if (end) locator.end = end;
-    return Object.freeze(locator);
+    if (end && end.offset < start.offset) invalid("locator-range");
+    return Object.freeze({ schema: 1, contentVersion: value.contentVersion, start, ...(end ? { end } : {}) });
+  }
+
+  function validate(value, book) {
+    const decoded = decode(value);
+    if (decoded.contentVersion !== book.contentVersion) invalid("locator-version");
+    const order = sectionOrder(book);
+    const start = validatePoint(decoded.start, order);
+    const end = decoded.end ? validatePoint(decoded.end, order) : null;
+    const result = { schema: 1, contentVersion: book.contentVersion, start };
+    if (end) result.end = end;
+    return Object.freeze(result);
   }
 
   function point(book, section, offset) {
@@ -73,6 +86,10 @@ export function createLocator({ assert }) {
   }
 
   function parse(book, serialized) {
+    return validate(inspect(serialized), book);
+  }
+
+  function inspect(serialized) {
     if (
       typeof serialized !== "string" ||
       serialized.length === 0 ||
@@ -86,7 +103,7 @@ export function createLocator({ assert }) {
     } catch {
       invalid("locator-format");
     }
-    return validate(value, book);
+    return decode(value);
   }
 
   function serialize(book, value) {
@@ -140,5 +157,5 @@ export function createLocator({ assert }) {
   }
 
   selfCheck();
-  return Object.freeze({ compare, parse, point, range, serialize });
+  return Object.freeze({ compare, inspect, parse, point, range, serialize });
 }

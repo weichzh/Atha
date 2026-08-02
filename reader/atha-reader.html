@@ -86,6 +86,21 @@
             <output id="preferences-status" aria-live="polite"></output>
           </div>
         </details>
+        <details class="bookmarks">
+          <summary>书签</summary>
+          <div class="bookmarks-panel">
+            <button id="add-bookmark" type="button">添加当前位置</button>
+            <label>
+              已存书签
+              <select id="bookmarks" aria-label="已存书签"></select>
+            </label>
+            <div class="bookmark-actions">
+              <button id="go-bookmark" type="button">跳转</button>
+              <button id="delete-bookmark" type="button">删除</button>
+            </div>
+            <output id="bookmarks-status" aria-live="polite"></output>
+          </div>
+        </details>
         <button id="next" type="button">下一页</button>
       </nav>
       <dialog id="content-dialog" aria-labelledby="content-dialog-title">

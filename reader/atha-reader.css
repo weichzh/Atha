@@ -155,7 +155,7 @@ textarea:focus-visible,
   bottom: 28px;
   left: 48px;
   display: grid;
-  grid-template-columns: max-content minmax(60px, 1fr) minmax(120px, 180px) max-content max-content;
+  grid-template-columns: max-content minmax(60px, 1fr) minmax(100px, 160px) max-content max-content max-content;
   gap: 12px;
   align-items: center;
   padding: 10px 14px;
@@ -165,16 +165,19 @@ textarea:focus-visible,
   box-shadow: 0 8px 32px rgb(25 39 43 / 14%);
 }
 
-.preferences {
+.preferences,
+.bookmarks {
   position: relative;
 }
 
 .preferences > summary,
+.bookmarks > summary,
 .advanced-preferences > summary {
   cursor: pointer;
 }
 
-.preferences > summary {
+.preferences > summary,
+.bookmarks > summary {
   min-height: 44px;
   padding: 10px 12px;
   border: 1px solid #ccd4d6;
@@ -196,6 +199,34 @@ textarea:focus-visible,
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 8px 32px rgb(25 39 43 / 20%);
+}
+
+.bookmarks-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 16px);
+  display: grid;
+  width: min(360px, calc(100vw - 96px));
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #ccd4d6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 32px rgb(25 39 43 / 20%);
+}
+
+.bookmarks-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.bookmark-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.bookmark-actions > * {
+  flex: 1;
 }
 
 .preferences-panel label:not(.checkbox-label) {
@@ -394,7 +425,9 @@ textarea:focus-visible,
   select,
   textarea,
   .preferences > summary,
+  .bookmarks > summary,
   .preferences-panel,
+  .bookmarks-panel,
   .toolbar {
     border-color: #40545c;
     background: #202c30;

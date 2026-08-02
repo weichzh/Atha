@@ -133,6 +133,8 @@ try {
                     'web/interaction.mjs',
                     'web/content-actions.mjs',
                     'web/structured-actions.mjs',
+                    'web/reader-state.mjs',
+                    'web/bookmarks.mjs',
                     'web/diagnostics.mjs',
                     'web/app.mjs'
                 ) | ForEach-Object {

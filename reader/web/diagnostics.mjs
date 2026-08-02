@@ -11,6 +11,8 @@ export function createDiagnostics({
   interaction,
   contentActions,
   structuredActions,
+  readerState,
+  bookmarks,
   reader,
   renderCachedSource,
   emit,
@@ -23,6 +25,8 @@ export function createDiagnostics({
   let preferencesEvidence = {};
   let interactionEvidence = {};
   let contentActionEvidence = {};
+  let stateEvidence = {};
+  let bookmarkEvidence = {};
 
   function heading() {
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
@@ -411,6 +415,8 @@ export function createDiagnostics({
       ...(await contentActions.verify({ pagination, session })),
       ...(await structuredActions.verify({ pagination, session })),
     };
+    stateEvidence = await readerState.verify();
+    bookmarkEvidence = await bookmarks.verify();
     await pagination.verifySizes();
     pagination.verifyFormulaLayout();
     pagination.verifyDisplayGeometry();
@@ -495,6 +501,8 @@ export function createDiagnostics({
         ...structuredActions.snapshot(),
         selectionLength: contentActions.selectionLength(),
       },
+      readerState: { ...readerState.snapshot(), ...stateEvidence },
+      bookmarks: { items: bookmarks.snapshot(), ...bookmarkEvidence },
     };
   }
 
