@@ -101,6 +101,25 @@
             <output id="bookmarks-status" aria-live="polite"></output>
           </div>
         </details>
+        <details class="search">
+          <summary>搜索</summary>
+          <form id="search-form" class="search-panel">
+            <label>
+              书内文字
+              <input id="search-query" type="search" maxlength="128" autocomplete="off" />
+            </label>
+            <div class="search-actions">
+              <button type="submit">搜索</button>
+              <button id="cancel-search" type="button">取消</button>
+            </div>
+            <output id="search-status" aria-live="polite"></output>
+            <label>
+              搜索结果
+              <select id="search-results" size="8" aria-label="搜索结果"></select>
+            </label>
+            <button id="go-search-result" type="button">跳转到结果</button>
+          </form>
+        </details>
         <button id="next" type="button">下一页</button>
       </nav>
       <dialog id="content-dialog" aria-labelledby="content-dialog-title">

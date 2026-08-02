@@ -135,6 +135,7 @@ try {
                     'web/structured-actions.mjs',
                     'web/reader-state.mjs',
                     'web/bookmarks.mjs',
+                    'web/search.mjs',
                     'web/diagnostics.mjs',
                     'web/app.mjs'
                 ) | ForEach-Object {

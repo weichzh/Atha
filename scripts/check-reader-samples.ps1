@@ -223,6 +223,7 @@ $themeProbe = @'
   if (expectedSections > 1 && !result.contentActions.crossSection) throw new Error('content-link-section');
   if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
   if (!result.bookmarks.created || !result.bookmarks.duplicatePrevented || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
+  if (!result.search.replaced || !result.search.canceled || !result.search.errorIsolated || !result.search.activeContentRejected) throw new Error('search');
   return result;
 })()
 '@
@@ -240,6 +241,7 @@ try {
         'reader/web/structured-actions.mjs',
         'reader/web/reader-state.mjs',
         'reader/web/bookmarks.mjs',
+        'reader/web/search.mjs',
         'reader/web/diagnostics.mjs',
         'reader/web/interaction.mjs',
         'reader/web/locator.mjs',
@@ -424,6 +426,34 @@ try {
                 if (@($linkRequests.data.requests).Count -ne 0) { throw 'Blocked external link issued a network request.' }
                 $screenshot = Join-Path $screenshots "$($sample.id)-$theme.png"
                 Invoke-AgentBrowser @('--session', $session, 'screenshot', $screenshot)
+                Invoke-AgentBrowser @('--session', $session, 'click', '.search > summary')
+                Invoke-AgentBrowser @('--session', $session, 'fill', '#search-query', [string]$sample.searchQuery)
+                Invoke-AgentBrowser @('--session', $session, 'click', '#search-form button[type=submit]')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "globalThis.__athaReaderDiagnostics.snapshot().search.status === 'complete'")
+                $searchState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.snapshot().search' | ConvertFrom-Json
+                if ($searchState.count -ne [int]$sample.expectedSearchResults -or @($searchState.sections).Count -ne [int]$sample.expectedSearchSections) {
+                    throw "Search results changed for $($sample.id): $($searchState | ConvertTo-Json -Compress)"
+                }
+                if ($sample.id -eq 'math-history-r1') {
+                    $searchScreenshot = Join-Path $screenshots "math-history-r1-$theme-search.png"
+                    Invoke-AgentBrowser @('--session', $session, 'screenshot', $searchScreenshot)
+                    if ($theme -eq 'light') {
+                        [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.dataset.theme = 'dark'; true")
+                        $explicitDark = Get-AgentBrowserScriptValue -Session $session -Script "(() => { const panel = getComputedStyle(document.querySelector('.search-panel')); const input = getComputedStyle(document.querySelector('#search-query')); return panel.backgroundColor === 'rgb(32, 44, 48)' && panel.color === 'rgb(233, 238, 238)' && input.backgroundColor === 'rgb(32, 44, 48)' && input.color === 'rgb(233, 238, 238)'; })()"
+                        if ($explicitDark -ne 'true') { throw 'Explicit dark search theme is unreadable under a light system theme.' }
+                        Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-explicit-dark-search.png'))
+                        [void](Get-AgentBrowserScriptValue -Session $session -Script "delete document.documentElement.dataset.theme; true")
+                    }
+                }
+                $lastResult = @($searchState.results)[-1]
+                Invoke-AgentBrowser @('--session', $session, 'select', '#search-results', [string]$lastResult.id)
+                Invoke-AgentBrowser @('--session', $session, 'click', '#go-search-result')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', 'globalThis.__athaReaderDiagnostics.snapshot().search.lastJump?.visible === true')
+                $firstResult = @($searchState.results)[0]
+                Invoke-AgentBrowser @('--session', $session, 'select', '#search-results', [string]$firstResult.id)
+                Invoke-AgentBrowser @('--session', $session, 'click', '#go-search-result')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', '(() => { const search = globalThis.__athaReaderDiagnostics.snapshot().search; const first = JSON.parse(search.results[0].locator).start; return search.lastJump?.visible === true && search.lastJump.section === first.section && search.lastJump.offset === first.offset; })()')
+                Invoke-AgentBrowser @('--session', $session, 'click', '.search > summary')
                 Invoke-AgentBrowser @('--session', $session, 'errors')
                 Invoke-AgentBrowser @('--session', $session, 'network', 'requests', '--filter', 'example.com')
             }

@@ -32,6 +32,7 @@ body {
 }
 
 button,
+input,
 select,
 textarea {
   min-height: 44px;
@@ -39,6 +40,7 @@ textarea {
 }
 
 button:focus-visible,
+input:focus-visible,
 select:focus-visible,
 summary:focus-visible,
 textarea:focus-visible,
@@ -155,7 +157,7 @@ textarea:focus-visible,
   bottom: 28px;
   left: 48px;
   display: grid;
-  grid-template-columns: max-content minmax(60px, 1fr) minmax(100px, 160px) max-content max-content max-content;
+  grid-template-columns: max-content minmax(60px, 1fr) minmax(100px, 160px) max-content max-content max-content max-content;
   gap: 12px;
   align-items: center;
   padding: 10px 14px;
@@ -166,18 +168,21 @@ textarea:focus-visible,
 }
 
 .preferences,
-.bookmarks {
+.bookmarks,
+.search {
   position: relative;
 }
 
 .preferences > summary,
 .bookmarks > summary,
+.search > summary,
 .advanced-preferences > summary {
   cursor: pointer;
 }
 
 .preferences > summary,
-.bookmarks > summary {
+.bookmarks > summary,
+.search > summary {
   min-height: 44px;
   padding: 10px 12px;
   border: 1px solid #ccd4d6;
@@ -201,7 +206,8 @@ textarea:focus-visible,
   box-shadow: 0 8px 32px rgb(25 39 43 / 20%);
 }
 
-.bookmarks-panel {
+.bookmarks-panel,
+.search-panel {
   position: absolute;
   right: 0;
   bottom: calc(100% + 16px);
@@ -218,6 +224,28 @@ textarea:focus-visible,
 .bookmarks-panel label {
   display: grid;
   gap: 6px;
+}
+
+.search-panel {
+  width: min(440px, calc(100vw - 96px));
+}
+
+.search-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.search-panel select {
+  min-height: 220px;
+}
+
+.search-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.search-actions > * {
+  flex: 1;
 }
 
 .bookmark-actions {
@@ -422,12 +450,15 @@ textarea:focus-visible,
   }
 
   button,
+  input,
   select,
   textarea,
   .preferences > summary,
   .bookmarks > summary,
+  .search > summary,
   .preferences-panel,
   .bookmarks-panel,
+  .search-panel,
   .toolbar {
     border-color: #40545c;
     background: #202c30;
@@ -484,10 +515,15 @@ textarea:focus-visible,
 }
 
 :root[data-theme="light"] button,
+:root[data-theme="light"] input,
 :root[data-theme="light"] select,
 :root[data-theme="light"] textarea,
 :root[data-theme="light"] .preferences > summary,
+:root[data-theme="light"] .bookmarks > summary,
+:root[data-theme="light"] .search > summary,
 :root[data-theme="light"] .preferences-panel,
+:root[data-theme="light"] .bookmarks-panel,
+:root[data-theme="light"] .search-panel,
 :root[data-theme="light"] .toolbar {
   border-color: #ccd4d6;
   background: #fff;
@@ -544,10 +580,15 @@ textarea:focus-visible,
 }
 
 :root[data-theme="dark"] button,
+:root[data-theme="dark"] input,
 :root[data-theme="dark"] select,
 :root[data-theme="dark"] textarea,
 :root[data-theme="dark"] .preferences > summary,
+:root[data-theme="dark"] .bookmarks > summary,
+:root[data-theme="dark"] .search > summary,
 :root[data-theme="dark"] .preferences-panel,
+:root[data-theme="dark"] .bookmarks-panel,
+:root[data-theme="dark"] .search-panel,
 :root[data-theme="dark"] .toolbar {
   border-color: #40545c;
   background: #202c30;

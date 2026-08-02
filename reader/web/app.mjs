@@ -123,6 +123,21 @@ const bookmarks = createBookmarks({
   },
   assert,
 });
+const search = createSearch({
+  session,
+  navigation,
+  pagination,
+  locator,
+  controls: {
+    form: document.querySelector("#search-form"),
+    query: document.querySelector("#search-query"),
+    cancel: document.querySelector("#cancel-search"),
+    results: document.querySelector("#search-results"),
+    go: document.querySelector("#go-search-result"),
+    status: document.querySelector("#search-status"),
+  },
+  assert,
+});
 const contentActions = createContentActions({
   content,
   navigation,
@@ -161,6 +176,7 @@ const diagnostics = createDiagnostics({
   structuredActions,
   readerState,
   bookmarks,
+  search,
   reader,
   renderCachedSource,
   emit,
@@ -177,6 +193,7 @@ async function start() {
   await readerState.restore();
   readerState.bind();
   bookmarks.bind();
+  search.bind();
   contentActions.bind();
   structuredActions.bind();
   interaction.bind();
