@@ -38,6 +38,35 @@ function Invoke-AgentBrowser {
     if ($LASTEXITCODE -ne 0) { throw "agent-browser failed with exit code $LASTEXITCODE." }
 }
 
+function Invoke-AgentBrowserScript {
+    param(
+        [string]$Session,
+        [string]$Script
+    )
+
+    $Script | & agent-browser --session $Session eval --stdin
+    if ($LASTEXITCODE -ne 0) { throw "agent-browser eval failed with exit code $LASTEXITCODE." }
+}
+
+function Get-AgentBrowserOutput {
+    param([string[]]$Arguments)
+
+    $output = @(& agent-browser @Arguments)
+    if ($LASTEXITCODE -ne 0) { throw "agent-browser failed with exit code $LASTEXITCODE." }
+    return [string]::Join("`n", $output)
+}
+
+function Get-AgentBrowserScriptValue {
+    param(
+        [string]$Session,
+        [string]$Script
+    )
+
+    $output = @($Script | & agent-browser --session $Session eval --stdin)
+    if ($LASTEXITCODE -ne 0) { throw "agent-browser eval failed with exit code $LASTEXITCODE." }
+    return [string]::Join("`n", $output).Trim()
+}
+
 function Invoke-ReaderHost {
     param(
         [string]$BookRoot,
@@ -180,6 +209,8 @@ $themeProbe = @'
   if (!result.navigation.locatorRoundTrip || !result.navigation.rangeCompared || !result.navigation.reflowRestored || result.navigation.fallback !== 'locator-version') throw new Error('locator-navigation');
   if (expectedSections > 1 && (result.navigation.tocSection !== expectedSequence[1] || result.navigation.previousSection !== expectedSequence[0] || result.navigation.nextSection !== expectedSequence[1])) throw new Error('section-navigation');
   if (!result.interaction.keyboardVerified || !result.interaction.wheelVerified || !result.interaction.mouseVerified || !result.interaction.touchVerified || !result.interaction.selectionVerified || !result.interaction.controlsVerified || !result.interaction.linksVerified || !result.interaction.multiTouchVerified) throw new Error('page-input');
+  if (!result.contentActions.selectionCopied || !result.contentActions.sameSection || !result.contentActions.tailFragmentRecovered || !result.contentActions.missingTargetRecovered || !result.contentActions.unknownSectionRecovered || !result.contentActions.auxiliaryActivation || !result.contentActions.externalBlocked || !result.contentActions.footnoteDialog || !result.contentActions.dialogInputProtected || !result.contentActions.focusRestored) throw new Error('content-actions');
+  if (expectedSections > 1 && !result.contentActions.crossSection) throw new Error('content-link-section');
   return result;
 })()
 '@
@@ -193,6 +224,7 @@ try {
     foreach ($module in @(
         'reader/web/app.mjs',
         'reader/web/content.mjs',
+        'reader/web/content-actions.mjs',
         'reader/web/diagnostics.mjs',
         'reader/web/interaction.mjs',
         'reader/web/locator.mjs',
@@ -283,6 +315,25 @@ try {
                 Invoke-AgentBrowser @('--session', $session, 'set', 'media', $theme)
                 Invoke-AgentBrowser @('--session', $session, 'reload')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.status === 'pass'")
+                $selectionProbe = Get-AgentBrowserScriptValue -Session $session -Script @'
+(() => {
+  const point = globalThis.__athaReaderDiagnostics.selectionProbe();
+  return point && [point.startX, point.startY, point.endX, point.endY].map(Math.round);
+})()
+'@ | ConvertFrom-Json
+                if (@($selectionProbe).Count -ne 4) { throw 'No visible text was available for selection.' }
+                $copyCount = [int](Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.snapshot().contentActions.trustedCopies')
+                Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$selectionProbe[0], [string]$selectionProbe[1])
+                Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+                Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$selectionProbe[2], [string]$selectionProbe[3])
+                Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
+                $selectionLength = [int](Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.snapshot().contentActions.selectionLength')
+                if ($selectionLength -le 0) { throw 'Real mouse text selection failed.' }
+                [void](Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.armCopyProbe(); true')
+                Invoke-AgentBrowser @('--session', $session, 'press', 'Control+c')
+                $trustedCopies = [int](Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.snapshot().contentActions.trustedCopies')
+                if ($trustedCopies -ne $copyCount + 1) { throw 'Trusted Ctrl+C copy event was not observed.' }
+                [void](Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.clearSelection()')
                 $expectedDark = if ($theme -eq 'dark') { 'true' } else { 'false' }
                 $requireFormulas = if ($sample.requireFormulas) { 'true' } else { 'false' }
                 $requireCodeBlock = if ($sample.requireCodeBlock) { 'true' } else { 'false' }
@@ -295,8 +346,10 @@ try {
                     Replace('__EXPECTED_SECTIONS__', [string]$expectedSections).
                     Replace('__EXPECTED_SEQUENCE__', $sequenceJson).
                     Replace('__EXPECTED_HEADINGS__', $headingsJson)
-                $encodedProbe = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($probe))
-                Invoke-AgentBrowser @('--session', $session, 'eval', '-b', $encodedProbe)
+                Invoke-AgentBrowserScript -Session $session -Script $probe
+                $linkRequests = Get-AgentBrowserOutput @('--session', $session, 'network', 'requests', '--filter', 'atha-link-probe.invalid', '--json') | ConvertFrom-Json
+                if (-not $linkRequests.success -or $null -eq $linkRequests.data.requests) { throw 'External link network evidence is unavailable.' }
+                if (@($linkRequests.data.requests).Count -ne 0) { throw 'Blocked external link issued a network request.' }
                 $screenshot = Join-Path $screenshots "$($sample.id)-$theme.png"
                 Invoke-AgentBrowser @('--session', $session, 'screenshot', $screenshot)
                 Invoke-AgentBrowser @('--session', $session, 'errors')

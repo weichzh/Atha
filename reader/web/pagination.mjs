@@ -103,13 +103,56 @@ export function createPagination({
   function offsetForFragment(fragment) {
     const target = [...book.querySelectorAll("[id]")].find((element) => element.id === fragment);
     if (!target) return null;
+    const nodes = textNodes();
     let offset = 0;
-    for (const node of textNodes()) {
-      if (target.contains(node)) return offset;
-      if (target.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) return offset;
+    let start = nodes.length;
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      if (
+        target.contains(node) ||
+        target.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING
+      ) {
+        start = index;
+        break;
+      }
       offset += (node.textContent || "").length;
     }
-    return offset;
+    const renderedCharacter = (node, first) => {
+      const length = (node.textContent || "").length;
+      if (!length) return null;
+      const hasRect = (startOffset, endOffset) => {
+        const range = document.createRange();
+        range.setStart(node, startOffset);
+        range.setEnd(node, endOffset);
+        return [...range.getClientRects()].some((rect) => rect.width > 0 && rect.height > 0);
+      };
+      if (!hasRect(0, length)) return null;
+      let low = 0;
+      let high = length - 1;
+      while (low < high) {
+        const middle = first ? Math.floor((low + high) / 2) : Math.ceil((low + high) / 2);
+        if (first ? hasRect(0, middle + 1) : hasRect(middle, length)) {
+          if (first) high = middle;
+          else low = middle;
+        } else if (first) low = middle + 1;
+        else high = middle - 1;
+      }
+      return low;
+    };
+    let current = offset;
+    for (let nodeIndex = start; nodeIndex < nodes.length; nodeIndex += 1) {
+      const node = nodes[nodeIndex];
+      const index = renderedCharacter(node, true);
+      if (index !== null) return current + index;
+      current += (node.textContent || "").length;
+    }
+    for (let nodeIndex = start - 1; nodeIndex >= 0; nodeIndex -= 1) {
+      const node = nodes[nodeIndex];
+      offset -= (node.textContent || "").length;
+      const index = renderedCharacter(node, false);
+      if (index !== null) return offset + index;
+    }
+    return 0;
   }
 
   function syncPageDeviceScale() {

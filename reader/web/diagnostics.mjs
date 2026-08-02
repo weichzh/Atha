@@ -9,6 +9,7 @@ export function createDiagnostics({
   navigation,
   preferences,
   interaction,
+  contentActions,
   reader,
   renderCachedSource,
   emit,
@@ -20,6 +21,7 @@ export function createDiagnostics({
   let navigationEvidence = {};
   let preferencesEvidence = {};
   let interactionEvidence = {};
+  let contentActionEvidence = {};
 
   function heading() {
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
@@ -404,6 +406,7 @@ export function createDiagnostics({
     await verifyNavigation();
     await verifyPreferences();
     await verifyInteraction();
+    contentActionEvidence = await contentActions.verify({ pagination, session });
     await pagination.verifySizes();
     pagination.verifyFormulaLayout();
     pagination.verifyDisplayGeometry();
@@ -476,6 +479,11 @@ export function createDiagnostics({
         styles: content.styleSnapshot(),
       },
       interaction: { ...interactionEvidence },
+      contentActions: {
+        ...contentActionEvidence,
+        ...contentActions.snapshot(),
+        selectionLength: contentActions.selectionLength(),
+      },
     };
   }
 
@@ -495,7 +503,12 @@ export function createDiagnostics({
 
   if (params.has("verify")) {
     Object.defineProperty(globalThis, "__athaReaderDiagnostics", {
-      value: Object.freeze({ snapshot: visualSnapshot }),
+      value: Object.freeze({
+        armCopyProbe: contentActions.armCopyProbe,
+        clearSelection: contentActions.clearSelection,
+        selectionProbe: contentActions.selectionProbe,
+        snapshot: visualSnapshot,
+      }),
       configurable: false,
       writable: false,
     });

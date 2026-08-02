@@ -42,6 +42,27 @@ export function createContent({ host, readerStyleSource, fail }) {
     return url.href;
   }
 
+  function describeLink(value) {
+    ensure(typeof value === "string" && value.length > 0 && value.length <= 2048, "active-link");
+    let target;
+    try {
+      target = new URL(value, bookUrl);
+    } catch {
+      reject("active-link");
+    }
+    ensure(!target.username && !target.password, "active-link");
+    ensure(["http:", "https:"].includes(target.protocol), "active-link");
+    if (target.origin === bookOrigin) {
+      ensure(!target.search && target.pathname.toLowerCase().endsWith(".xhtml"), "active-link");
+      return Object.freeze({
+        kind: "internal",
+        href: target.href,
+        sameSection: target.pathname === bookUrl.pathname,
+      });
+    }
+    return Object.freeze({ kind: "external", href: target.href, sameSection: false });
+  }
+
   function validateCss(css, declarations = false) {
     const cacheKey = `${declarations ? "declaration" : "stylesheet"}:${css}`;
     if (validatedCss.has(cacheKey)) return validatedCss.get(cacheKey);
@@ -119,17 +140,7 @@ export function createContent({ host, readerStyleSource, fail }) {
         if (attributeName === "src" && name !== "img") reject("unsupported-resource-attribute");
         if (attributeName === "href" || attributeName.endsWith(":href")) {
           if (name === "a") {
-            if (!attribute.value.startsWith("#")) {
-              const target = new URL(attribute.value, bookUrl);
-              ensure(
-                target.origin === bookOrigin &&
-                  target.pathname === bookUrl.pathname &&
-                  !target.search &&
-                  target.hash,
-                "active-link",
-              );
-              element.setAttribute("href", target.hash);
-            }
+            element.setAttribute("href", describeLink(attribute.value).href);
           } else if (name === "link") {
             ensure(element.getAttribute("rel") === "stylesheet", "active-content");
             element.setAttribute("href", localBookUrl(attribute.value));
@@ -201,7 +212,12 @@ export function createContent({ host, readerStyleSource, fail }) {
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><p onclick='x()'>x</p></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><img src='https://example.com/x.png'/></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><form/></body></html>",
-      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='other.xhtml#x'>x</a></body></html>",
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='javascript:alert(1)'>x</a></body></html>",
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='mailto:x@example.com'>x</a></body></html>",
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='data:text/plain,x'>x</a></body></html>",
+      `<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='blob:${bookOrigin}/x.xhtml'>x</a></body></html>`,
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='#x' target='_blank'>x</a></body></html>",
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='#x' download=''>x</a></body></html>",
     ]) {
       ensure(
         rejected(() =>
@@ -215,7 +231,13 @@ export function createContent({ host, readerStyleSource, fail }) {
       "application/xhtml+xml",
     );
     validateMarkup(samePage);
-    ensure(samePage.querySelector("a").getAttribute("href") === "#x", "active-link");
+    ensure(describeLink(samePage.querySelector("a").getAttribute("href")).kind === "internal", "active-link");
+    const external = new DOMParser().parseFromString(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='https://example.com/reference'>x</a></body></html>",
+      "application/xhtml+xml",
+    );
+    validateMarkup(external);
+    ensure(describeLink(external.querySelector("a").getAttribute("href")).kind === "external", "active-link");
     for (const css of [
       "@import 'x.css';",
       "p{background:url(x)}",
@@ -336,6 +358,7 @@ export function createContent({ host, readerStyleSource, fail }) {
     initialize,
     loadSection,
     renderCached,
+    describeLink,
     setStyles,
     styleSnapshot,
   });

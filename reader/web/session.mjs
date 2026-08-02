@@ -108,7 +108,9 @@ export function createReadingSession({ params, content, render, onState, assert,
       strictResources: true,
       description: Object.freeze({
         contentVersion: value.contentVersion,
-        sections: Object.freeze(sections.map(({ id, href }) => Object.freeze({ id, href }))),
+        sections: Object.freeze(
+          sections.map(({ id, href, url }) => Object.freeze({ id, href, url: url.href })),
+        ),
         toc: frozenToc,
       }),
     });
@@ -167,7 +169,9 @@ export function createReadingSession({ params, content, render, onState, assert,
         strictResources: false,
         description: Object.freeze({
           contentVersion: null,
-          sections: Object.freeze([Object.freeze({ id: "entry", href: url.pathname })]),
+          sections: Object.freeze([
+            Object.freeze({ id: "entry", href: url.pathname, url: url.href }),
+          ]),
           toc: Object.freeze([]),
         }),
       });

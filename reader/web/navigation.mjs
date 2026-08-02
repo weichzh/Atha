@@ -101,6 +101,35 @@ export function createNavigation({
     return true;
   }
 
+  async function goToHref(value) {
+    let target;
+    try {
+      target = new URL(value);
+    } catch {
+      return fallback("locator-section");
+    }
+    const sectionIndex = book().sections.findIndex(
+      (section) => new URL(section.url).href === `${target.origin}${target.pathname}`,
+    );
+    if (sectionIndex < 0) return fallback("locator-section");
+    if (session.snapshot().currentIndex !== sectionIndex) await session.open(sectionIndex);
+    if (target.hash) {
+      let fragment;
+      try {
+        fragment = decodeURIComponent(target.hash.slice(1));
+      } catch {
+        return fallback("locator-fragment", sectionIndex);
+      }
+      const offset = pagination.offsetForFragment(fragment);
+      if (offset === null) return fallback("locator-fragment", sectionIndex);
+      await pagination.showOffset(offset);
+    } else {
+      await pagination.show(0);
+    }
+    syncControls();
+    return true;
+  }
+
   async function previousPage() {
     if (await pagination.move(-1)) {
       syncControls();
@@ -201,6 +230,7 @@ export function createNavigation({
     bindControls,
     current,
     goTo: (value) => run(() => goTo(value)),
+    goToHref: (value) => run(() => goToHref(value)),
     goToToc: (index) => run(() => goToToc(index)),
     next: () => run(nextPage),
     previous: () => run(previousPage),

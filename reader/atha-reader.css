@@ -41,7 +41,8 @@ textarea {
 button:focus-visible,
 select:focus-visible,
 summary:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+.book a:focus-visible {
   outline: 3px solid #176b87;
   outline-offset: 2px;
 }
@@ -244,6 +245,26 @@ textarea:focus-visible {
   color: #a32921;
 }
 
+#content-dialog {
+  width: min(520px, calc(100vw - 64px));
+  max-height: calc(100vh - 64px);
+  padding: 24px;
+  overflow: auto;
+  border: 1px solid #ccd4d6;
+  border-radius: 14px;
+  background: #fffdf8;
+  color: #182226;
+}
+
+#content-dialog::backdrop {
+  background: rgb(15 21 24 / 48%);
+}
+
+#content-dialog form {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .toolbar output {
   text-align: center;
 }
@@ -297,6 +318,10 @@ textarea:focus-visible {
     filter: none;
   }
 
+  .book a:focus-visible {
+    outline-color: #8bd4ec;
+  }
+
   button,
   select,
   textarea,
@@ -316,6 +341,12 @@ textarea:focus-visible {
     border-color: #ff8a80;
     background: #3b2020;
     color: #ffb3ad;
+  }
+
+  #content-dialog {
+    border-color: #40545c;
+    background: #182226;
+    color: #e9eeee;
   }
 }
 
@@ -348,6 +379,12 @@ textarea:focus-visible {
   color: #182226;
 }
 
+:root[data-theme="light"] #content-dialog {
+  border-color: #ccd4d6;
+  background: #fffdf8;
+  color: #182226;
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   background: #0f1518;
@@ -370,6 +407,10 @@ textarea:focus-visible {
   filter: none;
 }
 
+.book[data-theme="dark"] a:focus-visible {
+  outline-color: #8bd4ec;
+}
+
 :root[data-theme="dark"] button,
 :root[data-theme="dark"] select,
 :root[data-theme="dark"] textarea,
@@ -378,5 +419,11 @@ textarea:focus-visible {
 :root[data-theme="dark"] .toolbar {
   border-color: #40545c;
   background: #202c30;
+  color: #e9eeee;
+}
+
+:root[data-theme="dark"] #content-dialog {
+  border-color: #40545c;
+  background: #182226;
   color: #e9eeee;
 }

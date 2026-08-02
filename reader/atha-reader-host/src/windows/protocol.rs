@@ -40,6 +40,7 @@ pub(super) fn app_response(request: Request<Vec<u8>>) -> Response<Cow<'static, [
                     include_bytes!("../../../web/session.mjs").as_slice(),
                     include_bytes!("../../../web/navigation.mjs").as_slice(),
                     include_bytes!("../../../web/interaction.mjs").as_slice(),
+                    include_bytes!("../../../web/content-actions.mjs").as_slice(),
                     include_bytes!("../../../web/diagnostics.mjs").as_slice(),
                     include_bytes!("../../../web/app.mjs").as_slice(),
                 ]
