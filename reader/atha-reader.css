@@ -1,4 +1,9 @@
 :root {
+  --reader-width: 1264px;
+  --reader-height: 1680px;
+  --page-scale: 1;
+  --reader-display-width: 1264px;
+  --reader-display-height: 1680px;
   color-scheme: light dark;
   font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   background: #dfe5e7;
@@ -17,9 +22,13 @@ body {
   overflow: hidden;
 }
 
-body {
+.reader-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
   display: grid;
   place-items: start center;
+  overflow: auto;
 }
 
 button,
@@ -34,9 +43,12 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+.reader-frame {
+  width: var(--reader-display-width);
+  height: var(--reader-display-height);
+}
+
 .reader {
-  --reader-width: 1264px;
-  --reader-height: 1680px;
   --page-inline-margin: 112px;
   --page-top-margin: 96px;
   --page-bottom-margin: 128px;
@@ -49,8 +61,8 @@ select:focus-visible {
   width: var(--reader-width);
   height: var(--reader-height);
   background: #fffdf8;
-  transform: scale(var(--fit-scale, 1));
-  transform-origin: top center;
+  transform: scale(var(--page-scale));
+  transform-origin: top left;
 }
 
 .page {
@@ -112,7 +124,7 @@ select:focus-visible {
 }
 
 .toolbar {
-  position: absolute;
+  position: fixed;
   right: 48px;
   bottom: 28px;
   left: 48px;
@@ -138,7 +150,7 @@ select:focus-visible {
 }
 
 .error {
-  position: absolute;
+  position: fixed;
   inset: 96px 112px auto;
   z-index: 2;
   padding: 20px;

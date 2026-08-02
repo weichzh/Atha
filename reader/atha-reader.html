@@ -8,10 +8,14 @@
     <script src="atha-reader.js" defer></script>
   </head>
   <body>
-    <main class="reader" aria-label="分页阅读器">
-      <section id="page" class="page" aria-label="书籍内容">
-        <div id="book-host"></div>
-      </section>
+    <main class="reader-shell" aria-label="分页阅读器">
+      <div class="reader-frame">
+        <section class="reader" aria-label="固定尺寸阅读页">
+          <section id="page" class="page" aria-label="书籍内容">
+            <div id="book-host"></div>
+          </section>
+        </section>
+      </div>
       <p id="error" class="error" role="alert" hidden>无法安全打开这份内容。</p>
       <nav class="toolbar" aria-label="阅读控制">
         <button id="previous" type="button">上一页</button>

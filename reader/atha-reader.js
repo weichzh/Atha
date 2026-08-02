@@ -26,15 +26,15 @@ let bookOrigin;
 let cachedXhtml;
 let cachedCss;
 
-function fitReader() {
-  reader.style.setProperty(
-    "--fit-scale",
-    String(Math.min(window.innerWidth / 1264, window.innerHeight / 1680)),
-  );
+function syncPageDeviceScale() {
+  const scale = 1 / devicePixelRatio;
+  document.documentElement.style.setProperty("--page-scale", String(scale));
+  document.documentElement.style.setProperty("--reader-display-width", `${1264 * scale}px`);
+  document.documentElement.style.setProperty("--reader-display-height", `${1680 * scale}px`);
 }
 
-fitReader();
-window.addEventListener("resize", fitReader);
+syncPageDeviceScale();
+window.addEventListener("resize", syncPageDeviceScale);
 
 function emit(message) {
   if (window.ipc?.postMessage) window.ipc.postMessage(message);
@@ -351,6 +351,14 @@ function verifyFormulaLayout() {
   }
 }
 
+function verifyDisplayGeometry() {
+  const readerRect = reader.getBoundingClientRect();
+  assert(Math.abs(readerRect.width * devicePixelRatio - 1264) <= 1, "layout-cut");
+  assert(Math.abs(readerRect.height * devicePixelRatio - 1680) <= 1, "layout-cut");
+  assert(previous.getBoundingClientRect().height >= 44, "layout-cut");
+  assert(next.getBoundingClientRect().height >= 44, "layout-cut");
+}
+
 async function verifySizes() {
   for (const size of [24, 32, 40]) {
     state.fontSize = size;
@@ -499,6 +507,7 @@ async function start() {
   if (params.has("verify")) {
     await verifySizes();
     verifyFormulaLayout();
+    verifyDisplayGeometry();
     await securityProbe();
   }
 

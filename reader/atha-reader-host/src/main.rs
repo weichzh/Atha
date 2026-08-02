@@ -33,6 +33,11 @@ mod windows {
     const APP_PAGE: &str = "https://atha.localhost/atha-reader.html";
     const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src https://atha-book.localhost; connect-src 'self' https://atha-book.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
     const SAMPLE_ID: &str = "logic-1-2-v1";
+    const PAGE_DEVICE_WIDTH: f64 = 1264.0;
+    const PAGE_DEVICE_HEIGHT: f64 = 1680.0;
+    const WINDOW_PADDING_LOGICAL: f64 = 48.0;
+    const WINDOW_FRAME_ALLOWANCE_LOGICAL: f64 = 48.0;
+    const MAX_SCREEN_FRACTION: f64 = 0.8;
 
     enum UserEvent {
         Reader(Result<ReaderEvent, TelemetryError>),
@@ -129,11 +134,9 @@ mod windows {
         let window_size = event_loop
             .primary_monitor()
             .map(|monitor| {
-                let screen = monitor.size().to_logical::<f64>(monitor.scale_factor());
-                LogicalSize::new(
-                    1264.0_f64.min(screen.width * 0.9),
-                    1680.0_f64.min(screen.height * 0.9),
-                )
+                let scale_factor = monitor.scale_factor();
+                let screen = monitor.size().to_logical::<f64>(scale_factor);
+                initial_window_size(screen, scale_factor)
             })
             .unwrap_or_else(|| LogicalSize::new(900.0, 900.0));
         let window = WindowBuilder::new()
@@ -613,6 +616,38 @@ mod windows {
             value
         } else {
             "invalid-event"
+        }
+    }
+
+    fn initial_window_size(
+        screen: LogicalSize<f64>,
+        monitor_scale_factor: f64,
+    ) -> LogicalSize<f64> {
+        let scale_factor = if monitor_scale_factor.is_finite() && monitor_scale_factor > 0.0 {
+            monitor_scale_factor
+        } else {
+            1.0
+        };
+        let max_width =
+            (screen.width * MAX_SCREEN_FRACTION - WINDOW_FRAME_ALLOWANCE_LOGICAL).max(1.0);
+        let max_height =
+            (screen.height * MAX_SCREEN_FRACTION - WINDOW_FRAME_ALLOWANCE_LOGICAL).max(1.0);
+        LogicalSize::new(
+            (PAGE_DEVICE_WIDTH / scale_factor + WINDOW_PADDING_LOGICAL).min(max_width),
+            (PAGE_DEVICE_HEIGHT / scale_factor + WINDOW_PADDING_LOGICAL).min(max_height),
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn initial_window_reserves_system_frame_within_screen_bounds() {
+            let size = initial_window_size(LogicalSize::new(1920.0, 1080.0), 2.0);
+
+            assert_eq!(size.width, 680.0);
+            assert_eq!(size.height, 816.0);
         }
     }
 }
