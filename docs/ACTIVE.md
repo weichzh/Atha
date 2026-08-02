@@ -2,6 +2,5 @@
 
 本文件只登记当前可执行工作的路由；范围、证据和下一步由所指向的所有者维护。
 
-- `roadmap`：R8 阅读器门槛 → `docs/roadmap/ROADMAP.md`
-- `change`：R8 阅读器门槛 → `docs/changes/reader-gate-r8.md`
+- `roadmap`：M2 阅读器 V1 已完成，等待使用测试反馈；M3 尚未开始 → `docs/roadmap/ROADMAP.md`
 - `Context Bundle`：`reader`
