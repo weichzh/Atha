@@ -7,7 +7,7 @@
 - SQLite P0 提交：`840cdea`
 - M0 工作流提交：`fc104e0`
 - M1 规格提交：`5d255e4`
-- 当前没有远程仓库。
+- 远程仓库：`github.com/weichzh/Atha`。
 - 当前已有根 Cargo workspace、正式后端 crate、Windows WebView2 阅读 host 与原生 HTML/CSS/JavaScript 阅读页；没有前端框架。
 
 ## 顶层结构
@@ -29,6 +29,9 @@
 | `scripts/export_reader_sample.py` | 安全、可重复地从 EPUB 导出整页或 section 验收样本 | M2 已通过 |
 | `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页和单一样本 | M2 已通过 |
 | `scripts/check-reader-samples.ps1` | 三样本实际 host 与明暗主题截图总验收 | M2 已通过 |
+| `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
+| `scripts/Measure-Workflow.ps1` | schema v1/v2 本机流程日志、兼容汇总与自检 | 本地已验证 |
+| `docs/agents/workflow.md` | 全局工作流的项目契约、任务类型和真实检查 gate | 已配置 |
 | `docs/` | 项目权威记忆、规格、计划、决策和评审 | 已建立 |
 
 `p0/` 只保存技术验证，不是生产后端。后续正式代码不得直接在 P0 目录上堆叠。
@@ -72,6 +75,7 @@
 
 证据等级均为 Windows 本地：
 
+- 统一工程 CLI 的 station、`check docs`、schema v1/v2 混合 report、受控失败传播和非法参数拒绝通过；
 - MSVC 19.51 与 CMake 4.4.1 构建通过；
 - Rust 1.97.1 单元测试 2/2 通过；
 - CTest 1/1 通过；
@@ -80,8 +84,8 @@
 - 行间公式 6/6 在 32px 下为 `3×` 源尺寸、中心偏差 0px、宽高比误差 0；Agent Browser 首尾翻页与 40px 重排截图通过；
 - 三样本实际 host 与 Agent Browser 明暗验收通过：逻辑样本 154 个公式，宏观经济学样本 58 个公式和 1 张普通图，范畴论样本 0 个公式、8 个代码块和 2 张普通 PNG；
 - 明暗正文对比度分别为 15.94 和 13.84；暗色下只反色公式，普通图始终为 `filter: none`；
-- 最近一次 10 样本基准中位数：冷启动 1391.530ms、首个稳定页面 512.400ms、热打开 20.750ms、翻页 13.900ms、字号重排 20.800ms；
-- metadata 证明正式 workspace 只有一个零依赖包；
+- 校正验收与用户阶段边界后的最近 10 样本基准中位数：冷启动 658.205ms、首个稳定页面 135.800ms、热打开 20.800ms、翻页 6.250ms、字号重排 20.800ms；该变化是口径纠正，不称为运行时加速；
+- metadata 证明正式后端仍是 workspace 中唯一零依赖包；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
 - 系统 SQLite 3.53.4 上回滚、FTS 完整性、外键和数据库完整性检查通过；
@@ -94,7 +98,7 @@
 - 除受限阅读遥测外，没有应用服务、领域 API 或通用跨进程接口；
 - 没有导入解析、Locator 重锚定或富文本迁移；
 - 没有 CI、Windows 安装包或书籍导入产品链路；
-- 性能数据未记录设备指纹，也没有重复样本统计。
+- 性能数据未记录设备指纹，也没有跨日期重复运行统计。
 
 ## 正式代码约定
 

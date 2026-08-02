@@ -439,9 +439,8 @@ async function measurePageTurns() {
     state.page = sample % 2;
     showPage();
     await nextFrame();
-    assert(countCutRects() === 0, "layout-cut");
-    await nextFrame();
     emit(`metric|page_turn|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}`);
+    assert(countCutRects() === 0, "layout-cut");
   }
 }
 
@@ -494,15 +493,15 @@ async function start() {
   const firstStableStarted = performance.now();
   await loadSource();
   await renderCachedSource();
+  if (params.get("benchmark") !== "hot") {
+    emit(`metric|first_stable|1|${(performance.now() - firstStableStarted).toFixed(3)}|${state.fontSize}|${state.pages}`);
+  }
   if (params.has("verify")) {
     await verifySizes();
     verifyFormulaLayout();
     await securityProbe();
   }
 
-  if (params.get("benchmark") !== "hot") {
-    emit(`metric|first_stable|1|${(performance.now() - firstStableStarted).toFixed(3)}|${state.fontSize}|${state.pages}`);
-  }
   if (params.get("benchmark") === "hot") {
     await measureHotOpen();
     await measurePageTurns();

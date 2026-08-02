@@ -183,6 +183,18 @@ mod windows {
                         );
                         return;
                     }
+                    if metric.stage == MetricStage::FirstStable
+                        && arguments
+                            .benchmark
+                            .as_ref()
+                            .is_some_and(|benchmark| benchmark.mode == BenchmarkMode::Cold)
+                        && recorder
+                            .cold_start(startup.elapsed().as_secs_f64() * 1000.0, metric.pages)
+                            .is_err()
+                    {
+                        eprintln!("reader cold-start write failed");
+                        process::exit(1);
+                    }
                     if let Err(error) = recorder.metric(metric) {
                         eprintln!("reader telemetry write failed: {error}");
                         process::exit(1);
@@ -203,17 +215,6 @@ mod windows {
                             arguments.verify_sample,
                         );
                         return;
-                    }
-                    if arguments
-                        .benchmark
-                        .as_ref()
-                        .is_some_and(|benchmark| benchmark.mode == BenchmarkMode::Cold)
-                        && recorder
-                            .cold_start(startup.elapsed().as_secs_f64() * 1000.0, ready.pages)
-                            .is_err()
-                    {
-                        eprintln!("reader cold-start write failed");
-                        process::exit(1);
                     }
                     if recorder.log("info", "ready").is_err() || recorder.flush().is_err() {
                         eprintln!("reader recorder flush failed");
