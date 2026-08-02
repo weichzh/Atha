@@ -42,7 +42,8 @@ button:focus-visible,
 select:focus-visible,
 summary:focus-visible,
 textarea:focus-visible,
-.book a:focus-visible {
+.book a:focus-visible,
+.book img[role="button"]:focus-visible {
   outline: 3px solid #176b87;
   outline-offset: 2px;
 }
@@ -265,6 +266,23 @@ textarea:focus-visible,
   justify-content: flex-end;
 }
 
+#content-dialog.media-preview {
+  width: min(960px, calc(100vw - 64px));
+}
+
+#content-dialog-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 220px);
+  margin: 0 auto 20px;
+  object-fit: contain;
+}
+
+#content-dialog-image[hidden],
+#content-dialog-body[hidden] {
+  display: none;
+}
+
 .toolbar output {
   text-align: center;
 }
@@ -318,8 +336,13 @@ textarea:focus-visible,
     filter: none;
   }
 
-  .book a:focus-visible {
+  .book a:focus-visible,
+  .book img[role="button"]:focus-visible {
     outline-color: #8bd4ec;
+  }
+
+  #content-dialog-image.formula-preview {
+    filter: invert(0.88) hue-rotate(180deg);
   }
 
   button,
@@ -368,6 +391,10 @@ textarea:focus-visible,
   filter: none;
 }
 
+:root[data-theme="light"] #content-dialog-image.formula-preview {
+  filter: none;
+}
+
 :root[data-theme="light"] button,
 :root[data-theme="light"] select,
 :root[data-theme="light"] textarea,
@@ -407,8 +434,13 @@ textarea:focus-visible,
   filter: none;
 }
 
-.book[data-theme="dark"] a:focus-visible {
+.book[data-theme="dark"] a:focus-visible,
+.book[data-theme="dark"] img[role="button"]:focus-visible {
   outline-color: #8bd4ec;
+}
+
+:root[data-theme="dark"] #content-dialog-image.formula-preview {
+  filter: invert(0.88) hue-rotate(180deg);
 }
 
 :root[data-theme="dark"] button,

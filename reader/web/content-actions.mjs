@@ -4,6 +4,7 @@ export function createContentActions({
   dialog,
   title,
   body,
+  image,
   closeButton,
   assert,
   fail,
@@ -11,14 +12,44 @@ export function createContentActions({
   let trigger = null;
   let pending = Promise.resolve();
   let copyProbeArmed = false;
-  const counts = { internal: 0, external: 0, footnote: 0, trustedCopies: 0 };
+  const counts = {
+    internal: 0,
+    external: 0,
+    footnote: 0,
+    image: 0,
+    formula: 0,
+    trustedCopies: 0,
+  };
 
-  function show(anchor, heading, text) {
+  function open(anchor) {
     trigger = anchor;
-    title.textContent = heading;
-    body.textContent = text;
     if (!dialog.open) dialog.showModal();
     closeButton.focus();
+  }
+
+  function show(anchor, heading, text) {
+    title.textContent = heading;
+    body.textContent = text;
+    body.hidden = false;
+    image.hidden = true;
+    image.removeAttribute("src");
+    image.className = "";
+    dialog.classList.remove("media-preview");
+    open(anchor);
+  }
+
+  function showImage(source) {
+    const formula = source.matches(".math-inline, .math-display");
+    const heading = formula ? "公式" : "图片";
+    title.textContent = heading;
+    body.hidden = true;
+    image.src = source.src;
+    image.alt = source.getAttribute("alt")?.trim().slice(0, 160) || heading;
+    image.className = formula ? "formula-preview" : "";
+    image.hidden = false;
+    dialog.classList.add("media-preview");
+    counts[formula ? "formula" : "image"] += 1;
+    open(source);
   }
 
   function isNoteref(anchor) {
@@ -71,18 +102,35 @@ export function createContentActions({
     }
   }
 
-  function onLink(event) {
+  function onContentClick(event) {
     if (event.type === "auxclick" && event.button !== 1) return;
-    const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
-    if (!anchor || !content.book.contains(anchor)) return;
+    if (!(event.target instanceof Element)) return;
+    const anchor = event.target.closest("a[href]");
+    if (anchor && content.book.contains(anchor)) {
+      event.preventDefault();
+      pending = activate(anchor);
+      pending.catch(report);
+      return;
+    }
+    const source = event.type === "click" ? event.target.closest("img[role='button']") : null;
+    if (source && content.book.contains(source)) {
+      event.preventDefault();
+      showImage(source);
+    }
+  }
+
+  function onContentKeydown(event) {
+    if (!["Enter", " "].includes(event.key) || !(event.target instanceof Element)) return;
+    const source = event.target.closest("img[role='button']");
+    if (!source || !content.book.contains(source)) return;
     event.preventDefault();
-    pending = activate(anchor);
-    pending.catch(report);
+    showImage(source);
   }
 
   function bind() {
-    content.book.addEventListener("click", onLink);
-    content.book.addEventListener("auxclick", onLink);
+    content.book.addEventListener("click", onContentClick);
+    content.book.addEventListener("auxclick", onContentClick);
+    content.book.addEventListener("keydown", onContentKeydown);
     content.book.addEventListener("copy", (event) => {
       if (!event.isTrusted) return;
       counts.trustedCopies += 1;
@@ -93,6 +141,11 @@ export function createContentActions({
     dialog.addEventListener("close", () => {
       if (trigger?.isConnected) trigger.focus({ preventScroll: true });
       trigger = null;
+      body.hidden = false;
+      image.hidden = true;
+      image.removeAttribute("src");
+      image.className = "";
+      dialog.classList.remove("media-preview");
     });
   }
 
@@ -146,6 +199,47 @@ export function createContentActions({
       anchor.style.left = "-9999px";
       content.book.append(anchor);
       return anchor;
+    };
+    const probeMedia = async (source, key) => {
+      const formula = source.matches(".math-inline, .math-display");
+      const pageBefore = pagination.snapshot().page;
+      const sectionBefore = session.snapshot().currentIndex;
+      const locatorBefore = JSON.stringify(navigation.current());
+      source.focus({ preventScroll: true });
+      if (key) {
+        source.dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+        );
+      } else {
+        source.click();
+      }
+      assert(
+        dialog.open &&
+          !image.hidden &&
+          body.hidden &&
+          image.src === source.src &&
+          title.textContent === (formula ? "公式" : "图片") &&
+          image.alt ===
+            (source.getAttribute("alt")?.trim().slice(0, 160) ||
+              (formula ? "公式" : "图片")),
+        "sample-boundary",
+      );
+      await image.decode();
+      const dark =
+        document.documentElement.dataset.theme === "dark" ||
+        (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+      const filter = getComputedStyle(image).filter;
+      assert(formula ? (dark ? filter !== "none" : filter === "none") : filter === "none", "sample-boundary");
+      closeButton.click();
+      await waitFor(() => !dialog.open);
+      assert(
+        content.book.getRootNode().activeElement === source &&
+          pagination.snapshot().page === pageBefore &&
+          session.snapshot().currentIndex === sectionBefore &&
+          JSON.stringify(navigation.current()) === locatorBefore,
+        "sample-boundary",
+      );
+      return filter;
     };
 
     await session.open(0);
@@ -280,6 +374,31 @@ export function createContentActions({
     note.remove();
     await pagination.show(0);
 
+    const ordinary = content.book.querySelector(
+      "img[role='button']:not(.math-inline):not(.math-display)",
+    );
+    const formula = content.book.querySelector(
+      "img[role='button'].math-inline, img[role='button'].math-display",
+    );
+    const ordinaryFilter = ordinary ? await probeMedia(ordinary) : null;
+    const formulaFilter = formula ? await probeMedia(formula, "Enter") : null;
+
+    const mediaCount = counts.image + counts.formula;
+    const internalCount = counts.internal;
+    const linkedImage = document.createElement("img");
+    const linked = makeLink("#atha-missing-fragment");
+    linked.replaceChildren(linkedImage);
+    linkedImage.click();
+    await pending;
+    assert(
+      !dialog.open &&
+        counts.image + counts.formula === mediaCount &&
+        counts.internal === internalCount + 1,
+      "sample-boundary",
+    );
+    linked.remove();
+    await pagination.show(0);
+
     return Object.freeze({
       ...counts,
       selectionCopied: true,
@@ -293,6 +412,12 @@ export function createContentActions({
       footnoteDialog: true,
       dialogInputProtected: true,
       focusRestored: true,
+      ordinaryPreview: ordinary ? true : null,
+      formulaPreview: formula ? true : null,
+      ordinaryPreviewFilter: ordinaryFilter,
+      formulaPreviewFilter: formulaFilter,
+      mediaPagePreserved: true,
+      linkImageProtected: true,
     });
   }
 

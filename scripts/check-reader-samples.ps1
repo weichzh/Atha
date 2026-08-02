@@ -201,6 +201,9 @@ $themeProbe = @'
   if (expectedDark && result.formulaFilters.includes('none')) throw new Error('formula-dark-filter');
   if (!expectedDark && result.formulaFilters.some((filter) => filter !== 'none')) throw new Error('formula-light-filter');
   if (result.ordinaryFilters.some((filter) => filter !== 'none')) throw new Error('ordinary-image-filter');
+  if (result.standaloneOrdinaryCount > 0 && !result.contentActions.ordinaryPreview) throw new Error('ordinary-image-preview');
+  if (result.standaloneFormulaCount > 0 && !result.contentActions.formulaPreview) throw new Error('formula-preview');
+  if (!result.contentActions.mediaPagePreserved || !result.contentActions.linkImageProtected) throw new Error('media-preview-policy');
   if (result.session.sections !== expectedSections || result.session.state !== 'layout-stable' || result.session.currentIndex !== 0) throw new Error('session-state');
   if (JSON.stringify(result.session.verifiedSections) !== JSON.stringify(expectedSequence)) throw new Error('session-sequence');
   if (expectedHeadings.length && JSON.stringify(result.session.verifiedHeadings) !== JSON.stringify(expectedHeadings)) throw new Error('session-content');
@@ -347,6 +350,38 @@ try {
                     Replace('__EXPECTED_SEQUENCE__', $sequenceJson).
                     Replace('__EXPECTED_HEADINGS__', $headingsJson)
                 Invoke-AgentBrowserScript -Session $session -Script $probe
+                if ([int]$sample.ordinaryImages -gt 0) {
+                    $mediaPoint = Get-AgentBrowserScriptValue -Session $session -Script @'
+(async () => {
+  const point = await globalThis.__athaReaderDiagnostics.mediaPoint('ordinary');
+  return point && [point.x, point.y].map(Math.round);
+})()
+'@ | ConvertFrom-Json
+                    if (@($mediaPoint).Count -ne 2) { throw 'No ordinary image was available for real mouse preview.' }
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$mediaPoint[0], [string]$mediaPoint[1])
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
+                    $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
+                    if (-not $previewState.open) { throw 'Real mouse image preview failed.' }
+                    Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#content-dialog-image').complete && document.querySelector('#content-dialog-image').naturalWidth > 0")
+                    $previewScreenshot = Join-Path $screenshots "$($sample.id)-$theme-preview.png"
+                    Invoke-AgentBrowser @('--session', $session, 'screenshot', $previewScreenshot)
+                    Invoke-AgentBrowser @('--session', $session, 'press', 'Escape')
+                    $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
+                    if ($previewState.open -or -not $previewState.focusRestored) { throw 'Escape did not close the image preview and restore focus.' }
+                    if ((Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.focusMedia('ordinary')") -ne 'true') { throw 'Ordinary image focus failed.' }
+                    Invoke-AgentBrowser @('--session', $session, 'press', 'Space')
+                    $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
+                    if (-not $previewState.open) { throw 'Trusted Space image preview failed.' }
+                    Invoke-AgentBrowser @('--session', $session, 'press', 'Escape')
+                }
+                if ($sample.requireFormulas) {
+                    if ((Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.focusMedia('formula')") -ne 'true') { throw 'Formula focus failed.' }
+                    Invoke-AgentBrowser @('--session', $session, 'press', 'Enter')
+                    $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
+                    if (-not $previewState.open) { throw 'Trusted Enter formula preview failed.' }
+                    Invoke-AgentBrowser @('--session', $session, 'press', 'Escape')
+                }
                 $linkRequests = Get-AgentBrowserOutput @('--session', $session, 'network', 'requests', '--filter', 'atha-link-probe.invalid', '--json') | ConvertFrom-Json
                 if (-not $linkRequests.success -or $null -eq $linkRequests.data.requests) { throw 'External link network evidence is unavailable.' }
                 if (@($linkRequests.data.requests).Count -ne 0) { throw 'Blocked external link issued a network request.' }

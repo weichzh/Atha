@@ -118,6 +118,28 @@ export function createContent({ host, readerStyleSource, fail }) {
     }
   }
 
+  function setImageInteraction(image) {
+    if (image.closest("a[href]")) {
+      image.removeAttribute("role");
+      image.removeAttribute("tabindex");
+      return;
+    }
+    const formula = image.matches(".math-inline, .math-display");
+    const alternative = image.getAttribute("alt")?.trim().slice(0, 160);
+    image.removeAttribute("aria-hidden");
+    image.removeAttribute("aria-disabled");
+    image.setAttribute("role", "button");
+    image.setAttribute("tabindex", "0");
+    image.setAttribute(
+      "aria-label",
+      alternative
+        ? `${formula ? "查看公式" : "查看图片"}：${alternative}`
+        : formula
+          ? "查看公式"
+          : "查看图片",
+    );
+  }
+
   function validateMarkup(documentNode) {
     ensure(!documentNode.querySelector("parsererror") && !documentNode.doctype, "invalid-xhtml");
     ensure(
@@ -154,6 +176,7 @@ export function createContent({ host, readerStyleSource, fail }) {
 
     for (const image of documentNode.querySelectorAll("img[src]")) {
       image.setAttribute("src", localBookUrl(image.getAttribute("src")));
+      setImageInteraction(image);
     }
   }
 
@@ -238,6 +261,23 @@ export function createContent({ host, readerStyleSource, fail }) {
     );
     validateMarkup(external);
     ensure(describeLink(external.querySelector("a").getAttribute("href")).kind === "external", "active-link");
+    const imageMarkup = new DOMParser().parseFromString(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><img alt='插图' aria-hidden='true' aria-disabled='true'/><img class='math-inline' alt='x + y'/><a href='#x'><img role='button' tabindex='0'/></a></body></html>",
+      "application/xhtml+xml",
+    );
+    const [standaloneImage, formulaImage, linkedImage] = imageMarkup.querySelectorAll("img");
+    for (const image of imageMarkup.querySelectorAll("img")) setImageInteraction(image);
+    ensure(
+        standaloneImage.getAttribute("role") === "button" &&
+        standaloneImage.getAttribute("tabindex") === "0" &&
+        standaloneImage.getAttribute("aria-label") === "查看图片：插图" &&
+        !standaloneImage.hasAttribute("aria-hidden") &&
+        !standaloneImage.hasAttribute("aria-disabled") &&
+        formulaImage.getAttribute("aria-label") === "查看公式：x + y" &&
+        !linkedImage.hasAttribute("role") &&
+        !linkedImage.hasAttribute("tabindex"),
+      "active-content",
+    );
     for (const css of [
       "@import 'x.css';",
       "p{background:url(x)}",

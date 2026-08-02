@@ -2,5 +2,5 @@
 
 本文件只登记当前可执行工作的路由；范围、证据和下一步由所指向的所有者维护。
 
-- `next`：R4C 图片、表格、代码与公式交互；开始前新建并批准对应 change
+- `roadmap`：R4D 表格与代码交互 → `docs/roadmap/ROADMAP.md`
 - `Context Bundle`：`reader`

@@ -450,6 +450,8 @@ export function createDiagnostics({
     const book = content.book;
     const formulas = [...book.querySelectorAll("img.math-inline, img.math-display")];
     const ordinary = [...book.querySelectorAll("img:not(.math-inline):not(.math-display)")];
+    const standaloneFormulas = formulas.filter((image) => image.getAttribute("role") === "button");
+    const standaloneOrdinary = ordinary.filter((image) => image.getAttribute("role") === "button");
     const ordinaryPngCount = ordinary.filter((image) =>
       new URL(image.src).pathname.toLowerCase().endsWith(".png"),
     ).length;
@@ -460,6 +462,8 @@ export function createDiagnostics({
       pages: pagination.snapshot().pages,
       formulaCount: formulas.length,
       ordinaryCount: ordinary.length,
+      standaloneFormulaCount: standaloneFormulas.length,
+      standaloneOrdinaryCount: standaloneOrdinary.length,
       ordinaryPngCount,
       codeBlockCount: book.querySelectorAll("pre code").length,
       foreground: getComputedStyle(book).color,
@@ -487,6 +491,54 @@ export function createDiagnostics({
     };
   }
 
+  function mediaSource(kind) {
+    const selector =
+      kind === "formula"
+        ? "img[role='button'].math-inline, img[role='button'].math-display"
+        : "img[role='button']:not(.math-inline):not(.math-display)";
+    return content.book.querySelector(selector);
+  }
+
+  async function mediaPoint(kind) {
+    const source = mediaSource(kind);
+    if (!source) return null;
+    const previousId = source.getAttribute("id");
+    const probeId = `atha-media-${crypto.randomUUID()}`;
+    source.id = probeId;
+    const offset = pagination.offsetForFragment(probeId);
+    if (previousId === null) source.removeAttribute("id");
+    else source.id = previousId;
+    assert(offset !== null && (await pagination.showOffset(offset)), "sample-boundary");
+    const rect = source.getBoundingClientRect();
+    const viewport = reader.getBoundingClientRect();
+    assert(
+      rect.width > 0 &&
+        rect.height > 0 &&
+        rect.left >= viewport.left &&
+        rect.right <= viewport.right &&
+        rect.top >= viewport.top &&
+        rect.bottom <= viewport.bottom,
+      "sample-boundary",
+    );
+    return Object.freeze({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+  }
+
+  function focusMedia(kind) {
+    const source = mediaSource(kind);
+    if (!source) return false;
+    source.focus({ preventScroll: true });
+    return content.book.getRootNode().activeElement === source;
+  }
+
+  function previewState() {
+    return Object.freeze({
+      open: document.querySelector("#content-dialog").open,
+      focusRestored: content.book
+        .getRootNode()
+        .activeElement?.matches("img[role='button']") === true,
+    });
+  }
+
   function complete() {
     const book = content.book;
     const state = pagination.snapshot();
@@ -506,6 +558,9 @@ export function createDiagnostics({
       value: Object.freeze({
         armCopyProbe: contentActions.armCopyProbe,
         clearSelection: contentActions.clearSelection,
+        focusMedia,
+        mediaPoint,
+        previewState,
         selectionProbe: contentActions.selectionProbe,
         snapshot: visualSnapshot,
       }),

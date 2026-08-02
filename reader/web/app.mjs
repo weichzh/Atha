@@ -93,6 +93,7 @@ const contentActions = createContentActions({
   dialog: document.querySelector("#content-dialog"),
   title: document.querySelector("#content-dialog-title"),
   body: document.querySelector("#content-dialog-body"),
+  image: document.querySelector("#content-dialog-image"),
   closeButton: document.querySelector("#close-content-dialog"),
   assert,
   fail,
