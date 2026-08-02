@@ -64,9 +64,11 @@ const pagination = createPagination({
   fail,
 });
 
+let annotations;
 async function renderCachedSource() {
   await content.renderCached();
   await pagination.renderFromStart();
+  await annotations?.redraw();
 }
 
 const session = createReadingSession({
@@ -82,6 +84,8 @@ const session = createReadingSession({
 
 const locator = createLocator({ assert });
 let readerState;
+const keyPrefix = params.has("state-probe") ? "atha.reader.probe" : "atha.reader";
+const bookKey = params.get("state");
 const navigation = createNavigation({
   session,
   pagination,
@@ -101,13 +105,37 @@ const navigation = createNavigation({
 });
 readerState = createReaderState({
   storage: durableStorage(),
-  keyPrefix: params.has("state-probe") ? "atha.reader.probe" : "atha.reader",
-  bookKey: params.get("state"),
+  keyPrefix,
+  bookKey,
   session,
   navigation,
   pagination,
   preferences,
   locator,
+  assert,
+});
+const annotationStore = createAnnotationStore({
+  storage: durableStorage(),
+  requireDurable: !params.has("verify") || params.has("persist"),
+  keyPrefix,
+  bookKey,
+  locator,
+});
+annotations = createAnnotations({
+  store: annotationStore,
+  content,
+  session,
+  navigation,
+  locator,
+  controls: {
+    add: document.querySelector("#add-annotation"),
+    note: document.querySelector("#annotation-note"),
+    list: document.querySelector("#annotations"),
+    go: document.querySelector("#go-annotation"),
+    saveNote: document.querySelector("#save-annotation-note"),
+    remove: document.querySelector("#delete-annotation"),
+    status: document.querySelector("#annotations-status"),
+  },
   assert,
 });
 const bookmarks = createBookmarks({
@@ -177,6 +205,7 @@ const diagnostics = createDiagnostics({
   readerState,
   bookmarks,
   search,
+  annotations,
   reader,
   renderCachedSource,
   emit,
@@ -190,17 +219,22 @@ async function start() {
   const firstStableStarted = performance.now();
   await session.open();
   navigation.bindControls();
+  await annotations.restore();
   await readerState.restore();
   readerState.bind();
   bookmarks.bind();
   search.bind();
+  annotations.bind();
   contentActions.bind();
   structuredActions.bind();
   interaction.bind();
   diagnostics.recordFirstStable(firstStableStarted);
 
   const stateProbe = params.get("state-probe");
-  if (stateProbe) await readerState.verifyPersistence(stateProbe);
+  if (stateProbe) {
+    await readerState.verifyPersistence(stateProbe);
+    await annotations.verifyPersistence(stateProbe);
+  }
   else if (params.has("verify")) await diagnostics.verify();
   if (params.get("benchmark") === "hot") await diagnostics.benchmark();
 

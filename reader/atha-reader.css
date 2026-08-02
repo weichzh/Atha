@@ -221,9 +221,29 @@ textarea:focus-visible,
   box-shadow: 0 8px 32px rgb(25 39 43 / 20%);
 }
 
-.bookmarks-panel label {
+.bookmarks-panel {
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+}
+
+.bookmarks-panel label,
+.annotation-editor {
   display: grid;
   gap: 6px;
+}
+
+.annotation-editor h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.annotation-editor textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.annotation-editor select {
+  min-height: 140px;
 }
 
 .search-panel {
@@ -255,6 +275,25 @@ textarea:focus-visible,
 
 .bookmark-actions > * {
   flex: 1;
+}
+
+.annotation-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.annotation-actions > * {
+  min-width: 0;
+  flex: 1;
+}
+
+#annotations-status[data-error="true"] {
+  color: #a32921;
+}
+
+::highlight(atha-annotations) {
+  background: rgb(255 202 40 / 48%);
+  color: inherit;
 }
 
 .preferences-panel label:not(.checkbox-label) {
@@ -475,6 +514,10 @@ textarea:focus-visible,
     color: #ffb3ad;
   }
 
+  #annotations-status[data-error="true"] {
+    color: #ffb3ad;
+  }
+
   #content-dialog {
     border-color: #40545c;
     background: #182226;
@@ -609,4 +652,8 @@ textarea:focus-visible,
 
 :root[data-theme="dark"] #content-dialog-code {
   background: #202c30;
+}
+
+:root[data-theme="dark"] #annotations-status[data-error="true"] {
+  color: #ffb3ad;
 }

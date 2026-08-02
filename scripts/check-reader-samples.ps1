@@ -194,6 +194,10 @@ $themeProbe = @'
     return (values[0] + 0.05) / (values[1] + 0.05);
   };
   result.contrast = contrast(result.foreground, result.background);
+  const annotationStatus = document.querySelector('#annotations-status');
+  annotationStatus.dataset.error = 'true';
+  result.annotationErrorColor = getComputedStyle(annotationStatus).color;
+  delete annotationStatus.dataset.error;
   if (result.status !== 'pass' || result.error) throw new Error('reader-status');
   if (requireFormulas && result.formulaCount < 1) throw new Error('no-formulas');
   if (!requireFormulas && result.formulaCount !== 0) throw new Error('unexpected-formulas');
@@ -201,6 +205,7 @@ $themeProbe = @'
   if (requireCodeBlock && result.codeBlockCount < 1) throw new Error('missing-code-block');
   if (result.contrast < 4.5) throw new Error('contrast');
   if (result.dark !== expectedDark) throw new Error('theme-media');
+  if (result.annotationErrorColor !== (expectedDark ? 'rgb(255, 179, 173)' : 'rgb(163, 41, 33)')) throw new Error('annotation-error-contrast');
   if (expectedDark && result.formulaFilters.includes('none')) throw new Error('formula-dark-filter');
   if (!expectedDark && result.formulaFilters.some((filter) => filter !== 'none')) throw new Error('formula-light-filter');
   if (result.ordinaryFilters.some((filter) => filter !== 'none')) throw new Error('ordinary-image-filter');
@@ -224,6 +229,7 @@ $themeProbe = @'
   if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
   if (!result.bookmarks.created || !result.bookmarks.duplicatePrevented || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
   if (!result.search.replaced || !result.search.canceled || !result.search.errorIsolated || !result.search.activeContentRejected) throw new Error('search');
+  if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected) throw new Error('annotations');
   return result;
 })()
 '@
@@ -234,7 +240,7 @@ try {
         throw 'agent-browser is not available.'
     }
     Invoke-Checked 'python3' @('scripts/export_reader_sample.py', '--self-check')
-    foreach ($module in @(
+    $readerModules = @(
         'reader/web/app.mjs',
         'reader/web/content.mjs',
         'reader/web/content-actions.mjs',
@@ -242,6 +248,8 @@ try {
         'reader/web/reader-state.mjs',
         'reader/web/bookmarks.mjs',
         'reader/web/search.mjs',
+        'reader/web/annotation-store.mjs',
+        'reader/web/annotations.mjs',
         'reader/web/diagnostics.mjs',
         'reader/web/interaction.mjs',
         'reader/web/locator.mjs',
@@ -249,8 +257,21 @@ try {
         'reader/web/pagination.mjs',
         'reader/web/preferences.mjs',
         'reader/web/session.mjs'
-    )) {
+    )
+    foreach ($module in $readerModules) {
         Invoke-Checked 'node' @('--check', $module)
+    }
+    $bundleCheck = Join-Path $repoRoot '.tmp/atha-reader-bundle-check.mjs'
+    [IO.File]::WriteAllText(
+        $bundleCheck,
+        [string]::Join("`n", @($readerModules | ForEach-Object { [IO.File]::ReadAllText((Join-Path $repoRoot $_)) })),
+        [Text.UTF8Encoding]::new($false)
+    )
+    try {
+        Invoke-Checked 'node' @('--check', $bundleCheck)
+    }
+    finally {
+        Remove-Item -LiteralPath $bundleCheck -Force
     }
     Invoke-Checked $cargoPath @('fmt', '--manifest-path', 'Cargo.toml', '--all', '--check')
     Invoke-Checked $cargoPath @('clippy', '--manifest-path', 'Cargo.toml', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings')
@@ -424,6 +445,46 @@ try {
                 $linkRequests = Get-AgentBrowserOutput @('--session', $session, 'network', 'requests', '--filter', 'atha-link-probe.invalid', '--json') | ConvertFrom-Json
                 if (-not $linkRequests.success -or $null -eq $linkRequests.data.requests) { throw 'External link network evidence is unavailable.' }
                 if (@($linkRequests.data.requests).Count -ne 0) { throw 'Blocked external link issued a network request.' }
+                if ($sample.id -eq 'math-history-r1') {
+                    if ($theme -eq 'light') {
+                        $annotationProbe = Get-AgentBrowserScriptValue -Session $session -Script @'
+(() => {
+  const point = globalThis.__athaReaderDiagnostics.selectionProbe();
+  return point && [point.startX, point.startY, point.endX, point.endY].map(Math.round);
+})()
+'@ | ConvertFrom-Json
+                        if (@($annotationProbe).Count -ne 4) { throw 'No visible text was available for annotation.' }
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[0], [string]$annotationProbe[1])
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[2], [string]$annotationProbe[3])
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                        Invoke-AgentBrowser @('--session', $session, 'fill', '#annotation-note', '真实阅读笔记')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#add-annotation')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.overlayCount === 1 && value.active[0].sourceAnchor.contentHash.length === 64; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '40')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "globalThis.__athaReaderDiagnostics.snapshot().annotations.overlayCount === 1")
+                        Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '32')
+                        Invoke-AgentBrowser @('--session', $session, 'fill', '#annotation-note', '已更新的真实阅读笔记')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#save-annotation-note')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "globalThis.__athaReaderDiagnostics.snapshot().annotations.active[0]?.note === '已更新的真实阅读笔记'")
+                        Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-light-annotation.png'))
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                    }
+                    else {
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.overlayCount === 1 && value.active[0].note === '已更新的真实阅读笔记'; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#go-annotation')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot(); const anchor = JSON.parse(value.annotations.active[0].sourceAnchor.canonicalLocator).start; const current = JSON.parse(value.navigation.current).start; return anchor.section === current.section && anchor.offset === current.offset; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-dark-annotation.png'))
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#delete-annotation')
+                        $deletedAnnotation = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.snapshot().annotations' | ConvertFrom-Json
+                        if (@($deletedAnnotation.active).Count -ne 0 -or $deletedAnnotation.tombstones -ne 1 -or $deletedAnnotation.overlayCount -ne 0) {
+                            throw "Annotation soft delete failed: $($deletedAnnotation | ConvertTo-Json -Compress -Depth 6)"
+                        }
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                    }
+                }
                 $screenshot = Join-Path $screenshots "$($sample.id)-$theme.png"
                 Invoke-AgentBrowser @('--session', $session, 'screenshot', $screenshot)
                 Invoke-AgentBrowser @('--session', $session, 'click', '.search > summary')
@@ -439,7 +500,7 @@ try {
                     Invoke-AgentBrowser @('--session', $session, 'screenshot', $searchScreenshot)
                     if ($theme -eq 'light') {
                         [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.dataset.theme = 'dark'; true")
-                        $explicitDark = Get-AgentBrowserScriptValue -Session $session -Script "(() => { const panel = getComputedStyle(document.querySelector('.search-panel')); const input = getComputedStyle(document.querySelector('#search-query')); return panel.backgroundColor === 'rgb(32, 44, 48)' && panel.color === 'rgb(233, 238, 238)' && input.backgroundColor === 'rgb(32, 44, 48)' && input.color === 'rgb(233, 238, 238)'; })()"
+                        $explicitDark = Get-AgentBrowserScriptValue -Session $session -Script "(() => { const panel = getComputedStyle(document.querySelector('.search-panel')); const input = getComputedStyle(document.querySelector('#search-query')); const status = document.querySelector('#annotations-status'); status.dataset.error = 'true'; const errorColor = getComputedStyle(status).color; delete status.dataset.error; return panel.backgroundColor === 'rgb(32, 44, 48)' && panel.color === 'rgb(233, 238, 238)' && input.backgroundColor === 'rgb(32, 44, 48)' && input.color === 'rgb(233, 238, 238)' && errorColor === 'rgb(255, 179, 173)'; })()"
                         if ($explicitDark -ne 'true') { throw 'Explicit dark search theme is unreadable under a light system theme.' }
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-explicit-dark-search.png'))
                         [void](Get-AgentBrowserScriptValue -Session $session -Script "delete document.documentElement.dataset.theme; true")
@@ -476,10 +537,18 @@ try {
   position: document.querySelector('#position').textContent,
   fontSize: document.querySelector('#font-size').value,
   theme: document.querySelector('#theme').value,
-                  bookmarks: document.querySelector('#bookmarks').value ? 1 : 0,
+  bookmarks: document.querySelector('#bookmarks').value ? 1 : 0,
+  ...(() => {
+    const key = Object.keys(localStorage).find((value) => value.startsWith('atha.reader.annotations.'));
+    const items = JSON.parse(localStorage.getItem(key)).items;
+    return {
+      annotationActive: items.filter((item) => item.deletedAt === null).length,
+      annotationTombstones: items.filter((item) => item.deletedAt !== null).length,
+    };
+  })(),
                 }))()
 '@ | ConvertFrom-Json
-                if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1) {
+                if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1 -or $restored.annotationActive -ne 0 -or $restored.annotationTombstones -ne 1) {
                     throw "Persistent reader state did not restore. expectedPosition=$savedPosition actual=$($restored | ConvertTo-Json -Compress)"
                 }
                 Invoke-AgentBrowser @('--session', $session, 'click', '#next')

@@ -136,6 +136,8 @@ try {
                     'web/reader-state.mjs',
                     'web/bookmarks.mjs',
                     'web/search.mjs',
+                    'web/annotation-store.mjs',
+                    'web/annotations.mjs',
                     'web/diagnostics.mjs',
                     'web/app.mjs'
                 ) | ForEach-Object {

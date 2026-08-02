@@ -34,7 +34,7 @@ WebView2 是当前唯一阅读渲染技术。宿主只提供窗口、受控资�
 
 schema 1 Locator 是同一书籍内容版本内的内容坐标：起点由 section id 和该 section DOM 文本节点文档顺序中的 UTF-16 偏移组成，range 可再带一个同 section、不早于起点且不超出实际文本的终点。它可严格序列化、解析并按 manifest section 顺序比较；跨 section range 没有当前选择消费者，等真实交互需要时再扩展。显示页码只是当前布局的投影，不进入 Locator。
 
-字号和 CSS 重排前捕获当前可见 Locator，布局稳定后再定位到包含该文本偏移的页面。损坏 Locator、错书版本、未知 section、越界偏移或缺失 TOC fragment 回落到安全 section 起点，并在只读诊断中记录原因，不让会话失效。R5 只耐久保存同一内容版本的 Locator；跨内容版本自动重锚留给 R7。
+字号和 CSS 重排前捕获当前可见 Locator，布局稳定后再定位到包含该文本偏移的页面。损坏 Locator、错书版本、未知 section、越界偏移或缺失 TOC fragment 回落到安全 section 起点，并在只读诊断中记录原因，不让会话失效。进度与书签只恢复同一内容版本的 Locator；R7 只为带原文快照的标注增加同 section 唯一原文重锚。
 
 `Navigation` 组合 reading session、Locator 与 pagination，统一处理页内移动、section 边界和 TOC 跳转；当前工具栏的原生 TOC 控件只是可验收入口，不预先决定最终沉浸控制层。
 
@@ -49,6 +49,14 @@ Windows host 使用持久 WebView2 profile，并从规范入口路径计算只�
 Search 按 manifest section 顺序只读获取 XHTML，以 `DOMParser` 拒绝解析错误、doctype 和 active content，移除样式节点后扫描与渲染 DOM 相同顺序的正文文本；明确隐藏的文本以不可匹配的等长哨兵保留 offset。它不加载书籍资源、不替换当前内容 DOM，也不改变 reading session；命中项使用原文本 UTF-16 偏移生成 schema 1 range Locator，再由 Navigation 跳转并验证目标起点。可定位结果必须在当前页可见，其他需完整渲染才能确定的候选明确报告失效。
 
 R6 只提供不区分大小写的字面量搜索。查询最长 128 个 UTF-16 code unit，单次最多保留 2000 条结果并明确报告截断；新查询和显式取消都通过 `AbortController` 终止旧扫描，旧扫描不得回写新状态。结果、错误和进度只存在于当前页面，任一章节失败不会让阅读会话失效。worker、持久缓存、搜索索引、历史和高级匹配只在真实大书证明需要时增加。
+
+### 标注与引用
+
+Annotation Store 以独立的每书 schema 1 记录保存用户事实，不与高频进度或本书偏好一起重写。每条记录包含稳定 id、highlight 或 note 类型、schema 1 `SourceAnchor`、笔记、创建/更新时间和 `deletedAt` tombstone；删除不物理移除。写入先由 localStorage 成功接收完整记录，再替换内存状态；存储不可用或记录损坏时禁止覆盖并只在标注域报告，不使 reading session 失败。
+
+`SourceAnchor` 包含 canonical range Locator、至多 4096 个 UTF-16 code unit 的原文、前后各 32 个 code unit 的上下文和原文 UTF-8 SHA-256，字段语义可直接映射到未来消息链路的 `source_anchor`。同版本先验证 Locator 指向的原文；版本或文本不一致时，只在原 section 中接受唯一原文命中并更新 canonical Locator，零个、多个命中或缺失 section 都报告重锚失败。
+
+Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未删除事实投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。首版只提供创建、可选纯文本笔记、跳转、笔记更新和软删除；颜色、气泡、notebook、同步、tombstone 压缩、导入与 SQLite 留待后续真实需求。
 
 ### 翻页输入
 

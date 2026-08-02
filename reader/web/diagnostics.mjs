@@ -14,6 +14,7 @@ export function createDiagnostics({
   readerState,
   bookmarks,
   search,
+  annotations,
   reader,
   renderCachedSource,
   emit,
@@ -29,6 +30,7 @@ export function createDiagnostics({
   let stateEvidence = {};
   let bookmarkEvidence = {};
   let searchEvidence = {};
+  let annotationEvidence = {};
 
   function heading() {
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
@@ -420,6 +422,7 @@ export function createDiagnostics({
     stateEvidence = await readerState.verify();
     bookmarkEvidence = await bookmarks.verify();
     searchEvidence = await search.verify();
+    annotationEvidence = await annotations.verify();
     await pagination.verifySizes();
     pagination.verifyFormulaLayout();
     pagination.verifyDisplayGeometry();
@@ -507,6 +510,7 @@ export function createDiagnostics({
       readerState: { ...readerState.snapshot(), ...stateEvidence },
       bookmarks: { items: bookmarks.snapshot(), ...bookmarkEvidence },
       search: { ...search.snapshot(), ...searchEvidence },
+      annotations: { ...annotations.snapshot(), ...annotationEvidence },
     };
   }
 

@@ -99,6 +99,25 @@
               <button id="delete-bookmark" type="button">删除</button>
             </div>
             <output id="bookmarks-status" aria-live="polite"></output>
+            <hr />
+            <section class="annotation-editor" aria-labelledby="annotation-heading">
+              <h2 id="annotation-heading">标注</h2>
+              <label>
+                笔记（可选）
+                <textarea id="annotation-note" rows="3" maxlength="2000"></textarea>
+              </label>
+              <button id="add-annotation" type="button">保存当前选择</button>
+              <label>
+                已存标注
+                <select id="annotations" size="5" aria-label="已存标注"></select>
+              </label>
+              <div class="annotation-actions">
+                <button id="go-annotation" type="button">跳转</button>
+                <button id="save-annotation-note" type="button">保存笔记</button>
+                <button id="delete-annotation" type="button">删除</button>
+              </div>
+              <output id="annotations-status" aria-live="polite"></output>
+            </section>
           </div>
         </details>
         <details class="search">
