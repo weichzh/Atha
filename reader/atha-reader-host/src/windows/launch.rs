@@ -32,16 +32,33 @@ pub(super) struct Benchmark {
 
 pub(super) struct Arguments {
     pub(super) book_root: PathBuf,
-    pub(super) entry: String,
+    pub(super) source: BookSource,
     pub(super) verify_sample: bool,
     pub(super) benchmark: Option<Benchmark>,
 }
 
+pub(super) enum BookSource {
+    Entry(String),
+    Manifest(String),
+}
+
+impl BookSource {
+    pub(super) fn path(&self) -> &str {
+        match self {
+            Self::Entry(path) | Self::Manifest(path) => path,
+        }
+    }
+}
+
 impl Arguments {
     pub(super) fn parse() -> Result<Self, Box<dyn Error>> {
-        let mut values = env::args_os().skip(1);
+        Self::parse_values(env::args_os().skip(1))
+    }
+
+    fn parse_values(mut values: impl Iterator<Item = OsString>) -> Result<Self, Box<dyn Error>> {
         let mut book_root = None;
         let mut entry = None;
+        let mut manifest = None;
         let mut verify_sample = false;
         let mut run_id = None;
         let mut process_sample = None;
@@ -54,6 +71,13 @@ impl Arguments {
                         required(&mut values, "entry")?
                             .into_string()
                             .map_err(|_| "entry must be Unicode")?,
+                    )
+                }
+                Some("--manifest") => {
+                    manifest = Some(
+                        required(&mut values, "manifest")?
+                            .into_string()
+                            .map_err(|_| "manifest must be Unicode")?,
                     )
                 }
                 Some("--verify-sample") => verify_sample = true,
@@ -83,7 +107,11 @@ impl Arguments {
             }
         }
         let book_root = book_root.ok_or("missing --book-root")?;
-        let entry = entry.ok_or("missing --entry")?;
+        let source = match (entry, manifest) {
+            (Some(path), None) => BookSource::Entry(path),
+            (None, Some(path)) => BookSource::Manifest(path),
+            _ => return Err("exactly one of --entry or --manifest is required".into()),
+        };
         let benchmark = match (run_id, process_sample, mode) {
             (None, None, None) => None,
             (Some(run_id), Some(process_sample), Some(mode))
@@ -102,7 +130,7 @@ impl Arguments {
         }
         Ok(Self {
             book_root,
-            entry,
+            source,
             verify_sample,
             benchmark,
         })
@@ -110,7 +138,10 @@ impl Arguments {
 }
 
 pub(super) fn reader_url(arguments: &Arguments, probe: Option<&TcpListener>) -> String {
-    let mut query = vec![format!("entry={}", percent_encode(&arguments.entry))];
+    let mut query = vec![match &arguments.source {
+        BookSource::Entry(path) => format!("entry={}", percent_encode(path)),
+        BookSource::Manifest(path) => format!("manifest={}", percent_encode(path)),
+    }];
     if arguments.verify_sample {
         query.push("verify=1".into());
         let port = probe
@@ -186,5 +217,41 @@ mod tests {
 
         assert_eq!(size.width, 680.0);
         assert_eq!(size.height, 816.0);
+    }
+
+    #[test]
+    fn arguments_require_exactly_one_book_source() {
+        let values = |items: &[&str]| {
+            items
+                .iter()
+                .map(|value| OsString::from(*value))
+                .collect::<Vec<_>>()
+                .into_iter()
+        };
+        assert!(
+            Arguments::parse_values(values(&["--book-root", "book", "--entry", "a.xhtml"])).is_ok()
+        );
+        assert!(
+            Arguments::parse_values(values(&[
+                "--book-root",
+                "book",
+                "--manifest",
+                ".atha-reader.json"
+            ]))
+            .is_ok()
+        );
+        for invalid in [
+            vec!["--book-root", "book"],
+            vec![
+                "--book-root",
+                "book",
+                "--entry",
+                "a.xhtml",
+                "--manifest",
+                ".atha-reader.json",
+            ],
+        ] {
+            assert!(Arguments::parse_values(values(&invalid)).is_err());
+        }
     }
 }

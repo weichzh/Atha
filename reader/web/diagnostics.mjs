@@ -4,11 +4,20 @@ export function createDiagnostics({
   params,
   content,
   pagination,
+  session,
   reader,
   renderCachedSource,
   emit,
   assert,
 }) {
+  let verifiedSections = [];
+  let verifiedHeadings = [];
+  let releasedSections = 0;
+
+  function heading() {
+    return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
+  }
+
   async function securityProbe() {
     const probeUrl = params.get("probe");
     assert(probeUrl, "network-block");
@@ -35,6 +44,30 @@ export function createDiagnostics({
   }
 
   async function verify() {
+    const initial = session.snapshot();
+    assert(initial.state === "layout-stable" && initial.sections > 0, "sample-boundary");
+    verifiedSections = [initial.currentSection];
+    verifiedHeadings = [heading()];
+    releasedSections = 0;
+    for (let index = 1; index < Math.min(initial.sections, 3); index += 1) {
+      const previousNodes = [...content.book.childNodes];
+      await session.open(index);
+      const current = session.snapshot();
+      assert(current.state === "layout-stable" && current.currentIndex === index, "sample-boundary");
+      assert(
+        previousNodes.length > 0 && previousNodes.every((node) => !node.isConnected),
+        "sample-boundary",
+      );
+      verifiedSections.push(current.currentSection);
+      verifiedHeadings.push(heading());
+      releasedSections += 1;
+    }
+    session.close();
+    assert(
+      session.snapshot().state === "closed" && content.book.childNodes.length === 0,
+      "sample-boundary",
+    );
+    await session.open(0);
     await pagination.verifySizes();
     pagination.verifyFormulaLayout();
     pagination.verifyDisplayGeometry();
@@ -94,6 +127,12 @@ export function createDiagnostics({
       background: getComputedStyle(reader).backgroundColor,
       formulaFilters: [...new Set(formulas.map((image) => getComputedStyle(image).filter))],
       ordinaryFilters: [...new Set(ordinary.map((image) => getComputedStyle(image).filter))],
+      session: {
+        ...session.snapshot(),
+        verifiedSections: [...verifiedSections],
+        verifiedHeadings: [...verifiedHeadings],
+        releasedSections,
+      },
     };
   }
 

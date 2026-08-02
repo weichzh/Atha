@@ -41,13 +41,19 @@ function Invoke-AgentBrowser {
 function Invoke-ReaderHost {
     param(
         [string]$BookRoot,
-        [string]$Entry
+        [object]$Sample
     )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
-    foreach ($argument in @('--book-root', $BookRoot, '--entry', $Entry, '--verify-sample')) {
+    $source = if ($Sample.manifest) {
+        @('--manifest', [string]$Sample.manifest)
+    }
+    else {
+        @('--entry', [string]$Sample.entry)
+    }
+    foreach ($argument in @('--book-root', $BookRoot) + $source + @('--verify-sample')) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
     $process = [Diagnostics.Process]::Start($startInfo)
@@ -97,6 +103,9 @@ $themeProbe = @'
   const requireFormulas = __REQUIRE_FORMULAS__;
   const expectedOrdinaryImages = __EXPECTED_ORDINARY_IMAGES__;
   const requireCodeBlock = __REQUIRE_CODE_BLOCK__;
+  const expectedSections = __EXPECTED_SECTIONS__;
+  const expectedSequence = __EXPECTED_SEQUENCE__;
+  const expectedHeadings = __EXPECTED_HEADINGS__;
   const result = globalThis.__athaReaderDiagnostics?.snapshot();
   if (!result) throw new Error('missing-reader-diagnostics');
   const rgb = (value) => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
@@ -122,6 +131,11 @@ $themeProbe = @'
   if (expectedDark && result.formulaFilters.includes('none')) throw new Error('formula-dark-filter');
   if (!expectedDark && result.formulaFilters.some((filter) => filter !== 'none')) throw new Error('formula-light-filter');
   if (result.ordinaryFilters.some((filter) => filter !== 'none')) throw new Error('ordinary-image-filter');
+  if (result.session.sections !== expectedSections || result.session.state !== 'layout-stable' || result.session.currentIndex !== 0) throw new Error('session-state');
+  if (JSON.stringify(result.session.verifiedSections) !== JSON.stringify(expectedSequence)) throw new Error('session-sequence');
+  if (expectedHeadings.length && JSON.stringify(result.session.verifiedHeadings) !== JSON.stringify(expectedHeadings)) throw new Error('session-content');
+  if (result.session.releasedSections < Math.max(0, expectedSections - 1)) throw new Error('session-release');
+  if (result.session.contentLoads < expectedSections + 1 || result.session.stableLayouts < expectedSections + 1 || result.session.closes < expectedSections) throw new Error('session-lifecycle');
   return result;
 })()
 '@
@@ -136,7 +150,8 @@ try {
         'reader/web/app.mjs',
         'reader/web/content.mjs',
         'reader/web/diagnostics.mjs',
-        'reader/web/pagination.mjs'
+        'reader/web/pagination.mjs',
+        'reader/web/session.mjs'
     )) {
         Invoke-Checked 'node' @('--check', $module)
     }
@@ -150,7 +165,35 @@ try {
         $sample = $samples[$index]
         Write-Host "Validating $($sample.id)..."
         if ($sample.id -notmatch '^[a-z0-9-]+$') { throw "Invalid sample id: $($sample.id)" }
+        if ($sample.source) {
+            $sourcePath = (Resolve-Path (Join-Path $repoRoot $sample.source)).Path
+            $outputName = Split-Path ([string]$sample.root) -Leaf
+            $exportArguments = @('scripts/export_reader_sample.py', '--epub', $sourcePath, '--output', $outputName)
+            foreach ($entry in @($sample.exportEntries)) {
+                $exportArguments += @('--entry', [string]$entry)
+            }
+            Invoke-Checked 'python3' $exportArguments
+        }
         $bookRoot = (Resolve-Path (Join-Path $repoRoot $sample.root)).Path
+        $expectedSections = if ($sample.expectedSections) { [int]$sample.expectedSections } else { 1 }
+        $expectedSequence = if ($sample.expectedSequence) { @($sample.expectedSequence) } else { @('entry') }
+        $expectedHeadings = if ($sample.expectedHeadings) { @($sample.expectedHeadings) } else { @() }
+        if ($sample.manifest) {
+            $bookManifest = Get-Content -LiteralPath (Join-Path $bookRoot $sample.manifest) -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($bookManifest.contentVersion -ne $sample.contentVersion -or @($bookManifest.sections).Count -ne $expectedSections) {
+                throw "$($sample.id) manifest does not match the configured source."
+            }
+            $manifestEntries = @($bookManifest.sections | ForEach-Object { [string]$_.href })
+            if (($manifestEntries -join [char]0) -ne (@($sample.exportEntries) -join [char]0)) {
+                throw "$($sample.id) manifest section order changed."
+            }
+            for ($sectionIndex = 0; $sectionIndex -lt $manifestEntries.Count; $sectionIndex++) {
+                $sectionSource = Get-Content -LiteralPath (Join-Path $bookRoot ($manifestEntries[$sectionIndex] -replace '/', [IO.Path]::DirectorySeparatorChar)) -Raw -Encoding utf8
+                if (-not $sectionSource.Contains([string]$sample.sectionContains[$sectionIndex])) {
+                    throw "$($sample.id) section $sectionIndex has unexpected content."
+                }
+            }
+        }
         $entryPath = Join-Path $bookRoot ($sample.entry -replace '/', [IO.Path]::DirectorySeparatorChar)
         $source = Get-Content -LiteralPath $entryPath -Raw -Encoding utf8
         if (-not $source.Contains([string]$sample.contains)) {
@@ -172,14 +215,19 @@ try {
             throw "$($sample.id) contains no code block."
         }
 
-        Invoke-ReaderHost $bookRoot $sample.entry
+        Invoke-ReaderHost $bookRoot $sample
         $port = $BasePort + $index
         $server = Start-ValidationServer $bookRoot $port
         $session = "atha-reader-$($sample.id)"
         try {
-            $bookUrl = [Uri]::EscapeDataString("/book/$($sample.entry)")
+            $sourceQuery = if ($sample.manifest) {
+                'manifest=' + [Uri]::EscapeDataString("/book/$($sample.manifest)")
+            }
+            else {
+                'book=' + [Uri]::EscapeDataString("/book/$($sample.entry)")
+            }
             $probeUrl = [Uri]::EscapeDataString('https://example.com/blocked.png')
-            $url = "http://127.0.0.1:$port/reader/atha-reader.html?book=$bookUrl&verify=1&probe=$probeUrl"
+            $url = "http://127.0.0.1:$port/reader/atha-reader.html?$sourceQuery&verify=1&probe=$probeUrl"
             Invoke-AgentBrowser @('--session', $session, '--allowed-domains', '127.0.0.1', 'open', $url)
             Invoke-AgentBrowser @('--session', $session, 'set', 'viewport', '1264', '1680')
             foreach ($theme in @('light', 'dark')) {
@@ -190,10 +238,15 @@ try {
                 $expectedDark = if ($theme -eq 'dark') { 'true' } else { 'false' }
                 $requireFormulas = if ($sample.requireFormulas) { 'true' } else { 'false' }
                 $requireCodeBlock = if ($sample.requireCodeBlock) { 'true' } else { 'false' }
+                $sequenceJson = ConvertTo-Json @($expectedSequence) -Compress
+                $headingsJson = ConvertTo-Json @($expectedHeadings) -Compress
                 $probe = $themeProbe.Replace('__EXPECTED_DARK__', $expectedDark).
                     Replace('__REQUIRE_FORMULAS__', $requireFormulas).
                     Replace('__EXPECTED_ORDINARY_IMAGES__', [string]$sample.ordinaryImages).
-                    Replace('__REQUIRE_CODE_BLOCK__', $requireCodeBlock)
+                    Replace('__REQUIRE_CODE_BLOCK__', $requireCodeBlock).
+                    Replace('__EXPECTED_SECTIONS__', [string]$expectedSections).
+                    Replace('__EXPECTED_SEQUENCE__', $sequenceJson).
+                    Replace('__EXPECTED_HEADINGS__', $headingsJson)
                 $encodedProbe = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($probe))
                 Invoke-AgentBrowser @('--session', $session, 'eval', '-b', $encodedProbe)
                 $screenshot = Join-Path $screenshots "$($sample.id)-$theme.png"

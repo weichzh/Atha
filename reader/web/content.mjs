@@ -1,4 +1,4 @@
-export function createContent({ params, host, readerStyleSource, fail }) {
+export function createContent({ host, readerStyleSource, fail }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const bookStyle = document.createElement("style");
   const readerStyle = document.createElement("style");
@@ -9,9 +9,11 @@ export function createContent({ params, host, readerStyleSource, fail }) {
 
   let bookUrl;
   let bookOrigin;
+  let declaredResources;
   let cachedXhtml;
   let cachedCss;
   let silentFailure = false;
+  let selfChecked = false;
 
   function reject(code) {
     if (silentFailure) throw new Error(code);
@@ -20,14 +22,6 @@ export function createContent({ params, host, readerStyleSource, fail }) {
 
   function ensure(condition, code) {
     if (!condition) reject(code);
-  }
-
-  function configuredBookUrl() {
-    const override = params.get("book");
-    if (override) return new URL(override, location.href);
-    const entry = params.get("entry");
-    ensure(entry, "missing-book-url");
-    return new URL(entry.replace(/^\/+/, ""), "https://atha-book.localhost/");
   }
 
   function localBookUrl(value, base = bookUrl) {
@@ -39,6 +33,7 @@ export function createContent({ params, host, readerStyleSource, fail }) {
     }
     ensure(url.origin === bookOrigin && !url.username && !url.password, "external-resource");
     ensure(!url.search, "external-resource");
+    if (declaredResources) ensure(declaredResources.has(url.href), "undeclared-resource");
     return url.href;
   }
 
@@ -165,17 +160,21 @@ export function createContent({ params, host, readerStyleSource, fail }) {
   }
 
   async function initialize() {
-    bookUrl = configuredBookUrl();
-    bookOrigin = bookUrl.origin;
-    validatorSelfCheck();
     const response = await fetch(readerStyleSource.href);
     ensure(response.ok, "reader-style-load");
     readerStyle.textContent = await response.text();
   }
 
-  async function load() {
+  async function loadSection(url, resources, loadError) {
+    bookUrl = url;
+    bookOrigin = url.origin;
+    declaredResources = resources;
+    if (!selfChecked) {
+      validatorSelfCheck();
+      selfChecked = true;
+    }
     const response = await fetch(bookUrl);
-    ensure(response.ok, "book-load");
+    ensure(response.ok, loadError);
     cachedXhtml = await response.text();
     const source = new DOMParser().parseFromString(cachedXhtml, "application/xhtml+xml");
     validateMarkup(source);
@@ -221,5 +220,16 @@ export function createContent({ params, host, readerStyleSource, fail }) {
     await document.fonts.ready;
   }
 
-  return Object.freeze({ book, initialize, load, renderCached });
+  function close() {
+    book.replaceChildren();
+    bookStyle.textContent = "";
+    userStyle.textContent = "";
+    bookUrl = undefined;
+    bookOrigin = undefined;
+    declaredResources = undefined;
+    cachedXhtml = undefined;
+    cachedCss = undefined;
+  }
+
+  return Object.freeze({ book, close, initialize, loadSection, renderCached });
 }

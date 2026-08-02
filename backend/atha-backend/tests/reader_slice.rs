@@ -42,6 +42,7 @@ fn book_root_rejects_path_and_media_escapes() {
     let root = tree.path().join("book");
     fs::create_dir(&root).expect("create book root");
     fs::write(root.join("chapter.xhtml"), b"<html/>").expect("write chapter");
+    fs::write(root.join(".atha-reader.json"), b"{\"schema\":1}").expect("write manifest");
     fs::write(root.join("secret.exe"), b"secret").expect("write unknown media");
     fs::write(tree.path().join("outside.svg"), b"<svg/>").expect("write outside file");
     let book = BookRoot::new(&root).expect("open book root");
@@ -52,6 +53,9 @@ fn book_root_rejects_path_and_media_escapes() {
         "application/xhtml+xml; charset=utf-8"
     );
     assert_eq!(resource.bytes, b"<html/>");
+
+    let manifest = book.read("/.atha-reader.json").expect("read manifest");
+    assert_eq!(manifest.content_type, "application/json; charset=utf-8");
 
     for path in [
         "chapter.xhtml",

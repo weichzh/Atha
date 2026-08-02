@@ -65,6 +65,7 @@ function Get-ContentType {
         '.css' { 'text/css; charset=utf-8' }
         '.js' { 'text/javascript; charset=utf-8' }
         '.mjs' { 'text/javascript; charset=utf-8' }
+        '.json' { 'application/json; charset=utf-8' }
         '.svg' { 'image/svg+xml' }
         '.png' { 'image/png' }
         '.jpg' { 'image/jpeg' }
@@ -125,6 +126,7 @@ try {
                 $source = @(
                     'web/content.mjs',
                     'web/pagination.mjs',
+                    'web/session.mjs',
                     'web/diagnostics.mjs',
                     'web/app.mjs'
                 ) | ForEach-Object {

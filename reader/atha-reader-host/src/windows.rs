@@ -25,7 +25,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let startup = Instant::now();
     let arguments = Arguments::parse()?;
     let book_root = BookRoot::new(&arguments.book_root)?;
-    book_root.read(&format!("/{}", arguments.entry))?;
+    book_root.read(&format!("/{}", arguments.source.path()))?;
     let mut diagnostics = Diagnostics::new(
         startup,
         arguments.verify_sample,

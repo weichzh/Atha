@@ -17,19 +17,19 @@
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M2 已验证 |
 | `backend/atha-backend/` | 正式零依赖后端库、书根资源边界与阅读遥测校验 | M2 阅读切片 |
-| `reader/atha-reader-host/src/` | Wry/Tao Windows WebView2 承载；入口、启动参数、受控协议和诊断按职责分离 | M2 R0 已验证 |
+| `reader/atha-reader-host/src/` | Wry/Tao Windows WebView2 承载；入口、启动参数、受控协议和诊断按职责分离 | M2 R1 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构与默认样式 | M2 R0 已验证 |
-| `reader/web/` | 内容安全与加载、分页与公式布局、诊断与 benchmark、页面组合入口 | M2 R0 已验证 |
-| `reader/samples.json` | 三个本地验收样本的入口、边界与内容断言清单 | M2 已验证 |
+| `reader/web/` | 阅读会话、内容安全与加载、分页与公式布局、诊断与 benchmark、页面组合入口 | M2 R1 已验证 |
+| `reader/samples.json` | 四个本地验收样本的入口、manifest、边界与内容断言清单 | M2 R1 已验证 |
 | `p0/ffi/` | Rust/C++ 共享 C ABI 调用与所有权对照 | 本地 P0 实验 |
 | `p0/sqlite/` | SQLite、FTS5、Outbox schema 与故障检查 | 本地 P0 实验 |
 | `scripts/check-backend.ps1` | 正式后端 fmt、clippy、test 和 doc | M1 已通过 |
 | `scripts/check-p0-ffi.ps1` | 构建两个 FFI 实现并运行统一 runner | 已通过 |
 | `scripts/check-p0-sqlite.ps1` | 重建数据库并验证事务、FTS 与 10k 冒烟 | 已通过 |
 | `scripts/check-reader-slice.ps1` | 构建实际 host，运行安全、布局和性能验收 | M2 已通过 |
-| `scripts/export_reader_sample.py` | 安全、可重复地从 EPUB 导出整页或 section 验收样本 | M2 已通过 |
-| `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页和单一样本 | M2 已通过 |
-| `scripts/check-reader-samples.ps1` | 三样本实际 host 与明暗主题截图总验收 | M2 已通过 |
+| `scripts/export_reader_sample.py` | 安全、可重复地从 EPUB 导出单章节或带 manifest 的多章节验收样本 | M2 R1 已通过 |
+| `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页、manifest 和书根资源 | M2 R1 已通过 |
+| `scripts/check-reader-samples.ps1` | 四样本实际 host、切章释放与明暗主题截图总验收 | M2 R1 已通过 |
 | `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
 | `scripts/Measure-Workflow.ps1` | schema v1/v2 本机流程日志、兼容汇总与自检 | 本地已验证 |
 | `docs/agents/workflow.md` | 全局工作流的项目契约、任务类型和真实检查 gate | 已配置 |
@@ -48,10 +48,11 @@
 ### HTML 阅读切片
 
 - `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；
+- schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--manifest` 与兼容 `--entry` 互斥；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、日志与 benchmark；
-- 阅读页源码保持原生 ES module：`content` 先校验 XHTML、CSS 与 SVG，再导入闭合 Shadow DOM；`pagination` 负责公式、分页与控件；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
-- 四份页面源码由应用资源协议按固定顺序交付为单个 `atha-reader.mjs`，避免为源码分层增加多次自定义协议请求；浏览器验证服务器使用同一顺序；
+- 阅读页源码保持原生 ES module：`session` 校验 manifest 并拥有打开、释放和生命周期；`content` 校验并加载单份 XHTML、CSS 与 SVG；`pagination` 负责公式、分页与控件；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
+- 五份页面源码由应用资源协议按固定顺序交付为单个 `atha-reader.mjs`，避免为源码分层增加多次自定义协议请求；浏览器验证服务器使用同一顺序；
 - 公式按源尺寸随字号缩放，行间公式使用独立 `1.5` 倍率并在逻辑内容列中居中；
 - 固定 1264 × 1680 设备像素页使用 CSS 多栏，并以 `1 / devicePixelRatio` 隔离系统 DPI；文字、公式和原子内容均有布局后裁切检查；
 - Windows 窗口与壳层控件使用系统逻辑像素，当前默认窗口按固定页面设备像素换算并限制在屏幕逻辑宽高的 80%；
@@ -87,9 +88,9 @@
 - M2 Rust 资源与遥测集成测试 3/3 通过；实际 Windows WebView2 host 在 24/32/40px 下完成公式、安全与分页自检；
 - 当前 4K、200% DPI 环境实测页面为 1264 × 1680 设备像素、默认客户区为 680 × 816 逻辑像素、窗口外框为屏幕高度的 78.3%；工具栏按钮为 44px 逻辑高度；
 - 行间公式 6/6 在 32px 下为 `3×` 源尺寸、中心偏差 0px、宽高比误差 0；Agent Browser 首尾翻页与 40px 重排截图通过；
-- 三样本实际 host 与 Agent Browser 明暗验收通过：逻辑样本 154 个公式，宏观经济学样本 58 个公式和 1 张普通图，范畴论样本 0 个公式、8 个代码块和 2 张普通 PNG；
+- 四样本实际 host 与 Agent Browser 明暗验收通过：既有三样本保持原内容断言；《数学及其历史》R1 样本依次加载三个标题、两次释放旧 DOM、关闭后重新打开首章，首章含 23 个公式和 2 张普通 PNG；
 - 明暗正文对比度分别为 15.94 和 13.84；暗色下只反色公式，普通图始终为 `filter: none`；
-- R0 最终 10 样本基准中位数：冷启动 791.483ms、首个稳定页面 161.200ms、热打开 20.750ms、翻页 6.200ms、字号重排 20.800ms；该轮只证明指标和样本格式保持有效，不称为结构整理带来加速；冷启动和首个稳定页高于历史最近记录，未执行旧代码的同时间受控对照，不能归因于本次改动；
+- R1 最终 10 样本基准中位数：冷启动 772.623ms、首个稳定页面 166.300ms、热打开 20.700ms、翻页 6.300ms、字号重排 20.800ms；该轮只证明指标与既有样本保持有效，未执行旧代码的同时间受控对照，不能归因于本次改动；
 - metadata 证明正式后端仍是 workspace 中唯一零依赖包；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；

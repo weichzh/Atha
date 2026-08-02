@@ -210,11 +210,91 @@ def export_sample(
         raise
 
 
+def section_label(tree: ET.ElementTree, entry: str) -> str:
+    for element in tree.getroot().iter():
+        if local_name(element) in {"h1", "h2", "h3"}:
+            label = " ".join("".join(element.itertext()).split())
+            if label:
+                return label[:256]
+    return PurePosixPath(entry).stem
+
+
+def export_book_sample(
+    repo_root: Path, epub_path: Path, entries: list[str], output_name: str
+) -> dict[str, object]:
+    epub_path = epub_path.resolve(strict=True)
+    if not epub_path.is_file():
+        raise SampleError("EPUB is not a file")
+    entries = [archive_name(entry) for entry in entries]
+    if len(entries) < 2 or len(set(entries)) != len(entries):
+        raise SampleError("book sample requires distinct entries")
+    output = fixture_output(repo_root, output_name)
+    staging = output.with_name(f".{output.name}.staging-{os.getpid()}")
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    source_hash = sha256(epub_path)
+    try:
+        with zipfile.ZipFile(epub_path) as book:
+            members = inspect_archive(book)
+            pages: dict[str, bytes] = {}
+            resources: set[str] = set()
+            sections = []
+            toc = []
+            for index, entry in enumerate(entries, start=1):
+                source = read_member(book, members, entry)
+                try:
+                    tree = ET.ElementTree(ET.fromstring(source))
+                except ET.ParseError as error:
+                    raise SampleError(f"invalid XHTML: {error}") from error
+                pages[entry] = source
+                resources.update(resource_members(tree, entry))
+                section_id = f"section-{index}"
+                sections.append({"id": section_id, "href": entry})
+                toc.append({"label": section_label(tree, entry), "href": entry})
+            files = {*entries, *resources}
+            for name in sorted(files):
+                data = pages.get(name) or read_member(book, members, name)
+                destination = staging.joinpath(*PurePosixPath(name).parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(data)
+        manifest = {
+            "schema": 1,
+            "contentVersion": source_hash,
+            "sections": sections,
+            "resources": sorted(resources),
+            "toc": toc,
+        }
+        (staging / ".atha-reader.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        if sha256(epub_path) != source_hash:
+            raise SampleError("source EPUB changed during extraction")
+        metadata: dict[str, object] = {
+            "generator": "export_reader_sample.py",
+            "source_sha256": source_hash,
+            "entries": entries,
+            "files": sorted([*files, ".atha-reader.json"]),
+        }
+        (staging / MARKER).write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        replace_output(staging, output)
+        return metadata
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
 def self_check(repo_root: Path) -> None:
     work = repo_root / ".tmp" / f"export-reader-sample-{os.getpid()}"
     source = work / "sample.epub"
     bad = work / "bad.epub"
-    outputs = [".export-reader-section-check", ".export-reader-page-check"]
+    outputs = [
+        ".export-reader-section-check",
+        ".export-reader-page-check",
+        ".export-reader-book-check",
+    ]
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     page = f"""<?xml version="1.0" encoding="utf-8"?>
@@ -224,6 +304,14 @@ def self_check(repo_root: Path) -> None:
     try:
         with zipfile.ZipFile(source, "w") as book:
             book.writestr("EPUB/text/ch.xhtml", page)
+            book.writestr(
+                "EPUB/text/ch2.xhtml",
+                page.replace("<h2>keep</h2>", "<h2>second</h2>"),
+            )
+            book.writestr(
+                "EPUB/text/missing.xhtml",
+                page.replace("../media/keep.png", "../media/missing.png"),
+            )
             book.writestr("EPUB/styles/book.css", "p { color: inherit; }")
             book.writestr("EPUB/media/drop.png", b"drop")
             book.writestr("EPUB/media/keep.png", b"keep")
@@ -239,6 +327,37 @@ def self_check(repo_root: Path) -> None:
             encoding="utf-8"
         )
         assert "keep" in whole and "drop" in whole
+        export_book_sample(
+            repo_root,
+            source,
+            ["EPUB/text/ch.xhtml", "EPUB/text/ch2.xhtml"],
+            outputs[2],
+        )
+        book_manifest = json.loads(
+            (fixture_output(repo_root, outputs[2]) / ".atha-reader.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert [section["href"] for section in book_manifest["sections"]] == [
+            "EPUB/text/ch.xhtml",
+            "EPUB/text/ch2.xhtml",
+        ]
+        assert book_manifest["resources"] == [
+            "EPUB/media/drop.png",
+            "EPUB/media/keep.png",
+            "EPUB/styles/book.css",
+        ]
+        try:
+            export_book_sample(
+                repo_root,
+                source,
+                ["EPUB/text/ch.xhtml", "EPUB/text/missing.xhtml"],
+                ".export-reader-missing",
+            )
+        except SampleError:
+            pass
+        else:
+            raise AssertionError("missing book resource was accepted")
         with zipfile.ZipFile(bad, "w") as book:
             book.writestr("../escape", b"bad")
         try:
@@ -249,14 +368,14 @@ def self_check(repo_root: Path) -> None:
             raise AssertionError("unsafe ZIP member was accepted")
     finally:
         shutil.rmtree(work, ignore_errors=True)
-        for name in [*outputs, ".export-reader-bad"]:
+        for name in [*outputs, ".export-reader-bad", ".export-reader-missing"]:
             shutil.rmtree(fixture_output(repo_root, name), ignore_errors=True)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epub", type=Path)
-    parser.add_argument("--entry")
+    parser.add_argument("--entry", action="append")
     parser.add_argument("--section-id")
     parser.add_argument("--output")
     parser.add_argument("--self-check", action="store_true")
@@ -273,7 +392,14 @@ def main() -> int:
             return 0
         if not args.epub or not args.entry or not args.output:
             raise SampleError("--epub, --entry and --output are required")
-        metadata = export_sample(repo_root, args.epub, args.entry, args.section_id, args.output)
+        if len(args.entry) == 1:
+            metadata = export_sample(
+                repo_root, args.epub, args.entry[0], args.section_id, args.output
+            )
+        else:
+            if args.section_id:
+                raise SampleError("--section-id requires one --entry")
+            metadata = export_book_sample(repo_root, args.epub, args.entry, args.output)
         print(json.dumps(metadata, ensure_ascii=False))
         return 0
     except (OSError, SampleError, zipfile.BadZipFile, json.JSONDecodeError) as error:

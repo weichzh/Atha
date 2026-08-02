@@ -22,9 +22,15 @@ WebView2 是当前唯一阅读渲染技术。宿主只提供窗口、受控资�
 
 应用内样式社区、评分和发布流程不属于阅读内核。远程共享的具体协议在确有需求时再确定。
 
+## 书籍输入与阅读会话
+
+运行时书籍输入是受控书根内的 schema 1 manifest，不是 EPUB 文件。manifest 以书籍内容哈希标识版本，声明有序且唯一的 section、可访问资源和可选 TOC；未知字段、重复项、超量输入、编码绕过、绝对路径、查询和书根越界均拒绝。单 XHTML `entry` 只作为现有样本的兼容入口。
+
+`Section` 是一次只加载一份的顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 前必须释放上一 section 的 DOM、书源样式和缓存；关闭后不保留书籍 DOM。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
+
 ### 首个验收基线
 
-长期验收样本位于本机忽略目录 `fixtures/local/`。当前清单包含《数理逻辑导引》的“1.2 命题表达式”、《高级宏观经济学》的“5.2 引入人力资本”和《程序员的范畴论》的“5.6 余积”；源 EPUB 不修改，也不提交样本内容到仓库。`scripts/export_reader_sample.py` 负责可重复生成后两份样本，`scripts/check-reader-samples.ps1` 统一运行实际 Windows host 与明暗主题截图验收。
+长期验收样本位于本机忽略目录 `fixtures/local/`。当前清单包含三个既有单章节样本，以及从《数学及其历史 (2026)》固定哈希源文件重复导出的“1.1 算术与几何”“1.2 勾股数组”“1.3 圆上的有理点”三章节 R1 样本；源 EPUB 不修改，也不提交样本内容到仓库。`scripts/export_reader_sample.py` 支持导出单章节或带 manifest 的多章节样本，`scripts/check-reader-samples.ps1` 统一运行实际 Windows host 与明暗主题截图验收。
 
 阅读页使用固定 1264 × 1680 设备像素画布。页内字号、边距、栏宽、公式和图形尺寸都使用该画布的绝对像素坐标；显示层只以 `1 / devicePixelRatio` 抵消系统 DPI，不再根据窗口大小缩放页面。Windows 窗口、工具栏和错误提示仍使用系统逻辑像素并遵循 DPI；窗口不足时由壳层滚动承载固定页面。
 

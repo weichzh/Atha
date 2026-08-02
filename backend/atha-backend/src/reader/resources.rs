@@ -152,6 +152,7 @@ const fn hex(value: u8) -> Option<u8> {
 fn content_type(path: &Path) -> Option<&'static str> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "xhtml" => Some("application/xhtml+xml; charset=utf-8"),
+        "json" => Some("application/json; charset=utf-8"),
         "css" => Some("text/css; charset=utf-8"),
         "svg" => Some("image/svg+xml"),
         "png" => Some("image/png"),

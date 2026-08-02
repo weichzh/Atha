@@ -20,7 +20,6 @@ function assert(condition, code) {
 }
 
 const content = createContent({
-  params,
   host: document.querySelector("#book-host"),
   readerStyleSource: document.querySelector("#reader-style-source"),
   fail,
@@ -42,10 +41,22 @@ async function renderCachedSource() {
   await pagination.renderFromStart();
 }
 
+const session = createReadingSession({
+  params,
+  content,
+  render: renderCachedSource,
+  onState(state) {
+    document.documentElement.dataset.sessionState = state;
+  },
+  assert,
+  fail,
+});
+
 const diagnostics = createDiagnostics({
   params,
   content,
   pagination,
+  session,
   reader,
   renderCachedSource,
   emit,
@@ -57,8 +68,7 @@ pagination.bindControls();
 async function start() {
   await content.initialize();
   const firstStableStarted = performance.now();
-  await content.load();
-  await renderCachedSource();
+  await session.open();
   diagnostics.recordFirstStable(firstStableStarted);
 
   if (params.has("verify")) await diagnostics.verify();
