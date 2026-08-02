@@ -23,6 +23,13 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 $hostPath = Join-Path $repoRoot 'target/debug/atha-reader-host.exe'
 $runId = '{0}-{1}' -f [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(), $PID
 $benchmarkRoot = Join-Path $repoRoot 'artifacts/local/benchmarks'
+$p95Limits = @{
+    cold_start = 2000
+    first_stable = 750
+    hot_open = 120
+    page_turn = 50
+    font_reflow = 150
+}
 
 function Invoke-ReaderHost {
     param([string[]]$Arguments)
@@ -59,12 +66,15 @@ function Get-PercentileSummary {
     if ($values.Count -ne 10) {
         throw "Expected 10 $Stage samples, found $($values.Count)."
     }
+    $p95 = $values[[Math]::Ceiling(0.95 * $values.Count) - 1]
     [pscustomobject]@{
         run_id = $runId
         stage = $Stage
         samples = $values.Count
         median_ms = (($values[4] + $values[5]) / 2).ToString('F3', [Globalization.CultureInfo]::InvariantCulture)
-        p95_ms = $values[[Math]::Ceiling(0.95 * $values.Count) - 1].ToString('F3', [Globalization.CultureInfo]::InvariantCulture)
+        p95_ms = $p95.ToString('F3', [Globalization.CultureInfo]::InvariantCulture)
+        p95_limit_ms = $p95Limits[$Stage]
+        within_limit = $p95 -le $p95Limits[$Stage]
     }
 }
 
@@ -119,6 +129,10 @@ try {
     $summaries | Export-Csv -LiteralPath $summaryPath -NoTypeInformation -Encoding utf8
     $summaries | Format-Table -AutoSize
     Write-Host "Reader benchmark summary: $summaryPath"
+    $violations = @($summaries | Where-Object within_limit -EQ $false)
+    if ($violations.Count) {
+        throw "Reader benchmark P95 exceeded its limit: $($violations.stage -join ', ')"
+    }
 }
 finally {
     Pop-Location

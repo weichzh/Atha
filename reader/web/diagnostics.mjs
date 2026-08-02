@@ -582,7 +582,7 @@ export function createDiagnostics({
     emit(`ready|${state.pages}|${inline}|${display}|${cuts}`);
   }
 
-  if (params.has("verify")) {
+  if (params.has("verify") || params.has("search-probe")) {
     Object.defineProperty(globalThis, "__athaReaderDiagnostics", {
       value: Object.freeze({
         armCopyProbe: contentActions.armCopyProbe,

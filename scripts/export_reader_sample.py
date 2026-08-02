@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export one XHTML page or section and its direct resources from an EPUB."""
+"""Export XHTML validation samples and their direct resources from an EPUB."""
 
 from __future__ import annotations
 
@@ -128,6 +128,21 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def all_xhtml_entries(epub_path: Path, first_entries: list[str] | None = None) -> list[str]:
+    with zipfile.ZipFile(epub_path.resolve(strict=True)) as book:
+        members = inspect_archive(book)
+        entries = sorted(
+            (name for name, info in members.items() if not info.is_dir() and name.lower().endswith(".xhtml")),
+            key=lambda name: (name.lower().endswith("/nav.xhtml"), name),
+        )
+    if len(entries) < 2:
+        raise SampleError("EPUB must contain at least two XHTML files")
+    first = [archive_name(entry) for entry in first_entries or []]
+    if len(set(first)) != len(first) or any(entry not in entries for entry in first):
+        raise SampleError("preferred XHTML entry is missing or duplicated")
+    return [*first, *(entry for entry in entries if entry not in first)]
 
 
 def fixture_output(repo_root: Path, name: str) -> Path:
@@ -347,6 +362,12 @@ def self_check(repo_root: Path) -> None:
             "EPUB/media/keep.png",
             "EPUB/styles/book.css",
         ]
+        assert all_xhtml_entries(source) == [
+            "EPUB/text/ch.xhtml",
+            "EPUB/text/ch2.xhtml",
+            "EPUB/text/missing.xhtml",
+        ]
+        assert all_xhtml_entries(source, ["EPUB/text/ch2.xhtml"])[0] == "EPUB/text/ch2.xhtml"
         try:
             export_book_sample(
                 repo_root,
@@ -376,6 +397,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epub", type=Path)
     parser.add_argument("--entry", action="append")
+    parser.add_argument("--all-xhtml", action="store_true")
     parser.add_argument("--section-id")
     parser.add_argument("--output")
     parser.add_argument("--self-check", action="store_true")
@@ -390,8 +412,14 @@ def main() -> int:
             self_check(repo_root)
             print("export_reader_sample: ok")
             return 0
-        if not args.epub or not args.entry or not args.output:
-            raise SampleError("--epub, --entry and --output are required")
+        if not args.epub or not args.output:
+            raise SampleError("--epub and --output are required")
+        if args.all_xhtml:
+            if args.section_id:
+                raise SampleError("--all-xhtml cannot be combined with --section-id")
+            args.entry = all_xhtml_entries(args.epub, args.entry)
+        elif not args.entry:
+            raise SampleError("--entry or --all-xhtml is required")
         if len(args.entry) == 1:
             metadata = export_sample(
                 repo_root, args.epub, args.entry[0], args.section_id, args.output

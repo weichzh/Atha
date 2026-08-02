@@ -176,6 +176,7 @@ fn allowed_error(value: &str) -> Option<&'static str> {
         "sample-boundary" => Some("sample-boundary"),
         "section-index" => Some("section-index"),
         "section-load" => Some("section-load"),
+        "state-persistence" => Some("state-persistence"),
         "stylesheet-load" => Some("stylesheet-load"),
         "svg-event-handler" => Some("svg-event-handler"),
         "svg-external-resource" => Some("svg-external-resource"),

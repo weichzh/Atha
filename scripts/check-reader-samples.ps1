@@ -336,7 +336,7 @@ try {
         Invoke-ReaderHost $bookRoot $sample
         $port = $BasePort + $index
         $server = Start-ValidationServer $bookRoot $port
-        $session = "atha-reader-$($sample.id)"
+        $session = "atha-reader-$($sample.id)-$PID"
         try {
             $sourceQuery = if ($sample.manifest) {
                 'manifest=' + [Uri]::EscapeDataString("/book/$($sample.manifest)")

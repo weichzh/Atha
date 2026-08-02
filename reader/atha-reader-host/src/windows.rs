@@ -104,6 +104,9 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             }
             Event::UserEvent(UserEvent::Reader(Ok(ReaderEvent::Ready(ready)))) => {
                 match diagnostics.record_ready(ready) {
+                    Ok(ReadyDisposition::VerificationComplete) if arguments.hold_after_verify => {
+                        window.set_title("Atha Reader Verification Complete");
+                    }
                     Ok(ReadyDisposition::VerificationComplete) => process::exit(0),
                     Ok(ReadyDisposition::Interactive) => window.set_title("Atha Reader"),
                     Err(error) => handle_diagnostic_error(

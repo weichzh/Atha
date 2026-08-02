@@ -34,6 +34,7 @@ pub(super) struct Arguments {
     pub(super) book_root: PathBuf,
     pub(super) source: BookSource,
     pub(super) verify_sample: bool,
+    pub(super) hold_after_verify: bool,
     pub(super) state_probe: Option<StateProbe>,
     pub(super) benchmark: Option<Benchmark>,
 }
@@ -76,6 +77,7 @@ impl Arguments {
         let mut entry = None;
         let mut manifest = None;
         let mut verify_sample = false;
+        let mut hold_after_verify = false;
         let mut state_probe = None;
         let mut run_id = None;
         let mut process_sample = None;
@@ -98,6 +100,7 @@ impl Arguments {
                     )
                 }
                 Some("--verify-sample") => verify_sample = true,
+                Some("--hold-after-verify") => hold_after_verify = true,
                 Some("--state-probe") => {
                     state_probe = match required(&mut values, "state probe")?.to_str() {
                         Some("write") => Some(StateProbe::Write),
@@ -155,10 +158,16 @@ impl Arguments {
         if state_probe.is_some() && (!verify_sample || benchmark.is_some()) {
             return Err("state probe requires non-benchmark verification".into());
         }
+        if hold_after_verify
+            && (!verify_sample || benchmark.is_some() || state_probe == Some(StateProbe::Read))
+        {
+            return Err("hold-after-verify requires plain or write verification".into());
+        }
         Ok(Self {
             book_root,
             source,
             verify_sample,
+            hold_after_verify,
             state_probe,
             benchmark,
         })
@@ -311,6 +320,30 @@ mod tests {
             ]))
             .is_ok()
         );
+        assert!(
+            Arguments::parse_values(values(&[
+                "--book-root",
+                "book",
+                "--entry",
+                "a.xhtml",
+                "--verify-sample",
+                "--state-probe",
+                "write",
+                "--hold-after-verify",
+            ]))
+            .is_ok()
+        );
+        assert!(
+            Arguments::parse_values(values(&[
+                "--book-root",
+                "book",
+                "--entry",
+                "a.xhtml",
+                "--verify-sample",
+                "--hold-after-verify",
+            ]))
+            .is_ok()
+        );
         for invalid in [
             vec!["--book-root", "book"],
             vec![
@@ -320,6 +353,37 @@ mod tests {
                 "a.xhtml",
                 "--manifest",
                 ".atha-reader.json",
+            ],
+            vec![
+                "--book-root",
+                "book",
+                "--entry",
+                "a.xhtml",
+                "--hold-after-verify",
+            ],
+            vec![
+                "--book-root",
+                "book",
+                "--entry",
+                "a.xhtml",
+                "--verify-sample",
+                "--hold-after-verify",
+                "--state-probe",
+                "read",
+            ],
+            vec![
+                "--book-root",
+                "book",
+                "--entry",
+                "a.xhtml",
+                "--verify-sample",
+                "--hold-after-verify",
+                "--benchmark-run",
+                "test",
+                "--sample",
+                "1",
+                "--benchmark",
+                "cold",
             ],
         ] {
             assert!(Arguments::parse_values(values(&invalid)).is_err());

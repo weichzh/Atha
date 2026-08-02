@@ -112,6 +112,10 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
     assert_eq!(metric.stage, MetricStage::PageTurn);
     assert_eq!(metric.sample, 4);
     assert_eq!(metric.duration_ms, 1.25);
+    assert_eq!(
+        parse_reader_event(READER_PAGE, "error|state-persistence"),
+        Ok(ReaderEvent::Error("state-persistence"))
+    );
 
     for (origin, message, expected) in [
         (
