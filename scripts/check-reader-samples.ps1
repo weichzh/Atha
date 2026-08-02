@@ -204,6 +204,10 @@ $themeProbe = @'
   if (result.standaloneOrdinaryCount > 0 && !result.contentActions.ordinaryPreview) throw new Error('ordinary-image-preview');
   if (result.standaloneFormulaCount > 0 && !result.contentActions.formulaPreview) throw new Error('formula-preview');
   if (!result.contentActions.mediaPagePreserved || !result.contentActions.linkImageProtected) throw new Error('media-preview-policy');
+  if (result.tableCount > 0 && !result.contentActions.tablePreview) throw new Error('table-preview');
+  if (result.codeBlockCount > 0 && !result.contentActions.codePreview) throw new Error('code-preview');
+  if (!result.contentActions.structuredPagePreserved || !result.contentActions.structuredProjectionSafe || !result.contentActions.structuredSelectionProtected) throw new Error('structured-preview-policy');
+  if (result.structuredLinkCount > 0 && !result.contentActions.structuredLinkProtected) throw new Error('structured-link-policy');
   if (result.session.sections !== expectedSections || result.session.state !== 'layout-stable' || result.session.currentIndex !== 0) throw new Error('session-state');
   if (JSON.stringify(result.session.verifiedSections) !== JSON.stringify(expectedSequence)) throw new Error('session-sequence');
   if (expectedHeadings.length && JSON.stringify(result.session.verifiedHeadings) !== JSON.stringify(expectedHeadings)) throw new Error('session-content');
@@ -228,6 +232,7 @@ try {
         'reader/web/app.mjs',
         'reader/web/content.mjs',
         'reader/web/content-actions.mjs',
+        'reader/web/structured-actions.mjs',
         'reader/web/diagnostics.mjs',
         'reader/web/interaction.mjs',
         'reader/web/locator.mjs',
@@ -381,6 +386,22 @@ try {
                     $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
                     if (-not $previewState.open) { throw 'Trusted Enter formula preview failed.' }
                     Invoke-AgentBrowser @('--session', $session, 'press', 'Escape')
+                }
+                $structuredCounts = Get-AgentBrowserScriptValue -Session $session -Script '(() => { const value = globalThis.__athaReaderDiagnostics.snapshot(); return [value.tableCount, value.codeBlockCount]; })()' | ConvertFrom-Json
+                $structuredTargets = @()
+                if ([int]$structuredCounts[0] -gt 0) { $structuredTargets += @{ kind = 'table'; key = 'Enter' } }
+                if ([int]$structuredCounts[1] -gt 0) { $structuredTargets += @{ kind = 'code'; key = 'Space' } }
+                foreach ($target in $structuredTargets) {
+                    $kind = [string]$target.kind
+                    if ((Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.focusMedia('$kind')") -ne 'true') { throw "$kind focus failed." }
+                    Invoke-AgentBrowser @('--session', $session, 'press', [string]$target.key)
+                    $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
+                    if (-not $previewState.open) { throw "Trusted $($target.key) $kind preview failed." }
+                    $structuredScreenshot = Join-Path $screenshots "$($sample.id)-$theme-$kind-preview.png"
+                    Invoke-AgentBrowser @('--session', $session, 'screenshot', $structuredScreenshot)
+                    Invoke-AgentBrowser @('--session', $session, 'press', 'Escape')
+                    $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
+                    if ($previewState.open -or -not $previewState.focusRestored) { throw "Escape did not close the $kind preview and restore focus." }
                 }
                 $linkRequests = Get-AgentBrowserOutput @('--session', $session, 'network', 'requests', '--filter', 'atha-link-probe.invalid', '--json') | ConvertFrom-Json
                 if (-not $linkRequests.success -or $null -eq $linkRequests.data.requests) { throw 'External link network evidence is unavailable.' }

@@ -140,6 +140,19 @@ export function createContent({ host, readerStyleSource, fail }) {
     );
   }
 
+  function setStructuredInteraction(element) {
+    if (element.closest("a[href]")) {
+      element.removeAttribute("tabindex");
+      return;
+    }
+    const table = element.localName.toLowerCase() === "table";
+    const caption = table ? element.querySelector(":scope > caption")?.textContent.trim() : "";
+    element.removeAttribute("aria-hidden");
+    element.removeAttribute("aria-disabled");
+    element.setAttribute("tabindex", "0");
+    element.setAttribute("aria-label", caption ? `查看表格：${caption.slice(0, 160)}` : table ? "查看表格" : "查看代码");
+  }
+
   function validateMarkup(documentNode) {
     ensure(!documentNode.querySelector("parsererror") && !documentNode.doctype, "invalid-xhtml");
     ensure(
@@ -177,6 +190,9 @@ export function createContent({ host, readerStyleSource, fail }) {
     for (const image of documentNode.querySelectorAll("img[src]")) {
       image.setAttribute("src", localBookUrl(image.getAttribute("src")));
       setImageInteraction(image);
+    }
+    for (const element of documentNode.querySelectorAll("table, pre")) {
+      setStructuredInteraction(element);
     }
   }
 
@@ -276,6 +292,24 @@ export function createContent({ host, readerStyleSource, fail }) {
         formulaImage.getAttribute("aria-label") === "查看公式：x + y" &&
         !linkedImage.hasAttribute("role") &&
         !linkedImage.hasAttribute("tabindex"),
+      "active-content",
+    );
+    const structuredMarkup = new DOMParser().parseFromString(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><table aria-hidden='true'><caption>数据</caption></table><pre aria-disabled='true'>code</pre><a href='#x'><pre tabindex='0'>linked</pre></a></body></html>",
+      "application/xhtml+xml",
+    );
+    const [table, code, linkedCode] = structuredMarkup.querySelectorAll("table, pre");
+    for (const element of structuredMarkup.querySelectorAll("table, pre")) {
+      setStructuredInteraction(element);
+    }
+    ensure(
+      table.getAttribute("tabindex") === "0" &&
+        table.getAttribute("aria-label") === "查看表格：数据" &&
+        !table.hasAttribute("aria-hidden") &&
+        code.getAttribute("tabindex") === "0" &&
+        code.getAttribute("aria-label") === "查看代码" &&
+        !code.hasAttribute("aria-disabled") &&
+        !linkedCode.hasAttribute("tabindex"),
       "active-content",
     );
     for (const css of [

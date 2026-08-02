@@ -132,6 +132,7 @@ try {
                     'web/navigation.mjs',
                     'web/interaction.mjs',
                     'web/content-actions.mjs',
+                    'web/structured-actions.mjs',
                     'web/diagnostics.mjs',
                     'web/app.mjs'
                 ) | ForEach-Object {

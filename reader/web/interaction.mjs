@@ -53,7 +53,7 @@ export function createInteraction({ reader, content, navigation, assert, fail })
         (node) =>
           node instanceof Element &&
           node.matches(
-            "a, button, input, select, textarea, label, summary, details, dialog, [contenteditable], [role='button']",
+            "a, button, input, select, textarea, label, summary, details, dialog, table, pre, [contenteditable], [role='button']",
           ),
       );
   }

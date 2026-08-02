@@ -98,6 +98,18 @@ const contentActions = createContentActions({
   assert,
   fail,
 });
+const structuredActions = createStructuredActions({
+  content,
+  navigation,
+  dialog: document.querySelector("#content-dialog"),
+  title: document.querySelector("#content-dialog-title"),
+  body: document.querySelector("#content-dialog-body"),
+  image: document.querySelector("#content-dialog-image"),
+  tablePreview: document.querySelector("#content-dialog-table"),
+  codePreview: document.querySelector("#content-dialog-code"),
+  contentActions,
+  assert,
+});
 const interaction = createInteraction({ reader, content, navigation, assert, fail });
 
 const diagnostics = createDiagnostics({
@@ -110,6 +122,7 @@ const diagnostics = createDiagnostics({
   preferences,
   interaction,
   contentActions,
+  structuredActions,
   reader,
   renderCachedSource,
   emit,
@@ -124,6 +137,7 @@ async function start() {
   await session.open();
   navigation.bindControls();
   contentActions.bind();
+  structuredActions.bind();
   interaction.bind();
   diagnostics.recordFirstStable(firstStableStarted);
 

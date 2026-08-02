@@ -10,6 +10,7 @@ export function createDiagnostics({
   preferences,
   interaction,
   contentActions,
+  structuredActions,
   reader,
   renderCachedSource,
   emit,
@@ -406,7 +407,10 @@ export function createDiagnostics({
     await verifyNavigation();
     await verifyPreferences();
     await verifyInteraction();
-    contentActionEvidence = await contentActions.verify({ pagination, session });
+    contentActionEvidence = {
+      ...(await contentActions.verify({ pagination, session })),
+      ...(await structuredActions.verify({ pagination, session })),
+    };
     await pagination.verifySizes();
     pagination.verifyFormulaLayout();
     pagination.verifyDisplayGeometry();
@@ -465,7 +469,9 @@ export function createDiagnostics({
       standaloneFormulaCount: standaloneFormulas.length,
       standaloneOrdinaryCount: standaloneOrdinary.length,
       ordinaryPngCount,
-      codeBlockCount: book.querySelectorAll("pre code").length,
+      tableCount: book.querySelectorAll("table").length,
+      codeBlockCount: book.querySelectorAll("pre").length,
+      structuredLinkCount: book.querySelectorAll("table a[href], pre a[href]").length,
       foreground: getComputedStyle(book).color,
       background: getComputedStyle(reader).backgroundColor,
       formulaFilters: [...new Set(formulas.map((image) => getComputedStyle(image).filter))],
@@ -486,16 +492,19 @@ export function createDiagnostics({
       contentActions: {
         ...contentActionEvidence,
         ...contentActions.snapshot(),
+        ...structuredActions.snapshot(),
         selectionLength: contentActions.selectionLength(),
       },
     };
   }
 
   function mediaSource(kind) {
-    const selector =
-      kind === "formula"
-        ? "img[role='button'].math-inline, img[role='button'].math-display"
-        : "img[role='button']:not(.math-inline):not(.math-display)";
+    const selector = {
+      formula: "img[role='button'].math-inline, img[role='button'].math-display",
+      ordinary: "img[role='button']:not(.math-inline):not(.math-display)",
+      table: "table",
+      code: "pre",
+    }[kind];
     return content.book.querySelector(selector);
   }
 
@@ -520,7 +529,11 @@ export function createDiagnostics({
         rect.bottom <= viewport.bottom,
       "sample-boundary",
     );
-    return Object.freeze({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    const structured = kind === "table" || kind === "code";
+    return Object.freeze({
+      x: structured ? rect.left + 2 : rect.left + rect.width / 2,
+      y: structured ? rect.top + 2 : rect.top + rect.height / 2,
+    });
   }
 
   function focusMedia(kind) {
@@ -535,7 +548,7 @@ export function createDiagnostics({
       open: document.querySelector("#content-dialog").open,
       focusRestored: content.book
         .getRootNode()
-        .activeElement?.matches("img[role='button']") === true,
+        .activeElement?.matches("img[role='button'], table, pre") === true,
     });
   }
 

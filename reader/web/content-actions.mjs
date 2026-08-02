@@ -241,7 +241,6 @@ export function createContentActions({
       );
       return filter;
     };
-
     await session.open(0);
     await pagination.show(0);
     const walker = document.createTreeWalker(content.book, NodeFilter.SHOW_TEXT, {
@@ -428,6 +427,7 @@ export function createContentActions({
     },
     bind,
     clearSelection,
+    idle: () => pending,
     selectionLength,
     selectionProbe,
     snapshot: () => Object.freeze({ ...counts }),
