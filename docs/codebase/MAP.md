@@ -17,8 +17,9 @@
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M2 已验证 |
 | `backend/atha-backend/` | 正式零依赖后端库、书根资源边界与阅读遥测校验 | M2 阅读切片 |
-| `reader/atha-reader-host/` | Wry/Tao Windows WebView2 承载、自定义协议与宿主边界 | M2 阅读切片 |
-| `reader/atha-reader.*` | 唯一阅读页实现：内容校验、公式适配、CSS 多栏分页与自检 | M2 阅读切片 |
+| `reader/atha-reader-host/src/` | Wry/Tao Windows WebView2 承载；入口、启动参数、受控协议和诊断按职责分离 | M2 R0 已验证 |
+| `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构与默认样式 | M2 R0 已验证 |
+| `reader/web/` | 内容安全与加载、分页与公式布局、诊断与 benchmark、页面组合入口 | M2 R0 已验证 |
 | `reader/samples.json` | 三个本地验收样本的入口、边界与内容断言清单 | M2 已验证 |
 | `p0/ffi/` | Rust/C++ 共享 C ABI 调用与所有权对照 | 本地 P0 实验 |
 | `p0/sqlite/` | SQLite、FTS5、Outbox schema 与故障检查 | 本地 P0 实验 |
@@ -48,7 +49,9 @@
 
 - `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
-- 阅读页先校验 XHTML、CSS 与 SVG，再导入闭合 Shadow DOM；
+- 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、日志与 benchmark；
+- 阅读页源码保持原生 ES module：`content` 先校验 XHTML、CSS 与 SVG，再导入闭合 Shadow DOM；`pagination` 负责公式、分页与控件；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
+- 四份页面源码由应用资源协议按固定顺序交付为单个 `atha-reader.mjs`，避免为源码分层增加多次自定义协议请求；浏览器验证服务器使用同一顺序；
 - 公式按源尺寸随字号缩放，行间公式使用独立 `1.5` 倍率并在逻辑内容列中居中；
 - 固定 1264 × 1680 设备像素页使用 CSS 多栏，并以 `1 / devicePixelRatio` 隔离系统 DPI；文字、公式和原子内容均有布局后裁切检查；
 - Windows 窗口与壳层控件使用系统逻辑像素，当前默认窗口按固定页面设备像素换算并限制在屏幕逻辑宽高的 80%；
@@ -86,7 +89,7 @@
 - 行间公式 6/6 在 32px 下为 `3×` 源尺寸、中心偏差 0px、宽高比误差 0；Agent Browser 首尾翻页与 40px 重排截图通过；
 - 三样本实际 host 与 Agent Browser 明暗验收通过：逻辑样本 154 个公式，宏观经济学样本 58 个公式和 1 张普通图，范畴论样本 0 个公式、8 个代码块和 2 张普通 PNG；
 - 明暗正文对比度分别为 15.94 和 13.84；暗色下只反色公式，普通图始终为 `filter: none`；
-- 校正验收与用户阶段边界后的最近 10 样本基准中位数：冷启动 658.205ms、首个稳定页面 135.800ms、热打开 20.800ms、翻页 6.250ms、字号重排 20.800ms；该变化是口径纠正，不称为运行时加速；
+- R0 最终 10 样本基准中位数：冷启动 791.483ms、首个稳定页面 161.200ms、热打开 20.750ms、翻页 6.200ms、字号重排 20.800ms；该轮只证明指标和样本格式保持有效，不称为结构整理带来加速；冷启动和首个稳定页高于历史最近记录，未执行旧代码的同时间受控对照，不能归因于本次改动；
 - metadata 证明正式后端仍是 workspace 中唯一零依赖包；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；

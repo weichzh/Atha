@@ -64,6 +64,7 @@ function Get-ContentType {
         '.xhtml' { 'text/plain; charset=utf-8' }
         '.css' { 'text/css; charset=utf-8' }
         '.js' { 'text/javascript; charset=utf-8' }
+        '.mjs' { 'text/javascript; charset=utf-8' }
         '.svg' { 'image/svg+xml' }
         '.png' { 'image/png' }
         '.jpg' { 'image/jpeg' }
@@ -111,7 +112,6 @@ try {
             $readerFiles = @{
                 '/reader/atha-reader.html' = 'atha-reader.html'
                 '/reader/atha-reader.css' = 'atha-reader.css'
-                '/reader/atha-reader.js' = 'atha-reader.js'
             }
             if ($readerFiles.ContainsKey($path)) {
                 $file = Get-SafeFile $readerRoot $readerFiles[$path]
@@ -119,6 +119,20 @@ try {
                     $context.Response.Headers['Content-Security-Policy'] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
                 }
                 Write-Response $context 200 (Get-ContentType $file) ([IO.File]::ReadAllBytes($file))
+                continue
+            }
+            if ($path -eq '/reader/atha-reader.mjs') {
+                $source = @(
+                    'web/content.mjs',
+                    'web/pagination.mjs',
+                    'web/diagnostics.mjs',
+                    'web/app.mjs'
+                ) | ForEach-Object {
+                    $file = Get-SafeFile $readerRoot $_
+                    [IO.File]::ReadAllText($file)
+                }
+                $body = [Text.Encoding]::UTF8.GetBytes([string]::Join("`n", $source))
+                Write-Response $context 200 'text/javascript; charset=utf-8' $body
                 continue
             }
             if ($path.StartsWith('/book/', [StringComparison]::Ordinal)) {

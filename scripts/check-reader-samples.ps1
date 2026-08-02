@@ -97,6 +97,8 @@ $themeProbe = @'
   const requireFormulas = __REQUIRE_FORMULAS__;
   const expectedOrdinaryImages = __EXPECTED_ORDINARY_IMAGES__;
   const requireCodeBlock = __REQUIRE_CODE_BLOCK__;
+  const result = globalThis.__athaReaderDiagnostics?.snapshot();
+  if (!result) throw new Error('missing-reader-diagnostics');
   const rgb = (value) => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
   const luminance = (value) => {
     const channels = rgb(value).map((channel) => {
@@ -109,25 +111,7 @@ $themeProbe = @'
     const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
     return (values[0] + 0.05) / (values[1] + 0.05);
   };
-  const reader = document.querySelector('.reader');
-  const formulas = [...book.querySelectorAll('img.math-inline, img.math-display')];
-  const ordinary = [...book.querySelectorAll('img:not(.math-inline):not(.math-display)')];
-  const ordinaryPngCount = ordinary.filter((image) => new URL(image.src).pathname.toLowerCase().endsWith('.png')).length;
-  const foreground = getComputedStyle(book).color;
-  const background = getComputedStyle(reader).backgroundColor;
-  const result = {
-    status: document.documentElement.dataset.status || null,
-    error: document.documentElement.dataset.error || null,
-    dark: matchMedia('(prefers-color-scheme: dark)').matches,
-    pages: state.pages,
-    formulaCount: formulas.length,
-    ordinaryCount: ordinary.length,
-    ordinaryPngCount,
-    codeBlockCount: book.querySelectorAll('pre code').length,
-    contrast: contrast(foreground, background),
-    formulaFilters: [...new Set(formulas.map((image) => getComputedStyle(image).filter))],
-    ordinaryFilters: [...new Set(ordinary.map((image) => getComputedStyle(image).filter))],
-  };
+  result.contrast = contrast(result.foreground, result.background);
   if (result.status !== 'pass' || result.error) throw new Error('reader-status');
   if (requireFormulas && result.formulaCount < 1) throw new Error('no-formulas');
   if (!requireFormulas && result.formulaCount !== 0) throw new Error('unexpected-formulas');
@@ -148,7 +132,14 @@ try {
         throw 'agent-browser is not available.'
     }
     Invoke-Checked 'python3' @('scripts/export_reader_sample.py', '--self-check')
-    Invoke-Checked 'node' @('--check', 'reader/atha-reader.js')
+    foreach ($module in @(
+        'reader/web/app.mjs',
+        'reader/web/content.mjs',
+        'reader/web/diagnostics.mjs',
+        'reader/web/pagination.mjs'
+    )) {
+        Invoke-Checked 'node' @('--check', $module)
+    }
     Invoke-Checked $cargoPath @('fmt', '--manifest-path', 'Cargo.toml', '--all', '--check')
     Invoke-Checked $cargoPath @('clippy', '--manifest-path', 'Cargo.toml', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings')
     Invoke-Checked $cargoPath @('test', '--manifest-path', 'Cargo.toml', '--workspace', '--all-targets', '--locked')
