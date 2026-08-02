@@ -14,6 +14,104 @@ export function createPagination({
 }) {
   const state = { page: 0, pages: 0, fontSize: 32 };
 
+  function textNodes() {
+    const nodes = [];
+    const walker = document.createTreeWalker(book, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  }
+
+  function withoutTranslation(action) {
+    const transform = book.style.transform;
+    book.style.transform = "none";
+    try {
+      return action();
+    } finally {
+      book.style.transform = transform;
+    }
+  }
+
+  function columnForRect(rect, bookLeft, step, scale) {
+    return Math.max(0, Math.floor((rect.left - bookLeft) / (step * scale)));
+  }
+
+  function captureOffset() {
+    return withoutTranslation(() => {
+      const style = getComputedStyle(book);
+      const step = parseFloat(style.width) + parseFloat(style.columnGap);
+      const bookLeft = book.getBoundingClientRect().left;
+      const scale = reader.getBoundingClientRect().width / reader.clientWidth;
+      let base = 0;
+      for (const node of textNodes()) {
+        const text = node.textContent || "";
+        const whole = document.createRange();
+        whole.selectNodeContents(node);
+        const reachesPage = [...whole.getClientRects()].some(
+          (rect) => rect.width && columnForRect(rect, bookLeft, step, scale) === state.page,
+        );
+        if (reachesPage) {
+          for (let offset = 0; offset < text.length; offset += 1) {
+            const character = document.createRange();
+            character.setStart(node, offset);
+            character.setEnd(node, offset + 1);
+            const rect = [...character.getClientRects()].find((item) => item.width);
+            if (rect && columnForRect(rect, bookLeft, step, scale) === state.page) {
+              return base + offset;
+            }
+          }
+        }
+        base += text.length;
+      }
+      return base;
+    });
+  }
+
+  function pointForOffset(offset) {
+    const nodes = textNodes().filter((node) => (node.textContent || "").length > 0);
+    const total = nodes.reduce((sum, node) => sum + node.textContent.length, 0);
+    if (!Number.isInteger(offset) || offset < 0 || offset > total) {
+      return { exact: false, node: null, offset: 0 };
+    }
+    let remaining = offset;
+    for (const node of nodes) {
+      if (remaining < node.textContent.length) {
+        return { exact: true, node, offset: remaining };
+      }
+      remaining -= node.textContent.length;
+    }
+    const node = nodes.at(-1) || null;
+    return { exact: true, node, offset: Math.max(0, (node?.textContent.length || 1) - 1) };
+  }
+
+  function pageForOffset(offset) {
+    return withoutTranslation(() => {
+      const point = pointForOffset(offset);
+      if (!point.exact || !point.node) return { exact: point.exact, page: 0 };
+      const range = document.createRange();
+      range.setStart(point.node, point.offset);
+      range.setEnd(point.node, Math.min(point.node.textContent.length, point.offset + 1));
+      const rect = [...range.getClientRects()].find((item) => item.width);
+      if (!rect) return { exact: false, page: 0 };
+      const style = getComputedStyle(book);
+      const step = parseFloat(style.width) + parseFloat(style.columnGap);
+      const scale = reader.getBoundingClientRect().width / reader.clientWidth;
+      const pageIndex = columnForRect(rect, book.getBoundingClientRect().left, step, scale);
+      return { exact: true, page: Math.min(pageIndex, state.pages - 1) };
+    });
+  }
+
+  function offsetForFragment(fragment) {
+    const target = [...book.querySelectorAll("[id]")].find((element) => element.id === fragment);
+    if (!target) return null;
+    let offset = 0;
+    for (const node of textNodes()) {
+      if (target.contains(node)) return offset;
+      if (target.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) return offset;
+      offset += (node.textContent || "").length;
+    }
+    return offset;
+  }
+
   function syncPageDeviceScale() {
     const scale = 1 / devicePixelRatio;
     document.documentElement.style.setProperty("--page-scale", String(scale));
@@ -54,8 +152,6 @@ export function createPagination({
     const step = parseFloat(style.width) + parseFloat(style.columnGap);
     book.style.transform = `translateX(${-state.page * step}px)`;
     position.textContent = `${state.page + 1} / ${state.pages}`;
-    previous.disabled = state.page === 0;
-    next.disabled = state.page + 1 === state.pages;
     document.title = `Atha Reader — ${state.page + 1} / ${state.pages}`;
   }
 
@@ -173,7 +269,7 @@ export function createPagination({
         assert(width <= columnWidth + 0.75, "layout-cut");
         if (isDisplay) {
           const logicalLeft = (rect.left - bookRect.left) / fitScale;
-          const column = Math.round(logicalLeft / columnStep);
+          const column = Math.floor(logicalLeft / columnStep);
           const centerOffset =
             logicalLeft + width / 2 - (column * columnStep + columnWidth / 2);
           assert(Math.abs(centerOffset) <= 2, "formula-selectors");
@@ -186,16 +282,31 @@ export function createPagination({
 
   function verifyDisplayGeometry() {
     const readerRect = reader.getBoundingClientRect();
+    const scale = readerRect.width / reader.clientWidth;
     assert(Math.abs(readerRect.width * devicePixelRatio - 1264) <= 1, "layout-cut");
     assert(Math.abs(readerRect.height * devicePixelRatio - 1680) <= 1, "layout-cut");
     assert(previous.getBoundingClientRect().height >= 44, "layout-cut");
     assert(next.getBoundingClientRect().height >= 44, "layout-cut");
+    if (state.pages > 1) {
+      const style = getComputedStyle(book);
+      const step = parseFloat(style.width) + parseFloat(style.columnGap);
+      const bookLeft = book.getBoundingClientRect().left;
+      const laterRect = textNodes()
+        .flatMap((node) => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return [...range.getClientRects()];
+        })
+        .find((rect) => rect.width && (rect.left - bookLeft) / scale >= step);
+      assert(laterRect && columnForRect(laterRect, bookLeft, step, scale) > 0, "sample-boundary");
+    }
   }
 
-  async function setFontSize(value) {
+  async function setFontSize(value, anchor = captureOffset()) {
     state.fontSize = Number(value);
     layout();
     await waitForStableLayout();
+    await showOffset(anchor);
     assert(countCutRects() === 0, "layout-cut");
   }
 
@@ -209,44 +320,72 @@ export function createPagination({
   }
 
   async function show(index) {
-    state.page = index;
+    state.page = Math.max(0, Math.min(index, state.pages - 1));
     showPage();
     await nextFrame();
+  }
+
+  async function showOffset(offset) {
+    const target = pageForOffset(offset);
+    if (!target.exact) return false;
+    await show(target.page);
+    return true;
+  }
+
+  function isOffsetVisible(offset) {
+    const target = pageForOffset(offset);
+    return target.exact && target.page === state.page;
+  }
+
+  function hasOffset(offset) {
+    return pointForOffset(offset).exact;
+  }
+
+  async function move(delta) {
+    const target = state.page + delta;
+    if (target < 0 || target >= state.pages) return false;
+    await show(target);
+    return true;
   }
 
   function snapshot() {
     return { ...state };
   }
 
-  function bindControls() {
-    syncPageDeviceScale();
-    window.addEventListener("resize", syncPageDeviceScale);
-    previous.addEventListener("click", async () => {
-      if (state.page > 0) state.page -= 1;
-      showPage();
-      await nextFrame();
-    });
-    next.addEventListener("click", async () => {
-      if (state.page + 1 < state.pages) state.page += 1;
-      showPage();
-      await nextFrame();
-    });
-    fontSizeControl.addEventListener("change", () => {
-      setFontSize(fontSizeControl.value).catch((error) => {
+  function bindControls({ onPrevious, onNext, onFontSize }) {
+    const run = (action) => {
+      Promise.resolve(action()).catch((error) => {
         if (!document.documentElement.dataset.error) {
           fail(error instanceof Error ? error.message : "layout-cut");
         }
       });
+    };
+    previous.addEventListener("click", () => run(onPrevious));
+    next.addEventListener("click", () => run(onNext));
+    fontSizeControl.addEventListener("change", () => {
+      run(() => onFontSize(fontSizeControl.value));
     });
+  }
+
+  function initialize() {
+    syncPageDeviceScale();
+    window.addEventListener("resize", syncPageDeviceScale);
   }
 
   return Object.freeze({
     bindControls,
+    captureOffset,
     countCutRects,
+    hasOffset,
+    initialize,
+    isOffsetVisible,
+    move,
     nextFrame,
+    offsetForFragment,
     renderFromStart,
     setFontSize,
     show,
+    showOffset,
     snapshot,
     verifyDisplayGeometry,
     verifyFormulaLayout,

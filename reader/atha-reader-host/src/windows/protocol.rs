@@ -34,8 +34,10 @@ pub(super) fn app_response(request: Request<Vec<u8>>) -> Response<Cow<'static, [
             Cow::Owned(
                 [
                     include_bytes!("../../../web/content.mjs").as_slice(),
+                    include_bytes!("../../../web/locator.mjs").as_slice(),
                     include_bytes!("../../../web/pagination.mjs").as_slice(),
                     include_bytes!("../../../web/session.mjs").as_slice(),
+                    include_bytes!("../../../web/navigation.mjs").as_slice(),
                     include_bytes!("../../../web/diagnostics.mjs").as_slice(),
                     include_bytes!("../../../web/app.mjs").as_slice(),
                 ]

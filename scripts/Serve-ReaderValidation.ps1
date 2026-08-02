@@ -125,8 +125,10 @@ try {
             if ($path -eq '/reader/atha-reader.mjs') {
                 $source = @(
                     'web/content.mjs',
+                    'web/locator.mjs',
                     'web/pagination.mjs',
                     'web/session.mjs',
+                    'web/navigation.mjs',
                     'web/diagnostics.mjs',
                     'web/app.mjs'
                 ) | ForEach-Object {

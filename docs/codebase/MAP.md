@@ -17,9 +17,9 @@
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M2 已验证 |
 | `backend/atha-backend/` | 正式零依赖后端库、书根资源边界与阅读遥测校验 | M2 阅读切片 |
-| `reader/atha-reader-host/src/` | Wry/Tao Windows WebView2 承载；入口、启动参数、受控协议和诊断按职责分离 | M2 R1 已验证 |
+| `reader/atha-reader-host/src/` | Wry/Tao Windows WebView2 承载；入口、启动参数、受控协议和诊断按职责分离 | M2 R2 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构与默认样式 | M2 R0 已验证 |
-| `reader/web/` | 阅读会话、内容安全与加载、分页与公式布局、诊断与 benchmark、页面组合入口 | M2 R1 已验证 |
+| `reader/web/` | Locator、导航、阅读会话、内容安全与加载、分页与公式布局、诊断与 benchmark、页面组合入口 | M2 R2 已验证 |
 | `reader/samples.json` | 四个本地验收样本的入口、manifest、边界与内容断言清单 | M2 R1 已验证 |
 | `p0/ffi/` | Rust/C++ 共享 C ABI 调用与所有权对照 | 本地 P0 实验 |
 | `p0/sqlite/` | SQLite、FTS5、Outbox schema 与故障检查 | 本地 P0 实验 |
@@ -51,8 +51,10 @@
 - schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--manifest` 与兼容 `--entry` 互斥；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、日志与 benchmark；
-- 阅读页源码保持原生 ES module：`session` 校验 manifest 并拥有打开、释放和生命周期；`content` 校验并加载单份 XHTML、CSS 与 SVG；`pagination` 负责公式、分页与控件；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
-- 五份页面源码由应用资源协议按固定顺序交付为单个 `atha-reader.mjs`，避免为源码分层增加多次自定义协议请求；浏览器验证服务器使用同一顺序；
+- 阅读页源码保持原生 ES module：`locator` 校验、序列化并比较内容坐标；`navigation` 组合页、section、TOC 与重排恢复；`session` 拥有 manifest 和内容生命周期；`content` 校验并加载单份 XHTML、CSS 与 SVG；`pagination` 负责公式与固定页面布局；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
+- 七份页面源码由应用资源协议按固定顺序交付为单个 `atha-reader.mjs`，避免为源码分层增加多次自定义协议请求；浏览器验证服务器使用同一顺序；
+- Locator 以内容版本、section id 和 DOM 文本 UTF-16 偏移表示 point/range；R2 range 限于单 section 并检查实际文本边界，无效输入安全回落并留下诊断，页码不作为内容坐标；
+- 上一页和下一页可跨 section，manifest TOC 通过原生 `select` 跳转；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
 - 公式按源尺寸随字号缩放，行间公式使用独立 `1.5` 倍率并在逻辑内容列中居中；
 - 固定 1264 × 1680 设备像素页使用 CSS 多栏，并以 `1 / devicePixelRatio` 隔离系统 DPI；文字、公式和原子内容均有布局后裁切检查；
 - Windows 窗口与壳层控件使用系统逻辑像素，当前默认窗口按固定页面设备像素换算并限制在屏幕逻辑宽高的 80%；
@@ -89,8 +91,10 @@
 - 当前 4K、200% DPI 环境实测页面为 1264 × 1680 设备像素、默认客户区为 680 × 816 逻辑像素、窗口外框为屏幕高度的 78.3%；工具栏按钮为 44px 逻辑高度；
 - 行间公式 6/6 在 32px 下为 `3×` 源尺寸、中心偏差 0px、宽高比误差 0；Agent Browser 首尾翻页与 40px 重排截图通过；
 - 四样本实际 host 与 Agent Browser 明暗验收通过：既有三样本保持原内容断言；《数学及其历史》R1 样本依次加载三个标题、两次释放旧 DOM、关闭后重新打开首章，首章含 23 个公式和 2 张普通 PNG；
+- R2 在实际浏览器验证 Locator 往返与 range 边界、32→40→24→32px 逐次位置恢复、TOC 控件切章、并发导航串行化、section 首尾导航和错版本安全回落；
 - 明暗正文对比度分别为 15.94 和 13.84；暗色下只反色公式，普通图始终为 `filter: none`；
 - R1 最终 10 样本基准中位数：冷启动 772.623ms、首个稳定页面 166.300ms、热打开 20.700ms、翻页 6.300ms、字号重排 20.800ms；该轮只证明指标与既有样本保持有效，未执行旧代码的同时间受控对照，不能归因于本次改动；
+- R2 最终 10 样本基准中位数：冷启动 666.998ms、首个稳定页面 177.850ms、热打开 20.800ms、翻页 6.300ms、字号重排 27.800ms；字号重排包含文本位置捕获与恢复，仍在正式门槛内，未执行旧代码同时间对照；
 - metadata 证明正式后端仍是 workspace 中唯一零依赖包；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
@@ -102,7 +106,7 @@
 - P0 schema 含 SQLite CLI 指令，尚未转为正式版本化迁移；
 - 正式后端尚未添加或编译已决策的随包 SQLite；
 - 除受限阅读遥测外，没有应用服务、领域 API 或通用跨进程接口；
-- 没有导入解析、Locator 重锚定或富文本迁移；
+- 没有导入解析、跨内容版本 Locator 重锚定或富文本迁移；
 - 没有 CI、Windows 安装包或书籍导入产品链路；
 - 性能数据未记录设备指纹，也没有跨日期重复运行统计。
 

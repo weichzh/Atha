@@ -2,5 +2,5 @@
 
 本文件只登记当前可执行工作的路由；范围、证据和下一步由所指向的所有者维护。
 
-- `next`：R2 Locator 与导航；开始前新建并批准对应 change
+- `next`：R3 排版与阅读偏好 → `docs/roadmap/ROADMAP.md`
 - `Context Bundle`：`reader`

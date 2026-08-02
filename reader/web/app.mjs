@@ -52,23 +52,42 @@ const session = createReadingSession({
   fail,
 });
 
+const locator = createLocator({ assert });
+const navigation = createNavigation({
+  session,
+  pagination,
+  locator,
+  toc: document.querySelector("#toc"),
+  previous: document.querySelector("#previous"),
+  next: document.querySelector("#next"),
+  fontSizeControl: document.querySelector("#font-size"),
+  onFallback(reason) {
+    document.documentElement.dataset.locatorFallback = reason;
+  },
+  assert,
+  fail,
+});
+
 const diagnostics = createDiagnostics({
   params,
   content,
   pagination,
   session,
+  locator,
+  navigation,
   reader,
   renderCachedSource,
   emit,
   assert,
 });
 
-pagination.bindControls();
+pagination.initialize();
 
 async function start() {
   await content.initialize();
   const firstStableStarted = performance.now();
   await session.open();
+  navigation.bindControls();
   diagnostics.recordFirstStable(firstStableStarted);
 
   if (params.has("verify")) await diagnostics.verify();

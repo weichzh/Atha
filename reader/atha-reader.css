@@ -129,8 +129,8 @@ select:focus-visible {
   bottom: 28px;
   left: 48px;
   display: grid;
-  grid-template-columns: max-content 1fr max-content max-content;
-  gap: 18px;
+  grid-template-columns: max-content minmax(60px, 1fr) minmax(120px, 180px) max-content max-content;
+  gap: 12px;
   align-items: center;
   padding: 10px 14px;
   border: 1px solid #ccd4d6;
@@ -145,8 +145,19 @@ select:focus-visible {
 
 .toolbar label {
   display: flex;
+  min-width: 0;
   gap: 8px;
   align-items: center;
+  white-space: nowrap;
+}
+
+.toolbar label[hidden] {
+  display: none;
+}
+
+#toc {
+  min-width: 0;
+  width: 100%;
 }
 
 .error {

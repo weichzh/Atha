@@ -99,12 +99,18 @@ export function createReadingSession({ params, content, render, onState, assert,
       tocItems.add(item.href);
       return Object.freeze({ label: item.label, href: item.href });
     });
+    const frozenToc = Object.freeze(toc || []);
     return Object.freeze({
       contentVersion: value.contentVersion,
       sections: Object.freeze(sections),
       resources: resourceUrls,
-      toc: Object.freeze(toc || []),
+      toc: frozenToc,
       strictResources: true,
+      description: Object.freeze({
+        contentVersion: value.contentVersion,
+        sections: Object.freeze(sections.map(({ id, href }) => Object.freeze({ id, href }))),
+        toc: frozenToc,
+      }),
     });
   }
 
@@ -159,6 +165,11 @@ export function createReadingSession({ params, content, render, onState, assert,
         resources: null,
         toc: Object.freeze([]),
         strictResources: false,
+        description: Object.freeze({
+          contentVersion: null,
+          sections: Object.freeze([Object.freeze({ id: "entry", href: url.pathname })]),
+          toc: Object.freeze([]),
+        }),
       });
       return manifest;
     }
@@ -233,6 +244,11 @@ export function createReadingSession({ params, content, render, onState, assert,
     closes += 1;
   }
 
+  function describe() {
+    assert(manifest, "invalid-manifest");
+    return manifest.description;
+  }
+
   function snapshot() {
     return Object.freeze({
       state,
@@ -247,5 +263,5 @@ export function createReadingSession({ params, content, render, onState, assert,
     });
   }
 
-  return Object.freeze({ close, open, snapshot });
+  return Object.freeze({ close, describe, open, snapshot });
 }

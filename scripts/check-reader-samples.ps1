@@ -98,7 +98,7 @@ function Start-ValidationServer {
 }
 
 $themeProbe = @'
-(() => {
+(async () => {
   const expectedDark = __EXPECTED_DARK__;
   const requireFormulas = __REQUIRE_FORMULAS__;
   const expectedOrdinaryImages = __EXPECTED_ORDINARY_IMAGES__;
@@ -106,6 +106,24 @@ $themeProbe = @'
   const expectedSections = __EXPECTED_SECTIONS__;
   const expectedSequence = __EXPECTED_SEQUENCE__;
   const expectedHeadings = __EXPECTED_HEADINGS__;
+  if (expectedSections > 1) {
+    const toc = document.querySelector('#toc');
+    if (toc.options.length !== expectedSections) throw new Error('toc-control');
+    const waitForSection = async (section) => {
+      for (let frame = 0; frame < 60; frame += 1) {
+        const state = globalThis.__athaReaderDiagnostics?.snapshot().session;
+        if (state.currentSection === section && state.state === 'layout-stable') return;
+        await new Promise(requestAnimationFrame);
+      }
+      throw new Error('toc-control');
+    };
+    toc.value = '1';
+    toc.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForSection(expectedSequence[1]);
+    toc.value = '0';
+    toc.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitForSection(expectedSequence[0]);
+  }
   const result = globalThis.__athaReaderDiagnostics?.snapshot();
   if (!result) throw new Error('missing-reader-diagnostics');
   const rgb = (value) => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
@@ -136,6 +154,8 @@ $themeProbe = @'
   if (expectedHeadings.length && JSON.stringify(result.session.verifiedHeadings) !== JSON.stringify(expectedHeadings)) throw new Error('session-content');
   if (result.session.releasedSections < Math.max(0, expectedSections - 1)) throw new Error('session-release');
   if (result.session.contentLoads < expectedSections + 1 || result.session.stableLayouts < expectedSections + 1 || result.session.closes < expectedSections) throw new Error('session-lifecycle');
+  if (!result.navigation.locatorRoundTrip || !result.navigation.rangeCompared || !result.navigation.reflowRestored || result.navigation.fallback !== 'locator-version') throw new Error('locator-navigation');
+  if (expectedSections > 1 && (result.navigation.tocSection !== expectedSequence[1] || result.navigation.previousSection !== expectedSequence[0] || result.navigation.nextSection !== expectedSequence[1])) throw new Error('section-navigation');
   return result;
 })()
 '@
@@ -150,6 +170,8 @@ try {
         'reader/web/app.mjs',
         'reader/web/content.mjs',
         'reader/web/diagnostics.mjs',
+        'reader/web/locator.mjs',
+        'reader/web/navigation.mjs',
         'reader/web/pagination.mjs',
         'reader/web/session.mjs'
     )) {
