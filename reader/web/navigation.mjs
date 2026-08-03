@@ -10,6 +10,7 @@ export function createNavigation({
   locator,
   preferences,
   toc,
+  chapterLabel,
   previous,
   next,
   fontSizeControl,
@@ -47,6 +48,7 @@ export function createNavigation({
     next.disabled = state.currentIndex + 1 === state.sections && page.page + 1 === page.pages;
     const index = findTocIndex(book(), state.currentIndex, preferredTocIndex);
     if (index >= 0) toc.value = String(index);
+    chapterLabel.textContent = book().toc[index]?.label || book().sections[state.currentIndex]?.id || "";
   }
 
   async function fallback(reason, sectionIndex = 0) {
@@ -197,12 +199,14 @@ export function createNavigation({
       onPrevious: () => run(previousPage),
       onNext: () => run(nextPage),
       onFontSize: (value) => run(() => setFontSize(value)),
+      onProgress: (value) => run(() => pagination.show(Number(value) - 1)),
     });
     preferences.bind({
       onUpdate: (scope, patch) => run(() => setPreferences(scope, patch)),
       onReset: (scope) => run(() => resetPreferences(scope)),
     });
     toc.addEventListener("change", () => {
+      if (toc.selectedOptions[0]?.dataset.bookmarkId) return;
       const index = Number(toc.value);
       run(() => goToToc(index)).catch((error) => {
         fail(error instanceof Error ? error.message : "section-load");
@@ -217,7 +221,7 @@ export function createNavigation({
     return Object.freeze({
       current: state.currentIndex >= 0 ? locator.serialize(book(), current()) : null,
       lastFallback,
-      tocIndex: toc.selectedIndex,
+      tocIndex: Number(toc.value),
     });
   }
 

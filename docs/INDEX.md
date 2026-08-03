@@ -26,6 +26,7 @@
 | [architecture/READER-CORE.md](architecture/READER-CORE.md) | 阅读内核与样本策略 |
 | [architecture/MESSAGE-READING.md](architecture/MESSAGE-READING.md) | 消息、引用与共读语义 |
 | [codebase/MAP.md](codebase/MAP.md) | 已实现代码与验证入口 |
+| [codebase/READER-MOBILE-UI.md](codebase/READER-MOBILE-UI.md) | 移动阅读界面的代码位置与手工调整入口 |
 | [codebase/DATABASE.md](codebase/DATABASE.md) | P0 数据库语义与缺口 |
 | [roadmap/ROADMAP.md](roadmap/ROADMAP.md) | 交付顺序与暂缓范围 |
 | [decisions/](decisions/) | 仍有效的长期决策 |

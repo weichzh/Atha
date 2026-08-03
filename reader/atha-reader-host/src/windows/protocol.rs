@@ -8,7 +8,7 @@ use wry::http::{Request, Response, StatusCode, header};
 
 use super::launch::APP_PAGE;
 
-const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src https://atha-book.localhost; connect-src 'self' https://atha-book.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://atha-book.localhost; connect-src 'self' https://atha-book.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 
 pub(super) fn is_reader_url(url: String) -> bool {
     let Some(suffix) = url.strip_prefix(APP_PAGE) else {
@@ -29,6 +29,10 @@ pub(super) fn app_response(request: Request<Vec<u8>>) -> Response<Cow<'static, [
         "/atha-reader.css" => (
             Cow::Borrowed(include_bytes!("../../../atha-reader.css")),
             "text/css; charset=utf-8",
+        ),
+        "/assets/bookmark-24-regular.svg" => (
+            Cow::Borrowed(include_bytes!("../../../assets/bookmark-24-regular.svg")),
+            "image/svg+xml",
         ),
         "/atha-reader.mjs" => (
             Cow::Owned(

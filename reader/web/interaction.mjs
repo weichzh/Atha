@@ -31,7 +31,7 @@ function swipeDirection(start, event) {
   return deltaX < 0 ? 1 : -1;
 }
 
-export function createInteraction({ reader, content, navigation, assert, fail }) {
+export function createInteraction({ reader, content, navigation, onCenter, assert, fail }) {
   const wheel = createWheelDetector();
   const counts = {
     keyboard: 0,
@@ -159,6 +159,7 @@ export function createInteraction({ reader, content, navigation, assert, fail })
     const ratio = (event.clientX - rect.left) / rect.width;
     if (ratio < 0.35) run(-1, "mouse");
     else if (ratio > 0.65) run(1, "mouse");
+    else onCenter();
   }
 
   function bind() {

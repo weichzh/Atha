@@ -1,6 +1,16 @@
 const params = new URLSearchParams(location.search);
+const root = document.documentElement;
 const reader = document.querySelector(".reader");
 const errorBox = document.querySelector("#error");
+
+function toggleReaderTools() {
+  if (root.hasAttribute("data-reader-tools")) {
+    root.removeAttribute("data-reader-tools");
+    for (const panel of document.querySelectorAll(".reader-tool[open]")) panel.open = false;
+  } else {
+    root.setAttribute("data-reader-tools", "");
+  }
+}
 
 function emit(message) {
   if (window.ipc?.postMessage) window.ipc.postMessage(message);
@@ -34,7 +44,7 @@ const content = createContent({
   fail,
 });
 const preferences = createPreferences({
-  root: document.documentElement,
+  root,
   reader,
   content,
   controls: {
@@ -57,6 +67,8 @@ const pagination = createPagination({
   reader,
   page: document.querySelector("#page"),
   position: document.querySelector("#position"),
+  progressPosition: document.querySelector("#progress-position"),
+  progressRange: document.querySelector("#progress-range"),
   previous: document.querySelector("#previous"),
   next: document.querySelector("#next"),
   fontSizeControl: document.querySelector("#font-size"),
@@ -65,6 +77,7 @@ const pagination = createPagination({
 });
 
 let annotations;
+let bookmarks;
 async function renderCachedSource() {
   await content.renderCached();
   await pagination.renderFromStart();
@@ -92,6 +105,7 @@ const navigation = createNavigation({
   locator,
   preferences,
   toc: document.querySelector("#toc"),
+  chapterLabel: document.querySelector("#chapter-label"),
   previous: document.querySelector("#previous"),
   next: document.querySelector("#next"),
   fontSizeControl: document.querySelector("#font-size"),
@@ -99,7 +113,10 @@ const navigation = createNavigation({
     document.documentElement.dataset.locatorFallback = reason;
   },
   onPreferences: (scope) => readerState?.savePreferences(scope),
-  onStable: () => readerState?.scheduleProgress(),
+  onStable() {
+    readerState?.scheduleProgress();
+    bookmarks?.syncCurrent();
+  },
   assert,
   fail,
 });
@@ -138,15 +155,14 @@ annotations = createAnnotations({
   },
   assert,
 });
-const bookmarks = createBookmarks({
+bookmarks = createBookmarks({
   state: readerState,
   navigation,
   session,
+  locator,
   controls: {
     add: document.querySelector("#add-bookmark"),
-    list: document.querySelector("#bookmarks"),
-    go: document.querySelector("#go-bookmark"),
-    remove: document.querySelector("#delete-bookmark"),
+    list: document.querySelector("#toc"),
     status: document.querySelector("#bookmarks-status"),
   },
   assert,
@@ -189,8 +205,24 @@ const structuredActions = createStructuredActions({
   contentActions,
   assert,
 });
-const interaction = createInteraction({ reader, content, navigation, assert, fail });
+const interaction = createInteraction({
+  reader,
+  content,
+  navigation,
+  onCenter: toggleReaderTools,
+  assert,
+  fail,
+});
 
+const brightness = document.querySelector("#brightness");
+brightness.addEventListener("input", () => {
+  root.style.setProperty("--reader-brightness", String(Number(brightness.value) / 100));
+});
+
+document.querySelector("#reader-back").addEventListener("click", () => {
+  if (history.length > 1) history.back();
+  else window.close();
+});
 const diagnostics = createDiagnostics({
   params,
   content,

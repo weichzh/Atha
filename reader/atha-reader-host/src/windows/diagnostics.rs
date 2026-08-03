@@ -263,7 +263,7 @@ impl Recorder {
                 stage_sample,
                 self.renderer,
                 SAMPLE_ID,
-                1264,
+                780,
                 1680,
                 font_size,
                 pages,

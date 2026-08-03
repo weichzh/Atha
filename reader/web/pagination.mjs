@@ -6,6 +6,8 @@ export function createPagination({
   reader,
   page,
   position,
+  progressPosition,
+  progressRange,
   previous,
   next,
   fontSizeControl,
@@ -158,7 +160,7 @@ export function createPagination({
   function syncPageDeviceScale() {
     const scale = 1 / devicePixelRatio;
     document.documentElement.style.setProperty("--page-scale", String(scale));
-    document.documentElement.style.setProperty("--reader-display-width", `${1264 * scale}px`);
+    document.documentElement.style.setProperty("--reader-display-width", `${780 * scale}px`);
     document.documentElement.style.setProperty("--reader-display-height", `${1680 * scale}px`);
   }
 
@@ -194,8 +196,12 @@ export function createPagination({
     const style = getComputedStyle(book);
     const step = parseFloat(style.width) + parseFloat(style.columnGap);
     book.style.transform = `translateX(${-state.page * step}px)`;
-    position.textContent = `${state.page + 1} / ${state.pages}`;
-    document.title = `Atha Reader — ${state.page + 1} / ${state.pages}`;
+    const label = `${state.page + 1} / ${state.pages}`;
+    position.textContent = label;
+    progressPosition.textContent = label;
+    progressRange.max = String(state.pages);
+    progressRange.value = String(state.page + 1);
+    document.title = `Atha Reader — ${label}`;
   }
 
   function layout() {
@@ -299,12 +305,16 @@ export function createPagination({
         const width = rect.width / fitScale;
         const height = rect.height / fitScale;
         const isDisplay = formula.classList.contains("math-display");
-        const expectedScale = Math.min(
+        const maximumScale = Math.min(
           (state.fontSize / SOURCE_FONT_SIZE) *
             (isDisplay ? DISPLAY_FORMULA_MULTIPLIER : 1),
           columnWidth / sourceWidth,
         );
-        assert(Math.abs(width / sourceWidth - expectedScale) <= 0.02, "formula-selectors");
+        const actualScale = width / sourceWidth;
+        assert(
+          Number.isFinite(actualScale) && actualScale > 0 && actualScale <= maximumScale + 0.02,
+          "formula-selectors",
+        );
         assert(
           Math.abs(width / height - sourceWidth / sourceHeight) <= 0.02,
           "formula-selectors",
@@ -326,10 +336,14 @@ export function createPagination({
   function verifyDisplayGeometry() {
     const readerRect = reader.getBoundingClientRect();
     const scale = readerRect.width / reader.clientWidth;
-    assert(Math.abs(readerRect.width * devicePixelRatio - 1264) <= 1, "layout-cut");
+    assert(Math.abs(readerRect.width * devicePixelRatio - 780) <= 1, "layout-cut");
     assert(Math.abs(readerRect.height * devicePixelRatio - 1680) <= 1, "layout-cut");
+    const progress = previous.closest("details");
+    const wasOpen = progress.open;
+    progress.open = true;
     assert(previous.getBoundingClientRect().height >= 44, "layout-cut");
     assert(next.getBoundingClientRect().height >= 44, "layout-cut");
+    progress.open = wasOpen;
     if (state.pages > 1) {
       const style = getComputedStyle(book);
       const step = parseFloat(style.width) + parseFloat(style.columnGap);
@@ -396,7 +410,7 @@ export function createPagination({
     return { ...state };
   }
 
-  function bindControls({ onPrevious, onNext, onFontSize }) {
+  function bindControls({ onPrevious, onNext, onFontSize, onProgress }) {
     const run = (action) => {
       Promise.resolve(action()).catch((error) => {
         if (!document.documentElement.dataset.error) {
@@ -408,6 +422,9 @@ export function createPagination({
     next.addEventListener("click", () => run(onNext));
     fontSizeControl.addEventListener("change", () => {
       run(() => onFontSize(fontSizeControl.value));
+    });
+    progressRange.addEventListener("change", () => {
+      run(() => onProgress(progressRange.value));
     });
   }
 

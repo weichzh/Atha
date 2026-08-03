@@ -14,94 +14,139 @@
           <section id="page" class="page" aria-label="书籍内容">
             <div id="book-host"></div>
           </section>
+          <p id="chapter-label" class="chapter-label" aria-live="polite"></p>
+          <output id="position" class="reading-position" aria-live="polite">加载中</output>
         </section>
       </div>
       <p id="error" class="error" role="alert" hidden>无法安全打开这份内容。</p>
-      <nav class="toolbar" aria-label="阅读控制">
-        <button id="previous" type="button">上一页</button>
-        <output id="position" aria-live="polite">加载中</output>
-        <label hidden>
-          目录
-          <select id="toc" aria-label="章节目录"></select>
-        </label>
-        <details class="preferences">
-          <summary>阅读偏好</summary>
-          <div class="preferences-panel">
-            <label>
-              主题
-              <select id="theme">
-                <option value="system" selected>跟随系统</option>
-                <option value="light">亮色</option>
-                <option value="dark">暗色</option>
-              </select>
-            </label>
-            <label>
-              字号
-              <select id="font-size" aria-label="正文字号">
-                <option value="24">24px</option>
-                <option value="32" selected>32px</option>
-                <option value="40">40px</option>
-              </select>
-            </label>
-            <label>
-              字体
-              <select id="font-family">
-                <option value="book" selected>书源字体</option>
-                <option value="serif">衬线</option>
-                <option value="sans">无衬线</option>
-              </select>
-            </label>
-            <label>
-              阅读密度
-              <select id="density">
-                <option value="compact">紧凑</option>
-                <option value="standard" selected>标准</option>
-                <option value="comfortable">舒展</option>
-              </select>
-            </label>
-            <button id="reset-application-preferences" type="button">恢复应用默认</button>
-            <hr />
-            <label class="checkbox-label">
-              <input id="source-styles" type="checkbox" checked />
-              使用书源样式
-            </label>
-            <details class="advanced-preferences">
-              <summary>本书自定义样式</summary>
-              <label class="checkbox-label">
-                <input id="user-styles-enabled" type="checkbox" checked />
-                启用自定义样式
-              </label>
-              <label for="user-stylesheet">CSS</label>
-              <textarea
-                id="user-stylesheet"
-                rows="6"
-                spellcheck="false"
-                placeholder="例如：p { letter-spacing: 1px; }"
-              ></textarea>
-              <div class="preference-actions">
-                <button id="apply-user-style" type="button">应用</button>
-                <button id="reset-book-preferences" type="button">恢复本书</button>
+      <section class="reader-controls" aria-label="阅读工具">
+        <div class="top-toolbar">
+          <button id="reader-back" class="icon-button" type="button" aria-label="返回" title="返回">
+            <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+          </button>
+          <div class="top-toolbar-actions">
+            <button id="add-bookmark" class="icon-button" type="button" aria-label="添加或取消书签" title="添加或取消书签" aria-pressed="false">
+              <span class="bookmark-icon" aria-hidden="true"></span>
+            </button>
+            <details class="reader-tool preferences" name="reader-panel">
+              <summary class="icon-button" aria-label="阅读设置" title="阅读设置">
+                <span class="fluent-icon" aria-hidden="true">&#xE712;</span>
+              </summary>
+              <div class="tool-panel preferences-panel">
+                <h2>阅读设置</h2>
+                <label>
+                  亮度
+                  <input id="brightness" type="range" min="70" max="120" value="100" />
+                </label>
+                <label>
+                  主题
+                  <select id="theme">
+                    <option value="system" selected>跟随系统</option>
+                    <option value="light">亮色</option>
+                    <option value="dark">暗色</option>
+                  </select>
+                </label>
+                <label>
+                  字号
+                  <select id="font-size" aria-label="正文字号">
+                    <option value="24">24px</option>
+                    <option value="32" selected>32px</option>
+                    <option value="40">40px</option>
+                  </select>
+                </label>
+                <label>
+                  字体
+                  <select id="font-family">
+                    <option value="book" selected>书源字体</option>
+                    <option value="serif">衬线</option>
+                    <option value="sans">无衬线</option>
+                  </select>
+                </label>
+                <label>
+                  阅读密度
+                  <select id="density">
+                    <option value="compact">紧凑</option>
+                    <option value="standard" selected>标准</option>
+                    <option value="comfortable">舒展</option>
+                  </select>
+                </label>
+                <button id="reset-application-preferences" type="button">恢复应用默认</button>
+                <hr />
+                <label class="checkbox-label">
+                  <input id="source-styles" type="checkbox" checked />
+                  使用书源样式
+                </label>
+                <details class="advanced-preferences">
+                  <summary>本书自定义样式</summary>
+                  <label class="checkbox-label">
+                    <input id="user-styles-enabled" type="checkbox" checked />
+                    启用自定义样式
+                  </label>
+                  <label for="user-stylesheet">CSS</label>
+                  <textarea
+                    id="user-stylesheet"
+                    rows="6"
+                    spellcheck="false"
+                    placeholder="例如：p { letter-spacing: 1px; }"
+                  ></textarea>
+                  <div class="preference-actions">
+                    <button id="apply-user-style" type="button">应用</button>
+                    <button id="reset-book-preferences" type="button">恢复本书</button>
+                  </div>
+                </details>
+                <output id="preferences-status" aria-live="polite"></output>
               </div>
             </details>
-            <output id="preferences-status" aria-live="polite"></output>
           </div>
-        </details>
-        <details class="bookmarks">
-          <summary>书签</summary>
-          <div class="bookmarks-panel">
-            <button id="add-bookmark" type="button">添加当前位置</button>
-            <label>
-              已存书签
-              <select id="bookmarks" aria-label="已存书签"></select>
-            </label>
-            <div class="bookmark-actions">
-              <button id="go-bookmark" type="button">跳转</button>
-              <button id="delete-bookmark" type="button">删除</button>
+        </div>
+        <nav class="toolbar" aria-label="阅读控制">
+          <details class="reader-tool directory" name="reader-panel">
+            <summary class="icon-button" aria-label="目录" title="目录">
+              <span class="fluent-icon" aria-hidden="true">&#xE700;</span>
+            </summary>
+            <div class="tool-panel directory-panel">
+              <h2>目录</h2>
+              <label class="toc-control" hidden>
+                <span class="visually-hidden">章节和书签</span>
+                <select id="toc" size="10" aria-label="章节和书签"></select>
+              </label>
+              <output id="bookmarks-status" class="visually-hidden" aria-live="polite"></output>
             </div>
-            <output id="bookmarks-status" aria-live="polite"></output>
-            <hr />
-            <section class="annotation-editor" aria-labelledby="annotation-heading">
-              <h2 id="annotation-heading">标注</h2>
+          </details>
+          <details class="reader-tool search" name="reader-panel">
+            <summary class="icon-button" aria-label="搜索" title="搜索">
+              <span class="fluent-icon" aria-hidden="true">&#xE721;</span>
+            </summary>
+            <form id="search-form" class="tool-panel search-panel">
+              <h2>搜索本书</h2>
+              <label>
+                <span class="visually-hidden">书内文字</span>
+                <input
+                  id="search-query"
+                  type="search"
+                  maxlength="128"
+                  autocomplete="off"
+                  placeholder="搜索本书内容"
+                />
+              </label>
+              <div class="search-actions">
+                <button type="submit">搜索</button>
+                <button id="cancel-search" type="button">取消</button>
+              </div>
+              <output id="search-status" aria-live="polite"></output>
+              <label>
+                <span class="visually-hidden">搜索结果</span>
+                <select id="search-results" size="8" aria-label="搜索结果"></select>
+              </label>
+              <button id="go-search-result" type="button">跳转到结果</button>
+            </form>
+          </details>
+          <details class="reader-tool notes" name="reader-panel">
+            <summary class="icon-button" aria-label="笔记" title="笔记">
+              <span class="fluent-icon" aria-hidden="true">&#xE70F;</span>
+            </summary>
+            <section class="tool-panel notes-panel annotation-editor" aria-labelledby="annotation-heading">
+              <h2 id="annotation-heading">笔记</h2>
               <label>
                 笔记（可选）
                 <textarea id="annotation-note" rows="3" maxlength="2000"></textarea>
@@ -118,29 +163,30 @@
               </div>
               <output id="annotations-status" aria-live="polite"></output>
             </section>
-          </div>
-        </details>
-        <details class="search">
-          <summary>搜索</summary>
-          <form id="search-form" class="search-panel">
-            <label>
-              书内文字
-              <input id="search-query" type="search" maxlength="128" autocomplete="off" />
-            </label>
-            <div class="search-actions">
-              <button type="submit">搜索</button>
-              <button id="cancel-search" type="button">取消</button>
-            </div>
-            <output id="search-status" aria-live="polite"></output>
-            <label>
-              搜索结果
-              <select id="search-results" size="8" aria-label="搜索结果"></select>
-            </label>
-            <button id="go-search-result" type="button">跳转到结果</button>
-          </form>
-        </details>
-        <button id="next" type="button">下一页</button>
-      </nav>
+          </details>
+          <details class="reader-tool progress" name="reader-panel">
+            <summary class="icon-button" aria-label="进度" title="进度">
+              <span class="fluent-icon" aria-hidden="true">&#xE823;</span>
+            </summary>
+            <section class="tool-panel progress-panel" aria-labelledby="progress-heading">
+              <h2 id="progress-heading">阅读进度</h2>
+              <output id="progress-position" aria-live="polite">加载中</output>
+              <input id="progress-range" type="range" min="1" max="1" value="1" aria-label="章节内进度" />
+              <div class="progress-actions">
+                <button id="previous" type="button" aria-label="上一页">
+                  <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                </button>
+                <button id="next" type="button" aria-label="下一页">
+                  <span class="fluent-icon" aria-hidden="true">&#xE72A;</span>
+                </button>
+              </div>
+            </section>
+          </details>
+          <button class="icon-button listen-placeholder" type="button" aria-label="听书（尚未实现）" title="听书（尚未实现）" disabled>
+            <span class="fluent-icon" aria-hidden="true">&#xE767;</span>
+          </button>
+        </nav>
+      </section>
       <dialog id="content-dialog" aria-labelledby="content-dialog-title">
         <h2 id="content-dialog-title"></h2>
         <p id="content-dialog-body"></p>

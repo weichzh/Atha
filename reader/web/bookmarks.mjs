@@ -1,4 +1,4 @@
-export function createBookmarks({ state, navigation, session, controls, assert }) {
+export function createBookmarks({ state, navigation, session, locator, controls, assert }) {
   let pending = Promise.resolve();
   const messages = Object.freeze({
     "bookmark-label": "书签名称无效",
@@ -22,32 +22,43 @@ export function createBookmarks({ state, navigation, session, controls, assert }
     return heading?.label || section.id;
   }
 
-  function sync(preferred = controls.list.value) {
+  function syncCurrent() {
+    const current = locator.serialize(session.describe(), navigation.current());
+    const active = state
+      .snapshot()
+      .bookmarks.some((bookmark) => bookmark.currentVersion && bookmark.locator === current);
+    controls.add.setAttribute("aria-pressed", String(active));
+  }
+
+  function sync() {
     const bookmarks = state.snapshot().bookmarks;
-    if (bookmarks.length === 0) {
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "暂无书签";
-      controls.list.replaceChildren(empty);
-      controls.go.disabled = true;
-      controls.remove.disabled = true;
-      return;
+    controls.list.querySelectorAll("option[data-bookmark-id]").forEach((option) => option.remove());
+    for (const bookmark of bookmarks) {
+      const option = document.createElement("option");
+      option.value = `bookmark:${bookmark.id}`;
+      option.dataset.bookmarkId = bookmark.id;
+      option.disabled = !bookmark.currentVersion;
+      option.textContent = `　书签 · ${bookmark.label}${bookmark.currentVersion ? "" : "（旧版本）"}`;
+      let sectionId = null;
+      try {
+        sectionId = locator.parse(session.describe(), bookmark.locator).start.section;
+      } catch {
+        // The disabled legacy bookmark remains visible at the end of the directory.
+      }
+      const description = session.describe();
+      const section = description.sections.find((item) => item.id === sectionId);
+      const tocIndex = section
+        ? description.toc.findIndex((item) => item.href.split("#", 1)[0] === section.href)
+        : -1;
+      const chapter = controls.list.querySelector(`option[value="${tocIndex}"]`);
+      let previous = chapter;
+      while (previous?.nextElementSibling?.dataset.bookmarkId) {
+        previous = previous.nextElementSibling;
+      }
+      if (previous) previous.after(option);
+      else controls.list.append(option);
     }
-    controls.list.replaceChildren(
-      ...bookmarks.map((bookmark) => {
-        const option = document.createElement("option");
-        option.value = bookmark.id;
-        option.textContent = bookmark.currentVersion
-          ? bookmark.label
-          : `${bookmark.label}（旧版本）`;
-        return option;
-      }),
-    );
-    controls.list.value = bookmarks.some((bookmark) => bookmark.id === preferred)
-      ? preferred
-      : bookmarks.at(-1).id;
-    controls.go.disabled = false;
-    controls.remove.disabled = false;
+    syncCurrent();
   }
 
   function run(action) {
@@ -59,35 +70,35 @@ export function createBookmarks({ state, navigation, session, controls, assert }
     return result;
   }
 
-  function add() {
+  function toggle() {
     const result = state.addBookmark(label());
     if (!result.ok) throw new Error(result.error);
-    sync(result.id);
-    report(result.created ? "已添加书签" : "当前位置已有书签");
+    if (!result.created) {
+      const removed = state.removeBookmark(result.id);
+      if (!removed.ok) throw new Error(removed.error);
+      sync();
+      report("已取消书签");
+      return Object.freeze({ ...result, removed: true });
+    }
+    sync();
+    report("已添加书签");
     return result;
   }
 
-  async function go() {
-    const result = state.resolveBookmark(controls.list.value);
+  async function go(id) {
+    const result = state.resolveBookmark(id);
     if (!result.ok) throw new Error(result.error);
     if (!(await navigation.goTo(result.locator))) throw new Error("bookmark-location");
     report("已跳转到书签");
     return true;
   }
 
-  function remove() {
-    const result = state.removeBookmark(controls.list.value);
-    if (!result.ok) throw new Error(result.error);
-    sync();
-    report("已删除书签");
-    return true;
-  }
-
   function bind() {
-    controls.add.addEventListener("click", () => run(add));
-    controls.go.addEventListener("click", () => run(go));
-    controls.remove.addEventListener("click", () => run(remove));
-    controls.list.addEventListener("change", () => sync());
+    controls.add.addEventListener("click", () => run(toggle));
+    controls.list.addEventListener("change", () => {
+      const id = controls.list.selectedOptions[0]?.dataset.bookmarkId;
+      if (id) run(() => go(id));
+    });
     sync();
   }
 
@@ -96,23 +107,41 @@ export function createBookmarks({ state, navigation, session, controls, assert }
     controls.add.click();
     await pending;
     const created = state.snapshot().bookmarks;
-    assert(created.length === 1 && controls.list.value === created[0].id, "sample-boundary");
+    assert(created.length === 1 && controls.add.getAttribute("aria-pressed") === "true", "sample-boundary");
     controls.add.click();
     await pending;
-    assert(state.snapshot().bookmarks.length === 1, "sample-boundary");
+    assert(
+      state.snapshot().bookmarks.length === 0 &&
+        controls.add.getAttribute("aria-pressed") === "false",
+      "sample-boundary",
+    );
+    controls.add.click();
+    await pending;
     await navigation.next();
-    controls.go.click();
+    const bookmark = controls.list.querySelector("option[data-bookmark-id]");
+    controls.list.value = bookmark.value;
+    controls.list.dispatchEvent(new Event("change", { bubbles: true }));
     await pending;
-    assert(locatorEqual(navigation.current(), before), "sample-boundary");
-    controls.remove.click();
+    assert(
+      locatorEqual(navigation.current(), before) &&
+        controls.add.getAttribute("aria-pressed") === "true",
+      "sample-boundary",
+    );
+    controls.add.click();
     await pending;
-    assert(state.snapshot().bookmarks.length === 0 && controls.remove.disabled, "sample-boundary");
-    return Object.freeze({ created: true, duplicatePrevented: true, jumped: true, deleted: true });
+    assert(state.snapshot().bookmarks.length === 0, "sample-boundary");
+    return Object.freeze({ created: true, toggled: true, jumped: true, deleted: true });
   }
 
   function locatorEqual(left, right) {
     return JSON.stringify(left) === JSON.stringify(right);
   }
 
-  return Object.freeze({ bind, idle: () => pending, snapshot: () => state.snapshot().bookmarks, verify });
+  return Object.freeze({
+    bind,
+    idle: () => pending,
+    snapshot: () => state.snapshot().bookmarks,
+    syncCurrent,
+    verify,
+  });
 }

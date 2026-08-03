@@ -140,7 +140,7 @@ $themeProbe = @'
   const expectedHeadings = __EXPECTED_HEADINGS__;
   if (expectedSections > 1) {
     const toc = document.querySelector('#toc');
-    if (toc.options.length !== expectedSections) throw new Error('toc-control');
+    if (toc.querySelectorAll('option:not([data-bookmark-id])').length !== expectedSections) throw new Error('toc-control');
     const waitForSection = async (section) => {
       for (let frame = 0; frame < 60; frame += 1) {
         const state = globalThis.__athaReaderDiagnostics?.snapshot().session;
@@ -227,7 +227,7 @@ $themeProbe = @'
   if (!result.contentActions.selectionCopied || !result.contentActions.sameSection || !result.contentActions.tailFragmentRecovered || !result.contentActions.missingTargetRecovered || !result.contentActions.unknownSectionRecovered || !result.contentActions.auxiliaryActivation || !result.contentActions.externalBlocked || !result.contentActions.footnoteDialog || !result.contentActions.dialogInputProtected || !result.contentActions.focusRestored) throw new Error('content-actions');
   if (expectedSections > 1 && !result.contentActions.crossSection) throw new Error('content-link-section');
   if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
-  if (!result.bookmarks.created || !result.bookmarks.duplicatePrevented || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
+  if (!result.bookmarks.created || !result.bookmarks.toggled || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
   if (!result.search.replaced || !result.search.canceled || !result.search.errorIsolated || !result.search.activeContentRejected) throw new Error('search');
   if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected) throw new Error('annotations');
   return result;
@@ -354,7 +354,7 @@ try {
             }
             $url = "http://127.0.0.1:$port/reader/atha-reader.html?$sourceQuery&verify=1&probe=$probeUrl&state=$($sample.id)&persist=1$versionQuery"
             Invoke-AgentBrowser @('--session', $session, '--allowed-domains', '127.0.0.1', 'open', $url)
-            Invoke-AgentBrowser @('--session', $session, 'set', 'viewport', '1264', '1680')
+            Invoke-AgentBrowser @('--session', $session, 'set', 'viewport', '780', '1680')
             [void](Get-AgentBrowserScriptValue -Session $session -Script 'localStorage.clear(); true')
             Invoke-AgentBrowser @('--session', $session, 'reload')
             foreach ($theme in @('light', 'dark')) {
@@ -458,7 +458,8 @@ try {
                         Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
                         Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[2], [string]$annotationProbe[3])
                         Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
-                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                        [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
                         Invoke-AgentBrowser @('--session', $session, 'fill', '#annotation-note', '真实阅读笔记')
                         Invoke-AgentBrowser @('--session', $session, 'click', '#add-annotation')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.overlayCount === 1 && value.active[0].sourceAnchor.contentHash.length === 64; })()")
@@ -469,11 +470,12 @@ try {
                         Invoke-AgentBrowser @('--session', $session, 'click', '#save-annotation-note')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "globalThis.__athaReaderDiagnostics.snapshot().annotations.active[0]?.note === '已更新的真实阅读笔记'")
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-light-annotation.png'))
-                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
                     }
                     else {
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.overlayCount === 1 && value.active[0].note === '已更新的真实阅读笔记'; })()")
-                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                        [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
                         Invoke-AgentBrowser @('--session', $session, 'click', '#go-annotation')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot(); const anchor = JSON.parse(value.annotations.active[0].sourceAnchor.canonicalLocator).start; const current = JSON.parse(value.navigation.current).start; return anchor.section === current.section && anchor.offset === current.offset; })()")
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-dark-annotation.png'))
@@ -482,11 +484,12 @@ try {
                         if (@($deletedAnnotation.active).Count -ne 0 -or $deletedAnnotation.tombstones -ne 1 -or $deletedAnnotation.overlayCount -ne 0) {
                             throw "Annotation soft delete failed: $($deletedAnnotation | ConvertTo-Json -Compress -Depth 6)"
                         }
-                        Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
                     }
                 }
                 $screenshot = Join-Path $screenshots "$($sample.id)-$theme.png"
                 Invoke-AgentBrowser @('--session', $session, 'screenshot', $screenshot)
+                [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
                 Invoke-AgentBrowser @('--session', $session, 'click', '.search > summary')
                 Invoke-AgentBrowser @('--session', $session, 'fill', '#search-query', [string]$sample.searchQuery)
                 Invoke-AgentBrowser @('--session', $session, 'click', '#search-form button[type=submit]')
@@ -519,11 +522,13 @@ try {
                 Invoke-AgentBrowser @('--session', $session, 'network', 'requests', '--filter', 'example.com')
             }
             if ($sample.id -eq 'math-history-r1') {
-                Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
+                Invoke-AgentBrowser @('--session', $session, 'click', '.progress > summary')
                 $positionBefore = Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#position').textContent" | ConvertFrom-Json
                 Invoke-AgentBrowser @('--session', $session, 'click', '#next')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent !== '$positionBefore'")
+                Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
                 Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
+                Invoke-AgentBrowser @('--session', $session, 'click', '.preferences > summary')
                 Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '24')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "JSON.parse(localStorage.getItem('atha.reader.application.v1')).preferences.fontSize === 24")
                 Invoke-AgentBrowser @('--session', $session, 'select', '#theme', 'dark')
@@ -537,7 +542,7 @@ try {
   position: document.querySelector('#position').textContent,
   fontSize: document.querySelector('#font-size').value,
   theme: document.querySelector('#theme').value,
-  bookmarks: document.querySelector('#bookmarks').value ? 1 : 0,
+  bookmarks: document.querySelectorAll('#toc option[data-bookmark-id]').length,
   ...(() => {
     const key = Object.keys(localStorage).find((value) => value.startsWith('atha.reader.annotations.'));
     const items = JSON.parse(localStorage.getItem(key)).items;
@@ -551,12 +556,22 @@ try {
                 if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1 -or $restored.annotationActive -ne 0 -or $restored.annotationTombstones -ne 1) {
                     throw "Persistent reader state did not restore. expectedPosition=$savedPosition actual=$($restored | ConvertTo-Json -Compress)"
                 }
+                [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
+                Invoke-AgentBrowser @('--session', $session, 'click', '.progress > summary')
                 Invoke-AgentBrowser @('--session', $session, 'click', '#next')
-                Invoke-AgentBrowser @('--session', $session, 'click', '.bookmarks > summary')
-                Invoke-AgentBrowser @('--session', $session, 'click', '#go-bookmark')
+                Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
+                [void](Get-AgentBrowserScriptValue -Session $session -Script @'
+(() => {
+  const toc = document.querySelector('#toc');
+  const bookmark = toc.querySelector('option[data-bookmark-id]');
+  toc.value = bookmark.value;
+  toc.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+})()
+'@)
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent === '$savedPosition'")
-                Invoke-AgentBrowser @('--session', $session, 'click', '#delete-bookmark')
-                $bookmarkCount = [int](Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#bookmarks option').value ? 1 : 0")
+                Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
+                $bookmarkCount = [int](Get-AgentBrowserScriptValue -Session $session -Script "document.querySelectorAll('#toc option[data-bookmark-id]').length")
                 if ($bookmarkCount -ne 0) { throw 'Bookmark deletion did not persist in memory.' }
                 [void](Get-AgentBrowserScriptValue -Session $session -Script @'
 (() => {

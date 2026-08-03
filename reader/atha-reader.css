@@ -1,9 +1,11 @@
 :root {
-  --reader-width: 1264px;
+  --reader-width: 780px;
   --reader-height: 1680px;
   --page-scale: 1;
-  --reader-display-width: 1264px;
+  --reader-display-width: 780px;
   --reader-display-height: 1680px;
+  --reader-brightness: 1;
+  --reader-accent: #1497e8;
   color-scheme: light dark;
   font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   background: #dfe5e7;
@@ -58,10 +60,10 @@ textarea:focus-visible,
 }
 
 .reader {
-  --page-inline-margin: 112px;
+  --page-inline-margin: 56px;
   --page-top-margin: 96px;
   --page-bottom-margin: 128px;
-  --page-gap: 224px;
+  --page-gap: 112px;
   --content-width: calc(var(--reader-width) - 2 * var(--page-inline-margin));
   --content-height: calc(
     var(--reader-height) - var(--page-top-margin) - var(--page-bottom-margin)
@@ -70,6 +72,7 @@ textarea:focus-visible,
   width: var(--reader-width);
   height: var(--reader-height);
   background: #fffdf8;
+  filter: brightness(var(--reader-brightness));
   transform: scale(var(--page-scale));
   transform-origin: top left;
   touch-action: pan-y;
@@ -118,7 +121,8 @@ textarea:focus-visible,
 .book img.math-inline,
 .book img.math-display {
   box-sizing: border-box;
-  max-width: 100%;
+  max-width: none;
+  padding: 0 !important;
   background: #fff;
   color-scheme: light;
 }
@@ -151,90 +155,225 @@ textarea:focus-visible,
   break-after: avoid;
 }
 
-.toolbar {
+.chapter-label,
+.reading-position {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  color: rgb(24 34 38 / 56%);
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-size: 24px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.chapter-label {
+  top: 40px;
+  left: var(--page-inline-margin);
+  max-width: calc(100% - 2 * var(--page-inline-margin));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-position {
+  right: var(--page-inline-margin);
+  bottom: 48px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.reader-controls {
   position: fixed;
-  right: 48px;
-  bottom: 28px;
-  left: 48px;
-  display: grid;
-  grid-template-columns: max-content minmax(60px, 1fr) minmax(100px, 160px) max-content max-content max-content max-content;
-  gap: 12px;
+  z-index: 10;
+  inset: 0;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, visibility 120ms step-end;
+}
+
+:root[data-reader-tools] .reader-controls {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+.top-toolbar,
+.toolbar {
+  position: absolute;
+  right: 0;
+  left: 0;
+  background: rgb(255 255 255 / 96%);
+  color: #182226;
+  pointer-events: auto;
+}
+
+.top-toolbar {
+  top: 0;
+  display: flex;
+  min-height: 64px;
   align-items: center;
-  padding: 10px 14px;
-  border: 1px solid #ccd4d6;
-  border-radius: 14px;
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 0 8px 32px rgb(25 39 43 / 14%);
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid #ccd4d6;
 }
 
-.preferences,
-.bookmarks,
-.search {
-  position: relative;
+.top-toolbar-actions {
+  display: flex;
+  align-items: center;
 }
 
-.preferences > summary,
-.bookmarks > summary,
-.search > summary,
+.toolbar {
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  min-height: 72px;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid #ccd4d6;
+}
+
+.reader-tool {
+  display: grid;
+  place-items: center;
+}
+
+.reader-tool > summary,
 .advanced-preferences > summary {
   cursor: pointer;
 }
 
-.preferences > summary,
-.bookmarks > summary,
-.search > summary {
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 1px solid #ccd4d6;
-  border-radius: 8px;
-  list-style-position: inside;
+.reader-tool > summary {
+  list-style: none;
+}
+
+.reader-tool > summary::-webkit-details-marker {
+  display: none;
+}
+
+.icon-button {
+  width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+
+.reader-tool[open] > .icon-button {
+  color: var(--reader-accent);
+}
+
+.fluent-icon {
+  display: inline-block;
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  font-size: 24px;
+  font-style: normal;
+  line-height: 1;
+}
+
+.bookmark-icon {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: url("assets/bookmark-24-regular.svg") center / contain no-repeat;
+  mask: url("assets/bookmark-24-regular.svg") center / contain no-repeat;
+}
+
+#add-bookmark[aria-pressed="true"] {
+  color: var(--reader-accent);
+}
+
+.listen-placeholder {
+  place-self: center;
+  opacity: 0.52;
+}
+
+.tool-panel {
+  position: fixed;
+  right: 0;
+  bottom: 72px;
+  left: 0;
+  display: grid;
+  max-height: min(72vh, calc(100vh - 136px));
+  gap: 12px;
+  padding: 20px;
+  overflow: auto;
+  border-top: 1px solid #ccd4d6;
+  background: #fff;
+  color: #182226;
+  box-shadow: 0 -10px 32px rgb(25 39 43 / 14%);
+  pointer-events: auto;
+}
+
+.tool-panel h2,
+.tool-panel h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.tool-panel h2 {
+  font-size: 1.15rem;
+  text-align: center;
+}
+
+.tool-panel h3 {
+  font-size: 1rem;
 }
 
 .preferences-panel {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 16px);
-  display: grid;
-  width: min(420px, calc(100vw - 96px));
-  max-height: calc(100vh - 140px);
-  gap: 12px;
-  padding: 18px;
-  overflow: auto;
-  border: 1px solid #ccd4d6;
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 8px 32px rgb(25 39 43 / 20%);
+  top: 64px;
+  right: auto;
+  bottom: auto;
+  width: min(390px, 100vw);
+  max-height: calc(100vh - 64px);
+  border-top: 0;
+  border-right: 1px solid #ccd4d6;
+  border-bottom: 1px solid #ccd4d6;
+  border-radius: 0 0 16px;
+  box-shadow: 10px 10px 32px rgb(25 39 43 / 14%);
 }
 
-.bookmarks-panel,
-.search-panel {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 16px);
-  display: grid;
-  width: min(360px, calc(100vw - 96px));
-  gap: 12px;
-  padding: 18px;
-  border: 1px solid #ccd4d6;
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 8px 32px rgb(25 39 43 / 20%);
+.directory-panel {
+  grid-template-rows: auto minmax(180px, 1fr);
+  height: min(78vh, calc(100vh - 136px));
 }
 
-.bookmarks-panel {
-  max-height: calc(100vh - 140px);
-  overflow: auto;
-}
-
-.bookmarks-panel label,
-.annotation-editor {
+.toc-control,
+.annotation-editor,
+.search-panel label {
   display: grid;
   gap: 6px;
 }
 
-.annotation-editor h2 {
-  margin: 0;
-  font-size: 1rem;
+.toc-control select,
+.search-panel select,
+.annotation-editor select {
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.toc-control select {
+  min-height: 260px;
+}
+
+.toc-control option,
+.search-panel option,
+.annotation-editor option {
+  padding: 12px 10px;
 }
 
 .annotation-editor textarea {
@@ -247,16 +386,12 @@ textarea:focus-visible,
 }
 
 .search-panel {
-  width: min(440px, calc(100vw - 96px));
-}
-
-.search-panel label {
-  display: grid;
-  gap: 6px;
+  grid-template-rows: auto auto auto auto minmax(180px, 1fr) auto;
+  height: min(72vh, calc(100vh - 136px));
 }
 
 .search-panel select {
-  min-height: 220px;
+  min-height: 260px;
 }
 
 .search-actions {
@@ -268,13 +403,8 @@ textarea:focus-visible,
   flex: 1;
 }
 
-.bookmark-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.bookmark-actions > * {
-  flex: 1;
+.toc-control option[data-bookmark-id] {
+  color: var(--reader-accent);
 }
 
 .annotation-actions {
@@ -285,6 +415,27 @@ textarea:focus-visible,
 .annotation-actions > * {
   min-width: 0;
   flex: 1;
+}
+
+.progress-panel {
+  min-height: 220px;
+  align-content: center;
+}
+
+#progress-position {
+  font-size: 1.75rem;
+  text-align: center;
+}
+
+#progress-range {
+  width: 100%;
+  accent-color: var(--reader-accent);
+}
+
+.progress-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 #annotations-status[data-error="true"] {
@@ -299,6 +450,7 @@ textarea:focus-visible,
 .preferences-panel label:not(.checkbox-label) {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
 }
 
 .preferences-panel hr {
@@ -424,22 +576,6 @@ textarea:focus-visible,
   white-space: pre;
 }
 
-.toolbar output {
-  text-align: center;
-}
-
-.toolbar label {
-  display: flex;
-  min-width: 0;
-  gap: 8px;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.toolbar label[hidden] {
-  display: none;
-}
-
 #toc {
   min-width: 0;
   width: 100%;
@@ -488,24 +624,25 @@ textarea:focus-visible,
     filter: invert(0.88) hue-rotate(180deg);
   }
 
-  button,
+  button:not(.icon-button),
   input,
   select,
   textarea,
-  .preferences > summary,
-  .bookmarks > summary,
-  .search > summary,
-  .preferences-panel,
-  .bookmarks-panel,
-  .search-panel,
+  .top-toolbar,
+  .tool-panel,
   .toolbar {
     border-color: #40545c;
     background: #202c30;
     color: #e9eeee;
   }
 
-  .toolbar {
-    box-shadow: 0 8px 32px rgb(0 0 0 / 35%);
+  .tool-panel {
+    box-shadow: 0 -10px 32px rgb(0 0 0 / 35%);
+  }
+
+  .chapter-label,
+  .reading-position {
+    color: rgb(233 238 238 / 58%);
   }
 
   .error {
@@ -547,6 +684,11 @@ textarea:focus-visible,
   color: #182226;
 }
 
+:root[data-theme="light"] .chapter-label,
+:root[data-theme="light"] .reading-position {
+  color: rgb(24 34 38 / 56%);
+}
+
 .book[data-theme="light"] img.math-inline,
 .book[data-theme="light"] img.math-display {
   background: #fff;
@@ -557,16 +699,12 @@ textarea:focus-visible,
   filter: none;
 }
 
-:root[data-theme="light"] button,
+:root[data-theme="light"] button:not(.icon-button),
 :root[data-theme="light"] input,
 :root[data-theme="light"] select,
 :root[data-theme="light"] textarea,
-:root[data-theme="light"] .preferences > summary,
-:root[data-theme="light"] .bookmarks > summary,
-:root[data-theme="light"] .search > summary,
-:root[data-theme="light"] .preferences-panel,
-:root[data-theme="light"] .bookmarks-panel,
-:root[data-theme="light"] .search-panel,
+:root[data-theme="light"] .top-toolbar,
+:root[data-theme="light"] .tool-panel,
 :root[data-theme="light"] .toolbar {
   border-color: #ccd4d6;
   background: #fff;
@@ -622,16 +760,12 @@ textarea:focus-visible,
   filter: invert(0.88) hue-rotate(180deg);
 }
 
-:root[data-theme="dark"] button,
+:root[data-theme="dark"] button:not(.icon-button),
 :root[data-theme="dark"] input,
 :root[data-theme="dark"] select,
 :root[data-theme="dark"] textarea,
-:root[data-theme="dark"] .preferences > summary,
-:root[data-theme="dark"] .bookmarks > summary,
-:root[data-theme="dark"] .search > summary,
-:root[data-theme="dark"] .preferences-panel,
-:root[data-theme="dark"] .bookmarks-panel,
-:root[data-theme="dark"] .search-panel,
+:root[data-theme="dark"] .top-toolbar,
+:root[data-theme="dark"] .tool-panel,
 :root[data-theme="dark"] .toolbar {
   border-color: #40545c;
   background: #202c30;
@@ -656,4 +790,9 @@ textarea:focus-visible,
 
 :root[data-theme="dark"] #annotations-status[data-error="true"] {
   color: #ffb3ad;
+}
+
+:root[data-theme="dark"] .chapter-label,
+:root[data-theme="dark"] .reading-position {
+  color: rgb(233 238 238 / 58%);
 }

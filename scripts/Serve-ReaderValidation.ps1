@@ -113,6 +113,7 @@ try {
             $readerFiles = @{
                 '/reader/atha-reader.html' = 'atha-reader.html'
                 '/reader/atha-reader.css' = 'atha-reader.css'
+                '/reader/assets/bookmark-24-regular.svg' = 'assets/bookmark-24-regular.svg'
             }
             if ($readerFiles.ContainsKey($path)) {
                 $file = Get-SafeFile $readerRoot $readerFiles[$path]

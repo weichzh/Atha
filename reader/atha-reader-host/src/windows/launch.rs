@@ -5,7 +5,7 @@ use atha_backend::reader::epub::{READER_MANIFEST, import_epub};
 use tao::dpi::LogicalSize;
 
 pub(super) const APP_PAGE: &str = "https://atha.localhost/atha-reader.html";
-const PAGE_DEVICE_WIDTH: f64 = 1264.0;
+const PAGE_DEVICE_WIDTH: f64 = 780.0;
 const PAGE_DEVICE_HEIGHT: f64 = 1680.0;
 const WINDOW_PADDING_LOGICAL: f64 = 48.0;
 const WINDOW_FRAME_ALLOWANCE_LOGICAL: f64 = 48.0;
@@ -362,7 +362,7 @@ mod tests {
     fn initial_window_reserves_system_frame_within_screen_bounds() {
         let size = initial_window_size(LogicalSize::new(1920.0, 1080.0), 2.0);
 
-        assert_eq!(size.width, 680.0);
+        assert_eq!(size.width, 438.0);
         assert_eq!(size.height, 816.0);
     }
 
