@@ -1,5 +1,5 @@
 <div class="reader-frame">
-  <section class="reader" aria-label="固定尺寸阅读页">
+  <section class="reader" aria-label="固定尺寸阅读页" tabindex="-1">
     <section id="page" class="page" aria-label="书籍内容">
       <div id="book-host"></div>
     </section>

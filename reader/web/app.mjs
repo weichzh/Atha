@@ -3,13 +3,14 @@ const root = document.documentElement;
 const reader = document.querySelector(".reader");
 const errorBox = document.querySelector("#error");
 
+function closeReaderTools() {
+  root.removeAttribute("data-reader-tools");
+  for (const panel of document.querySelectorAll(".reader-tool[open]")) panel.open = false;
+}
+
 function toggleReaderTools() {
-  if (root.hasAttribute("data-reader-tools")) {
-    root.removeAttribute("data-reader-tools");
-    for (const panel of document.querySelectorAll(".reader-tool[open]")) panel.open = false;
-  } else {
-    root.setAttribute("data-reader-tools", "");
-  }
+  if (root.hasAttribute("data-reader-tools")) closeReaderTools();
+  else root.setAttribute("data-reader-tools", "");
 }
 
 function emit(message) {
@@ -58,6 +59,8 @@ const preferences = createPreferences({
     marginRight: document.querySelector("#margin-right"),
     marginBottom: document.querySelector("#margin-bottom"),
     marginLeft: document.querySelector("#margin-left"),
+    tapToPaginate: document.querySelector("#tap-to-paginate"),
+    swipeToPaginate: document.querySelector("#swipe-to-paginate"),
     sourceStyles: document.querySelector("#source-styles"),
     userStylesEnabled: document.querySelector("#user-styles-enabled"),
     userStylesheet: document.querySelector("#user-stylesheet"),
@@ -73,7 +76,6 @@ const pagination = createPagination({
   reader,
   page: document.querySelector("#page"),
   position: document.querySelector("#position"),
-  progressPosition: document.querySelector("#progress-position"),
   progressRange: document.querySelector("#progress-range"),
   previous: document.querySelector("#previous"),
   next: document.querySelector("#next"),
@@ -103,6 +105,7 @@ const session = createReadingSession({
 
 const locator = createLocator({ assert });
 let readerState;
+let syncDirectorySelection = () => {};
 const keyPrefix = params.has("state-probe") ? "atha.reader.probe" : "atha.reader";
 const bookKey = params.get("state");
 const navigation = createNavigation({
@@ -112,6 +115,10 @@ const navigation = createNavigation({
   preferences,
   toc: document.querySelector("#toc"),
   chapterLabel: document.querySelector("#chapter-label"),
+  progressChapter: document.querySelector("#progress-chapter"),
+  progressBook: document.querySelector("#progress-book"),
+  progressPosition: document.querySelector("#progress-position"),
+  progressRange: document.querySelector("#progress-range"),
   previous: document.querySelector("#previous"),
   next: document.querySelector("#next"),
   fontSizeControl: document.querySelector("#font-size"),
@@ -122,6 +129,7 @@ const navigation = createNavigation({
   onStable() {
     readerState?.scheduleProgress();
     bookmarks?.syncCurrent();
+    syncDirectorySelection();
   },
   assert,
   fail,
@@ -216,6 +224,7 @@ const interaction = createInteraction({
   reader,
   content,
   navigation,
+  preferences,
   onCenter: toggleReaderTools,
   assert,
   fail,
@@ -225,6 +234,84 @@ document.querySelector("#reader-back").addEventListener("click", () => {
   if (history.length > 1) history.back();
   else window.close();
 });
+
+function bindSettingsNavigation() {
+  const panel = document.querySelector("[data-settings-root]");
+  if (!panel) return;
+  const owner = panel.closest("details");
+  const show = (name = "menu") => {
+    panel.dataset.settingsView = name;
+    for (const page of panel.querySelectorAll("[data-settings-page]")) {
+      page.hidden = page.dataset.settingsPage !== name;
+    }
+    requestAnimationFrame(() => {
+      panel.querySelector(`[data-settings-page="${name}"]:not([hidden]) h2`)?.focus();
+    });
+  };
+  panel.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-settings-target], [data-settings-back]");
+    if (!target) return;
+    show(target.dataset.settingsTarget);
+  });
+  owner.addEventListener("toggle", () => {
+    if (owner.open) show();
+  });
+}
+
+function bindDirectoryProjection() {
+  const source = document.querySelector("#toc");
+  const target = document.querySelector("#directory-list");
+  const sync = () => {
+    for (const button of target.querySelectorAll("button")) {
+      const current = button.dataset.value === source.value;
+      button.classList.toggle("is-current", current);
+      if (current) button.setAttribute("aria-current", "true");
+      else button.removeAttribute("aria-current");
+    }
+  };
+  const render = () => {
+    target.replaceChildren(
+      ...[...source.options].map((option) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = option.dataset.bookmarkId ? "directory-item is-bookmark" : "directory-item";
+        button.dataset.value = option.value;
+        button.disabled = option.disabled;
+        button.textContent = option.textContent;
+        return button;
+      }),
+    );
+    sync();
+  };
+  target.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-value]");
+    if (!button || button.disabled) return;
+    const option = [...source.options].find((item) => item.value === button.dataset.value);
+    if (!option) return;
+    let navigated;
+    try {
+      navigated = option.dataset.bookmarkId
+        ? await bookmarks.go(option.dataset.bookmarkId)
+        : await navigation.goToToc(Number(option.value));
+    } catch (error) {
+      if (!option.dataset.bookmarkId) {
+        fail(error instanceof Error ? error.message : "section-load");
+      }
+      return;
+    }
+    if (!navigated) return;
+    closeReaderTools();
+    reader.focus({ preventScroll: true });
+  });
+  new MutationObserver(render).observe(source, { childList: true });
+  syncDirectorySelection = sync;
+  render();
+}
+
+document.querySelectorAll("[data-close-reader-tools]").forEach((button) => {
+  button.addEventListener("click", closeReaderTools);
+});
+bindSettingsNavigation();
 const diagnostics = createDiagnostics({
   params,
   content,
@@ -257,6 +344,7 @@ async function start() {
   await readerState.restore();
   readerState.bind();
   await bookmarks.bind();
+  bindDirectoryProjection();
   search.bind();
   annotations.bind();
   contentActions.bind();

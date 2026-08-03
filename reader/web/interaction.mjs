@@ -31,7 +31,7 @@ function swipeDirection(start, event) {
   return deltaX < 0 ? 1 : -1;
 }
 
-export function createInteraction({ reader, content, navigation, onCenter, assert, fail }) {
+export function createInteraction({ reader, content, navigation, preferences, onCenter, assert, fail }) {
   const wheel = createWheelDetector();
   const counts = {
     keyboard: 0,
@@ -149,16 +149,18 @@ export function createInteraction({ reader, content, navigation, onCenter, asser
     }
     if (start.type === "touch") {
       const direction = swipeDirection(start, event);
-      if (direction) {
+      if (direction && preferences.snapshot().application.swipeToPaginate) {
         run(direction, "touch");
         return;
       }
       if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) return;
       const rect = reader.getBoundingClientRect();
       const ratio = (event.clientX - rect.left) / rect.width;
-      if (ratio < 0.35) run(-1, "touch");
-      else if (ratio > 0.65) run(1, "touch");
-      else onCenter();
+      if (ratio < 0.35) {
+        if (preferences.snapshot().application.tapToPaginate) run(-1, "touch");
+      } else if (ratio > 0.65) {
+        if (preferences.snapshot().application.tapToPaginate) run(1, "touch");
+      } else onCenter();
       return;
     }
     if (start.type !== "mouse" || Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) {
@@ -166,9 +168,11 @@ export function createInteraction({ reader, content, navigation, onCenter, asser
     }
     const rect = reader.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / rect.width;
-    if (ratio < 0.35) run(-1, "mouse");
-    else if (ratio > 0.65) run(1, "mouse");
-    else onCenter();
+    if (ratio < 0.35) {
+      if (preferences.snapshot().application.tapToPaginate) run(-1, "mouse");
+    } else if (ratio > 0.65) {
+      if (preferences.snapshot().application.tapToPaginate) run(1, "mouse");
+    } else onCenter();
   }
 
   function bind() {

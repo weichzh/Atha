@@ -187,6 +187,7 @@ export function createBookmarks({ state, navigation, pagination, session, locato
 
   return Object.freeze({
     bind,
+    go: (id) => run(() => go(id)),
     idle: () => pending,
     snapshot: () => state.snapshot().bookmarks,
     syncCurrent,

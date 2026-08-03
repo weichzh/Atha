@@ -19,6 +19,25 @@ function findTocIndex(
   return best.index;
 }
 
+function encodeProgress(sectionIndex, sectionCount, pageIndex, pageCount) {
+  return (sectionIndex + (pageIndex + 1) / pageCount) / sectionCount;
+}
+
+function decodeProgress(value, maximum, sectionCount) {
+  const ratio = Math.max(0, Math.min(1, Number(value) / Number(maximum)));
+  const absolute = ratio * sectionCount;
+  const epsilon = Number.EPSILON * Math.max(1, absolute) * 4;
+  const sectionIndex = Math.max(
+    0,
+    Math.min(sectionCount - 1, Math.ceil(absolute - epsilon) - 1),
+  );
+  return Object.freeze({ ratio, sectionIndex, localRatio: absolute - sectionIndex });
+}
+
+function decodeProgressPage(localRatio, pageCount) {
+  return Math.max(0, Math.min(pageCount - 1, Math.round(localRatio * pageCount) - 1));
+}
+
 export function createNavigation({
   session,
   pagination,
@@ -26,6 +45,10 @@ export function createNavigation({
   preferences,
   toc,
   chapterLabel,
+  progressChapter,
+  progressBook,
+  progressPosition,
+  progressRange,
   previous,
   next,
   fontSizeControl,
@@ -75,7 +98,13 @@ export function createNavigation({
     next.disabled = state.currentIndex + 1 === state.sections && page.page + 1 === page.pages;
     const index = currentTocIndex(preferredTocIndex, contentOffset);
     if (index >= 0) toc.value = String(index);
-    chapterLabel.textContent = book().toc[index]?.label || book().sections[state.currentIndex]?.id || "";
+    const label = book().toc[index]?.label || book().sections[state.currentIndex]?.id || "";
+    const ratio = encodeProgress(state.currentIndex, state.sections, page.page, page.pages);
+    chapterLabel.textContent = label;
+    progressChapter.textContent = label;
+    progressBook.textContent = `全书约 ${Math.round(ratio * 100)}%`;
+    progressPosition.textContent = `第 ${state.currentIndex + 1}/${state.sections} 节 · 本节 ${page.page + 1}/${page.pages} 页`;
+    progressRange.value = String(ratio * Number(progressRange.max));
   }
 
   async function fallback(reason, sectionIndex = 0) {
@@ -189,6 +218,18 @@ export function createNavigation({
     return true;
   }
 
+  async function goToProgress(value) {
+    const state = session.snapshot();
+    const { sectionIndex, localRatio } = decodeProgress(
+      value,
+      progressRange.max,
+      state.sections,
+    );
+    if (state.currentIndex !== sectionIndex) await session.open(sectionIndex);
+    await pagination.show(decodeProgressPage(localRatio, pagination.snapshot().pages));
+    syncControls();
+  }
+
   async function setFontSize(value) {
     return setPreferences("application", { fontSize: Number(value) });
   }
@@ -226,11 +267,7 @@ export function createNavigation({
       onPrevious: () => run(previousPage),
       onNext: () => run(nextPage),
       onFontSize: (value) => run(() => setFontSize(value)),
-      onProgress: (value) =>
-        run(async () => {
-          await pagination.show(Number(value) - 1);
-          syncControls();
-        }),
+      onProgress: (value) => run(() => goToProgress(value)),
     });
     preferences.bind({
       onUpdate: (scope, patch) => run(() => setPreferences(scope, patch)),
@@ -265,6 +302,34 @@ export function createNavigation({
       0,
       1,
     ) === 1,
+    "sample-boundary",
+  );
+  const firstPageProgress = encodeProgress(0, 1, 0, 10);
+  const firstPageTarget = decodeProgress(firstPageProgress, 1, 1);
+  assert(
+    firstPageTarget.sectionIndex === 0 &&
+      decodeProgressPage(firstPageTarget.localRatio, 10) === 0,
+    "sample-boundary",
+  );
+  const sectionEndProgress = encodeProgress(0, 173, 29, 30);
+  const sectionEndTarget = decodeProgress(sectionEndProgress, 1, 173);
+  assert(
+    sectionEndTarget.sectionIndex === 0 &&
+      decodeProgressPage(sectionEndTarget.localRatio, 30) === 29,
+    "sample-boundary",
+  );
+  const laterSectionEndProgress = encodeProgress(24, 173, 29, 30);
+  const laterSectionEndTarget = decodeProgress(laterSectionEndProgress, 1, 173);
+  assert(
+    laterSectionEndTarget.sectionIndex === 24 &&
+      decodeProgressPage(laterSectionEndTarget.localRatio, 30) === 29,
+    "sample-boundary",
+  );
+  const sectionMiddleProgress = encodeProgress(0, 173, 13, 30);
+  const sectionMiddleTarget = decodeProgress(sectionMiddleProgress, 1, 173);
+  assert(
+    sectionMiddleTarget.sectionIndex === 0 &&
+      decodeProgressPage(sectionMiddleTarget.localRatio, 30) === 13,
     "sample-boundary",
   );
   assert(

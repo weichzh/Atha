@@ -4,10 +4,12 @@ const APPLICATION_DEFAULTS = Object.freeze({
   fontSize: 32,
   fontFamily: "book",
   density: "standard",
-  marginTopPx: 88,
+  marginTopPx: 144,
   marginRightPx: 32,
-  marginBottomPx: 88,
+  marginBottomPx: 144,
   marginLeftPx: 32,
+  tapToPaginate: true,
+  swipeToPaginate: true,
 });
 const BOOK_DEFAULTS = Object.freeze({
   sourceStyles: true,
@@ -45,13 +47,15 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       marginRightPx: APPLICATION_DEFAULTS.marginRightPx,
       marginBottomPx: APPLICATION_DEFAULTS.marginBottomPx,
       marginLeftPx: APPLICATION_DEFAULTS.marginLeftPx,
+      tapToPaginate: APPLICATION_DEFAULTS.tapToPaginate,
+      swipeToPaginate: APPLICATION_DEFAULTS.swipeToPaginate,
       ...value,
     };
     const validMargin = (margin) =>
       Number.isInteger(margin) && margin >= 0 && margin <= 288 && margin % 8 === 0;
     ensure(
       exact(normalized, APPLICATION_DEFAULTS) &&
-        ["system", "light", "dark"].includes(normalized.theme) &&
+        ["system", "light", "paper", "dark"].includes(normalized.theme) &&
         Number.isInteger(normalized.brightness) &&
         normalized.brightness >= 70 &&
         normalized.brightness <= 120 &&
@@ -61,10 +65,16 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         validMargin(normalized.marginTopPx) &&
         validMargin(normalized.marginRightPx) &&
         validMargin(normalized.marginBottomPx) &&
-        validMargin(normalized.marginLeftPx),
+        validMargin(normalized.marginLeftPx) &&
+        typeof normalized.tapToPaginate === "boolean" &&
+        typeof normalized.swipeToPaginate === "boolean",
       "invalid-preference",
     );
-    return normalized;
+    return {
+      ...normalized,
+      marginTopPx: Math.max(APPLICATION_DEFAULTS.marginTopPx, normalized.marginTopPx),
+      marginBottomPx: Math.max(APPLICATION_DEFAULTS.marginBottomPx, normalized.marginBottomPx),
+    };
   }
 
   function validateBook(value) {
@@ -89,6 +99,8 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.marginRight.value = String(application.marginRightPx);
     controls.marginBottom.value = String(application.marginBottomPx);
     controls.marginLeft.value = String(application.marginLeftPx);
+    controls.tapToPaginate.checked = application.tapToPaginate;
+    controls.swipeToPaginate.checked = application.swipeToPaginate;
     controls.sourceStyles.checked = book.sourceStyles;
     controls.userStylesEnabled.checked = book.userStylesEnabled;
     controls.userStylesheet.value = book.userStylesheet;
@@ -181,6 +193,18 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.brightness.addEventListener("change", () => {
       run(
         () => onUpdate("application", { brightness: Number(controls.brightness.value) }),
+        "已应用",
+      );
+    });
+    controls.tapToPaginate.addEventListener("change", () => {
+      run(
+        () => onUpdate("application", { tapToPaginate: controls.tapToPaginate.checked }),
+        "已应用",
+      );
+    });
+    controls.swipeToPaginate.addEventListener("change", () => {
+      run(
+        () => onUpdate("application", { swipeToPaginate: controls.swipeToPaginate.checked }),
         "已应用",
       );
     });

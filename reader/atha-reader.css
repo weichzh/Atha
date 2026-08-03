@@ -6,10 +6,27 @@
   --reader-display-height: 1680px;
   --reader-brightness: 1;
   --reader-accent: #1497e8;
-  color-scheme: light dark;
+  --ui-canvas: #dddeda;
+  --ui-surface: #fff;
+  --ui-surface-muted: #f3f4f1;
+  --ui-bar-bg: rgb(255 255 255 / 94%);
+  --ui-input-bg: #f7f8f5;
+  --ui-text: #222725;
+  --ui-muted: #747b77;
+  --ui-border: #d4d8d3;
+  --ui-shadow: rgb(32 40 36 / 16%);
+  --ui-backdrop: rgb(18 23 21 / 42%);
+  --ui-error: #a32921;
+  --ui-error-bg: #fff0ed;
+  --page-bg: #f8f4e9;
+  --page-text: #2b2a26;
+  --page-muted: rgb(43 42 38 / 52%);
+  --formula-bg: #fff;
+  --annotation-bg: rgb(216 173 42 / 42%);
+  color-scheme: light;
   font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  background: #dfe5e7;
-  color: #182226;
+  background: var(--ui-canvas);
+  color: var(--ui-text);
 }
 
 * {
@@ -38,6 +55,9 @@ input,
 select,
 textarea {
   min-height: 44px;
+  border-color: var(--ui-border);
+  background: var(--ui-input-bg);
+  color: var(--ui-text);
   font: inherit;
 }
 
@@ -50,7 +70,7 @@ textarea:focus-visible,
 .book img[role="button"]:focus-visible,
 .book table:focus-visible,
 .book pre:focus-visible {
-  outline: 3px solid #176b87;
+  outline: 3px solid var(--reader-accent);
   outline-offset: 2px;
 }
 
@@ -70,7 +90,8 @@ textarea:focus-visible,
   position: relative;
   width: var(--reader-width);
   height: var(--reader-height);
-  background: #fffdf8;
+  background: var(--page-bg);
+  color: var(--page-text);
   filter: brightness(var(--reader-brightness));
   transform: scale(var(--page-scale));
   transform-origin: top left;
@@ -101,6 +122,8 @@ textarea:focus-visible,
   column-fill: auto;
   font-size: 32px;
   line-height: var(--reader-line-height, 1.6);
+  background: var(--page-bg);
+  color: var(--page-text);
   overflow: visible;
 }
 
@@ -122,8 +145,12 @@ textarea:focus-visible,
   box-sizing: border-box;
   max-width: none;
   padding: 0 !important;
-  background: #fff;
+  background: var(--formula-bg);
   color-scheme: light;
+}
+
+.book img:not(.math-inline):not(.math-display) {
+  filter: none;
 }
 
 .book img.math-inline {
@@ -159,7 +186,7 @@ textarea:focus-visible,
   position: absolute;
   z-index: 1;
   margin: 0;
-  color: rgb(24 34 38 / 56%);
+  color: var(--page-muted);
   font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   font-size: 24px;
   line-height: 1;
@@ -212,19 +239,20 @@ textarea:focus-visible,
   position: absolute;
   right: 0;
   left: 0;
-  background: rgb(255 255 255 / 96%);
-  color: #182226;
+  background: var(--ui-bar-bg);
+  color: var(--ui-text);
   pointer-events: auto;
 }
 
 .top-toolbar {
   top: 0;
   display: flex;
-  min-height: 64px;
+  height: 48px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid #ccd4d6;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .top-toolbar-actions {
@@ -236,10 +264,11 @@ textarea:focus-visible,
   bottom: 0;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  min-height: 72px;
+  height: 48px;
+  min-height: 48px;
   align-items: center;
-  padding: 8px 12px;
-  border-top: 1px solid #ccd4d6;
+  padding: 0 8px;
+  border-top: 1px solid var(--ui-border);
 }
 
 .reader-tool {
@@ -303,17 +332,17 @@ textarea:focus-visible,
 .tool-panel {
   position: fixed;
   right: 0;
-  bottom: 72px;
+  bottom: 48px;
   left: 0;
   display: grid;
-  max-height: min(72vh, calc(100vh - 136px));
+  max-height: min(72vh, calc(100vh - 96px));
   gap: 12px;
   padding: 20px;
   overflow: auto;
-  border-top: 1px solid #ccd4d6;
-  background: #fff;
-  color: #182226;
-  box-shadow: 0 -10px 32px rgb(25 39 43 / 14%);
+  border-top: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  box-shadow: 0 -10px 32px var(--ui-shadow);
   pointer-events: auto;
 }
 
@@ -332,32 +361,53 @@ textarea:focus-visible,
   font-size: 1rem;
 }
 
+.panel-heading {
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+}
+
+.panel-heading h2 {
+  grid-column: 2;
+}
+
+.panel-back {
+  grid-column: 1;
+  grid-row: 1;
+}
+
 .preferences-panel {
-  top: 64px;
-  right: auto;
+  top: 48px;
+  right: 8px;
   bottom: auto;
-  width: min(390px, 100vw);
-  max-height: calc(100vh - 64px);
-  border-top: 0;
-  border-right: 1px solid #ccd4d6;
-  border-bottom: 1px solid #ccd4d6;
-  border-radius: 0 0 16px;
-  box-shadow: 10px 10px 32px rgb(25 39 43 / 14%);
+  left: auto;
+  width: min(340px, calc(100vw - 16px));
+  max-height: calc(100vh - 56px);
+  padding: 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px var(--ui-shadow);
 }
 
 .directory-panel {
-  grid-template-rows: auto minmax(180px, 1fr);
-  height: min(78vh, calc(100vh - 136px));
+  z-index: 2;
+  inset: 0;
+  grid-template-rows: 56px minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  padding: 0 20px 20px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.toc-control,
 .annotation-editor,
 .search-panel label {
   display: grid;
   gap: 6px;
 }
 
-.toc-control select,
 .search-panel select,
 .annotation-editor select {
   width: 100%;
@@ -365,11 +415,38 @@ textarea:focus-visible,
   background: transparent;
 }
 
-.toc-control select {
-  min-height: 260px;
+.directory-list {
+  display: grid;
+  align-content: start;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
-.toc-control option,
+.directory-item {
+  min-height: 52px;
+  padding: 12px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--ui-border);
+  background: transparent;
+  color: var(--ui-text);
+  text-align: left;
+}
+
+.directory-item.is-current {
+  color: var(--reader-accent);
+  font-weight: 600;
+}
+
+.directory-item.is-bookmark {
+  padding-left: 28px;
+  color: var(--reader-accent);
+  font-size: 0.9rem;
+}
+
+.directory-item:disabled {
+  color: var(--ui-muted);
+}
+
 .search-panel option,
 .annotation-editor option {
   padding: 12px 10px;
@@ -386,7 +463,7 @@ textarea:focus-visible,
 
 .search-panel {
   grid-template-rows: auto auto auto auto minmax(180px, 1fr) auto;
-  height: min(72vh, calc(100vh - 136px));
+  height: min(72vh, calc(100vh - 96px));
 }
 
 .search-panel select {
@@ -402,10 +479,6 @@ textarea:focus-visible,
   flex: 1;
 }
 
-.toc-control option[data-bookmark-id] {
-  color: var(--reader-accent);
-}
-
 .annotation-actions {
   display: flex;
   gap: 8px;
@@ -417,12 +490,24 @@ textarea:focus-visible,
 }
 
 .progress-panel {
-  min-height: 220px;
+  min-height: 240px;
   align-content: center;
 }
 
-#progress-position {
-  font-size: 1.75rem;
+.progress-chapter {
+  overflow: hidden;
+  color: var(--ui-text);
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-book {
+  color: var(--reader-accent);
+  font-size: 1.5rem;
+  font-weight: 600;
   text-align: center;
 }
 
@@ -431,49 +516,84 @@ textarea:focus-visible,
   accent-color: var(--reader-accent);
 }
 
-.progress-actions {
+.progress-scrubber {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-position,
+.progress-actions {
+  color: var(--ui-muted);
+  font-size: 0.86rem;
+  text-align: center;
 }
 
 #annotations-status[data-error="true"] {
-  color: #a32921;
+  color: var(--ui-error);
 }
 
 ::highlight(atha-annotations) {
-  background: rgb(255 202 40 / 48%);
+  background: var(--annotation-bg);
   color: inherit;
 }
 
-.preferences-panel label:not(.checkbox-label) {
+.settings-view {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  align-items: center;
+  gap: 12px;
 }
 
-.preferences-panel hr {
-  width: 100%;
+.settings-view[hidden] {
+  display: none;
+}
+
+.settings-view label:not(.checkbox-label) {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-list {
+  display: grid;
+}
+
+.settings-list button {
+  display: grid;
+  grid-template-columns: 24px 1fr 20px;
+  min-height: 52px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
   border: 0;
-  border-top: 1px solid #ccd4d6;
+  border-bottom: 1px solid var(--ui-border);
+  background: transparent;
+  color: var(--ui-text);
+  text-align: left;
+}
+
+.settings-list svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.8;
+}
+
+.quiet-button {
+  border: 0;
+  background: transparent;
+  color: var(--ui-muted);
 }
 
 .checkbox-label {
-  justify-content: start;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .checkbox-label input {
   width: 22px;
   height: 22px;
-}
-
-.advanced-preferences {
-  display: grid;
-  gap: 10px;
-}
-
-.advanced-preferences[open] {
-  display: grid;
 }
 
 #user-stylesheet {
@@ -494,7 +614,7 @@ textarea:focus-visible,
 }
 
 #preferences-status[data-error="true"] {
-  color: #a32921;
+  color: var(--ui-error);
 }
 
 #content-dialog {
@@ -502,14 +622,14 @@ textarea:focus-visible,
   max-height: calc(100vh - 64px);
   padding: 24px;
   overflow: auto;
-  border: 1px solid #ccd4d6;
+  border: 1px solid var(--ui-border);
   border-radius: 14px;
-  background: #fffdf8;
-  color: #182226;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 #content-dialog::backdrop {
-  background: rgb(15 21 24 / 48%);
+  background: var(--ui-backdrop);
 }
 
 #content-dialog form {
@@ -562,15 +682,15 @@ textarea:focus-visible,
 #content-dialog-table th,
 #content-dialog-table td {
   padding: 8px 12px;
-  border: 1px solid #ccd4d6;
+  border: 1px solid var(--ui-border);
   text-align: left;
   vertical-align: top;
 }
 
 #content-dialog-code {
   padding: 16px;
-  border: 1px solid #ccd4d6;
-  background: #f4f6f6;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface-muted);
   font-family: Consolas, "Cascadia Mono", monospace;
   white-space: pre;
 }
@@ -585,9 +705,9 @@ textarea:focus-visible,
   inset: 96px 112px auto;
   z-index: 2;
   padding: 20px;
-  border: 2px solid #a32921;
-  background: #fff0ee;
-  color: #781e18;
+  border: 2px solid var(--ui-error);
+  background: var(--ui-error-bg);
+  color: var(--ui-error);
 }
 
 .error[hidden] {
@@ -595,207 +715,92 @@ textarea:focus-visible,
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    background: #0f1518;
-    color: #e9eeee;
+  :root:not([data-theme]),
+  .book:not([data-theme]) {
+    --reader-accent: #1497e8;
+    --ui-canvas: #101513;
+    --ui-surface: #202724;
+    --ui-surface-muted: #29312e;
+    --ui-bar-bg: rgb(26 32 29 / 94%);
+    --ui-input-bg: #29312e;
+    --ui-text: #edf0ed;
+    --ui-muted: #a0aaa4;
+    --ui-border: #46504a;
+    --ui-shadow: rgb(0 0 0 / 38%);
+    --ui-backdrop: rgb(0 0 0 / 58%);
+    --ui-error: #ffb3ad;
+    --ui-error-bg: #3d2220;
+    --page-bg: #1a211e;
+    --page-text: #e8ece8;
+    --page-muted: rgb(232 236 232 / 54%);
+    --formula-bg: transparent;
+    --annotation-bg: rgb(211 167 41 / 42%);
+    color-scheme: dark;
   }
 
-  .reader,
-  .book {
-    background: #182226;
-    color: #e9eeee;
-  }
-
-  .book img.math-inline,
-  .book img.math-display {
-    background: transparent;
+  .book:not([data-theme]) img.math-inline,
+  .book:not([data-theme]) img.math-display,
+  :root:not([data-theme]) #content-dialog-image.formula-preview {
     filter: invert(0.88) hue-rotate(180deg);
-  }
-
-  .book img:not(.math-inline):not(.math-display) {
-    filter: none;
-  }
-
-  .book a:focus-visible,
-  .book img[role="button"]:focus-visible,
-  .book table:focus-visible,
-  .book pre:focus-visible {
-    outline-color: #8bd4ec;
-  }
-
-  #content-dialog-image.formula-preview {
-    filter: invert(0.88) hue-rotate(180deg);
-  }
-
-  button:not(.icon-button),
-  input,
-  select,
-  textarea,
-  .top-toolbar,
-  .tool-panel,
-  .toolbar {
-    border-color: #40545c;
-    background: #202c30;
-    color: #e9eeee;
-  }
-
-  .tool-panel {
-    box-shadow: 0 -10px 32px rgb(0 0 0 / 35%);
-  }
-
-  .chapter-label,
-  .reading-position {
-    color: rgb(233 238 238 / 58%);
-  }
-
-  .error {
-    border-color: #ff8a80;
-    background: #3b2020;
-    color: #ffb3ad;
-  }
-
-  #annotations-status[data-error="true"] {
-    color: #ffb3ad;
-  }
-
-  #content-dialog {
-    border-color: #40545c;
-    background: #182226;
-    color: #e9eeee;
-  }
-
-  #content-dialog-table th,
-  #content-dialog-table td,
-  #content-dialog-code {
-    border-color: #40545c;
-  }
-
-  #content-dialog-code {
-    background: #202c30;
   }
 }
 
-:root[data-theme="light"] {
-  color-scheme: light;
-  background: #dfe5e7;
-  color: #182226;
-}
-
-:root[data-theme="light"] .reader,
+:root[data-theme="light"],
 .book[data-theme="light"] {
-  background: #fffdf8;
-  color: #182226;
+  --ui-canvas: #e7e9e6;
+  --ui-surface: #fff;
+  --ui-surface-muted: #f3f5f2;
+  --ui-bar-bg: rgb(255 255 255 / 94%);
+  --ui-input-bg: #f6f8f5;
+  --ui-text: #202522;
+  --ui-muted: #747b77;
+  --ui-border: #d6dad5;
+  --page-bg: #fff;
+  --page-text: #282b29;
+  --page-muted: rgb(40 43 41 / 50%);
+  --formula-bg: #fff;
+  color-scheme: light;
 }
 
-:root[data-theme="light"] .chapter-label,
-:root[data-theme="light"] .reading-position {
-  color: rgb(24 34 38 / 56%);
+:root[data-theme="paper"],
+.book[data-theme="paper"] {
+  color-scheme: light;
 }
 
-.book[data-theme="light"] img.math-inline,
-.book[data-theme="light"] img.math-display {
-  background: #fff;
-  filter: none;
-}
-
-:root[data-theme="light"] #content-dialog-image.formula-preview {
-  filter: none;
-}
-
-:root[data-theme="light"] button:not(.icon-button),
-:root[data-theme="light"] input,
-:root[data-theme="light"] select,
-:root[data-theme="light"] textarea,
-:root[data-theme="light"] .top-toolbar,
-:root[data-theme="light"] .tool-panel,
-:root[data-theme="light"] .toolbar {
-  border-color: #ccd4d6;
-  background: #fff;
-  color: #182226;
-}
-
-:root[data-theme="light"] #content-dialog {
-  border-color: #ccd4d6;
-  background: #fffdf8;
-  color: #182226;
-}
-
-:root[data-theme="light"] #content-dialog-table th,
-:root[data-theme="light"] #content-dialog-table td,
-:root[data-theme="light"] #content-dialog-code {
-  border-color: #ccd4d6;
-}
-
-:root[data-theme="light"] #content-dialog-code {
-  background: #f4f6f6;
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  background: #0f1518;
-  color: #e9eeee;
-}
-
-:root[data-theme="dark"] .reader,
+:root[data-theme="dark"],
 .book[data-theme="dark"] {
-  background: #182226;
-  color: #e9eeee;
+  --reader-accent: #1497e8;
+  --ui-canvas: #101513;
+  --ui-surface: #202724;
+  --ui-surface-muted: #29312e;
+  --ui-bar-bg: rgb(26 32 29 / 94%);
+  --ui-input-bg: #29312e;
+  --ui-text: #edf0ed;
+  --ui-muted: #a0aaa4;
+  --ui-border: #46504a;
+  --ui-shadow: rgb(0 0 0 / 38%);
+  --ui-backdrop: rgb(0 0 0 / 58%);
+  --ui-error: #ffb3ad;
+  --ui-error-bg: #3d2220;
+  --page-bg: #1a211e;
+  --page-text: #e8ece8;
+  --page-muted: rgb(232 236 232 / 54%);
+  --formula-bg: transparent;
+  --annotation-bg: rgb(211 167 41 / 42%);
+  color-scheme: dark;
 }
 
 .book[data-theme="dark"] img.math-inline,
-.book[data-theme="dark"] img.math-display {
-  background: transparent;
-  filter: invert(0.88) hue-rotate(180deg);
-}
-
-.book[data-theme="dark"] img:not(.math-inline):not(.math-display) {
-  filter: none;
-}
-
-.book[data-theme="dark"] a:focus-visible,
-.book[data-theme="dark"] img[role="button"]:focus-visible,
-.book[data-theme="dark"] table:focus-visible,
-.book[data-theme="dark"] pre:focus-visible {
-  outline-color: #8bd4ec;
-}
-
+.book[data-theme="dark"] img.math-display,
 :root[data-theme="dark"] #content-dialog-image.formula-preview {
   filter: invert(0.88) hue-rotate(180deg);
 }
 
-:root[data-theme="dark"] button:not(.icon-button),
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] select,
-:root[data-theme="dark"] textarea,
-:root[data-theme="dark"] .top-toolbar,
-:root[data-theme="dark"] .tool-panel,
-:root[data-theme="dark"] .toolbar {
-  border-color: #40545c;
-  background: #202c30;
-  color: #e9eeee;
-}
-
-:root[data-theme="dark"] #content-dialog {
-  border-color: #40545c;
-  background: #182226;
-  color: #e9eeee;
-}
-
-:root[data-theme="dark"] #content-dialog-table th,
-:root[data-theme="dark"] #content-dialog-table td,
-:root[data-theme="dark"] #content-dialog-code {
-  border-color: #40545c;
-}
-
-:root[data-theme="dark"] #content-dialog-code {
-  background: #202c30;
-}
-
-:root[data-theme="dark"] #annotations-status[data-error="true"] {
-  color: #ffb3ad;
-}
-
-:root[data-theme="dark"] .chapter-label,
-:root[data-theme="dark"] .reading-position {
-  color: rgb(233 238 238 / 58%);
+.book[data-theme="light"] img.math-inline,
+.book[data-theme="light"] img.math-display,
+.book[data-theme="paper"] img.math-inline,
+.book[data-theme="paper"] img.math-display,
+:root[data-theme="light"] #content-dialog-image.formula-preview,
+:root[data-theme="paper"] #content-dialog-image.formula-preview {
+  filter: none;
 }

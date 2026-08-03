@@ -144,13 +144,13 @@ export function createDiagnostics({
       "sample-boundary",
     );
     assert(content.book.dataset.fontFamily === "serif", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-top-margin") === "80px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-top-margin") === "144px", "sample-boundary");
     assert(reader.style.getPropertyValue("--page-right-margin") === "24px", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-bottom-margin") === "96px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-bottom-margin") === "144px", "sample-boundary");
     assert(reader.style.getPropertyValue("--page-left-margin") === "40px", "sample-boundary");
     const compactStyle = getComputedStyle(content.book);
-    assert(compactStyle.backgroundColor === "rgb(24, 34, 38)", "sample-boundary");
-    assert(compactStyle.color === "rgb(233, 238, 238)", "sample-boundary");
+    assert(compactStyle.backgroundColor === "rgb(26, 33, 30)", "sample-boundary");
+    assert(compactStyle.color === "rgb(232, 236, 232)", "sample-boundary");
     assert(compactStyle.fontFamily.includes("Georgia"), "sample-boundary");
     assert(Math.abs(parseFloat(compactStyle.lineHeight) - 34.8) < 0.1, "sample-boundary");
     const formula = content.book.querySelector("img.math-inline, img.math-display");
@@ -171,8 +171,8 @@ export function createDiagnostics({
     assert(reader.style.getPropertyValue("--page-left-margin") === "40px", "sample-boundary");
     assert(reader.style.getPropertyValue("--page-right-margin") === "24px", "sample-boundary");
     const comfortableStyle = getComputedStyle(content.book);
-    assert(comfortableStyle.backgroundColor === "rgb(255, 253, 248)", "sample-boundary");
-    assert(comfortableStyle.color === "rgb(24, 34, 38)", "sample-boundary");
+    assert(comfortableStyle.backgroundColor === "rgb(255, 255, 255)", "sample-boundary");
+    assert(comfortableStyle.color === "rgb(40, 43, 41)", "sample-boundary");
     assert(comfortableStyle.fontFamily.includes("Microsoft YaHei"), "sample-boundary");
     assert(Math.abs(parseFloat(comfortableStyle.lineHeight) - 72) < 0.1, "sample-boundary");
     if (formula) assert(getComputedStyle(formula).filter === "none", "sample-boundary");
@@ -224,10 +224,12 @@ export function createDiagnostics({
         restored.application.fontSize === 32 &&
         restored.application.fontFamily === "book" &&
         restored.application.density === "standard" &&
-        restored.application.marginTopPx === 88 &&
+        restored.application.marginTopPx === 144 &&
         restored.application.marginRightPx === 32 &&
-        restored.application.marginBottomPx === 88 &&
+        restored.application.marginBottomPx === 144 &&
         restored.application.marginLeftPx === 32 &&
+        restored.application.tapToPaginate &&
+        restored.application.swipeToPaginate &&
         !document.documentElement.dataset.theme &&
         document.documentElement.style.getPropertyValue("--reader-brightness") === "1" &&
         !content.book.dataset.fontFamily,
@@ -310,6 +312,40 @@ export function createDiagnostics({
     });
     await navigation.idle();
     assert(pagination.snapshot().page === 1, "sample-boundary");
+
+    await navigation.setPreferences("application", {
+      tapToPaginate: false,
+      swipeToPaginate: false,
+    });
+    await pagination.show(0);
+    const disabledCounts = interaction.snapshot();
+    pointer("pointerdown", { pointerId: 8, button: 0, clientX: right, clientY: rect.top + 40 });
+    pointer("pointerup", { pointerId: 8, button: 0, clientX: right, clientY: rect.top + 40 });
+    pointer("pointerdown", {
+      pointerId: 9,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer("pointerup", {
+      pointerId: 9,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.left + 80,
+      clientY: rect.top + 84,
+    });
+    await navigation.idle();
+    assert(
+      pagination.snapshot().page === 0 &&
+        interaction.snapshot().mouse === disabledCounts.mouse &&
+        interaction.snapshot().touch === disabledCounts.touch,
+      "sample-boundary",
+    );
+    await navigation.setPreferences("application", {
+      tapToPaginate: true,
+      swipeToPaginate: true,
+    });
 
     await pagination.show(0);
     document.documentElement.removeAttribute("data-reader-tools");

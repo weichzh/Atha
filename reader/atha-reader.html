@@ -10,7 +10,7 @@
   <body>
     <main class="reader-shell" aria-label="分页阅读器">
       <div class="reader-frame">
-        <section class="reader" aria-label="固定尺寸阅读页">
+        <section class="reader" aria-label="固定尺寸阅读页" tabindex="-1">
           <section id="page" class="page" aria-label="书籍内容">
             <div id="book-host"></div>
           </section>
@@ -32,49 +32,84 @@
               <summary class="icon-button" aria-label="阅读设置" title="阅读设置">
                 <span class="fluent-icon" aria-hidden="true">&#xE712;</span>
               </summary>
-              <div class="tool-panel preferences-panel">
-                <h2>阅读设置</h2>
-                <label>
-                  亮度
-                  <input id="brightness" type="range" min="70" max="120" value="100" />
-                </label>
-                <label>
-                  主题
-                  <select id="theme">
-                    <option value="system" selected>跟随系统</option>
-                    <option value="light">亮色</option>
-                    <option value="dark">暗色</option>
-                  </select>
-                </label>
-                <label>
-                  字号
-                  <select id="font-size" aria-label="正文字号">
-                    <option value="24">24px</option>
-                    <option value="32" selected>32px</option>
-                    <option value="40">40px</option>
-                  </select>
-                </label>
-                <label>
-                  字体
-                  <select id="font-family">
-                    <option value="book" selected>书源字体</option>
-                    <option value="serif">衬线</option>
-                    <option value="sans">无衬线</option>
-                  </select>
-                </label>
-                <label>
-                  行距
-                  <select id="density">
-                    <option value="compact">紧凑</option>
-                    <option value="standard" selected>标准</option>
-                    <option value="comfortable">舒展</option>
-                  </select>
-                </label>
-                <details class="advanced-preferences">
-                  <summary>页面布局</summary>
+              <div class="tool-panel preferences-panel" data-settings-root data-settings-view="menu">
+                <section class="settings-view settings-menu" data-settings-page="menu">
+                  <h2 tabindex="-1">阅读设置</h2>
+                  <div class="settings-list">
+                    <button type="button" data-settings-target="font">
+                      <span class="fluent-icon" aria-hidden="true">&#xE8D2;</span>
+                      <span>字体</span>
+                      <span class="fluent-icon" aria-hidden="true">&#xE76C;</span>
+                    </button>
+                    <button type="button" data-settings-target="layout">
+                      <span class="fluent-icon" aria-hidden="true">&#xECA5;</span>
+                      <span>布局</span>
+                      <span class="fluent-icon" aria-hidden="true">&#xE76C;</span>
+                    </button>
+                    <button type="button" data-settings-target="theme">
+                      <span class="fluent-icon" aria-hidden="true">&#xE790;</span>
+                      <span>主题与亮度</span>
+                      <span class="fluent-icon" aria-hidden="true">&#xE76C;</span>
+                    </button>
+                    <button type="button" data-settings-target="behavior">
+                      <span class="fluent-icon" aria-hidden="true">&#xE815;</span>
+                      <span>阅读行为</span>
+                      <span class="fluent-icon" aria-hidden="true">&#xE76C;</span>
+                    </button>
+                    <button type="button" data-settings-target="book">
+                      <span class="fluent-icon" aria-hidden="true">&#xE736;</span>
+                      <span>本书样式</span>
+                      <span class="fluent-icon" aria-hidden="true">&#xE76C;</span>
+                    </button>
+                  </div>
+                  <button id="reset-application-preferences" class="quiet-button" type="button">
+                    恢复应用默认
+                  </button>
+                </section>
+
+                <section class="settings-view" data-settings-page="font" hidden>
+                  <header class="panel-heading">
+                    <button class="icon-button panel-back" type="button" data-settings-back aria-label="返回设置">
+                      <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                    </button>
+                    <h2 tabindex="-1">字体</h2>
+                  </header>
+                  <label>
+                    字号
+                    <select id="font-size" aria-label="正文字号">
+                      <option value="24">24px</option>
+                      <option value="32" selected>32px</option>
+                      <option value="40">40px</option>
+                    </select>
+                  </label>
+                  <label>
+                    字体
+                    <select id="font-family">
+                      <option value="book" selected>书源字体</option>
+                      <option value="serif">衬线</option>
+                      <option value="sans">无衬线</option>
+                    </select>
+                  </label>
+                </section>
+
+                <section class="settings-view" data-settings-page="layout" hidden>
+                  <header class="panel-heading">
+                    <button class="icon-button panel-back" type="button" data-settings-back aria-label="返回设置">
+                      <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                    </button>
+                    <h2 tabindex="-1">布局</h2>
+                  </header>
+                  <label>
+                    行距
+                    <select id="density">
+                      <option value="compact">紧凑</option>
+                      <option value="standard" selected>标准</option>
+                      <option value="comfortable">舒展</option>
+                    </select>
+                  </label>
                   <label>
                     上边距（设备 px）
-                    <input id="margin-top" type="number" min="0" max="288" step="8" />
+                    <input id="margin-top" type="number" min="144" max="288" step="8" />
                   </label>
                   <label>
                     右边距（设备 px）
@@ -82,21 +117,64 @@
                   </label>
                   <label>
                     下边距（设备 px）
-                    <input id="margin-bottom" type="number" min="0" max="288" step="8" />
+                    <input id="margin-bottom" type="number" min="144" max="288" step="8" />
                   </label>
                   <label>
                     左边距（设备 px）
                     <input id="margin-left" type="number" min="0" max="288" step="8" />
                   </label>
-                </details>
-                <button id="reset-application-preferences" type="button">恢复应用默认</button>
-                <hr />
-                <label class="checkbox-label">
-                  <input id="source-styles" type="checkbox" checked />
-                  使用书源样式
-                </label>
-                <details class="advanced-preferences">
-                  <summary>本书自定义样式</summary>
+                </section>
+
+                <section class="settings-view" data-settings-page="theme" hidden>
+                  <header class="panel-heading">
+                    <button class="icon-button panel-back" type="button" data-settings-back aria-label="返回设置">
+                      <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                    </button>
+                    <h2 tabindex="-1">主题与亮度</h2>
+                  </header>
+                  <label>
+                    亮度
+                    <input id="brightness" type="range" min="70" max="120" value="100" />
+                  </label>
+                  <label>
+                    主题
+                    <select id="theme">
+                      <option value="system" selected>跟随系统</option>
+                      <option value="light">浅色</option>
+                      <option value="paper">纸张</option>
+                      <option value="dark">深色</option>
+                    </select>
+                  </label>
+                </section>
+
+                <section class="settings-view" data-settings-page="behavior" hidden>
+                  <header class="panel-heading">
+                    <button class="icon-button panel-back" type="button" data-settings-back aria-label="返回设置">
+                      <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                    </button>
+                    <h2 tabindex="-1">阅读行为</h2>
+                  </header>
+                  <label class="checkbox-label">
+                    <input id="tap-to-paginate" type="checkbox" checked />
+                    点击页面两侧翻页
+                  </label>
+                  <label class="checkbox-label">
+                    <input id="swipe-to-paginate" type="checkbox" checked />
+                    左右滑动翻页
+                  </label>
+                </section>
+
+                <section class="settings-view" data-settings-page="book" hidden>
+                  <header class="panel-heading">
+                    <button class="icon-button panel-back" type="button" data-settings-back aria-label="返回设置">
+                      <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                    </button>
+                    <h2 tabindex="-1">本书样式</h2>
+                  </header>
+                  <label class="checkbox-label">
+                    <input id="source-styles" type="checkbox" checked />
+                    使用书源样式
+                  </label>
                   <label class="checkbox-label">
                     <input id="user-styles-enabled" type="checkbox" checked />
                     启用自定义样式
@@ -112,7 +190,7 @@
                     <button id="apply-user-style" type="button">应用</button>
                     <button id="reset-book-preferences" type="button">恢复本书</button>
                   </div>
-                </details>
+                </section>
                 <output id="preferences-status" aria-live="polite"></output>
               </div>
             </details>
@@ -124,11 +202,17 @@
               <span class="fluent-icon" aria-hidden="true">&#xE700;</span>
             </summary>
             <div class="tool-panel directory-panel">
-              <h2>目录</h2>
-              <label class="toc-control" hidden>
+              <header class="panel-heading">
+                <button class="icon-button panel-back" type="button" data-close-reader-tools aria-label="返回阅读">
+                  <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                </button>
+                <h2>目录</h2>
+              </header>
+              <label class="visually-hidden" aria-hidden="true" hidden>
                 <span class="visually-hidden">章节和书签</span>
-                <select id="toc" size="10" aria-label="章节和书签"></select>
+                <select id="toc" size="10" tabindex="-1" aria-label="章节和书签"></select>
               </label>
+              <nav id="directory-list" class="directory-list" aria-label="章节和书签"></nav>
               <output id="bookmarks-status" class="visually-hidden" aria-live="polite"></output>
             </div>
           </details>
@@ -189,15 +273,20 @@
             </summary>
             <section class="tool-panel progress-panel" aria-labelledby="progress-heading">
               <h2 id="progress-heading">阅读进度</h2>
-              <output id="progress-position" aria-live="polite">加载中</output>
-              <input id="progress-range" type="range" min="1" max="1" value="1" aria-label="章节内进度" />
-              <div class="progress-actions">
-                <button id="previous" type="button" aria-label="上一页">
+              <output id="progress-chapter" class="progress-chapter" aria-live="polite">加载中</output>
+              <output id="progress-book" class="progress-book">全书约 0%</output>
+              <div class="progress-scrubber">
+                <button id="previous" class="icon-button" type="button" aria-label="上一页">
                   <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
                 </button>
-                <button id="next" type="button" aria-label="下一页">
+                <input id="progress-range" type="range" min="0" max="1" step="any" value="0" aria-label="全书进度" />
+                <button id="next" class="icon-button" type="button" aria-label="下一页">
                   <span class="fluent-icon" aria-hidden="true">&#xE72A;</span>
                 </button>
+              </div>
+              <output id="progress-position" class="progress-position">第 1/1 节 · 本节 1/1 页</output>
+              <div class="progress-actions">
+                <span>拖动可跳转全书位置</span>
               </div>
             </section>
           </details>

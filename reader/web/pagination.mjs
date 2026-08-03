@@ -6,7 +6,6 @@ export function createPagination({
   reader,
   page,
   position,
-  progressPosition,
   progressRange,
   previous,
   next,
@@ -198,9 +197,6 @@ export function createPagination({
     book.style.transform = `translateX(${-state.page * step}px)`;
     const label = `${state.page + 1} / ${state.pages}`;
     position.textContent = label;
-    progressPosition.textContent = label;
-    progressRange.max = String(state.pages);
-    progressRange.value = String(state.page + 1);
     document.title = `Atha Reader — ${label}`;
   }
 
@@ -423,9 +419,7 @@ export function createPagination({
     fontSizeControl.addEventListener("change", () => {
       run(() => onFontSize(fontSizeControl.value));
     });
-    progressRange.addEventListener("change", () => {
-      run(() => onProgress(progressRange.value));
-    });
+    progressRange.addEventListener("change", () => run(() => onProgress(progressRange.value)));
   }
 
   function initialize() {

@@ -157,19 +157,47 @@ $themeProbe = @'
     await waitForSection(expectedSequence[0]);
   }
   const progress = document.querySelector('#progress-range');
-  if (Number(progress.max) > 1) {
-    progress.value = '2';
+  if (!document.querySelector('#next').disabled) {
+    progress.value = String(Math.round(Number(progress.max) / 2));
     progress.dispatchEvent(new Event('change', { bubbles: true }));
-    for (let frame = 0; frame < 60 && (!document.querySelector('#position').textContent.startsWith('2 / ') || document.querySelector('#previous').disabled); frame += 1) {
+    for (let frame = 0; frame < 60 && document.querySelector('#previous').disabled; frame += 1) {
       await new Promise(requestAnimationFrame);
     }
     if (document.querySelector('#previous').disabled) throw new Error('progress-control');
+    progress.value = '0';
+    progress.dispatchEvent(new Event('change', { bubbles: true }));
+    for (let frame = 0; frame < 60 && !document.querySelector('#previous').disabled; frame += 1) {
+      await new Promise(requestAnimationFrame);
+    }
+  }
+  const roundTripPosition = document.querySelector('#position').textContent;
+  const roundTripProgress = progress.value;
+  progress.dispatchEvent(new Event('change', { bubbles: true }));
+  await new Promise(requestAnimationFrame);
+  await new Promise(requestAnimationFrame);
+  if (document.querySelector('#position').textContent !== roundTripPosition || progress.value !== roundTripProgress) {
+    throw new Error('progress-round-trip');
   }
   const preferences = document.querySelector('.preferences');
   const status = document.querySelector('#preferences-status');
   const readerBefore = document.querySelector('.reader').getBoundingClientRect();
+  document.documentElement.setAttribute('data-reader-tools', '');
   preferences.open = true;
-  if (!preferences.open || !document.querySelector('#user-stylesheet')) throw new Error('preferences-control');
+  await new Promise(requestAnimationFrame);
+  const settings = document.querySelector('[data-settings-root]');
+  settings.querySelector('[data-settings-target="font"]').click();
+  await new Promise(requestAnimationFrame);
+  const fontHeading = settings.querySelector('[data-settings-page="font"] h2');
+  if (!preferences.open || !document.querySelector('#user-stylesheet') || fontHeading.parentElement.parentElement.hidden || document.activeElement !== fontHeading) {
+    throw new Error(`preferences-control:${JSON.stringify({
+      open: preferences.open,
+      stylesheet: Boolean(document.querySelector('#user-stylesheet')),
+      hidden: fontHeading.parentElement.parentElement.hidden,
+      focused: document.activeElement === fontHeading,
+      active: document.activeElement?.outerHTML,
+    })}`);
+  }
+  settings.querySelector('[data-settings-page="font"] [data-settings-back]').click();
   const waitForPreference = async (message) => {
     for (let frame = 0; frame < 120; frame += 1) {
       if (status.textContent === message && status.dataset.error !== 'true') return;
@@ -186,6 +214,7 @@ $themeProbe = @'
   document.querySelector('#reset-application-preferences').click();
   await waitForPreference('已恢复应用默认');
   preferences.open = false;
+  document.documentElement.removeAttribute('data-reader-tools');
   const readerAfter = document.querySelector('.reader').getBoundingClientRect();
   if (readerBefore.width !== readerAfter.width || readerBefore.height !== readerAfter.height) throw new Error('preferences-control');
   const result = globalThis.__athaReaderDiagnostics?.snapshot();
@@ -512,7 +541,7 @@ try {
                     Invoke-AgentBrowser @('--session', $session, 'screenshot', $searchScreenshot)
                     if ($theme -eq 'light') {
                         [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.dataset.theme = 'dark'; true")
-                        $explicitDark = Get-AgentBrowserScriptValue -Session $session -Script "(() => { const panel = getComputedStyle(document.querySelector('.search-panel')); const input = getComputedStyle(document.querySelector('#search-query')); const status = document.querySelector('#annotations-status'); status.dataset.error = 'true'; const errorColor = getComputedStyle(status).color; delete status.dataset.error; return panel.backgroundColor === 'rgb(32, 44, 48)' && panel.color === 'rgb(233, 238, 238)' && input.backgroundColor === 'rgb(32, 44, 48)' && input.color === 'rgb(233, 238, 238)' && errorColor === 'rgb(255, 179, 173)'; })()"
+                        $explicitDark = Get-AgentBrowserScriptValue -Session $session -Script "(() => { const panel = getComputedStyle(document.querySelector('.search-panel')); const input = getComputedStyle(document.querySelector('#search-query')); const status = document.querySelector('#annotations-status'); status.dataset.error = 'true'; const errorColor = getComputedStyle(status).color; delete status.dataset.error; return panel.backgroundColor === 'rgb(32, 39, 36)' && panel.color === 'rgb(237, 240, 237)' && input.backgroundColor === 'rgb(41, 49, 46)' && input.color === 'rgb(237, 240, 237)' && errorColor === 'rgb(255, 179, 173)'; })()"
                         if ($explicitDark -ne 'true') { throw 'Explicit dark search theme is unreadable under a light system theme.' }
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-explicit-dark-search.png'))
                         [void](Get-AgentBrowserScriptValue -Session $session -Script "delete document.documentElement.dataset.theme; true")
@@ -535,9 +564,12 @@ try {
                 $positionBefore = Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#position').textContent" | ConvertFrom-Json
                 Invoke-AgentBrowser @('--session', $session, 'click', '#next')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent !== '$positionBefore'")
-                Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
                 Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#toc option[data-bookmark-id]').length === 1 && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'true'")
+                Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#directory-list .directory-item.is-bookmark').length === 1")
+                Invoke-AgentBrowser @('--session', $session, 'click', '.directory-panel [data-close-reader-tools]')
+                [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
                 Invoke-AgentBrowser @('--session', $session, 'click', '.preferences > summary')
                 [void](Get-AgentBrowserScriptValue -Session $session -Script "(() => { const value = document.querySelector('#brightness'); value.value = '85'; value.dispatchEvent(new Event('input', { bubbles: true })); value.dispatchEvent(new Event('change', { bubbles: true })); return true; })()")
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "JSON.parse(localStorage.getItem('atha.reader.application.v1')).preferences.brightness === 85")
@@ -574,16 +606,9 @@ try {
                 Invoke-AgentBrowser @('--session', $session, 'click', '#next')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent !== '$savedPosition'")
                 Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
-                [void](Get-AgentBrowserScriptValue -Session $session -Script @'
-(() => {
-  const toc = document.querySelector('#toc');
-  const bookmark = toc.querySelector('option[data-bookmark-id]');
-  toc.value = bookmark.value;
-  toc.dispatchEvent(new Event('change', { bubbles: true }));
-  return true;
-})()
-'@)
-                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent === '$savedPosition' && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'true'")
+                Invoke-AgentBrowser @('--session', $session, 'click', '#directory-list .directory-item.is-bookmark')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent === '$savedPosition' && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'true' && !document.documentElement.hasAttribute('data-reader-tools') && !document.querySelector('.directory').open && document.activeElement === document.querySelector('.reader')")
+                [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
                 Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#toc option[data-bookmark-id]').length === 0 && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'false'")
                 $bookmarkCount = [int](Get-AgentBrowserScriptValue -Session $session -Script "document.querySelectorAll('#toc option[data-bookmark-id]').length")
