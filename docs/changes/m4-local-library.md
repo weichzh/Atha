@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -30,15 +30,15 @@ Readest 的有效经验是把文件选择、内容哈希去重、耐久书目和
 
 ## Acceptance Criteria
 
-- [ ] 不带书籍参数启动 Tauri 时显示书架；空书架可直接选择 EPUB；
-- [ ] 文件对话框只选择 EPUB，可多选；取消不改变书架；单本失败不回滚同批成功项；
-- [ ] 相同内容从不同路径重复导入只产生一个书架项；重启后书架仍存在；
-- [ ] 卡片显示受限标题、作者和可用封面；缺少封面时显示稳定占位；
-- [ ] 点击书籍复用现有阅读内核打开，返回按钮回到书架，既有进度与偏好按内容身份恢复；
-- [ ] 从书架移除后内容缓存和阅读状态不被删除，再次导入可以恢复；
-- [ ] 损坏书架记录、未知书籍身份、缺失缓存和非法封面请求明确失败，不越过书根；
-- [ ] 既有 EPUB CLI、困难样本、安全检查和 Tauri 性能门槛保持通过；
-- [ ] 前端检查、production build、Rust fmt/clippy/test、真实 Windows Tauri 启动和相称 UI 检查通过。
+- [x] 不带书籍参数启动 Tauri 时显示书架；空书架可直接选择 EPUB；
+- [x] 文件对话框只选择 EPUB，可多选；取消不改变书架；单本失败不回滚同批成功项；
+- [x] 相同内容从不同路径重复导入只产生一个书架项；重启后书架仍存在；
+- [x] 卡片显示受限标题、作者和可用封面；缺少封面时显示稳定占位；
+- [x] 点击书籍复用现有阅读内核打开，返回按钮回到书架，既有进度与偏好按内容身份恢复；
+- [x] 从书架移除后内容缓存和阅读状态不被删除，再次导入可以恢复；
+- [x] 损坏书架记录、未知书籍身份、缺失缓存和非法封面请求明确失败，不越过书根；
+- [x] 既有 EPUB CLI、困难样本、安全检查和 Tauri 性能门槛保持通过；
+- [x] 前端检查、production build、Rust fmt/clippy/test、真实 Windows Tauri 启动和相称 UI 检查通过。
 
 ## Files And Steps
 
@@ -71,14 +71,19 @@ Readest 的有效经验是把文件选择、内容哈希去重、耐久书目和
 
 ## Result
 
-待实现。
+无参数 Tauri 入口现在显示本地书架；官方文件对话框、源路径和 EPUB 导入全部收口在 Rust command。`LocalLibrary` 以内容哈希管理每书 JSON，复用既有导入缓存，并向 Svelte 只暴露受限书目。OPF 标题、作者和可选封面随导入缓存生成；动态正文协议与独立封面协议都从已校验书架记录解析资源。Svelte 提供空状态、导入反馈、响应式卡片、打开、返回和仅移除书架记录的操作；阅读路由才加载原有 reader runtime。
 
 ## Review
 
-- Blocking：待 review。
-- Non-blocking：待 review。
-- Out-of-scope：待 review。
+- Standards 首轮发现源路径经前端 IPC 和 32px 删除按钮；`07123a3` 把文件对话框与路径完全收口到 Rust，删除前端 dialog 权限与依赖，并把按钮和正式几何断言改为 44px。复审无 Blocking 或 Non-blocking。
+- Spec 首轮把真实 Tauri 全链路自动化缺口列为 Blocking，并指出缺少可见导入状态；`07123a3` 增加可见状态，复审确认实现无 Blocking。原生文件选择器的人工点击保留为证据残余，不再判定为实现缺失。
+- Out-of-scope：没有同步、分组、排序设置、拖放、多格式或后台导入队列。
 
 ## Evidence And Residual Risks
 
-待实现与验证。
+- Windows 本地：`scripts/check-library-shelf.ps1` 通过后端 2 个导入/书架测试、锁定前端安装、Svelte check、production build、Tauri debug build、真实无参数窗口 smoke，以及 390 × 840 的空书架、无横向溢出和最小控件尺寸检查。
+- Windows 本地：`scripts/check-reader-samples.ps1` 在四个困难样本上通过；重排后的进度恢复允许最多等待 60 个 animation frame，但最终仍要求精确位置与进度相等。
+- Windows 本地：`scripts/check-tauri-reader.ps1` 在最终修复后通过 12 个 Rust 测试、production build、真实 EPUB import probe 和五项门槛。基准 `1785776709434-27872` 的 P95 为冷启动 609.962ms、首稳 187.000ms、热开 24.000ms、翻页 7.700ms、字号重排 51.300ms，均低于 2000/750/120/50/150ms 门槛。
+- Agent Browser 在 390 × 840 和 960 × 720 检查空书架及六本演示书架，无横向溢出；演示数据只用于布局，不是产品持久数据。
+- 原生文件对话框已由 Rust 官方插件按 EPUB filter 实现，但本轮自动化未可靠操作 Windows 文件选择器；真实无参数窗口已启动，选择文件这一步由用户试用验收。
+- Windows Cargo 偶发报告 incremental compilation session 最终化“拒绝访问”，所有正式命令仍以 0 退出；未推送、发布或生成安装包。
