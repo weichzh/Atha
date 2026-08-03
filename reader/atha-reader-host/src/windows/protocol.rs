@@ -6,7 +6,7 @@ use atha_backend::reader::{
 };
 use wry::http::{Request, Response, StatusCode, header};
 
-use super::launch::APP_PAGE;
+use crate::launch::APP_PAGE;
 
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://atha-book.localhost; connect-src 'self' https://atha-book.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 

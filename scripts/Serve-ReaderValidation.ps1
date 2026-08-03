@@ -4,6 +4,7 @@
 param(
     [Parameter(Mandatory)]
     [string]$BookRoot,
+    [string]$AppRoot,
     [ValidateRange(1024, 65535)]
     [int]$Port = 18766
 )
@@ -12,9 +13,14 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $readerRoot = (Resolve-Path (Join-Path $repoRoot 'reader')).Path
 $bookRootPath = (Resolve-Path -LiteralPath $BookRoot).Path
+$appRootPath = if ([string]::IsNullOrWhiteSpace($AppRoot)) {
+    $null
+} else {
+    (Resolve-Path -LiteralPath $AppRoot).Path
+}
 $separator = [IO.Path]::DirectorySeparatorChar
 
-foreach ($root in @($readerRoot, $bookRootPath)) {
+foreach ($root in @($readerRoot, $bookRootPath, $appRootPath) | Where-Object { $_ }) {
     $item = Get-Item -LiteralPath $root
     if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "Validation root must be a real directory: $root"
@@ -147,6 +153,12 @@ try {
                 }
                 $body = [Text.Encoding]::UTF8.GetBytes([string]::Join("`n", $source))
                 Write-Response $context 200 'text/javascript; charset=utf-8' $body
+                continue
+            }
+            if ($appRootPath -and ($path -eq '/app/' -or $path.StartsWith('/app/', [StringComparison]::Ordinal))) {
+                $relative = if ($path -eq '/app/') { 'index.html' } else { $path.Substring(5) }
+                $file = Get-SafeFile $appRootPath $relative
+                Write-Response $context 200 (Get-ContentType $file) ([IO.File]::ReadAllBytes($file))
                 continue
             }
             if ($path.StartsWith('/book/', [StringComparison]::Ordinal)) {

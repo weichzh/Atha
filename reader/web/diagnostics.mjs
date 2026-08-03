@@ -132,6 +132,10 @@ export function createDiagnostics({
       fontSize: 24,
       fontFamily: "serif",
       density: "compact",
+      marginTopPx: 80,
+      marginRightPx: 24,
+      marginBottomPx: 96,
+      marginLeftPx: 40,
     });
     assert(pagination.isOffsetVisible(compactAnchor.start.offset), "sample-boundary");
     assert(document.documentElement.dataset.theme === "dark", "sample-boundary");
@@ -140,7 +144,10 @@ export function createDiagnostics({
       "sample-boundary",
     );
     assert(content.book.dataset.fontFamily === "serif", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-inline-margin") === "80px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-top-margin") === "80px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-right-margin") === "24px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-bottom-margin") === "96px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-left-margin") === "40px", "sample-boundary");
     const compactStyle = getComputedStyle(content.book);
     assert(compactStyle.backgroundColor === "rgb(24, 34, 38)", "sample-boundary");
     assert(compactStyle.color === "rgb(233, 238, 238)", "sample-boundary");
@@ -161,7 +168,8 @@ export function createDiagnostics({
     assert(pagination.isOffsetVisible(comfortableAnchor.start.offset), "sample-boundary");
     assert(document.documentElement.dataset.theme === "light", "sample-boundary");
     assert(content.book.dataset.fontFamily === "sans", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-inline-margin") === "144px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-left-margin") === "40px", "sample-boundary");
+    assert(reader.style.getPropertyValue("--page-right-margin") === "24px", "sample-boundary");
     const comfortableStyle = getComputedStyle(content.book);
     assert(comfortableStyle.backgroundColor === "rgb(255, 253, 248)", "sample-boundary");
     assert(comfortableStyle.color === "rgb(24, 34, 38)", "sample-boundary");
@@ -216,6 +224,10 @@ export function createDiagnostics({
         restored.application.fontSize === 32 &&
         restored.application.fontFamily === "book" &&
         restored.application.density === "standard" &&
+        restored.application.marginTopPx === 88 &&
+        restored.application.marginRightPx === 32 &&
+        restored.application.marginBottomPx === 88 &&
+        restored.application.marginLeftPx === 32 &&
         !document.documentElement.dataset.theme &&
         document.documentElement.style.getPropertyValue("--reader-brightness") === "1" &&
         !content.book.dataset.fontFamily,
@@ -231,14 +243,6 @@ export function createDiagnostics({
     };
   }
 
-  async function waitFor(predicate) {
-    for (let frame = 0; frame < 120; frame += 1) {
-      if (predicate()) return;
-      await new Promise(requestAnimationFrame);
-    }
-    assert(false, "sample-boundary");
-  }
-
   async function verifyInteraction() {
     const key = (value, target = document, options = {}) => {
       target.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true, ...options }));
@@ -251,9 +255,11 @@ export function createDiagnostics({
 
     await pagination.show(0);
     key("ArrowRight");
-    await waitFor(() => pagination.snapshot().page === 1);
+    await navigation.idle();
+    assert(pagination.snapshot().page === 1, "sample-boundary");
     key("PageUp");
-    await waitFor(() => pagination.snapshot().page === 0);
+    await navigation.idle();
+    assert(pagination.snapshot().page === 0, "sample-boundary");
 
     const beforeProtected = interaction.snapshot();
     key("ArrowRight", document.querySelector("#font-size"));
@@ -272,18 +278,21 @@ export function createDiagnostics({
         new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY, deltaMode: 0 }),
       );
     }
-    await waitFor(() => pagination.snapshot().page === 1);
+    await navigation.idle();
+    assert(pagination.snapshot().page === 1, "sample-boundary");
     assert(interaction.snapshot().wheel === 1, "sample-boundary");
 
     await pagination.show(0);
     const right = rect.right - 20;
     pointer("pointerdown", { pointerId: 1, button: 0, clientX: right, clientY: rect.top + 40 });
     pointer("pointerup", { pointerId: 1, button: 0, clientX: right, clientY: rect.top + 40 });
-    await waitFor(() => pagination.snapshot().page === 1);
+    await navigation.idle();
+    assert(pagination.snapshot().page === 1, "sample-boundary");
     const left = rect.left + 20;
     pointer("pointerdown", { pointerId: 1, button: 0, clientX: left, clientY: rect.top + 40 });
     pointer("pointerup", { pointerId: 1, button: 0, clientX: left, clientY: rect.top + 40 });
-    await waitFor(() => pagination.snapshot().page === 0);
+    await navigation.idle();
+    assert(pagination.snapshot().page === 0, "sample-boundary");
 
     pointer("pointerdown", {
       pointerId: 2,
@@ -299,7 +308,8 @@ export function createDiagnostics({
       clientX: rect.left + 80,
       clientY: rect.top + 84,
     });
-    await waitFor(() => pagination.snapshot().page === 1);
+    await navigation.idle();
+    assert(pagination.snapshot().page === 1, "sample-boundary");
 
     await pagination.show(0);
     document.documentElement.removeAttribute("data-reader-tools");
@@ -392,9 +402,11 @@ export function createDiagnostics({
       await session.open(0);
       await pagination.show(pagination.snapshot().pages - 1);
       key("PageDown");
-      await waitFor(() => session.snapshot().currentIndex === 1);
+      await navigation.idle();
+      assert(session.snapshot().currentIndex === 1, "sample-boundary");
       key("PageUp");
-      await waitFor(() => session.snapshot().currentIndex === 0);
+      await navigation.idle();
+      assert(session.snapshot().currentIndex === 0, "sample-boundary");
     }
     await session.open(0);
     await pagination.show(0);
@@ -603,7 +615,22 @@ export function createDiagnostics({
     });
   }
 
+  function verifyHostPolicy() {
+    if (!window.__TAURI_INTERNALS__) return;
+    const policy = document.permissionsPolicy?.allowsFeature
+      ? document.permissionsPolicy
+      : document.featurePolicy;
+    assert(
+      policy?.allowsFeature &&
+        ["camera", "display-capture", "geolocation", "microphone"].every(
+          (feature) => !policy.allowsFeature(feature),
+        ),
+      "permission-policy",
+    );
+  }
+
   function complete() {
+    verifyHostPolicy();
     const book = content.book;
     const state = pagination.snapshot();
     const inline = book.querySelectorAll("img.math-inline").length;

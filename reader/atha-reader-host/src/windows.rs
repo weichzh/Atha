@@ -1,15 +1,18 @@
-mod diagnostics;
-mod launch;
+#[path = "windows/protocol.rs"]
 mod protocol;
 
 use std::{error::Error, fs, process, time::Instant};
 
+use crate::{
+    diagnostics::{DiagnosticError, Diagnostics, ReadyDisposition, safe_event},
+    launch::{
+        Arguments, BookSource, content_fingerprint, initial_window_size, reader_url, state_key,
+    },
+};
 use atha_backend::reader::{
     resources::BookRoot,
     telemetry::{ReaderEvent, TelemetryError, parse_reader_event},
 };
-use diagnostics::{DiagnosticError, Diagnostics, ReadyDisposition, safe_event};
-use launch::{Arguments, initial_window_size, reader_url};
 use tao::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder},
@@ -28,13 +31,13 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let book_root = BookRoot::new(&book.book_root)?;
     let source_resource = book_root.read(&format!("/{}", book.source.path()))?;
     let canonical_source = fs::canonicalize(book.book_root.join(book.source.path()))?;
-    let mut state_key = launch::state_key(&canonical_source);
+    let mut state_key = state_key(&canonical_source);
     if arguments.state_probe.is_some() {
         state_key.push_str("-probe");
     }
     let content_version = match &book.source {
-        launch::BookSource::Entry(_) => Some(launch::content_fingerprint(&source_resource.bytes)),
-        launch::BookSource::Manifest(_) => None,
+        BookSource::Entry(_) => Some(content_fingerprint(&source_resource.bytes)),
+        BookSource::Manifest(_) => None,
     };
     let mut diagnostics = Diagnostics::new(
         startup,

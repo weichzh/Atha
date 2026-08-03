@@ -10,21 +10,27 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 
 | 文件 | 负责内容 |
 | --- | --- |
-| `reader/atha-reader.html` | 阅读页 DOM；顶部返回、书签、更多菜单；底部五个图标；目录、搜索、笔记和进度面板 |
-| `reader/atha-reader.css` | 固定书页、系统缩放、顶部和底部覆盖层、各工具面板、明暗主题 |
+| `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
+| `reader/app/src/components/ReaderCanvas.svelte` | 固定书页、章节和进度 DOM |
+| `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏与五个工具入口的组合 |
+| `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部五图标 |
+| `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
+| `reader/app/src/shell.css` | 顶部和底部覆盖层、面板、图标及壳层明暗视觉 |
+| `reader/atha-reader.css` | 固定书页、系统缩放和书籍内容样式 |
 | `reader/web/app.mjs` | 组合模块；开关工具层；亮度；返回按钮 |
 | `reader/web/interaction.mjs` | 正文左、中、右点击区和键盘、滚轮、触摸输入；中间点击开关工具层 |
 | `reader/web/bookmarks.mjs` | 右上角书签切换、目录中的书签列表和书签跳转 |
 | `reader/web/navigation.mjs` | 章节标题、目录选择和进度拖动 |
 | `reader/web/pagination.mjs` | 780 × 1680 设备像素书页、分页、进度和公式尺寸 |
 | `reader/assets/bookmark-24-regular.svg` | 右上角书签图标，来自 Microsoft Fluent System Icons |
-| `reader/atha-reader-host/src/windows/launch.rs` | Windows 窗口按系统缩放换算后的初始尺寸 |
-| `reader/atha-reader-host/src/windows/protocol.rs` | 阅读页静态资源和 CSP；增加界面资源时需要登记 |
+| `reader/app/src-tauri/src/lib.rs` | Tauri 窗口、受控书籍协议、导航限制和遥测 command |
+| `reader/atha-reader-host/src/windows/launch.rs` | 两个 host 共用的 Windows 窗口尺寸、CLI 与阅读 URL |
+| `reader/app/vite.config.ts` | production 壳构建和既有 reader module 拼接顺序 |
 | `scripts/check-reader-samples.ps1` | 四本书、明暗主题、真实 WebView2 与阅读状态回归 |
 
 ## DOM 结构
 
-`reader/atha-reader.html` 的主要层次如下：
+Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 ```text
 .reader-shell
@@ -58,11 +64,11 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 
 ## 手工调整入口
 
-在 `reader/atha-reader.css` 中直接搜索以下选择器：
+应用壳视觉在 `reader/app/src/shell.css` 中调整；书页内容只在 `reader/atha-reader.css` 中调整：
 
 | 想调整的部分 | 选择器或变量 |
 | --- | --- |
-| 书页边距 | `.reader` 内的 `--page-inline-margin`、`--page-top-margin`、`--page-bottom-margin` |
+| 书页边距 | `reader/atha-reader.css` 的 `--page-top-margin`、`--page-right-margin`、`--page-bottom-margin`、`--page-left-margin`；默认值和校验在 `reader/web/preferences.mjs` |
 | 顶部栏 | `.top-toolbar`、`.top-toolbar-actions` |
 | 底部栏 | `.toolbar`、`.icon-button`、`.fluent-icon` |
 | 所有弹出面板 | `.tool-panel` |
@@ -73,7 +79,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | 更多菜单 | `.preferences-panel`、`.advanced-preferences` |
 | 明暗主题 | `:root[data-theme="light"]` 与 `:root[data-theme="dark"]` 下的规则 |
 
-图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `reader/atha-reader.html` 决定；`.toolbar` 固定为五等分。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
+图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `BottomToolbar.svelte` 决定；`.toolbar` 固定为五等分。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
 
 ## 交互连接
 
@@ -81,13 +87,14 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 - `interaction.mjs` 只按横向比例区分左 35%、中间 30% 和右 35%；中间区调用 `toggleReaderTools()`。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；选择书签项直接跳转。
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
+- `#density` 只调整行距；`#margin-top`、`#margin-right`、`#margin-bottom` 和 `#margin-left` 分别调整固定设备像素页边距，四项都经 Navigation 串行重排并恢复 Locator。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
 ## 当前有意暂缓
 
 - 听书只有禁用图标，没有播放逻辑；
 - 桌面横屏和大屏布局尚未设计；
-- 当前先使用系统 Fluent 图标和基础控件，不为第一版增加自定义图标系统或动效框架。
+- 当前使用 Lucide Svelte 图标和原生表单控件；尚未引入额外 UI 组件库或动效框架。
 
 ## 截图证据
 

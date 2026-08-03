@@ -4,7 +4,7 @@ use atha_backend::reader::epub::{READER_MANIFEST, import_epub};
 
 use tao::dpi::LogicalSize;
 
-pub(super) const APP_PAGE: &str = "https://atha.localhost/atha-reader.html";
+pub const APP_PAGE: &str = "https://atha.localhost/atha-reader.html";
 const PAGE_DEVICE_WIDTH: f64 = 780.0;
 const PAGE_DEVICE_HEIGHT: f64 = 1680.0;
 const WINDOW_PADDING_LOGICAL: f64 = 48.0;
@@ -12,13 +12,13 @@ const WINDOW_FRAME_ALLOWANCE_LOGICAL: f64 = 48.0;
 const MAX_SCREEN_FRACTION: f64 = 0.8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum BenchmarkMode {
+pub enum BenchmarkMode {
     Cold,
     Hot,
 }
 
 impl BenchmarkMode {
-    pub(super) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Cold => "cold",
             Self::Hot => "hot",
@@ -26,19 +26,19 @@ impl BenchmarkMode {
     }
 }
 
-pub(super) struct Benchmark {
-    pub(super) run_id: String,
-    pub(super) process_sample: u8,
-    pub(super) mode: BenchmarkMode,
+pub struct Benchmark {
+    pub run_id: String,
+    pub process_sample: u8,
+    pub mode: BenchmarkMode,
 }
 
-pub(super) struct Arguments {
+pub struct Arguments {
     input: BookInput,
-    pub(super) verify_sample: bool,
+    pub verify_sample: bool,
     import_probe: bool,
-    pub(super) hold_after_verify: bool,
-    pub(super) state_probe: Option<StateProbe>,
-    pub(super) benchmark: Option<Benchmark>,
+    pub hold_after_verify: bool,
+    pub state_probe: Option<StateProbe>,
+    pub benchmark: Option<Benchmark>,
 }
 
 enum BookInput {
@@ -49,13 +49,13 @@ enum BookInput {
     Epub(PathBuf),
 }
 
-pub(super) struct ResolvedBook {
-    pub(super) book_root: PathBuf,
-    pub(super) source: BookSource,
+pub struct ResolvedBook {
+    pub book_root: PathBuf,
+    pub source: BookSource,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum StateProbe {
+pub enum StateProbe {
     Write,
     Read,
 }
@@ -70,13 +70,13 @@ impl StateProbe {
 }
 
 #[derive(Clone)]
-pub(super) enum BookSource {
+pub enum BookSource {
     Entry(String),
     Manifest(String),
 }
 
 impl BookSource {
-    pub(super) fn path(&self) -> &str {
+    pub fn path(&self) -> &str {
         match self {
             Self::Entry(path) | Self::Manifest(path) => path,
         }
@@ -84,7 +84,7 @@ impl BookSource {
 }
 
 impl Arguments {
-    pub(super) fn parse() -> Result<Self, Box<dyn Error>> {
+    pub fn parse() -> Result<Self, Box<dyn Error>> {
         Self::parse_values(env::args_os().skip(1))
     }
 
@@ -214,7 +214,7 @@ impl Arguments {
         })
     }
 
-    pub(super) fn resolve_book(&self) -> Result<ResolvedBook, Box<dyn Error>> {
+    pub fn resolve_book(&self) -> Result<ResolvedBook, Box<dyn Error>> {
         match &self.input {
             BookInput::Prepared { book_root, source } => Ok(ResolvedBook {
                 book_root: book_root.clone(),
@@ -237,7 +237,7 @@ impl Arguments {
     }
 }
 
-pub(super) fn reader_url(
+pub fn reader_url(
     arguments: &Arguments,
     source: &BookSource,
     probe: Option<&TcpListener>,
@@ -277,7 +277,7 @@ pub(super) fn reader_url(
     format!("atha://localhost/atha-reader.html?{}", query.join("&"))
 }
 
-pub(super) fn state_key(source: &std::path::Path) -> String {
+pub fn state_key(source: &std::path::Path) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in source
         .to_string_lossy()
@@ -290,7 +290,7 @@ pub(super) fn state_key(source: &std::path::Path) -> String {
     format!("{hash:016x}")
 }
 
-pub(super) fn content_fingerprint(bytes: &[u8]) -> String {
+pub fn content_fingerprint(bytes: &[u8]) -> String {
     [
         0xcbf29ce484222325,
         0x84222325cbf29ce4,
@@ -307,7 +307,7 @@ pub(super) fn content_fingerprint(bytes: &[u8]) -> String {
     .join("")
 }
 
-pub(super) fn initial_window_size(
+pub fn initial_window_size(
     screen: LogicalSize<f64>,
     monitor_scale_factor: f64,
 ) -> LogicalSize<f64> {

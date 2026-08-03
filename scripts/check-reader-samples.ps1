@@ -537,6 +537,7 @@ try {
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent !== '$positionBefore'")
                 Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
                 Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#toc option[data-bookmark-id]').length === 1 && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'true'")
                 Invoke-AgentBrowser @('--session', $session, 'click', '.preferences > summary')
                 [void](Get-AgentBrowserScriptValue -Session $session -Script "(() => { const value = document.querySelector('#brightness'); value.value = '85'; value.dispatchEvent(new Event('input', { bubbles: true })); value.dispatchEvent(new Event('change', { bubbles: true })); return true; })()")
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "JSON.parse(localStorage.getItem('atha.reader.application.v1')).preferences.brightness === 85")
@@ -571,6 +572,7 @@ try {
                 [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
                 Invoke-AgentBrowser @('--session', $session, 'click', '.progress > summary')
                 Invoke-AgentBrowser @('--session', $session, 'click', '#next')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent !== '$savedPosition'")
                 Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
                 [void](Get-AgentBrowserScriptValue -Session $session -Script @'
 (() => {
@@ -581,8 +583,9 @@ try {
   return true;
 })()
 '@)
-                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent === '$savedPosition'")
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#position').textContent === '$savedPosition' && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'true'")
                 Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#toc option[data-bookmark-id]').length === 0 && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'false'")
                 $bookmarkCount = [int](Get-AgentBrowserScriptValue -Session $session -Script "document.querySelectorAll('#toc option[data-bookmark-id]').length")
                 if ($bookmarkCount -ne 0) { throw 'Bookmark deletion did not persist in memory.' }
                 [void](Get-AgentBrowserScriptValue -Session $session -Script @'

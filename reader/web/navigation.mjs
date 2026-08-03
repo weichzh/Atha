@@ -290,6 +290,7 @@ export function createNavigation({
     goTo: (value) => run(() => goTo(value)),
     goToHref: (value) => run(() => goToHref(value)),
     goToToc: (index) => run(() => goToToc(index)),
+    idle: () => pending,
     next: () => run(nextPage),
     previous: () => run(previousPage),
     resetPreferences: (scope) => run(() => resetPreferences(scope)),

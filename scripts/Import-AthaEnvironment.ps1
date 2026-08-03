@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $environmentPath -PathType Leaf)) {
 
 . $environmentPath
 
-foreach ($name in @('ATHA_CARGO', 'ATHA_CMAKE', 'ATHA_CTEST', 'ATHA_SQLITE3')) {
+foreach ($name in @('ATHA_CARGO', 'ATHA_CMAKE', 'ATHA_CTEST', 'ATHA_NODE', 'ATHA_PNPM', 'ATHA_SQLITE3')) {
     $path = [Environment]::GetEnvironmentVariable($name, 'Process')
     if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Environment variable $name must name an existing executable in env/local.ps1."

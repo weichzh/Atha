@@ -60,11 +60,10 @@ textarea:focus-visible,
 }
 
 .reader {
-  --page-inline-margin: 56px;
-  --page-top-margin: 96px;
-  --page-bottom-margin: 128px;
   --page-gap: 112px;
-  --content-width: calc(var(--reader-width) - 2 * var(--page-inline-margin));
+  --content-width: calc(
+    var(--reader-width) - var(--page-left-margin) - var(--page-right-margin)
+  );
   --content-height: calc(
     var(--reader-height) - var(--page-top-margin) - var(--page-bottom-margin)
   );
@@ -81,7 +80,7 @@ textarea:focus-visible,
 .page {
   position: absolute;
   top: var(--page-top-margin);
-  left: var(--page-inline-margin);
+  left: var(--page-left-margin);
   width: var(--content-width);
   height: var(--content-height);
   overflow: hidden;
@@ -169,15 +168,15 @@ textarea:focus-visible,
 
 .chapter-label {
   top: 40px;
-  left: var(--page-inline-margin);
-  max-width: calc(100% - 2 * var(--page-inline-margin));
+  left: var(--page-left-margin);
+  max-width: calc(100% - var(--page-left-margin) - var(--page-right-margin));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .reading-position {
-  right: var(--page-inline-margin);
+  right: var(--page-right-margin);
   bottom: 48px;
 }
 
@@ -589,6 +588,10 @@ textarea:focus-visible,
   border: 2px solid #a32921;
   background: #fff0ee;
   color: #781e18;
+}
+
+.error[hidden] {
+  display: none;
 }
 
 @media (prefers-color-scheme: dark) {

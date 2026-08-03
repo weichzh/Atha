@@ -2,6 +2,9 @@
 __pycache__/
 build/
 target/
+reader/app/dist/
+reader/app/node_modules/
+reader/app/src-tauri/gen/
 env/local.ps1
 fixtures/local/
 artifacts/local/

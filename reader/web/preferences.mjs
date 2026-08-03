@@ -4,16 +4,20 @@ const APPLICATION_DEFAULTS = Object.freeze({
   fontSize: 32,
   fontFamily: "book",
   density: "standard",
+  marginTopPx: 88,
+  marginRightPx: 32,
+  marginBottomPx: 88,
+  marginLeftPx: 32,
 });
 const BOOK_DEFAULTS = Object.freeze({
   sourceStyles: true,
   userStylesEnabled: true,
   userStylesheet: "",
 });
-const DENSITIES = Object.freeze({
-  compact: Object.freeze({ lineHeightRatio: 1.45, inline: 80, top: 80, bottom: 96 }),
-  standard: Object.freeze({ lineHeightRatio: 1.6, inline: 112, top: 96, bottom: 128 }),
-  comfortable: Object.freeze({ lineHeightRatio: 1.8, inline: 144, top: 112, bottom: 144 }),
+const LINE_HEIGHT_RATIOS = Object.freeze({
+  compact: 1.45,
+  standard: 1.6,
+  comfortable: 1.8,
 });
 
 export function createPreferences({ root, reader, content, controls, assert }) {
@@ -35,7 +39,16 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   }
 
   function validateApplication(value) {
-    const normalized = { brightness: 100, ...value };
+    const normalized = {
+      brightness: 100,
+      marginTopPx: APPLICATION_DEFAULTS.marginTopPx,
+      marginRightPx: APPLICATION_DEFAULTS.marginRightPx,
+      marginBottomPx: APPLICATION_DEFAULTS.marginBottomPx,
+      marginLeftPx: APPLICATION_DEFAULTS.marginLeftPx,
+      ...value,
+    };
+    const validMargin = (margin) =>
+      Number.isInteger(margin) && margin >= 0 && margin <= 288 && margin % 8 === 0;
     ensure(
       exact(normalized, APPLICATION_DEFAULTS) &&
         ["system", "light", "dark"].includes(normalized.theme) &&
@@ -44,7 +57,11 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         normalized.brightness <= 120 &&
         [24, 32, 40].includes(normalized.fontSize) &&
         ["book", "serif", "sans"].includes(normalized.fontFamily) &&
-        Object.hasOwn(DENSITIES, normalized.density),
+        Object.hasOwn(LINE_HEIGHT_RATIOS, normalized.density) &&
+        validMargin(normalized.marginTopPx) &&
+        validMargin(normalized.marginRightPx) &&
+        validMargin(normalized.marginBottomPx) &&
+        validMargin(normalized.marginLeftPx),
       "invalid-preference",
     );
     return normalized;
@@ -68,6 +85,10 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.fontSize.value = String(application.fontSize);
     controls.fontFamily.value = application.fontFamily;
     controls.density.value = application.density;
+    controls.marginTop.value = String(application.marginTopPx);
+    controls.marginRight.value = String(application.marginRightPx);
+    controls.marginBottom.value = String(application.marginBottomPx);
+    controls.marginLeft.value = String(application.marginLeftPx);
     controls.sourceStyles.checked = book.sourceStyles;
     controls.userStylesEnabled.checked = book.userStylesEnabled;
     controls.userStylesheet.value = book.userStylesheet;
@@ -87,14 +108,14 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     root.style.setProperty("--reader-brightness", String(application.brightness / 100));
     if (application.fontFamily === "book") delete content.book.dataset.fontFamily;
     else content.book.dataset.fontFamily = application.fontFamily;
-    const density = DENSITIES[application.density];
     reader.style.setProperty(
       "--reader-line-height",
-      `${application.fontSize * density.lineHeightRatio}px`,
+      `${application.fontSize * LINE_HEIGHT_RATIOS[application.density]}px`,
     );
-    reader.style.setProperty("--page-inline-margin", `${density.inline}px`);
-    reader.style.setProperty("--page-top-margin", `${density.top}px`);
-    reader.style.setProperty("--page-bottom-margin", `${density.bottom}px`);
+    reader.style.setProperty("--page-top-margin", `${application.marginTopPx}px`);
+    reader.style.setProperty("--page-right-margin", `${application.marginRightPx}px`);
+    reader.style.setProperty("--page-bottom-margin", `${application.marginBottomPx}px`);
+    reader.style.setProperty("--page-left-margin", `${application.marginLeftPx}px`);
     syncControls();
     return snapshot();
   }
@@ -145,6 +166,10 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       [controls.theme, "theme", String],
       [controls.fontFamily, "fontFamily", String],
       [controls.density, "density", String],
+      [controls.marginTop, "marginTopPx", Number],
+      [controls.marginRight, "marginRightPx", Number],
+      [controls.marginBottom, "marginBottomPx", Number],
+      [controls.marginLeft, "marginLeftPx", Number],
     ]) {
       control.addEventListener("change", () => {
         run(() => onUpdate("application", { [key]: convert(control.value) }), "已应用");
@@ -186,6 +211,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     ["application", { theme: "sepia" }],
     ["application", { brightness: 121 }],
     ["application", { fontSize: 31 }],
+    ["application", { marginLeftPx: 31 }],
     ["book", { unknown: true }],
   ]) {
     let rejected = false;

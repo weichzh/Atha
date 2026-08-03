@@ -1,4 +1,4 @@
-export function createBookmarks({ state, navigation, session, locator, controls, assert }) {
+export function createBookmarks({ state, navigation, pagination, session, locator, controls, assert }) {
   let pending = Promise.resolve();
   const placements = new Map();
   const messages = Object.freeze({
@@ -23,12 +23,21 @@ export function createBookmarks({ state, navigation, session, locator, controls,
     return heading?.label || section.id;
   }
 
+  function visibleBookmark() {
+    const section = session.snapshot().currentSection;
+    return state.snapshot().bookmarks.find((bookmark) => {
+      if (!bookmark.currentVersion) return false;
+      try {
+        const point = locator.parse(session.describe(), bookmark.locator).start;
+        return point.section === section && pagination.isOffsetVisible(point.offset);
+      } catch {
+        return false;
+      }
+    });
+  }
+
   function syncCurrent() {
-    const current = locator.serialize(session.describe(), navigation.current());
-    const active = state
-      .snapshot()
-      .bookmarks.some((bookmark) => bookmark.currentVersion && bookmark.locator === current);
-    controls.add.setAttribute("aria-pressed", String(active));
+    controls.add.setAttribute("aria-pressed", String(Boolean(visibleBookmark())));
   }
 
   function candidates(bookmark) {
@@ -68,6 +77,7 @@ export function createBookmarks({ state, navigation, session, locator, controls,
       if (previous) previous.after(option);
       else controls.list.append(option);
     }
+    controls.list.closest("label").hidden = controls.list.options.length === 0;
     syncCurrent();
   }
 
@@ -81,16 +91,18 @@ export function createBookmarks({ state, navigation, session, locator, controls,
   }
 
   function toggle() {
-    const result = state.addBookmark(label());
-    if (!result.ok) throw new Error(result.error);
-    if (!result.created) {
-      const removed = state.removeBookmark(result.id);
+    const visible = visibleBookmark();
+    if (visible) {
+      const removed = state.removeBookmark(visible.id);
       if (!removed.ok) throw new Error(removed.error);
-      placements.delete(result.id);
+      placements.delete(visible.id);
       sync();
       report("已取消书签");
-      return Object.freeze({ ...result, removed: true });
+      return Object.freeze({ ok: true, id: visible.id, created: false, removed: true });
     }
+    const result = state.addBookmark(label());
+    if (!result.ok) throw new Error(result.error);
+    assert(result.created, "sample-boundary");
     placements.set(result.id, navigation.snapshot().tocIndex);
     sync();
     report("已添加书签");
@@ -133,17 +145,22 @@ export function createBookmarks({ state, navigation, session, locator, controls,
     await pending;
     const created = state.snapshot().bookmarks;
     const inserted = controls.list.querySelector("option[data-bookmark-id]");
+    const correctlyPlaced = session.describe().toc.length
+      ? inserted?.previousElementSibling?.value === String(navigation.snapshot().tocIndex)
+      : inserted === controls.list.firstElementChild;
     assert(
       created.length === 1 &&
         controls.add.getAttribute("aria-pressed") === "true" &&
-        inserted?.previousElementSibling?.value === String(navigation.snapshot().tocIndex),
+        correctlyPlaced &&
+        !controls.list.closest("label").hidden,
       "sample-boundary",
     );
     controls.add.click();
     await pending;
     assert(
       state.snapshot().bookmarks.length === 0 &&
-        controls.add.getAttribute("aria-pressed") === "false",
+        controls.add.getAttribute("aria-pressed") === "false" &&
+        controls.list.closest("label").hidden === (session.describe().toc.length === 0),
       "sample-boundary",
     );
     controls.add.click();

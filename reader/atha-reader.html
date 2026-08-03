@@ -63,13 +63,32 @@
                   </select>
                 </label>
                 <label>
-                  阅读密度
+                  行距
                   <select id="density">
                     <option value="compact">紧凑</option>
                     <option value="standard" selected>标准</option>
                     <option value="comfortable">舒展</option>
                   </select>
                 </label>
+                <details class="advanced-preferences">
+                  <summary>页面布局</summary>
+                  <label>
+                    上边距（设备 px）
+                    <input id="margin-top" type="number" min="0" max="288" step="8" />
+                  </label>
+                  <label>
+                    右边距（设备 px）
+                    <input id="margin-right" type="number" min="0" max="288" step="8" />
+                  </label>
+                  <label>
+                    下边距（设备 px）
+                    <input id="margin-bottom" type="number" min="0" max="288" step="8" />
+                  </label>
+                  <label>
+                    左边距（设备 px）
+                    <input id="margin-left" type="number" min="0" max="288" step="8" />
+                  </label>
+                </details>
                 <button id="reset-application-preferences" type="button">恢复应用默认</button>
                 <hr />
                 <label class="checkbox-label">

@@ -1,9 +1,11 @@
-# Description: Verify the Windows XHTML reader slice and record local benchmarks.
+# Description: Verify a Windows XHTML reader host and record local benchmarks.
 
 [CmdletBinding()]
 param(
     [string]$BookRoot,
-    [string]$Entry = 'EPUB/text/ch012.xhtml'
+    [string]$Entry = 'EPUB/text/ch012.xhtml',
+    [string]$HostPackage = 'atha-reader-host',
+    [string]$HostPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,7 +22,10 @@ if (-not (Test-Path -LiteralPath $entryPath -PathType Leaf)) {
 . (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
 $cargoPath = $env:ATHA_CARGO
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
-$hostPath = Join-Path $repoRoot 'target/debug/atha-reader-host.exe'
+if ([string]::IsNullOrWhiteSpace($HostPath)) {
+    $HostPath = 'target/debug/atha-reader-host.exe'
+}
+$hostPath = [IO.Path]::GetFullPath((Join-Path $repoRoot $HostPath))
 $runId = '{0}-{1}' -f [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(), $PID
 $benchmarkRoot = Join-Path $repoRoot 'artifacts/local/benchmarks'
 $p95Limits = @{
@@ -89,7 +94,7 @@ try {
     & $cargoPath test --manifest-path $manifestPath --workspace --all-targets --locked
     if ($LASTEXITCODE -ne 0) { throw 'Reader Rust tests failed.' }
 
-    & $cargoPath build --manifest-path $manifestPath --package atha-reader-host --locked
+    & $cargoPath build --manifest-path $manifestPath --package $HostPackage --locked
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
         throw 'Reader host build failed.'
     }

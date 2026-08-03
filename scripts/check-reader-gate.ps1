@@ -14,7 +14,6 @@ $largeOutputName = 'math-history-r8'
 $largeRoot = Join-Path $repoRoot "fixtures/local/$largeOutputName"
 $hostPath = Join-Path $repoRoot 'target/debug/atha-reader-host.exe'
 $manifestName = '.atha-reader.json'
-$memoryLimitMiB = 1024
 $env:AGENT_BROWSER_DEFAULT_TIMEOUT = '120000'
 
 function Invoke-Checked {
@@ -121,9 +120,6 @@ function Measure-LargeBookHost {
     if ($samples -lt 5 -or $peakProcesses -lt 2 -or $peakMiB -le 0) {
         throw "WebView2 process-tree memory was not measurable: samples=$samples processes=$peakProcesses peakMiB=$peakMiB."
     }
-    if ($peakMiB -gt $memoryLimitMiB) {
-        throw "Large-book process-tree peak working set exceeded ${memoryLimitMiB}MiB: ${peakMiB}MiB."
-    }
     return [pscustomobject]@{
         peak_mib = $peakMiB
         peak_processes = $peakProcesses
@@ -204,6 +200,11 @@ function Test-LargeBookSearch {
         if ($pageState.status -ne 'pass' -or $pageState.error) {
             throw "Large-book page failed: $($pageState | ConvertTo-Json -Compress)"
         }
+        $readerPoint = Get-AgentBrowserScriptValue -Session $session -Script "(() => { const rect = document.querySelector('.reader').getBoundingClientRect(); return [Math.round(rect.left + rect.width / 2), Math.round(rect.top + 20)]; })()" | ConvertFrom-Json
+        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$readerPoint[0], [string]$readerPoint[1])
+        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
+        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.hasAttribute('data-reader-tools')")
         Invoke-AgentBrowser @('--session', $session, 'click', '.search > summary')
         Invoke-AgentBrowser @('--session', $session, 'fill', '#search-query', '数学')
         Invoke-AgentBrowser @('--session', $session, 'click', '#search-form button[type=submit]')

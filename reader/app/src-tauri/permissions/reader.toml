@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-reader-event"
+description = "允许主阅读窗口上报经过 Rust 严格校验的非内容事件。"
+commands.allow = ["reader_event"]

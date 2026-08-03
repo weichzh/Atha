@@ -1,0 +1,21 @@
+[package]
+name = "atha-reader-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atha_reader_app"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+atha-backend = { path = "../../../backend/atha-backend" }
+atha-reader-host = { path = "../../atha-reader-host" }
+tao = { version = "=0.36.0", default-features = false, features = ["rwh_06"] }
+tauri = { version = "2", features = [] }
+
+[lints]
+workspace = true

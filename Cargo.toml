@@ -1,5 +1,5 @@
 [workspace]
-members = ["backend/atha-backend", "reader/atha-reader-host"]
+members = ["backend/atha-backend", "reader/atha-reader-host", "reader/app/src-tauri"]
 exclude = ["p0/ffi/rust"]
 resolver = "3"
 

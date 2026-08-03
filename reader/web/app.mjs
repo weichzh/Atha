@@ -13,7 +13,8 @@ function toggleReaderTools() {
 }
 
 function emit(message) {
-  if (window.ipc?.postMessage) window.ipc.postMessage(message);
+  const bridge = window.athaReaderIpc || window.ipc;
+  if (bridge?.postMessage) bridge.postMessage(message);
 }
 
 function fail(code) {
@@ -53,6 +54,10 @@ const preferences = createPreferences({
     fontSize: document.querySelector("#font-size"),
     fontFamily: document.querySelector("#font-family"),
     density: document.querySelector("#density"),
+    marginTop: document.querySelector("#margin-top"),
+    marginRight: document.querySelector("#margin-right"),
+    marginBottom: document.querySelector("#margin-bottom"),
+    marginLeft: document.querySelector("#margin-left"),
     sourceStyles: document.querySelector("#source-styles"),
     userStylesEnabled: document.querySelector("#user-styles-enabled"),
     userStylesheet: document.querySelector("#user-stylesheet"),
@@ -159,6 +164,7 @@ annotations = createAnnotations({
 bookmarks = createBookmarks({
   state: readerState,
   navigation,
+  pagination,
   session,
   locator,
   controls: {
@@ -259,13 +265,14 @@ async function start() {
   diagnostics.recordFirstStable(firstStableStarted);
 
   const stateProbe = params.get("state-probe");
+  const benchmarkMode = params.get("benchmark");
   if (stateProbe) {
     await readerState.verifyPersistence(stateProbe);
     await annotations.verifyPersistence(stateProbe);
   }
   else if (params.has("verify-import")) await diagnostics.verifyImport();
-  else if (params.has("verify")) await diagnostics.verify();
-  if (params.get("benchmark") === "hot") await diagnostics.benchmark();
+  else if (params.has("verify") && !benchmarkMode) await diagnostics.verify();
+  if (benchmarkMode === "hot") await diagnostics.benchmark();
 
   diagnostics.complete();
 }

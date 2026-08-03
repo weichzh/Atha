@@ -98,9 +98,13 @@ R8 通过后，只选择 EPUB3，将其转换为 R1 已稳定的内容输入。W
 
 实施与验收由 `docs/changes/epub-source-m3.md` 记录。不得因此继续建设多格式工厂、书架、云端来源、损坏书源修复或界面改版。
 
-## M4：Atha 产品能力（暂不规划）
+## M4：Atha 产品能力
 
 书架、消息式阅读、Windows 正式壳、TTS、同步和其他产品能力不再预先绑成一个里程碑。M3 完成后根据真实阅读器 interface 和用户优先级重新排序；当前不创建其 schema、module 或占位界面。
+
+### Tauri 与 Svelte 阅读应用壳（已完成）
+
+首个产品化切片只把 Windows host 迁移到 Tauri 2，并用 Svelte 5 按职责拆分现有移动阅读壳；WebView2、单 WebView、受控书籍协议和无框架 reader kernel 保持不变。旧 Wry/Tao host 暂留作基线；后续功能由真实使用反馈决定，不预建书架、TTS 或同步骨架。
 
 ## 暂缓范围
 

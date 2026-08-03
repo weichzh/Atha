@@ -1,9 +1,6 @@
 #[cfg(windows)]
-mod windows;
-
-#[cfg(windows)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    windows::run()
+    atha_reader_host::run()
 }
 
 #[cfg(not(windows))]

@@ -16,17 +16,17 @@ use super::launch::{Benchmark, BenchmarkMode};
 
 const SAMPLE_ID: &str = "logic-1-2-v1";
 
-pub(super) enum DiagnosticError {
+pub enum DiagnosticError {
     Reader(&'static str),
     Recorder(&'static str, std::io::Error),
 }
 
-pub(super) enum ReadyDisposition {
+pub enum ReadyDisposition {
     Interactive,
     VerificationComplete,
 }
 
-pub(super) struct Diagnostics {
+pub struct Diagnostics {
     recorder: Recorder,
     progress: BenchmarkProgress,
     network_probe: Option<TcpListener>,
@@ -36,7 +36,7 @@ pub(super) struct Diagnostics {
 }
 
 impl Diagnostics {
-    pub(super) fn new(
+    pub fn new(
         startup: Instant,
         verify_sample: bool,
         benchmark: Option<&Benchmark>,
@@ -60,11 +60,11 @@ impl Diagnostics {
         })
     }
 
-    pub(super) fn network_probe(&self) -> Option<&TcpListener> {
+    pub fn network_probe(&self) -> Option<&TcpListener> {
         self.network_probe.as_ref()
     }
 
-    pub(super) fn record_metric(&mut self, metric: Metric) -> Result<(), DiagnosticError> {
+    pub fn record_metric(&mut self, metric: Metric) -> Result<(), DiagnosticError> {
         if !self.progress.insert(metric) {
             return Err(DiagnosticError::Reader("duplicate-metric"));
         }
@@ -82,10 +82,7 @@ impl Diagnostics {
             .map_err(|error| DiagnosticError::Recorder("reader telemetry write failed", error))
     }
 
-    pub(super) fn record_ready(
-        &mut self,
-        ready: Ready,
-    ) -> Result<ReadyDisposition, DiagnosticError> {
+    pub fn record_ready(&mut self, ready: Ready) -> Result<ReadyDisposition, DiagnosticError> {
         if (self.verify_sample && (ready.cuts != 0 || ready.pages == 0))
             || self.network_connected()
             || self
@@ -105,12 +102,12 @@ impl Diagnostics {
         })
     }
 
-    pub(super) fn record_failure(&mut self, code: &str) {
+    pub fn record_failure(&mut self, code: &str) {
         let _ = self.recorder.log("error", safe_event(code));
         let _ = self.recorder.flush();
     }
 
-    pub(super) fn flush(&mut self) {
+    pub fn flush(&mut self) {
         let _ = self.recorder.flush();
     }
 
@@ -276,7 +273,7 @@ impl Recorder {
     }
 }
 
-pub(super) fn safe_event(value: &str) -> &str {
+pub fn safe_event(value: &str) -> &str {
     if value
         .bytes()
         .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
