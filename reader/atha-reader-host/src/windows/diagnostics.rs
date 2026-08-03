@@ -72,7 +72,7 @@ impl Diagnostics {
             && self.benchmark_mode == Some(BenchmarkMode::Cold)
         {
             self.recorder
-                .cold_start(self.startup.elapsed().as_secs_f64() * 1000.0, metric.pages)
+                .cold_start(self.startup.elapsed().as_secs_f64() * 1000.0, metric)
                 .map_err(|error| {
                     DiagnosticError::Recorder("reader cold-start write failed", error)
                 })?;
@@ -211,17 +211,16 @@ impl Recorder {
 
     fn metric(&mut self, metric: Metric) -> std::io::Result<()> {
         self.write_metric(
+            metric,
             metric.sample,
-            metric.font_size,
-            metric.pages,
             metric.stage.mode(),
             metric.stage.as_str(),
             metric.duration_ms,
         )
     }
 
-    fn cold_start(&mut self, duration_ms: f64, pages: u16) -> std::io::Result<()> {
-        self.write_metric(1, 32, pages, "cold", "cold_start", duration_ms)
+    fn cold_start(&mut self, duration_ms: f64, metric: Metric) -> std::io::Result<()> {
+        self.write_metric(metric, 1, "cold", "cold_start", duration_ms)
     }
 
     fn log(&mut self, level: &str, event: &str) -> std::io::Result<()> {
@@ -244,9 +243,8 @@ impl Recorder {
 
     fn write_metric(
         &mut self,
+        metric: Metric,
         stage_sample: u8,
-        font_size: u16,
-        pages: u16,
         mode: &str,
         stage: &str,
         duration_ms: f64,
@@ -260,10 +258,10 @@ impl Recorder {
                 stage_sample,
                 self.renderer,
                 SAMPLE_ID,
-                780,
-                1680,
-                font_size,
-                pages,
+                metric.page_width,
+                metric.page_height,
+                metric.font_size,
+                metric.pages,
                 mode,
                 stage,
                 duration_ms

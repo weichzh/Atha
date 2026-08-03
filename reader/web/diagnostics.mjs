@@ -57,7 +57,7 @@ export function createDiagnostics({
     if (params.get("benchmark") === "hot") return;
     const state = pagination.snapshot();
     emit(
-      `metric|first_stable|1|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}`,
+      `metric|first_stable|1|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}|${reader.clientWidth}|${reader.clientHeight}`,
     );
   }
 
@@ -517,13 +517,12 @@ export function createDiagnostics({
   }
 
   async function benchmark() {
-    assert(reader.clientWidth === 780 && reader.clientHeight === 1680, "layout-cut");
     for (let sample = 1; sample <= BENCHMARK_SAMPLES; sample += 1) {
       const started = performance.now();
       await renderCachedSource();
       const state = pagination.snapshot();
       emit(
-        `metric|hot_open|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}`,
+        `metric|hot_open|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}|${reader.clientWidth}|${reader.clientHeight}`,
       );
     }
 
@@ -533,7 +532,7 @@ export function createDiagnostics({
       await pagination.show(sample % 2);
       const state = pagination.snapshot();
       emit(
-        `metric|page_turn|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}`,
+        `metric|page_turn|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}|${reader.clientWidth}|${reader.clientHeight}`,
       );
       assert(pagination.countCutRects() === 0, "layout-cut");
     }
@@ -543,7 +542,7 @@ export function createDiagnostics({
       await pagination.setFontSize(sample % 2 ? 40 : 24);
       const state = pagination.snapshot();
       emit(
-        `metric|font_reflow|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}`,
+        `metric|font_reflow|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}|${reader.clientWidth}|${reader.clientHeight}`,
       );
     }
     await pagination.setFontSize(32);

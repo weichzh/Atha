@@ -51,6 +51,9 @@ public static class AthaWindowProbe {
     public struct Point { public int X, Y; }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct Rect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct MinMaxInfo {
         public Point Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
     }
@@ -59,10 +62,33 @@ public static class AthaWindowProbe {
     public static extern bool IsZoomed(IntPtr handle);
 
     [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr handle);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr handle, int index);
+
+    [DllImport("user32.dll")]
+    private static extern bool AdjustWindowRectExForDpi(ref Rect rect, uint style, bool menu, uint extendedStyle, uint dpi);
+
+    [DllImport("user32.dll")]
     public static extern IntPtr SendMessage(IntPtr handle, uint message, IntPtr wParam, ref MinMaxInfo info);
 
     [DllImport("user32.dll")]
     public static extern bool ShowWindowAsync(IntPtr handle, int command);
+
+    public static Point RequiredTrackSize(IntPtr handle, int logicalWidth, int logicalHeight) {
+        uint dpi = GetDpiForWindow(handle);
+        Rect rect = new Rect {
+            Right = (int)Math.Ceiling(logicalWidth * dpi / 96.0),
+            Bottom = (int)Math.Ceiling(logicalHeight * dpi / 96.0)
+        };
+        uint style = unchecked((uint)GetWindowLongPtr(handle, -16).ToInt64());
+        uint extendedStyle = unchecked((uint)GetWindowLongPtr(handle, -20).ToInt64());
+        if (!AdjustWindowRectExForDpi(ref rect, style, false, extendedStyle, dpi)) {
+            throw new InvalidOperationException("Could not calculate the native minimum window size.");
+        }
+        return new Point { X = rect.Right - rect.Left, Y = rect.Bottom - rect.Top };
+    }
 }
 '@
     }
@@ -93,8 +119,9 @@ public static class AthaWindowProbe {
         [void][AthaWindowProbe]::ShowWindowAsync($handle, 9)
         $minimum = [AthaWindowProbe+MinMaxInfo]::new()
         [void][AthaWindowProbe]::SendMessage($handle, 0x24, [IntPtr]::Zero, [ref]$minimum)
-        if ($minimum.MinTrackSize.X -lt 360 -or $minimum.MinTrackSize.Y -lt 640) {
-            throw "Tauri reader minimum tracking size failed: $($minimum.MinTrackSize.X)x$($minimum.MinTrackSize.Y)."
+        $required = [AthaWindowProbe]::RequiredTrackSize($handle, 360, 640)
+        if ($minimum.MinTrackSize.X -lt $required.X -or $minimum.MinTrackSize.Y -lt $required.Y) {
+            throw "Tauri reader minimum tracking size failed: actual=$($minimum.MinTrackSize.X)x$($minimum.MinTrackSize.Y) required=$($required.X)x$($required.Y)."
         }
     }
     finally {

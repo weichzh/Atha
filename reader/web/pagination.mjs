@@ -1,6 +1,5 @@
 const SOURCE_FONT_SIZE = 16;
 const DISPLAY_FORMULA_MULTIPLIER = 1.5;
-const BENCHMARK_VIEWPORT = new URLSearchParams(location.search).has("benchmark");
 
 export function createPagination({
   book,
@@ -159,10 +158,8 @@ export function createPagination({
 
   function syncViewportDeviceSize() {
     const scale = 1 / devicePixelRatio;
-    const width = BENCHMARK_VIEWPORT ? 780 : Math.max(1, Math.round(innerWidth * devicePixelRatio));
-    const height = BENCHMARK_VIEWPORT
-      ? 1680
-      : Math.max(1, Math.round(innerHeight * devicePixelRatio));
+    const width = Math.max(1, Math.round(innerWidth * devicePixelRatio));
+    const height = Math.max(1, Math.round(innerHeight * devicePixelRatio));
     document.documentElement.style.setProperty("--page-scale", String(scale));
     document.documentElement.style.setProperty("--reader-width", `${width}px`);
     document.documentElement.style.setProperty("--reader-height", `${height}px`);

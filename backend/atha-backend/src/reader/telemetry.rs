@@ -21,6 +21,8 @@ pub struct Metric {
     pub duration_ms: f64,
     pub font_size: u16,
     pub pages: u16,
+    pub page_width: u16,
+    pub page_height: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,7 +56,16 @@ pub fn parse_reader_event(origin: &str, message: &str) -> Result<ReaderEvent, Te
     }
     let fields = message.split('|').collect::<Vec<_>>();
     match fields.as_slice() {
-        ["metric", stage, sample, duration_ms, font_size, pages] => {
+        [
+            "metric",
+            stage,
+            sample,
+            duration_ms,
+            font_size,
+            pages,
+            page_width,
+            page_height,
+        ] => {
             let stage = MetricStage::parse(stage).ok_or(TelemetryError::InvalidMessage)?;
             let sample = parse_range(sample, 1_u8, 10)?;
             let duration_ms = duration_ms
@@ -65,12 +76,16 @@ pub fn parse_reader_event(origin: &str, message: &str) -> Result<ReaderEvent, Te
             }
             let font_size = parse_range(font_size, 8_u16, 256)?;
             let pages = parse_range(pages, 1_u16, 10_000)?;
+            let page_width = parse_range(page_width, 1_u16, 16_384)?;
+            let page_height = parse_range(page_height, 1_u16, 16_384)?;
             Ok(ReaderEvent::Metric(Metric {
                 stage,
                 sample,
                 duration_ms,
                 font_size,
                 pages,
+                page_width,
+                page_height,
             }))
         }
         ["ready", pages, inline, display, cuts] => Ok(ReaderEvent::Ready(Ready {

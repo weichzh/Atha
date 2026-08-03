@@ -104,14 +104,15 @@ fn book_root_rejects_a_symlink_outside_the_root() {
 #[test]
 fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
     let origin = format!("{READER_PAGE}?entry=EPUB%2Ftext%2Fch012.xhtml");
-    let event =
-        parse_reader_event(&origin, "metric|page_turn|4|1.25|32|4").expect("parse valid metric");
+    let event = parse_reader_event(&origin, "metric|page_turn|4|1.25|32|4|860|1640")
+        .expect("parse valid metric");
     let ReaderEvent::Metric(metric) = event else {
         panic!("expected metric");
     };
     assert_eq!(metric.stage, MetricStage::PageTurn);
     assert_eq!(metric.sample, 4);
     assert_eq!(metric.duration_ms, 1.25);
+    assert_eq!((metric.page_width, metric.page_height), (860, 1640));
     assert_eq!(
         parse_reader_event(READER_PAGE, "error|state-persistence"),
         Ok(ReaderEvent::Error("state-persistence"))
@@ -125,12 +126,17 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
         ),
         (
             READER_PAGE,
-            "metric|unknown|1|1|32|4",
+            "metric|unknown|1|1|32|4|860|1640",
             TelemetryError::InvalidMessage,
         ),
         (
             READER_PAGE,
-            "metric|page_turn|11|1|32|4",
+            "metric|page_turn|11|1|32|4|860|1640",
+            TelemetryError::OutOfRange,
+        ),
+        (
+            READER_PAGE,
+            "metric|page_turn|1|1|32|4|0|1640",
             TelemetryError::OutOfRange,
         ),
         (
