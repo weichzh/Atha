@@ -1,5 +1,6 @@
 export function createBookmarks({ state, navigation, session, locator, controls, assert }) {
   let pending = Promise.resolve();
+  const placements = new Map();
   const messages = Object.freeze({
     "bookmark-label": "书签名称无效",
     "bookmark-limit": "书签数量已达上限",
@@ -30,6 +31,23 @@ export function createBookmarks({ state, navigation, session, locator, controls,
     controls.add.setAttribute("aria-pressed", String(active));
   }
 
+  function candidates(bookmark) {
+    let sectionId;
+    try {
+      sectionId = locator.parse(session.describe(), bookmark.locator).start.section;
+    } catch {
+      return [];
+    }
+    const description = session.describe();
+    const section = description.sections.find((item) => item.id === sectionId);
+    if (!section) return [];
+    const sameSection = description.toc
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.href.split("#", 1)[0] === section.href);
+    const sameLabel = sameSection.filter(({ item }) => item.label === bookmark.label);
+    return (sameLabel.length ? sameLabel : sameSection).map(({ index }) => index);
+  }
+
   function sync() {
     const bookmarks = state.snapshot().bookmarks;
     controls.list.querySelectorAll("option[data-bookmark-id]").forEach((option) => option.remove());
@@ -39,25 +57,9 @@ export function createBookmarks({ state, navigation, session, locator, controls,
       option.dataset.bookmarkId = bookmark.id;
       option.disabled = !bookmark.currentVersion;
       option.textContent = `　书签 · ${bookmark.label}${bookmark.currentVersion ? "" : "（旧版本）"}`;
-      let sectionId = null;
-      try {
-        sectionId = locator.parse(session.describe(), bookmark.locator).start.section;
-      } catch {
-        // The disabled legacy bookmark remains visible at the end of the directory.
-      }
-      const description = session.describe();
-      const section = description.sections.find((item) => item.id === sectionId);
-      let tocIndex = section
-        ? description.toc.findIndex(
-            (item) =>
-              item.href.split("#", 1)[0] === section.href && item.label === bookmark.label,
-          )
-        : -1;
-      if (tocIndex < 0 && section) {
-        tocIndex = description.toc.findIndex(
-          (item) => item.href.split("#", 1)[0] === section.href,
-        );
-      }
+      const choices = candidates(bookmark);
+      const saved = placements.get(bookmark.id);
+      const tocIndex = choices.includes(saved) ? saved : choices[0] ?? -1;
       const chapter = controls.list.querySelector(`option[value="${tocIndex}"]`);
       let previous = chapter;
       while (previous?.nextElementSibling?.dataset.bookmarkId) {
@@ -84,10 +86,12 @@ export function createBookmarks({ state, navigation, session, locator, controls,
     if (!result.created) {
       const removed = state.removeBookmark(result.id);
       if (!removed.ok) throw new Error(removed.error);
+      placements.delete(result.id);
       sync();
       report("已取消书签");
       return Object.freeze({ ...result, removed: true });
     }
+    placements.set(result.id, navigation.snapshot().tocIndex);
     sync();
     report("已添加书签");
     return result;
@@ -101,7 +105,20 @@ export function createBookmarks({ state, navigation, session, locator, controls,
     return true;
   }
 
-  function bind() {
+  async function bind() {
+    const ambiguous = state
+      .snapshot()
+      .bookmarks.filter((bookmark) => bookmark.currentVersion && candidates(bookmark).length > 1);
+    if (ambiguous.length) {
+      const before = locator.serialize(session.describe(), navigation.current());
+      // ponytail: Resolve rare ambiguous restores one by one; batch only if startup profiles regress.
+      for (const bookmark of ambiguous) {
+        if (await navigation.goTo(bookmark.locator)) {
+          placements.set(bookmark.id, navigation.snapshot().tocIndex);
+        }
+      }
+      await navigation.goTo(before);
+    }
     controls.add.addEventListener("click", () => run(toggle));
     controls.list.addEventListener("change", () => {
       const id = controls.list.selectedOptions[0]?.dataset.bookmarkId;
@@ -115,7 +132,13 @@ export function createBookmarks({ state, navigation, session, locator, controls,
     controls.add.click();
     await pending;
     const created = state.snapshot().bookmarks;
-    assert(created.length === 1 && controls.add.getAttribute("aria-pressed") === "true", "sample-boundary");
+    const inserted = controls.list.querySelector("option[data-bookmark-id]");
+    assert(
+      created.length === 1 &&
+        controls.add.getAttribute("aria-pressed") === "true" &&
+        inserted?.previousElementSibling?.value === String(navigation.snapshot().tocIndex),
+      "sample-boundary",
+    );
     controls.add.click();
     await pending;
     assert(

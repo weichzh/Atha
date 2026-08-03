@@ -250,7 +250,7 @@ async function start() {
   await annotations.restore();
   await readerState.restore();
   readerState.bind();
-  bookmarks.bind();
+  await bookmarks.bind();
   search.bind();
   annotations.bind();
   contentActions.bind();
