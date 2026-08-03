@@ -35,7 +35,7 @@ implemented
 - [x] 窗口调整后当前 Locator 仍可见，页数和进度刷新，正文无裁切，工具栏只覆盖固定页眉页脚安全区；
 - [x] 字体、布局、主题、行为和本书样式设置中均没有四边距输入，应用偏好也不再保存四边距；
 - [x] 带旧边距字段的有效偏好可迁移，其余设置不丢失；
-- [ ] Tauri/Svelte、正式 reader samples、窗口单元测试和文档 gate 通过，独立 review 无 blocking。
+- [x] Tauri/Svelte、正式 reader samples、窗口单元测试和文档 gate 通过，独立 review 无 blocking。
 
 ## Files And Steps
 
@@ -73,8 +73,8 @@ implemented
 
 ## Review
 
-- Blocking：独立标准与规格审查发现架构文档仍保留“边距可调”的旧事实、原生最小尺寸探针混用物理外框与逻辑客户区，以及后加的 benchmark 固定画布例外违反“始终填满视口”。三项已分别修正文档、按窗口 DPI 和非客户区换算最小拖动尺寸，并让遥测记录真实页面宽高；待最终复核。
-- Non-blocking：首次审查无其他问题；待最终复核。
+- Blocking：独立标准与规格审查发现架构文档仍保留“边距可调”的旧事实、原生最小尺寸探针混用物理外框与逻辑客户区，以及后加的 benchmark 固定画布例外违反“始终填满视口”。三项已分别修正文档、按窗口 DPI 和非客户区换算最小拖动尺寸，并让遥测记录真实页面宽高；最终复核无剩余 blocking。
+- Non-blocking：两轮审查均无发现。
 - Out-of-scope：桌面双栏、横屏专用布局和窗口状态持久化。
 
 ## Evidence And Residual Risks
