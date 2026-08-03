@@ -12,7 +12,7 @@
     "windows": [],
     "security": {
       "capabilities": ["main"],
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://atha-book.localhost; connect-src 'self' ipc: http://ipc.localhost https://atha-book.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://atha-book.localhost https://atha-cover.localhost; connect-src 'self' ipc: http://ipc.localhost https://atha-book.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
     }
   },
   "bundle": {

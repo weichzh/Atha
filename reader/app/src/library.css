@@ -1,0 +1,329 @@
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#app {
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+}
+
+.library-shell {
+  --library-bg: #f6f7f9;
+  --library-surface: #ffffff;
+  --library-text: #202124;
+  --library-muted: #85888f;
+  --library-border: rgb(32 33 36 / 9%);
+  --library-accent: #2f7cf6;
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 0 max(20px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+  overflow-x: hidden;
+  background: var(--library-bg);
+  color: var(--library-text);
+  font-family:
+    Inter, "Segoe UI Variable", "Microsoft YaHei UI", system-ui, sans-serif;
+}
+
+.library-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  min-height: 88px;
+  align-items: end;
+  justify-content: space-between;
+  padding: max(18px, env(safe-area-inset-top)) 0 14px;
+  background: color-mix(in srgb, var(--library-bg) 92%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.library-brand {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--library-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.library-header h1 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 680;
+  letter-spacing: -0.04em;
+}
+
+.library-import-button,
+.library-empty button {
+  border: 0;
+  border-radius: 999px;
+  background: var(--library-accent);
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 620;
+}
+
+.library-import-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+}
+
+.library-import-button svg {
+  width: 19px;
+  height: 19px;
+  stroke-width: 2;
+}
+
+.library-import-button:disabled,
+.library-empty button:disabled,
+.library-book button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.library-empty {
+  display: grid;
+  min-height: calc(100vh - 116px);
+  place-content: center;
+  justify-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.library-empty > svg {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 28px;
+  color: color-mix(in srgb, var(--library-muted) 65%, transparent);
+  stroke-width: 1.25;
+}
+
+.library-empty h2 {
+  margin: 0 0 12px;
+  font-size: 25px;
+  font-weight: 660;
+  letter-spacing: -0.025em;
+}
+
+.library-empty p {
+  max-width: 300px;
+  margin: 0 0 28px;
+  color: var(--library-muted);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.library-empty button {
+  min-height: 44px;
+  padding: 0 22px;
+}
+
+.library-loading {
+  width: 26px;
+  height: 26px;
+  margin-bottom: 18px;
+  border: 2px solid var(--library-border);
+  border-top-color: var(--library-accent);
+  border-radius: 50%;
+  animation: library-spin 0.8s linear infinite;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 26px 16px;
+  padding: 22px 0 36px;
+}
+
+.library-book {
+  position: relative;
+  min-width: 0;
+}
+
+.library-book-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.library-cover {
+  position: relative;
+  display: grid;
+  aspect-ratio: 0.72;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--library-border);
+  border-radius: 5px 9px 9px 5px;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 26%), transparent 44%),
+    linear-gradient(160deg, #5d7da6, #263b59);
+  box-shadow: 0 8px 20px rgb(35 40 48 / 15%);
+  color: rgb(255 255 255 / 88%);
+  font-family: Georgia, "Songti SC", serif;
+  font-size: clamp(28px, 10vw, 48px);
+}
+
+.library-cover::after {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: rgb(0 0 0 / 12%);
+  content: "";
+}
+
+.library-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-book-title,
+.library-book-author {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-book-title {
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 590;
+  line-height: 1.45;
+}
+
+.library-book-author {
+  margin-top: 3px;
+  color: var(--library-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.library-book-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(17 24 39 / 58%);
+  color: white;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.library-book:hover .library-book-remove,
+.library-book:focus-within .library-book-remove {
+  opacity: 1;
+}
+
+.library-book-remove svg {
+  width: 16px;
+  height: 16px;
+}
+
+.library-status {
+  position: fixed;
+  z-index: 3;
+  right: 20px;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 20px;
+  max-width: 520px;
+  margin: auto;
+  padding: 12px 16px;
+  border: 1px solid var(--library-border);
+  border-radius: 12px;
+  background: var(--library-surface);
+  box-shadow: 0 12px 36px rgb(20 25 33 / 16%);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.library-shell button:focus-visible {
+  outline: 2px solid var(--library-accent);
+  outline-offset: 3px;
+}
+
+@media (min-width: 620px) {
+  .library-shell {
+    padding-right: 32px;
+    padding-left: 32px;
+  }
+
+  .library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    gap: 30px 22px;
+  }
+}
+
+@media (hover: none) {
+  .library-book-remove {
+    opacity: 1;
+  }
+}
+
+@media (min-width: 960px) {
+  .library-shell {
+    padding-right: 48px;
+    padding-left: 48px;
+  }
+
+  .library-header,
+  .library-grid {
+    max-width: 1180px;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .library-shell {
+    --library-bg: #17181b;
+    --library-surface: #24262b;
+    --library-text: #f1f2f4;
+    --library-muted: #9b9ea6;
+    --library-border: rgb(255 255 255 / 10%);
+    --library-accent: #4b8cf7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-loading {
+    animation: none;
+  }
+
+  .library-book-remove {
+    transition: none;
+  }
+}
+
+@keyframes library-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

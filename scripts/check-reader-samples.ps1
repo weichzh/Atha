@@ -173,8 +173,10 @@ $themeProbe = @'
   const roundTripPosition = document.querySelector('#position').textContent;
   const roundTripProgress = progress.value;
   progress.dispatchEvent(new Event('change', { bubbles: true }));
-  await new Promise(requestAnimationFrame);
-  await new Promise(requestAnimationFrame);
+  for (let frame = 0; frame < 60; frame += 1) {
+    await new Promise(requestAnimationFrame);
+    if (document.querySelector('#position').textContent === roundTripPosition && progress.value === roundTripProgress) break;
+  }
   if (document.querySelector('#position').textContent !== roundTripPosition || progress.value !== roundTripProgress) {
     throw new Error('progress-round-trip');
   }

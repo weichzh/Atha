@@ -1,8 +1,19 @@
-use std::{borrow::Cow, error::Error, fs, process, sync::Mutex, time::Instant};
+use std::{
+    borrow::Cow,
+    env,
+    error::Error,
+    fs,
+    path::{Path, PathBuf},
+    process,
+    sync::{Arc, Mutex, RwLock},
+    time::Instant,
+};
 
 use atha_backend::reader::{
     READER_PAGE,
-    resources::{BookRoot, ResourceError},
+    epub::READER_MANIFEST,
+    library::{LibraryBook, LibraryError, LocalLibrary},
+    resources::{BookRoot, Resource, ResourceError},
     telemetry::{ReaderEvent, parse_reader_event},
 };
 use atha_reader_host::{
@@ -12,6 +23,7 @@ use atha_reader_host::{
         content_fingerprint, initial_window_size, reader_url, state_key,
     },
 };
+use serde::Serialize;
 use tauri::{
     AppHandle, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     http::{Request, Response, StatusCode, header},
@@ -20,12 +32,40 @@ use tauri::{
 
 const TAURI_READER_PAGE: &str = "https://tauri.localhost/index.html";
 const TAURI_READER_ORIGIN: &str = "https://tauri.localhost";
+const MAX_IMPORT_FILES: usize = 32;
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), clipboard-read=(), clipboard-write=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()";
 
 struct ReaderRuntime {
-    diagnostics: Mutex<Diagnostics>,
+    diagnostics: Mutex<Option<Diagnostics>>,
     verify_sample: bool,
     hold_after_verify: bool,
+    current_book: Arc<RwLock<Option<BookRoot>>>,
+    library: LocalLibrary,
+}
+
+struct PreparedReader {
+    root: BookRoot,
+    app_path: String,
+    diagnostics: Diagnostics,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportFailure {
+    name: String,
+    code: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportReport {
+    books: Vec<LibraryBook>,
+    failures: Vec<ImportFailure>,
+}
+
+#[derive(Serialize)]
+struct ReaderLaunch {
+    href: String,
 }
 
 #[tauri::command]
@@ -42,10 +82,11 @@ async fn reader_event(
 
     let event = parse_reader_event(READER_PAGE, &message).map_err(|error| error.code())?;
     let mut diagnostics = runtime.diagnostics.lock().map_err(|_| "reader-state")?;
+    let diagnostics = diagnostics.as_mut().ok_or("reader-state")?;
     match event {
         ReaderEvent::Metric(metric) => diagnostics
             .record_metric(metric)
-            .map_err(|error| handle_diagnostic_error(&mut diagnostics, &window, error))?,
+            .map_err(|error| handle_diagnostic_error(diagnostics, &window, error))?,
         ReaderEvent::Ready(ready) => match diagnostics.record_ready(ready) {
             Ok(ReadyDisposition::VerificationComplete) if runtime.hold_after_verify => {
                 let _ = window.set_title("Atha Reader Verification Complete");
@@ -55,7 +96,7 @@ async fn reader_event(
                 let _ = window.set_title("Atha Reader");
             }
             Err(error) => {
-                let code = handle_diagnostic_error(&mut diagnostics, &window, error);
+                let code = handle_diagnostic_error(diagnostics, &window, error);
                 if runtime.verify_sample {
                     eprintln!("reader self-check failed: {code}");
                     app.exit(1);
@@ -64,7 +105,7 @@ async fn reader_event(
             }
         },
         ReaderEvent::Error(code) => {
-            fail_run(&mut diagnostics, &window, code);
+            fail_run(diagnostics, &window, code);
             if runtime.verify_sample {
                 eprintln!("reader self-check failed: {}", safe_event(code));
                 app.exit(1);
@@ -75,49 +116,148 @@ async fn reader_event(
     Ok(())
 }
 
+#[tauri::command]
+fn list_library_books(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+) -> Result<Vec<LibraryBook>, String> {
+    let _ = window.set_title("Atha");
+    runtime.library.list().map_err(|error| error.code().into())
+}
+
+#[tauri::command]
+async fn import_library_books(
+    runtime: State<'_, ReaderRuntime>,
+    paths: Vec<String>,
+) -> Result<ImportReport, String> {
+    if paths.len() > MAX_IMPORT_FILES
+        || paths
+            .iter()
+            .any(|path| path.is_empty() || path.encode_utf16().count() > 32_767)
+    {
+        return Err("invalid-library-import".into());
+    }
+    let library = runtime.library.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut failures = Vec::new();
+        for path in paths {
+            if let Err(error) = library.import(&path) {
+                failures.push(ImportFailure {
+                    name: display_name(&path),
+                    code: error.code(),
+                });
+            }
+        }
+        Ok(ImportReport {
+            books: library.list().map_err(|error| error.code().to_owned())?,
+            failures,
+        })
+    })
+    .await
+    .map_err(|_| "library-import-task".to_owned())?
+}
+
+#[tauri::command]
+fn open_library_book(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    id: String,
+) -> Result<ReaderLaunch, String> {
+    let opened = runtime
+        .library
+        .open_book(&id)
+        .map_err(|error| error.code().to_owned())?;
+    let diagnostics = Diagnostics::new(Instant::now(), false, None)
+        .map_err(|_| "reader-diagnostics".to_owned())?;
+    *runtime
+        .current_book
+        .write()
+        .map_err(|_| "reader-state".to_owned())? = Some(opened.root);
+    *runtime
+        .diagnostics
+        .lock()
+        .map_err(|_| "reader-state".to_owned())? = Some(diagnostics);
+    let _ = window.set_title(&format!("{} — Atha", opened.book.title));
+    Ok(ReaderLaunch {
+        href: format!(
+            "index.html?manifest={READER_MANIFEST}&state={}",
+            &opened.book.id[..16]
+        ),
+    })
+}
+
+#[tauri::command]
+fn remove_library_book(
+    runtime: State<'_, ReaderRuntime>,
+    id: String,
+) -> Result<Vec<LibraryBook>, String> {
+    runtime
+        .library
+        .remove(&id)
+        .map_err(|error| error.code().to_owned())?;
+    runtime
+        .library
+        .list()
+        .map_err(|error| error.code().to_owned())
+}
+
 pub fn run() -> Result<(), Box<dyn Error>> {
     let startup = Instant::now();
-    let arguments = Arguments::parse()?;
-    let book = arguments.resolve_book()?;
-    let book_root = BookRoot::new(&book.book_root)?;
-    let source_resource = book_root.read(&format!("/{}", book.source.path()))?;
-    let canonical_source = fs::canonicalize(book.book_root.join(book.source.path()))?;
-    let mut book_state_key = state_key(&canonical_source);
-    if arguments.state_probe.is_some() {
-        book_state_key.push_str("-probe");
-    }
-    let content_version = match &book.source {
-        BookSource::Entry(_) => Some(content_fingerprint(&source_resource.bytes)),
-        BookSource::Manifest(_) => None,
+    let arguments = if env::args_os().len() > 1 {
+        Some(Arguments::parse()?)
+    } else {
+        None
     };
-    let diagnostics = Diagnostics::new(
-        startup,
-        arguments.verify_sample,
-        arguments.benchmark.as_ref(),
-    )?;
-    let legacy_url = reader_url(
-        &arguments,
-        &book.source,
-        diagnostics.network_probe(),
-        &book_state_key,
-        content_version.as_deref(),
-    );
-    let query = legacy_url.split_once('?').map_or("", |(_, query)| query);
-    let app_path = format!("index.html?{query}");
-    let verify_sample = arguments.verify_sample;
-    let hold_after_verify = arguments.hold_after_verify;
-    let protocol_root = book_root.clone();
+    let prepared = arguments
+        .as_ref()
+        .map(|arguments| prepare_reader(arguments, startup))
+        .transpose()?;
+    let data_root =
+        PathBuf::from(env::var_os("LOCALAPPDATA").ok_or("missing LOCALAPPDATA")?).join("Atha");
+    let library = LocalLibrary::open(data_root)?;
+    let current_book = Arc::new(RwLock::new(
+        prepared.as_ref().map(|reader| reader.root.clone()),
+    ));
+    let app_path = prepared
+        .as_ref()
+        .map_or_else(|| "index.html".to_owned(), |reader| reader.app_path.clone());
+    let window_title = if prepared.is_some() {
+        "Atha Reader"
+    } else {
+        "Atha"
+    };
+    let verify_sample = arguments
+        .as_ref()
+        .is_some_and(|arguments| arguments.verify_sample);
+    let hold_after_verify = arguments
+        .as_ref()
+        .is_some_and(|arguments| arguments.hold_after_verify);
+    let diagnostics = prepared.map(|reader| reader.diagnostics);
+    let protocol_book = Arc::clone(&current_book);
+    let cover_library = library.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(ReaderRuntime {
             diagnostics: Mutex::new(diagnostics),
             verify_sample,
             hold_after_verify,
+            current_book,
+            library,
         })
         .register_uri_scheme_protocol("atha-book", move |_context, request| {
-            book_response(&protocol_root, request)
+            book_response(&protocol_book, request)
         })
-        .invoke_handler(tauri::generate_handler![reader_event])
+        .register_uri_scheme_protocol("atha-cover", move |_context, request| {
+            cover_response(&cover_library, request)
+        })
+        .invoke_handler(tauri::generate_handler![
+            reader_event,
+            list_library_books,
+            import_library_books,
+            open_library_book,
+            remove_library_book
+        ])
         .setup(move |app| {
             let size = app
                 .primary_monitor()?
@@ -134,7 +274,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             let data_directory = app.path().app_local_data_dir()?.join("WebView2");
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App(app_path.clone().into()))
-                .title("Atha Reader")
+                .title(window_title)
                 .inner_size(size.width, size.height)
                 .min_inner_size(MIN_WINDOW_WIDTH_LOGICAL, MIN_WINDOW_HEIGHT_LOGICAL)
                 .resizable(true)
@@ -161,11 +301,48 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         .run(move |app, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event
                 && let Ok(mut diagnostics) = app.state::<ReaderRuntime>().diagnostics.lock()
+                && let Some(diagnostics) = diagnostics.as_mut()
             {
                 diagnostics.flush();
             }
         });
     Ok(())
+}
+
+fn prepare_reader(
+    arguments: &Arguments,
+    startup: Instant,
+) -> Result<PreparedReader, Box<dyn Error>> {
+    let book = arguments.resolve_book()?;
+    let book_root = BookRoot::new(&book.book_root)?;
+    let source_resource = book_root.read(&format!("/{}", book.source.path()))?;
+    let canonical_source = fs::canonicalize(book.book_root.join(book.source.path()))?;
+    let mut book_state_key = state_key(&canonical_source);
+    if arguments.state_probe.is_some() {
+        book_state_key.push_str("-probe");
+    }
+    let content_version = match &book.source {
+        BookSource::Entry(_) => Some(content_fingerprint(&source_resource.bytes)),
+        BookSource::Manifest(_) => None,
+    };
+    let diagnostics = Diagnostics::new(
+        startup,
+        arguments.verify_sample,
+        arguments.benchmark.as_ref(),
+    )?;
+    let legacy_url = reader_url(
+        arguments,
+        &book.source,
+        diagnostics.network_probe(),
+        &book_state_key,
+        content_version.as_deref(),
+    );
+    let query = legacy_url.split_once('?').map_or("", |(_, query)| query);
+    Ok(PreparedReader {
+        root: book_root,
+        app_path: format!("index.html?{query}"),
+        diagnostics,
+    })
 }
 
 fn is_reader_url(url: &str) -> bool {
@@ -197,21 +374,75 @@ fn fail_run(diagnostics: &mut Diagnostics, window: &WebviewWindow, code: &str) {
     let _ = window.set_title("Atha Reader - Error");
 }
 
-fn book_response(root: &BookRoot, request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+fn book_response(
+    current: &RwLock<Option<BookRoot>>,
+    request: Request<Vec<u8>>,
+) -> Response<Cow<'static, [u8]>> {
     if request.method() != "GET" {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
+    let root = match current.read() {
+        Ok(value) => value.clone(),
+        Err(_) => return empty_response(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+    let Some(root) = root else {
+        return empty_response(StatusCode::NOT_FOUND);
+    };
     match root.read(request.uri().path()) {
-        Ok(resource) => Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, resource.content_type)
-            .header(header::CACHE_CONTROL, "no-store")
-            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, TAURI_READER_ORIGIN)
-            .header("x-content-type-options", "nosniff")
-            .body(Cow::Owned(resource.bytes))
-            .expect("valid book response"),
+        Ok(resource) => resource_response(resource, "no-store", true),
         Err(error) => empty_response(resource_status(error)),
     }
+}
+
+fn cover_response(
+    library: &LocalLibrary,
+    request: Request<Vec<u8>>,
+) -> Response<Cow<'static, [u8]>> {
+    if request.method() != "GET" {
+        return empty_response(StatusCode::METHOD_NOT_ALLOWED);
+    }
+    let id = request.uri().path().strip_prefix('/').unwrap_or_default();
+    if id.contains('/') {
+        return empty_response(StatusCode::BAD_REQUEST);
+    }
+    match library.cover(id) {
+        Ok(resource) => resource_response(resource, "private, max-age=31536000, immutable", false),
+        Err(LibraryError::InvalidBookId) => empty_response(StatusCode::BAD_REQUEST),
+        Err(LibraryError::UnknownBook | LibraryError::MissingCover) => {
+            empty_response(StatusCode::NOT_FOUND)
+        }
+        Err(LibraryError::Resource(error)) => empty_response(resource_status(error)),
+        Err(_) => empty_response(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+fn resource_response(
+    resource: Resource,
+    cache_control: &'static str,
+    cors: bool,
+) -> Response<Cow<'static, [u8]>> {
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, resource.content_type)
+        .header(header::CACHE_CONTROL, cache_control)
+        .header("x-content-type-options", "nosniff");
+    if cors {
+        response = response.header(header::ACCESS_CONTROL_ALLOW_ORIGIN, TAURI_READER_ORIGIN);
+    }
+    response
+        .body(Cow::Owned(resource.bytes))
+        .expect("valid resource response")
+}
+
+fn display_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("EPUB")
+        .chars()
+        .take(256)
+        .collect()
 }
 
 fn empty_response(status: StatusCode) -> Response<Cow<'static, [u8]>> {

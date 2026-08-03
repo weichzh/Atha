@@ -11,8 +11,11 @@ use super::{ImportError, MAX_ENTRIES, MAX_SECTIONS, MAX_TOC_ITEMS, archive};
 
 const CONTAINER_NS: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:container";
 const OPF_NS: &[u8] = b"http://www.idpf.org/2007/opf";
+const DC_NS: &[u8] = b"http://purl.org/dc/elements/1.1/";
 const XHTML_NS: &[u8] = b"http://www.w3.org/1999/xhtml";
 const EPUB_NS: &[u8] = b"http://www.idpf.org/2007/ops";
+pub(super) const MAX_METADATA_TEXT: usize = 512;
+pub(super) const MAX_AUTHORS: usize = 16;
 
 #[derive(Debug)]
 struct PackageItem {
@@ -27,6 +30,9 @@ pub(super) struct Package {
     items: HashMap<String, PackageItem>,
     spine: Vec<String>,
     nav_path: String,
+    title: Option<String>,
+    authors: Vec<String>,
+    cover_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,6 +60,15 @@ struct TocItem {
 pub(super) struct ImportPlan {
     pub(super) manifest: ReaderManifest,
     pub(super) files: Vec<String>,
+    pub(super) title: Option<String>,
+    pub(super) authors: Vec<String>,
+    pub(super) cover_path: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum MetadataField {
+    Title,
+    Creator,
 }
 
 pub(super) fn parse_container(xml: &[u8]) -> Result<String, ImportError> {
@@ -171,6 +186,10 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
     let mut paths = HashSet::new();
     let mut spine = Vec::new();
     let mut nav_path = None;
+    let mut title = None;
+    let mut authors = Vec::new();
+    let mut metadata_depth = None;
+    let mut metadata_field: Option<(MetadataField, usize, String)> = None;
     let mut manifest_depth = None;
     let mut spine_depth = None;
     let mut manifest_count = 0_u8;
@@ -188,6 +207,27 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
                         require_namespace(&namespace, OPF_NS)?;
                         package_seen = true;
                         version = attribute(reader.decoder(), &event, b"version")?;
+                    }
+                    b"metadata" => {
+                        require_namespace(&namespace, OPF_NS)?;
+                        if depth != 2 || metadata_depth.is_some() {
+                            return Err(ImportError::InvalidXml);
+                        }
+                        metadata_depth = Some(depth);
+                    }
+                    b"title" if metadata_depth == Some(depth - 1) => {
+                        require_namespace(&namespace, DC_NS)?;
+                        if metadata_field.is_some() {
+                            return Err(ImportError::InvalidXml);
+                        }
+                        metadata_field = Some((MetadataField::Title, depth, String::new()));
+                    }
+                    b"creator" if metadata_depth == Some(depth - 1) => {
+                        require_namespace(&namespace, DC_NS)?;
+                        if metadata_field.is_some() {
+                            return Err(ImportError::InvalidXml);
+                        }
+                        metadata_field = Some((MetadataField::Creator, depth, String::new()));
                     }
                     b"manifest" => {
                         require_namespace(&namespace, OPF_NS)?;
@@ -276,7 +316,25 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
             }
             Event::End(event) => {
                 let name = event.local_name();
-                if name.as_ref() == b"manifest" && manifest_depth == Some(depth) {
+                if metadata_field
+                    .as_ref()
+                    .is_some_and(|(_, field_depth, _)| *field_depth == depth)
+                {
+                    let (field, _, value) = metadata_field.take().expect("metadata field");
+                    let value = normalize_metadata(&value);
+                    if !value.is_empty() {
+                        match field {
+                            MetadataField::Title if title.is_none() => title = Some(value),
+                            MetadataField::Creator if authors.len() < MAX_AUTHORS => {
+                                authors.push(value);
+                            }
+                            _ => {}
+                        }
+                    }
+                } else if name.as_ref() == b"metadata" && metadata_depth == Some(depth) {
+                    require_namespace(&namespace, OPF_NS)?;
+                    metadata_depth = None;
+                } else if name.as_ref() == b"manifest" && manifest_depth == Some(depth) {
                     require_namespace(&namespace, OPF_NS)?;
                     manifest_depth = None;
                 } else if name.as_ref() == b"spine" && spine_depth == Some(depth) {
@@ -285,12 +343,30 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
                 }
                 depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
             }
+            Event::Text(text) if metadata_field.is_some() => {
+                let decoded = text.decode().map_err(|_| ImportError::InvalidXml)?;
+                let value =
+                    quick_xml::escape::unescape(&decoded).map_err(|_| ImportError::InvalidXml)?;
+                let target = &mut metadata_field.as_mut().expect("metadata field").2;
+                if target.len().saturating_add(value.len()) > MAX_METADATA_TEXT {
+                    return Err(ImportError::InvalidXml);
+                }
+                target.push_str(&value);
+            }
             Event::DocType(_) => return Err(ImportError::InvalidXml),
             Event::Text(text) if depth == 0 && !xml_whitespace(text.as_ref()) => {
                 return Err(ImportError::InvalidXml);
             }
             Event::CData(_) if depth == 0 => return Err(ImportError::InvalidXml),
-            Event::Eof if depth == 0 && manifest_depth.is_none() && spine_depth.is_none() => break,
+            Event::Eof
+                if depth == 0
+                    && metadata_depth.is_none()
+                    && metadata_field.is_none()
+                    && manifest_depth.is_none()
+                    && spine_depth.is_none() =>
+            {
+                break;
+            }
             Event::Eof => return Err(ImportError::InvalidXml),
             _ => {}
         }
@@ -304,10 +380,31 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
     {
         return Err(ImportError::UnsupportedEpub);
     }
+    let mut cover_paths = items
+        .values()
+        .filter(|item| {
+            item.properties
+                .split_ascii_whitespace()
+                .any(|value| value == "cover-image")
+        })
+        .map(|item| item.path.clone());
+    let cover_path = cover_paths.next();
+    if cover_paths.next().is_some() {
+        return Err(ImportError::InvalidXml);
+    }
+    let cover_path = cover_path.filter(|path| {
+        items
+            .values()
+            .find(|item| item.path == *path)
+            .is_some_and(|item| resource_type(&item.media_type, path))
+    });
     Ok(Package {
         items,
         spine,
         nav_path: nav_path.ok_or(ImportError::UnsupportedEpub)?,
+        title,
+        authors,
+        cover_path,
     })
 }
 
@@ -373,6 +470,9 @@ pub(super) fn plan_import(
     package: Package,
     content_version: &str,
 ) -> Result<ImportPlan, ImportError> {
+    let title = package.title.clone();
+    let authors = package.authors.clone();
+    let cover_path = package.cover_path.clone();
     let nav_item = package
         .items
         .values()
@@ -432,7 +532,14 @@ pub(super) fn plan_import(
             toc,
         },
         files,
+        title,
+        authors,
+        cover_path,
     })
+}
+
+fn normalize_metadata(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn parse_navigation(

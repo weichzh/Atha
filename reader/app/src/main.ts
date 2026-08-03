@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { mount } from "svelte";
 
 import App from "./App.svelte";
+import "./library.css";
 import "./shell.css";
+import { isReaderRoute } from "./route";
 
 const target = document.querySelector<HTMLElement>("#app");
 if (!target) throw new Error("missing-app-root");
@@ -20,4 +22,4 @@ if (window.__TAURI_INTERNALS__) {
   };
 }
 
-await import("virtual:atha-reader-runtime");
+if (isReaderRoute()) await import("virtual:atha-reader-runtime");

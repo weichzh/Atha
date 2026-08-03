@@ -2,3 +2,13 @@
 identifier = "allow-reader-event"
 description = "允许主阅读窗口上报经过 Rust 严格校验的非内容事件。"
 commands.allow = ["reader_event"]
+
+[[permission]]
+identifier = "allow-library-commands"
+description = "允许主窗口列出、导入、打开和移除本地书架项目。"
+commands.allow = [
+  "list_library_books",
+  "import_library_books",
+  "open_library_book",
+  "remove_library_book",
+]

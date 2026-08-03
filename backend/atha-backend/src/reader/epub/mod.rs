@@ -11,9 +11,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::{Deserialize, Serialize};
+
 pub const READER_MANIFEST: &str = ".atha-reader.json";
 
 const IMPORT_MARKER: &str = ".atha-epub-import";
+const BOOK_METADATA: &str = ".atha-book.json";
 const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MEMBER_BYTES: u64 = 16 * 1024 * 1024;
@@ -25,6 +28,21 @@ const MAX_TOC_ITEMS: usize = 2_000;
 pub struct ImportedBook {
     pub root: PathBuf,
     pub content_version: String,
+    pub title: Option<String>,
+    pub authors: Vec<String>,
+    pub cover_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BookMetadata {
+    schema: u8,
+    #[serde(rename = "contentVersion")]
+    content_version: String,
+    title: Option<String>,
+    authors: Vec<String>,
+    #[serde(rename = "coverPath")]
+    cover_path: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,10 +106,7 @@ pub fn import_epub(
     fs::create_dir_all(cache_root).map_err(|_| ImportError::WriteFailed)?;
     let target = cache_root.join(&content_version);
     if complete_cache(&target, &content_version) {
-        return Ok(ImportedBook {
-            root: target,
-            content_version,
-        });
+        return imported_book(target, content_version);
     }
 
     let staging = cache_root.join(format!(".{content_version}.staging-{}", std::process::id()));
@@ -106,10 +121,7 @@ pub fn import_epub(
         let _ = fs::remove_dir_all(&staging);
     }
     result?;
-    Ok(ImportedBook {
-        root: target,
-        content_version,
-    })
+    imported_book(target, content_version)
 }
 
 fn build_import(source: &Path, staging: &Path, content_version: &str) -> Result<(), ImportError> {
@@ -137,9 +149,23 @@ fn build_import(source: &Path, staging: &Path, content_version: &str) -> Result<
     manifest
         .write_all(b"\n")
         .map_err(|_| ImportError::WriteFailed)?;
+    let metadata = BookMetadata {
+        schema: 1,
+        content_version: content_version.to_owned(),
+        title: plan.title,
+        authors: plan.authors,
+        cover_path: plan.cover_path,
+    };
+    let mut metadata_file =
+        File::create(staging.join(BOOK_METADATA)).map_err(|_| ImportError::WriteFailed)?;
+    serde_json::to_writer_pretty(&mut metadata_file, &metadata)
+        .map_err(|_| ImportError::WriteFailed)?;
+    metadata_file
+        .write_all(b"\n")
+        .map_err(|_| ImportError::WriteFailed)?;
     fs::write(
         staging.join(IMPORT_MARKER),
-        format!("atha-epub-import-v1\n{content_version}\n"),
+        format!("atha-epub-import-v2\n{content_version}\n"),
     )
     .map_err(|_| ImportError::WriteFailed)?;
     if archive::hash_file(source)? != content_version {
@@ -151,7 +177,45 @@ fn build_import(source: &Path, staging: &Path, content_version: &str) -> Result<
 fn complete_cache(path: &Path, content_version: &str) -> bool {
     path.join(READER_MANIFEST).is_file()
         && fs::read_to_string(path.join(IMPORT_MARKER))
-            .is_ok_and(|value| value == format!("atha-epub-import-v1\n{content_version}\n"))
+            .is_ok_and(|value| value == format!("atha-epub-import-v2\n{content_version}\n"))
+        && read_metadata(path, content_version).is_ok()
+}
+
+fn imported_book(root: PathBuf, content_version: String) -> Result<ImportedBook, ImportError> {
+    let metadata = read_metadata(&root, &content_version)?;
+    Ok(ImportedBook {
+        root,
+        content_version,
+        title: metadata.title,
+        authors: metadata.authors,
+        cover_path: metadata.cover_path,
+    })
+}
+
+fn read_metadata(path: &Path, content_version: &str) -> Result<BookMetadata, ImportError> {
+    let metadata: BookMetadata = serde_json::from_slice(
+        &fs::read(path.join(BOOK_METADATA)).map_err(|_| ImportError::WriteFailed)?,
+    )
+    .map_err(|_| ImportError::WriteFailed)?;
+    if metadata.schema != 1
+        || metadata.content_version != content_version
+        || metadata
+            .title
+            .as_ref()
+            .is_some_and(|value| value.is_empty() || value.len() > package::MAX_METADATA_TEXT)
+        || metadata.authors.len() > package::MAX_AUTHORS
+        || metadata
+            .authors
+            .iter()
+            .any(|value| value.is_empty() || value.len() > package::MAX_METADATA_TEXT)
+        || metadata
+            .cover_path
+            .as_ref()
+            .is_some_and(|value| value.is_empty() || value.len() > 512)
+    {
+        return Err(ImportError::WriteFailed);
+    }
+    Ok(metadata)
 }
 
 fn publish(staging: &Path, target: &Path, content_version: &str) -> Result<(), ImportError> {

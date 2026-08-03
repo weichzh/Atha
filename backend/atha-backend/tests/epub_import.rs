@@ -5,7 +5,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use atha_backend::reader::epub::{ImportError, READER_MANIFEST, import_epub};
+use atha_backend::reader::{
+    epub::{ImportError, READER_MANIFEST, import_epub},
+    library::{LibraryError, LocalLibrary},
+};
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 #[derive(Clone, Copy)]
@@ -64,7 +67,13 @@ fn imports_epub_and_rejects_unsafe_or_unsupported_sources() {
     assert_eq!(manifest["toc"][1]["href"], "OEBPS/text/two.xhtml#start");
     assert_eq!(
         manifest["resources"],
-        serde_json::json!(["OEBPS/styles/book.css"])
+        serde_json::json!(["OEBPS/images/cover.png", "OEBPS/styles/book.css"])
+    );
+    assert_eq!(imported.title.as_deref(), Some("Example Book"));
+    assert_eq!(imported.authors, ["Example Author"]);
+    assert_eq!(
+        imported.cover_path.as_deref(),
+        Some("OEBPS/images/cover.png")
     );
     assert!(imported.root.join("OEBPS/text/two.xhtml").is_file());
 
@@ -150,6 +159,61 @@ fn imports_epub_and_rejects_unsafe_or_unsupported_sources() {
     assert_ne!(changed.root, imported.root);
 }
 
+#[test]
+fn local_library_deduplicates_opens_and_removes_books_without_deleting_content() {
+    let root = TestRoot::new();
+    let source = root.0.join("book.epub");
+    write_epub(&source, EpubVariant::Valid);
+    let data = root.0.join("data");
+    let library = LocalLibrary::open(&data).expect("open library");
+
+    let imported = library.import(&source).expect("import into library");
+    assert_eq!(imported.title, "Example Book");
+    assert_eq!(imported.authors, ["Example Author"]);
+    assert!(imported.has_cover);
+
+    let moved = root.0.join("moved.epub");
+    fs::copy(&source, &moved).expect("copy epub");
+    assert_eq!(library.import(&moved).expect("repeat import"), imported);
+    let listed = library.list().expect("list library");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0], imported);
+
+    let opened = library.open_book(&imported.id).expect("open book");
+    assert_eq!(opened.book, imported);
+    assert!(opened.root.read(&format!("/{READER_MANIFEST}")).is_ok());
+    assert_eq!(
+        library
+            .cover(&opened.book.id)
+            .expect("read cover")
+            .content_type,
+        "image/png"
+    );
+
+    let reopened = LocalLibrary::open(&data).expect("reopen library");
+    let listed = reopened.list().expect("list reopened");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0], opened.book);
+    reopened.remove(&opened.book.id).expect("remove book");
+    assert!(reopened.list().expect("list empty").is_empty());
+    assert!(data.join("ImportedBooks").join(&opened.book.id).is_dir());
+    assert_eq!(
+        reopened.import(&moved).expect("restore book").id,
+        opened.book.id
+    );
+    assert_eq!(
+        reopened.open_book("not-a-content-hash").unwrap_err(),
+        LibraryError::InvalidBookId
+    );
+    fs::write(
+        data.join("Library")
+            .join(format!("{}.json", opened.book.id)),
+        b"{}",
+    )
+    .expect("corrupt library record");
+    assert_eq!(reopened.list().unwrap_err(), LibraryError::CorruptRecord);
+}
+
 fn write_epub(path: &Path, variant: EpubVariant) {
     let file = File::create(path).expect("create epub");
     let mut archive = ZipWriter::new(file);
@@ -188,7 +252,7 @@ fn write_epub(path: &Path, variant: EpubVariant) {
     } else if matches!(variant, EpubVariant::ExtraPackageRoot) {
         br#"<?xml version="1.0"?><extra/><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.as_slice()
     } else {
-        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"></item><item id="css" href="styles/book.css" media-type="text/css"/></manifest><spine><itemref idref="one"/><itemref idref="two"></itemref></spine></package>"#.as_slice()
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title> Example   Book </dc:title><dc:creator>Example Author</dc:creator></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"></item><item id="css" href="styles/book.css" media-type="text/css"/><item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"></itemref></spine></package>"#.as_slice()
     };
     let navigation = if matches!(variant, EpubVariant::TruncatedNavigation) {
         br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One"#.as_slice()
@@ -212,6 +276,7 @@ fn write_epub(path: &Path, variant: EpubVariant) {
             "OEBPS/styles/book.css",
             b"body { color: black; }".as_slice(),
         ),
+        ("OEBPS/images/cover.png", b"test-png".as_slice()),
     ] {
         archive.start_file(name, stored).expect("start epub member");
         archive.write_all(bytes).expect("write epub member");

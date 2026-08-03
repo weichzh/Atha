@@ -1,6 +1,7 @@
 //! Security boundaries shared by the reader host.
 
 pub mod epub;
+pub mod library;
 pub mod resources;
 pub mod telemetry;
 
