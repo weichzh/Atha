@@ -4,13 +4,10 @@ const APPLICATION_DEFAULTS = Object.freeze({
   fontSize: 32,
   fontFamily: "book",
   density: "standard",
-  marginTopPx: 144,
-  marginRightPx: 32,
-  marginBottomPx: 144,
-  marginLeftPx: 32,
   tapToPaginate: true,
   swipeToPaginate: true,
 });
+const LEGACY_MARGIN_KEYS = ["marginTopPx", "marginRightPx", "marginBottomPx", "marginLeftPx"];
 const BOOK_DEFAULTS = Object.freeze({
   sourceStyles: true,
   userStylesEnabled: true,
@@ -41,18 +38,14 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   }
 
   function validateApplication(value) {
+    ensure(value && typeof value === "object" && !Array.isArray(value));
     const normalized = {
       brightness: 100,
-      marginTopPx: APPLICATION_DEFAULTS.marginTopPx,
-      marginRightPx: APPLICATION_DEFAULTS.marginRightPx,
-      marginBottomPx: APPLICATION_DEFAULTS.marginBottomPx,
-      marginLeftPx: APPLICATION_DEFAULTS.marginLeftPx,
       tapToPaginate: APPLICATION_DEFAULTS.tapToPaginate,
       swipeToPaginate: APPLICATION_DEFAULTS.swipeToPaginate,
       ...value,
     };
-    const validMargin = (margin) =>
-      Number.isInteger(margin) && margin >= 0 && margin <= 288 && margin % 8 === 0;
+    for (const key of LEGACY_MARGIN_KEYS) delete normalized[key];
     ensure(
       exact(normalized, APPLICATION_DEFAULTS) &&
         ["system", "light", "paper", "dark"].includes(normalized.theme) &&
@@ -62,19 +55,11 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         [24, 32, 40].includes(normalized.fontSize) &&
         ["book", "serif", "sans"].includes(normalized.fontFamily) &&
         Object.hasOwn(LINE_HEIGHT_RATIOS, normalized.density) &&
-        validMargin(normalized.marginTopPx) &&
-        validMargin(normalized.marginRightPx) &&
-        validMargin(normalized.marginBottomPx) &&
-        validMargin(normalized.marginLeftPx) &&
         typeof normalized.tapToPaginate === "boolean" &&
         typeof normalized.swipeToPaginate === "boolean",
       "invalid-preference",
     );
-    return {
-      ...normalized,
-      marginTopPx: Math.max(APPLICATION_DEFAULTS.marginTopPx, normalized.marginTopPx),
-      marginBottomPx: Math.max(APPLICATION_DEFAULTS.marginBottomPx, normalized.marginBottomPx),
-    };
+    return normalized;
   }
 
   function validateBook(value) {
@@ -95,10 +80,6 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.fontSize.value = String(application.fontSize);
     controls.fontFamily.value = application.fontFamily;
     controls.density.value = application.density;
-    controls.marginTop.value = String(application.marginTopPx);
-    controls.marginRight.value = String(application.marginRightPx);
-    controls.marginBottom.value = String(application.marginBottomPx);
-    controls.marginLeft.value = String(application.marginLeftPx);
     controls.tapToPaginate.checked = application.tapToPaginate;
     controls.swipeToPaginate.checked = application.swipeToPaginate;
     controls.sourceStyles.checked = book.sourceStyles;
@@ -124,10 +105,6 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       "--reader-line-height",
       `${application.fontSize * LINE_HEIGHT_RATIOS[application.density]}px`,
     );
-    reader.style.setProperty("--page-top-margin", `${application.marginTopPx}px`);
-    reader.style.setProperty("--page-right-margin", `${application.marginRightPx}px`);
-    reader.style.setProperty("--page-bottom-margin", `${application.marginBottomPx}px`);
-    reader.style.setProperty("--page-left-margin", `${application.marginLeftPx}px`);
     syncControls();
     return snapshot();
   }
@@ -178,10 +155,6 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       [controls.theme, "theme", String],
       [controls.fontFamily, "fontFamily", String],
       [controls.density, "density", String],
-      [controls.marginTop, "marginTopPx", Number],
-      [controls.marginRight, "marginRightPx", Number],
-      [controls.marginBottom, "marginBottomPx", Number],
-      [controls.marginLeft, "marginLeftPx", Number],
     ]) {
       control.addEventListener("change", () => {
         run(() => onUpdate("application", { [key]: convert(control.value) }), "已应用");
@@ -235,7 +208,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     ["application", { theme: "sepia" }],
     ["application", { brightness: 121 }],
     ["application", { fontSize: 31 }],
-    ["application", { marginLeftPx: 31 }],
+    ["application", { unknown: true }],
     ["book", { unknown: true }],
   ]) {
     let rejected = false;
@@ -246,6 +219,17 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     }
     assert(rejected, "sample-boundary");
   }
+  const migrated = validateApplication({
+    ...APPLICATION_DEFAULTS,
+    marginTopPx: 80,
+    marginRightPx: 24,
+    marginBottomPx: 96,
+    marginLeftPx: 40,
+  });
+  assert(
+    LEGACY_MARGIN_KEYS.every((key) => !Object.hasOwn(migrated, key)),
+    "sample-boundary",
+  );
   apply();
   return Object.freeze({ bind, reset, restore, snapshot, update });
 }

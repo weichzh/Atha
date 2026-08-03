@@ -5,11 +5,12 @@ use atha_backend::reader::epub::{READER_MANIFEST, import_epub};
 use tao::dpi::LogicalSize;
 
 pub const APP_PAGE: &str = "https://atha.localhost/atha-reader.html";
-const PAGE_DEVICE_WIDTH: f64 = 780.0;
-const PAGE_DEVICE_HEIGHT: f64 = 1680.0;
-const WINDOW_PADDING_LOGICAL: f64 = 48.0;
+const INITIAL_WINDOW_WIDTH_LOGICAL: f64 = 430.0;
+const INITIAL_WINDOW_HEIGHT_LOGICAL: f64 = 820.0;
+pub const MIN_WINDOW_WIDTH_LOGICAL: f64 = 360.0;
+pub const MIN_WINDOW_HEIGHT_LOGICAL: f64 = 640.0;
 const WINDOW_FRAME_ALLOWANCE_LOGICAL: f64 = 48.0;
-const MAX_SCREEN_FRACTION: f64 = 0.8;
+const MAX_SCREEN_FRACTION: f64 = 0.9;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BenchmarkMode {
@@ -307,21 +308,17 @@ pub fn content_fingerprint(bytes: &[u8]) -> String {
     .join("")
 }
 
-pub fn initial_window_size(
-    screen: LogicalSize<f64>,
-    monitor_scale_factor: f64,
-) -> LogicalSize<f64> {
-    let scale_factor = if monitor_scale_factor.is_finite() && monitor_scale_factor > 0.0 {
-        monitor_scale_factor
-    } else {
-        1.0
-    };
+pub fn initial_window_size(screen: LogicalSize<f64>) -> LogicalSize<f64> {
     let max_width = (screen.width * MAX_SCREEN_FRACTION - WINDOW_FRAME_ALLOWANCE_LOGICAL).max(1.0);
     let max_height =
         (screen.height * MAX_SCREEN_FRACTION - WINDOW_FRAME_ALLOWANCE_LOGICAL).max(1.0);
     LogicalSize::new(
-        (PAGE_DEVICE_WIDTH / scale_factor + WINDOW_PADDING_LOGICAL).min(max_width),
-        (PAGE_DEVICE_HEIGHT / scale_factor + WINDOW_PADDING_LOGICAL).min(max_height),
+        INITIAL_WINDOW_WIDTH_LOGICAL
+            .min(max_width)
+            .max(MIN_WINDOW_WIDTH_LOGICAL),
+        INITIAL_WINDOW_HEIGHT_LOGICAL
+            .min(max_height)
+            .max(MIN_WINDOW_HEIGHT_LOGICAL),
     )
 }
 
@@ -360,10 +357,18 @@ mod tests {
 
     #[test]
     fn initial_window_reserves_system_frame_within_screen_bounds() {
-        let size = initial_window_size(LogicalSize::new(1920.0, 1080.0), 2.0);
+        let size = initial_window_size(LogicalSize::new(1920.0, 1080.0));
 
-        assert_eq!(size.width, 438.0);
-        assert_eq!(size.height, 816.0);
+        assert_eq!(size.width, 430.0);
+        assert_eq!(size.height, 820.0);
+    }
+
+    #[test]
+    fn initial_window_never_drops_below_the_reader_minimum() {
+        let size = initial_window_size(LogicalSize::new(320.0, 500.0));
+
+        assert_eq!(size.width, MIN_WINDOW_WIDTH_LOGICAL);
+        assert_eq!(size.height, MIN_WINDOW_HEIGHT_LOGICAL);
     }
 
     #[test]

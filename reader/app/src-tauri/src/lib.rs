@@ -8,7 +8,8 @@ use atha_backend::reader::{
 use atha_reader_host::{
     diagnostics::{DiagnosticError, Diagnostics, ReadyDisposition, safe_event},
     launch::{
-        Arguments, BookSource, content_fingerprint, initial_window_size, reader_url, state_key,
+        Arguments, BookSource, MIN_WINDOW_HEIGHT_LOGICAL, MIN_WINDOW_WIDTH_LOGICAL,
+        content_fingerprint, initial_window_size, reader_url, state_key,
     },
 };
 use tauri::{
@@ -127,7 +128,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                         f64::from(physical.width) / scale,
                         f64::from(physical.height) / scale,
                     );
-                    initial_window_size(screen, scale)
+                    initial_window_size(screen)
                 })
                 .unwrap_or_else(|| tao::dpi::LogicalSize::new(900.0, 900.0));
             let data_directory = app.path().app_local_data_dir()?.join("WebView2");
@@ -135,6 +136,9 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App(app_path.clone().into()))
                 .title("Atha Reader")
                 .inner_size(size.width, size.height)
+                .min_inner_size(MIN_WINDOW_WIDTH_LOGICAL, MIN_WINDOW_HEIGHT_LOGICAL)
+                .resizable(true)
+                .maximizable(true)
                 .data_directory(data_directory)
                 .devtools(false)
                 .general_autofill_enabled(false)

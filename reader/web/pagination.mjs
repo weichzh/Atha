@@ -1,5 +1,6 @@
 const SOURCE_FONT_SIZE = 16;
 const DISPLAY_FORMULA_MULTIPLIER = 1.5;
+const BENCHMARK_VIEWPORT = new URLSearchParams(location.search).has("benchmark");
 
 export function createPagination({
   book,
@@ -156,11 +157,15 @@ export function createPagination({
     return 0;
   }
 
-  function syncPageDeviceScale() {
+  function syncViewportDeviceSize() {
     const scale = 1 / devicePixelRatio;
+    const width = BENCHMARK_VIEWPORT ? 780 : Math.max(1, Math.round(innerWidth * devicePixelRatio));
+    const height = BENCHMARK_VIEWPORT
+      ? 1680
+      : Math.max(1, Math.round(innerHeight * devicePixelRatio));
     document.documentElement.style.setProperty("--page-scale", String(scale));
-    document.documentElement.style.setProperty("--reader-display-width", `${780 * scale}px`);
-    document.documentElement.style.setProperty("--reader-display-height", `${1680 * scale}px`);
+    document.documentElement.style.setProperty("--reader-width", `${width}px`);
+    document.documentElement.style.setProperty("--reader-height", `${height}px`);
   }
 
   function applyFormulaScale() {
@@ -332,8 +337,16 @@ export function createPagination({
   function verifyDisplayGeometry() {
     const readerRect = reader.getBoundingClientRect();
     const scale = readerRect.width / reader.clientWidth;
-    assert(Math.abs(readerRect.width * devicePixelRatio - 780) <= 1, "layout-cut");
-    assert(Math.abs(readerRect.height * devicePixelRatio - 1680) <= 1, "layout-cut");
+    assert(Math.abs(readerRect.width - innerWidth) <= 1, "layout-cut");
+    assert(Math.abs(readerRect.height - innerHeight) <= 1, "layout-cut");
+    assert(
+      Math.abs(reader.clientWidth - Math.round(innerWidth * devicePixelRatio)) <= 1,
+      "layout-cut",
+    );
+    assert(
+      Math.abs(reader.clientHeight - Math.round(innerHeight * devicePixelRatio)) <= 1,
+      "layout-cut",
+    );
     const progress = previous.closest("details");
     const wasOpen = progress.open;
     progress.open = true;
@@ -361,6 +374,15 @@ export function createPagination({
     layout();
     await waitForStableLayout();
     await showOffset(anchor);
+    assert(countCutRects() === 0, "layout-cut");
+  }
+
+  async function resizeViewport(anchor) {
+    syncViewportDeviceSize();
+    await document.fonts.ready;
+    layout();
+    await waitForStableLayout();
+    assert(await showOffset(anchor), "locator-offset");
     assert(countCutRects() === 0, "layout-cut");
   }
 
@@ -423,12 +445,32 @@ export function createPagination({
   }
 
   function initialize() {
-    syncPageDeviceScale();
-    window.addEventListener("resize", syncPageDeviceScale);
+    syncViewportDeviceSize();
+  }
+
+  function bindResize(onResize) {
+    let timer;
+    window.addEventListener("resize", () => {
+      clearTimeout(timer);
+      delete document.documentElement.dataset.viewportStable;
+      timer = setTimeout(() => {
+        Promise.resolve()
+          .then(onResize)
+          .then(() => {
+            document.documentElement.dataset.viewportStable = `${reader.clientWidth}x${reader.clientHeight}`;
+          })
+          .catch((error) => {
+            if (!document.documentElement.dataset.error) {
+              fail(error instanceof Error ? error.message : "layout-cut");
+            }
+          });
+      }, 120);
+    });
   }
 
   return Object.freeze({
     bindControls,
+    bindResize,
     captureOffset,
     countCutRects,
     hasOffset,
@@ -438,6 +480,7 @@ export function createPagination({
     nextFrame,
     offsetForFragment,
     renderFromStart,
+    resizeViewport,
     setFontSize,
     show,
     showOffset,

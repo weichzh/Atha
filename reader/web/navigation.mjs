@@ -252,6 +252,13 @@ export function createNavigation({
     return anchor;
   }
 
+  async function resizeViewport() {
+    const anchor = current();
+    await pagination.resizeViewport(anchor.start.offset);
+    syncControls();
+    return anchor;
+  }
+
   function bindControls() {
     const description = book();
     toc.replaceChildren(
@@ -359,6 +366,7 @@ export function createNavigation({
     next: () => run(nextPage),
     previous: () => run(previousPage),
     resetPreferences: (scope) => run(() => resetPreferences(scope)),
+    resize: () => run(resizeViewport),
     setFontSize: (value) => run(() => setFontSize(value)),
     setPreferences: (scope, patch) => run(() => setPreferences(scope, patch)),
     snapshot,

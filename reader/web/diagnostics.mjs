@@ -125,6 +125,23 @@ export function createDiagnostics({
   }
 
   async function verifyPreferences() {
+    const initial = preferences.snapshot();
+    const migrated = preferences.restore({
+      application: {
+        ...initial.application,
+        marginTopPx: 80,
+        marginRightPx: 24,
+        marginBottomPx: 96,
+        marginLeftPx: 40,
+      },
+      book: initial.book,
+    });
+    assert(
+      ["marginTopPx", "marginRightPx", "marginBottomPx", "marginLeftPx"].every(
+        (key) => !Object.hasOwn(migrated.application, key),
+      ),
+      "sample-boundary",
+    );
     if (pagination.snapshot().pages > 1) await pagination.show(1);
     const compactAnchor = await navigation.setPreferences("application", {
       theme: "dark",
@@ -132,10 +149,6 @@ export function createDiagnostics({
       fontSize: 24,
       fontFamily: "serif",
       density: "compact",
-      marginTopPx: 80,
-      marginRightPx: 24,
-      marginBottomPx: 96,
-      marginLeftPx: 40,
     });
     assert(pagination.isOffsetVisible(compactAnchor.start.offset), "sample-boundary");
     assert(document.documentElement.dataset.theme === "dark", "sample-boundary");
@@ -144,10 +157,6 @@ export function createDiagnostics({
       "sample-boundary",
     );
     assert(content.book.dataset.fontFamily === "serif", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-top-margin") === "144px", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-right-margin") === "24px", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-bottom-margin") === "144px", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-left-margin") === "40px", "sample-boundary");
     const compactStyle = getComputedStyle(content.book);
     assert(compactStyle.backgroundColor === "rgb(26, 33, 30)", "sample-boundary");
     assert(compactStyle.color === "rgb(232, 236, 232)", "sample-boundary");
@@ -168,8 +177,6 @@ export function createDiagnostics({
     assert(pagination.isOffsetVisible(comfortableAnchor.start.offset), "sample-boundary");
     assert(document.documentElement.dataset.theme === "light", "sample-boundary");
     assert(content.book.dataset.fontFamily === "sans", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-left-margin") === "40px", "sample-boundary");
-    assert(reader.style.getPropertyValue("--page-right-margin") === "24px", "sample-boundary");
     const comfortableStyle = getComputedStyle(content.book);
     assert(comfortableStyle.backgroundColor === "rgb(255, 255, 255)", "sample-boundary");
     assert(comfortableStyle.color === "rgb(40, 43, 41)", "sample-boundary");
@@ -224,10 +231,6 @@ export function createDiagnostics({
         restored.application.fontSize === 32 &&
         restored.application.fontFamily === "book" &&
         restored.application.density === "standard" &&
-        restored.application.marginTopPx === 144 &&
-        restored.application.marginRightPx === 32 &&
-        restored.application.marginBottomPx === 144 &&
-        restored.application.marginLeftPx === 32 &&
         restored.application.tapToPaginate &&
         restored.application.swipeToPaginate &&
         !document.documentElement.dataset.theme &&
@@ -242,6 +245,7 @@ export function createDiagnostics({
       userStylesApplied: true,
       userStylesToggled: true,
       unsafeStylesRejected: true,
+      legacyMarginsDropped: true,
     };
   }
 
@@ -513,6 +517,7 @@ export function createDiagnostics({
   }
 
   async function benchmark() {
+    assert(reader.clientWidth === 780 && reader.clientHeight === 1680, "layout-cut");
     for (let sample = 1; sample <= BENCHMARK_SAMPLES; sample += 1) {
       const started = performance.now();
       await renderCachedSource();

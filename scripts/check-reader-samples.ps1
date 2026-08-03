@@ -559,6 +559,52 @@ try {
                 Invoke-AgentBrowser @('--session', $session, 'errors')
                 Invoke-AgentBrowser @('--session', $session, 'network', 'requests', '--filter', 'example.com')
             }
+            if ($sample.id -eq 'logic-1-2') {
+                foreach ($viewport in @(
+                    @{ width = 390; height = 840; scale = 2; internalWidth = 780; internalHeight = 1680 },
+                    @{ width = 960; height = 720; scale = 1; internalWidth = 960; internalHeight = 720 },
+                    @{ width = 780; height = 1680; scale = 1; internalWidth = 780; internalHeight = 1680 }
+                )) {
+                    Invoke-AgentBrowser @('--session', $session, 'set', 'viewport', [string]$viewport.width, [string]$viewport.height, [string]$viewport.scale)
+                    $stableSize = "$($viewport.internalWidth)x$($viewport.internalHeight)"
+                    Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.viewportStable === '$stableSize' && !document.documentElement.dataset.error")
+                    $geometry = Get-AgentBrowserScriptValue -Session $session -Script @'
+(() => {
+  const reader = document.querySelector('.reader');
+  const page = document.querySelector('#page').getBoundingClientRect();
+  const top = document.querySelector('.top-toolbar').getBoundingClientRect();
+  const bottom = document.querySelector('.toolbar').getBoundingClientRect();
+  const rect = reader.getBoundingClientRect();
+  const style = getComputedStyle(reader);
+  return {
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    internalWidth: reader.clientWidth,
+    internalHeight: reader.clientHeight,
+    safe: top.bottom <= page.top + 1 && bottom.top >= page.bottom - 1,
+    margins: [
+      style.getPropertyValue('--page-top-margin').trim(),
+      style.getPropertyValue('--page-right-margin').trim(),
+      style.getPropertyValue('--page-bottom-margin').trim(),
+      style.getPropertyValue('--page-left-margin').trim(),
+    ],
+    marginControls: document.querySelectorAll('#margin-top, #margin-right, #margin-bottom, #margin-left').length,
+  };
+})()
+'@ | ConvertFrom-Json
+                    if (
+                        $geometry.width -ne $viewport.width -or
+                        $geometry.height -ne $viewport.height -or
+                        $geometry.internalWidth -ne $viewport.internalWidth -or
+                        $geometry.internalHeight -ne $viewport.internalHeight -or
+                        -not $geometry.safe -or
+                        (@($geometry.margins) -join ',') -ne '144px,32px,144px,32px' -or
+                        $geometry.marginControls -ne 0
+                    ) {
+                        throw "Adaptive reader geometry failed: $($geometry | ConvertTo-Json -Compress)"
+                    }
+                }
+            }
             if ($sample.id -eq 'math-history-r1') {
                 Invoke-AgentBrowser @('--session', $session, 'click', '.progress > summary')
                 $positionBefore = Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('#position').textContent" | ConvertFrom-Json

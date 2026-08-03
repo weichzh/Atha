@@ -55,10 +55,6 @@ const preferences = createPreferences({
     fontSize: document.querySelector("#font-size"),
     fontFamily: document.querySelector("#font-family"),
     density: document.querySelector("#density"),
-    marginTop: document.querySelector("#margin-top"),
-    marginRight: document.querySelector("#margin-right"),
-    marginBottom: document.querySelector("#margin-bottom"),
-    marginLeft: document.querySelector("#margin-left"),
     tapToPaginate: document.querySelector("#tap-to-paginate"),
     swipeToPaginate: document.querySelector("#swipe-to-paginate"),
     sourceStyles: document.querySelector("#source-styles"),
@@ -340,6 +336,7 @@ async function start() {
   const firstStableStarted = performance.now();
   await session.open();
   navigation.bindControls();
+  pagination.bindResize(() => navigation.resize());
   await annotations.restore();
   await readerState.restore();
   readerState.bind();

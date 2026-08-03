@@ -40,6 +40,71 @@ function Invoke-TauriSmoke {
     }
 }
 
+function Invoke-TauriWindowBehavior {
+    if (-not ('AthaWindowProbe' -as [type])) {
+        Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class AthaWindowProbe {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Point { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MinMaxInfo {
+        public Point Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool IsZoomed(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr handle, uint message, IntPtr wParam, ref MinMaxInfo info);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr handle, int command);
+}
+'@
+    }
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
+    $startInfo.UseShellExecute = $false
+    foreach ($argument in @('--book-root', $bookRootPath, '--manifest', '.atha-reader.json')) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($startInfo)
+    try {
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            if ($process.HasExited) { throw "Tauri reader exited with code $($process.ExitCode)." }
+            $process.Refresh()
+            Start-Sleep -Milliseconds 100
+        } while ($process.MainWindowHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
+        $handle = $process.MainWindowHandle
+        if ($handle -eq [IntPtr]::Zero) { throw 'Tauri reader window did not appear.' }
+
+        [void][AthaWindowProbe]::ShowWindowAsync($handle, 3)
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [AthaWindowProbe]::IsZoomed($handle) -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not [AthaWindowProbe]::IsZoomed($handle)) { throw 'Tauri reader window could not maximize.' }
+
+        [void][AthaWindowProbe]::ShowWindowAsync($handle, 9)
+        $minimum = [AthaWindowProbe+MinMaxInfo]::new()
+        [void][AthaWindowProbe]::SendMessage($handle, 0x24, [IntPtr]::Zero, [ref]$minimum)
+        if ($minimum.MinTrackSize.X -lt 360 -or $minimum.MinTrackSize.Y -lt 640) {
+            throw "Tauri reader minimum tracking size failed: $($minimum.MinTrackSize.X)x$($minimum.MinTrackSize.Y)."
+        }
+    }
+    finally {
+        if (-not $process.HasExited) {
+            $process.Kill($true)
+            $process.WaitForExit()
+        }
+    }
+}
+
 Push-Location $repoRoot
 try {
     Push-Location 'reader/app'
@@ -60,6 +125,7 @@ try {
         '-HostPath', 'target/debug/atha-reader-app.exe'
     )
     Invoke-TauriSmoke
+    Invoke-TauriWindowBehavior
 }
 finally {
     Pop-Location

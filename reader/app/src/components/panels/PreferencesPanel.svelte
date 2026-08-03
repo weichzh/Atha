@@ -95,22 +95,6 @@
         <option value="comfortable">舒展</option>
       </select>
     </label>
-    <label>
-      上边距（设备 px）
-      <input id="margin-top" type="number" min="144" max="288" step="8" />
-    </label>
-    <label>
-      右边距（设备 px）
-      <input id="margin-right" type="number" min="0" max="288" step="8" />
-    </label>
-    <label>
-      下边距（设备 px）
-      <input id="margin-bottom" type="number" min="144" max="288" step="8" />
-    </label>
-    <label>
-      左边距（设备 px）
-      <input id="margin-left" type="number" min="0" max="288" step="8" />
-    </label>
   </section>
 
   <section class="settings-view" data-settings-page="theme" hidden>

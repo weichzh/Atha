@@ -6,7 +6,8 @@ use std::{error::Error, fs, process, time::Instant};
 use crate::{
     diagnostics::{DiagnosticError, Diagnostics, ReadyDisposition, safe_event},
     launch::{
-        Arguments, BookSource, content_fingerprint, initial_window_size, reader_url, state_key,
+        Arguments, BookSource, MIN_WINDOW_HEIGHT_LOGICAL, MIN_WINDOW_WIDTH_LOGICAL,
+        content_fingerprint, initial_window_size, reader_url, state_key,
     },
 };
 use atha_backend::reader::{
@@ -51,12 +52,18 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         .map(|monitor| {
             let scale_factor = monitor.scale_factor();
             let screen = monitor.size().to_logical::<f64>(scale_factor);
-            initial_window_size(screen, scale_factor)
+            initial_window_size(screen)
         })
         .unwrap_or_else(|| tao::dpi::LogicalSize::new(900.0, 900.0));
     let window = WindowBuilder::new()
         .with_title("Atha Reader")
         .with_inner_size(window_size)
+        .with_min_inner_size(tao::dpi::LogicalSize::new(
+            MIN_WINDOW_WIDTH_LOGICAL,
+            MIN_WINDOW_HEIGHT_LOGICAL,
+        ))
+        .with_resizable(true)
+        .with_maximizable(true)
         .build(&event_loop)?;
     let proxy = event_loop.create_proxy();
     let url = reader_url(
