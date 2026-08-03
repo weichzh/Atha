@@ -8,7 +8,7 @@
 - M0 工作流提交：`fc104e0`
 - M1 规格提交：`5d255e4`
 - 远程仓库：`github.com/weichzh/Atha`。
-- 当前已有根 Cargo workspace、正式后端 crate、EPUB3 导入、Tauri 2/WebView2 host、Svelte 5 应用壳和无框架阅读内核；直接 Wry/Tao host 暂留为回归基线。
+- 当前已有根 Cargo workspace、正式后端 crate、EPUB3 导入、本地书架、Tauri 2/WebView2 host、Svelte 5 应用壳和无框架阅读内核；直接 Wry/Tao host 暂留为回归基线。
 
 ## 顶层结构
 
@@ -16,8 +16,8 @@
 |---|---|---|
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
-| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 导入与阅读遥测校验 | M3 EPUB 输入 |
-| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；应用壳、能力清单、受控协议和打包配置 | 已验证 |
+| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 导入、本地书架与阅读遥测校验 | M4 本地书架 |
+| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、默认样式、原生阅读偏好、书签、标注、搜索面板与内容 dialog | M2 已验证 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、标注事实与投影、内容安全、分页、诊断、benchmark 和页面组合入口 | M2 已验证 |
@@ -34,6 +34,7 @@
 | `scripts/check-reader-gate.ps1` | 组合四样本、大书搜索、进程树内存、强杀恢复和固定 P95 性能门槛 | M2 R8 已通过 |
 | `scripts/check-tauri-reader.ps1` | Svelte production build、workspace Rust 检查、Tauri build、真实 EPUB 与性能门槛 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
+| `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 空启动与移动书架 UI | M4 已通过 |
 | `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
 | `scripts/Measure-Workflow.ps1` | schema v1/v2 本机流程日志、兼容汇总与自检 | 本地已验证 |
 | `docs/agents/workflow.md` | 全局工作流的项目契约、任务类型和真实检查 gate | 已配置 |
@@ -54,6 +55,7 @@
 - `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；
 - schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--epub` 与 `--book-root` 输入互斥，后者再从 `--manifest` 与兼容 `--entry` 二选一；
 - `reader::epub` 的公开 interface 只有 `import_epub`：`mod` 编排内容哈希与原子缓存，`archive` 拥有 ZIP/路径/大小边界，`package` 拥有 container、OPF spine、navigation 和 schema 1 计划；同一源字节跨路径得到相同缓存根和状态键；
+- `reader::library::LocalLibrary` 复用 EPUB importer，以内容哈希为身份，用每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`；移除记录不删除导入缓存或阅读状态；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
 - 阅读页源码保持原生 ES module：`locator` 校验、序列化并比较内容坐标；`navigation` 组合页、section、TOC、窗口尺寸变化与重排恢复；`preferences` 合并应用默认与本书样式；`session` 拥有 manifest 和内容生命周期；`content` 校验并加载单份 XHTML、CSS 与 SVG；`pagination` 负责公式与自适应视口分页；`content-actions` 处理链接、脚注与图片，`structured-actions` 处理表格与代码；`reader-state` 分区持久化偏好、书签与进度，`bookmarks` 处理最小书签交互；`search` 只读扫描各 section 并生成 range Locator；`annotation-store` 只拥有严格 schema 与事务式写入，`annotations` 只拥有选择、重锚、CSS Highlight 投影和 UI；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
@@ -64,9 +66,9 @@
 - 公式按源尺寸随字号缩放，行间公式使用独立 `1.5` 倍率并在逻辑内容列中居中；
 - 阅读页内部设备像素尺寸跟随 WebView 视口与 DPR，使用 CSS 多栏并以 `1 / devicePixelRatio` 隔离系统 DPI；移动阅读壳层默认沉浸，48 CSS px 工具栏只覆盖固定 144 设备像素的页眉页脚安全区且不参与分页；文字、公式和原子内容均有布局后裁切检查；
 - Windows 窗口与壳层控件使用系统逻辑像素，默认内部尺寸为 430 × 820，最小为 360 × 640，可自由调整和最大化；窗口变化经 Navigation 队列恢复 Locator；
-- 宿主 IPC 只接收固定、限长、非内容性的性能与状态事件。
-- Tauri 产品入口保持单 WebView；Svelte 组件只拥有应用壳，Vite 直接拼接既有十六份 reader module，书籍 DOM 和分页热路径不进入组件状态；
-- Tauri command 复用后端遥测解析和共享 diagnostics，并在 Rust 端复核窗口 label 与当前来源；前端使用独立 `athaReaderIpc` 串行发送，避免覆盖 Tauri 内部 `window.ipc` 或让 ready 越过 metric；
+- 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
+- Tauri 产品入口保持单 WebView；Svelte 组件拥有书架与应用壳，Vite 直接拼接既有十六份 reader module，书籍 DOM 和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
+- Tauri 书架 command 只向可信壳暴露受限书目，不返回源路径或内容；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测仍复用后端解析和共享 diagnostics；
 
 ## 已实现能力
 
@@ -127,6 +129,8 @@
 - M3 完整 M2 回归的三轮 WebView2 进程树峰值为 638.3、628.8 和 636.5MiB；基准 `1785720849357-40976` 的 10 样本中位数/P95 为冷启动 800.103/898.631ms、首稳 145.650/151.900ms、热开 22.850/23.800ms、翻页 7.550/7.800ms、重排 31.250/32.000ms，均在既有门槛内；
 - Tauri/Svelte 基准 `1785763863358-21204` 的 10 样本中位数/P95 为冷启动 551.941/605.253ms、首稳 130.650/138.700ms、热开 20.800/21.400ms、翻页 6.600/6.900ms、重排 27.800/41.700ms，均在 2000/750/120/50/150ms 门槛内；真实 EPUB import probe、移动竖屏沉浸态与控制层通过，四边距为不进入偏好的页面内部固定值，真实文档策略确认相机、麦克风、定位和显示捕获不可用；
 - 移动阅读壳可用性升级的 reader samples 正式 runner 在 Windows 本地通过：四样本逻辑、明暗主题、目录投影、书签导航后返回阅读、连续进度往返、偏好持久化、WebView2 host 状态和截图链路均通过；production Svelte build 在 390 × 840、DPR 2 下完成微信读书源图同图 Design QA，最终无 P0、P1 或 P2；Tauri 基准 `1785769614666-29748` 的 10 样本中位数/P95 为冷启动 563.409/575.663ms、首稳 133.200/142.900ms、热开 20.800/21.000ms、翻页 6.600/6.800ms、重排 27.800/41.700ms，均低于既有门槛，本轮未做同时间旧代码对照，不能把差异归因于界面改动；
+- M4 本地书架检查在 Windows 本地通过：无参数 Tauri 真实窗口进入书架，390 × 840 和 960 × 720 书架无横向溢出，后端验证内容哈希去重、耐久重开、受限封面、移除保留缓存与损坏记录拒绝；六本演示书架仅用于 Agent Browser 布局检查；
+- M4 完整困难样本回归与 Tauri 产品检查通过；基准 `1785775641046-18876` 的 P95 为冷启动 601.261ms、首稳 155.800ms、热开 23.700ms、翻页 7.900ms、字号重排 46.200ms，均低于既有门槛；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
 - 系统 SQLite 3.53.4 上回滚、FTS 完整性、外键和数据库完整性检查通过；
@@ -136,8 +140,8 @@
 
 - P0 schema 含 SQLite CLI 指令，尚未转为正式版本化迁移；
 - 正式后端尚未添加或编译已决策的随包 SQLite；
-- 除受限阅读遥测外，没有应用服务、领域 API 或通用跨进程接口；
-- 只有 CLI EPUB3 导入；没有书架、文件选择器、文件关联、EPUB2/NCX fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移；
+- 除受限书架 command 与阅读遥测外，没有应用服务、领域 API 或通用跨进程接口；
+- 书架仅支持本地 EPUB3 选择、打开和移除；没有文件关联、拖放、分组、排序设置、最近阅读、EPUB2/NCX fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移；
 - 没有 CI 或 Windows 安装包；Tauri 当前只验证 debug build，旧 Wry/Tao host 尚未删除；
 - 性能数据未记录设备指纹，也没有跨日期重复运行统计。
 

@@ -20,7 +20,7 @@ WebView2 是当前唯一阅读渲染技术。宿主只提供窗口、受控资�
 
 产品入口采用 Tauri 2 与 Svelte 5，但仍只有一个 WebView2。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。
 
-Tauri 复用后端书根、EPUB 导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；壳层只允许一个严格校验、串行发送的非内容遥测 command，不经 IPC 传输 XHTML 或图片。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限，reader 完成前会从真实文档策略复核关键能力确实不可用。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
+Tauri 复用后端书根、EPUB 导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限，reader 完成前会从真实文档策略复核关键能力确实不可用。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
 
 ## 样式层
 
@@ -29,6 +29,12 @@ Tauri 复用后端书根、EPUB 导入、共享 CLI、窗口尺寸和诊断逻�
 书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、用户 CSS 排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。用户 CSS 可检查、启停和撤销，拒绝 `@import`、`url()` 与 Shadow 边界选择器；它不能修改应用壳。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
 
 应用内样式社区、评分、JavaScript 扩展和发布流程不属于阅读内核。远程共享的具体协议在确有需求时再确定。
+
+## 本地书架与应用内导入
+
+Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；它复用 `reader::epub`，以完整源文件 SHA-256 作为书籍身份，在 `%LOCALAPPDATA%/Atha/Library` 为每书保存一份受限 JSON，在既有 `%LOCALAPPDATA%/Atha/ImportedBooks/<sha256>` 保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
+
+EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性和导入时间，不接收源路径、缓存路径或书籍内容。打开书籍后，宿主把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
 
 ## 书籍输入与阅读会话
 

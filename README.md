@@ -2,7 +2,7 @@
 
 Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系统。
 
-当前只推进 Windows，并遵循“后端先于前端”。Tauri 2、Svelte 5 与 WebView2 阅读器已经可以从 CLI 直接打开受限 EPUB3；书架、文件选择器、消息与移动平台尚未开始。现有 `p0/` 只用于 FFI 与 SQLite 技术验证，不属于正式后端。
+当前只推进 Windows，并遵循“后端先于前端”。Tauri 2、Svelte 5 与 WebView2 应用已包含本地书架、应用内 EPUB3 导入和阅读器；消息与移动平台尚未开始。现有 `p0/` 只用于 FFI 与 SQLite 技术验证，不属于正式后端。
 
 ## 工程入口
 
@@ -28,10 +28,16 @@ pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 report
 . .\scripts\Import-AthaEnvironment.ps1 -RepoRoot (Get-Location).Path
 & $env:ATHA_PNPM --dir .\reader\app build
 & $env:ATHA_CARGO build --package atha-reader-app --locked
+.\target\debug\atha-reader-app.exe
+```
+
+应用默认打开书架，可从系统文件对话框选择一个或多个 EPUB。也可用 CLI 直接打开一本书：
+
+```powershell
 .\target\debug\atha-reader-app.exe --epub 'E:\Books\book.epub'
 ```
 
-当前入口只支持符合既定安全与资源边界的 EPUB3。导入缓存位于 `%LOCALAPPDATA%\Atha\ImportedBooks`；同一文件内容从不同路径打开会复用同一阅读状态。
+当前入口只支持符合既定安全与资源边界的 EPUB3。书架记录位于 `%LOCALAPPDATA%\Atha\Library`，导入缓存位于 `%LOCALAPPDATA%\Atha\ImportedBooks`；同一内容从不同路径导入只产生一个书架项，并复用同一阅读状态。
 
 ## 本地开发环境
 
