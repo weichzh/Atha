@@ -387,7 +387,7 @@ export function createDiagnostics({
     };
   }
 
-  async function verify() {
+  async function verifySections() {
     const initial = session.snapshot();
     assert(initial.state === "layout-stable" && initial.sections > 0, "sample-boundary");
     verifiedSections = [initial.currentSection];
@@ -412,6 +412,15 @@ export function createDiagnostics({
       "sample-boundary",
     );
     await session.open(0);
+  }
+
+  async function verifyImport() {
+    await verifySections();
+    await securityProbe();
+  }
+
+  async function verify() {
+    await verifySections();
     await verifyNavigation();
     await verifyPreferences();
     await verifyInteraction();
@@ -598,5 +607,5 @@ export function createDiagnostics({
     });
   }
 
-  return Object.freeze({ benchmark, complete, recordFirstStable, verify });
+  return Object.freeze({ benchmark, complete, recordFirstStable, verify, verifyImport });
 }

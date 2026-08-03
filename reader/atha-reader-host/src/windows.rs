@@ -24,14 +24,15 @@ enum UserEvent {
 pub fn run() -> Result<(), Box<dyn Error>> {
     let startup = Instant::now();
     let arguments = Arguments::parse()?;
-    let book_root = BookRoot::new(&arguments.book_root)?;
-    let source_resource = book_root.read(&format!("/{}", arguments.source.path()))?;
-    let canonical_source = fs::canonicalize(arguments.book_root.join(arguments.source.path()))?;
+    let book = arguments.resolve_book()?;
+    let book_root = BookRoot::new(&book.book_root)?;
+    let source_resource = book_root.read(&format!("/{}", book.source.path()))?;
+    let canonical_source = fs::canonicalize(book.book_root.join(book.source.path()))?;
     let mut state_key = launch::state_key(&canonical_source);
     if arguments.state_probe.is_some() {
         state_key.push_str("-probe");
     }
-    let content_version = match &arguments.source {
+    let content_version = match &book.source {
         launch::BookSource::Entry(_) => Some(launch::content_fingerprint(&source_resource.bytes)),
         launch::BookSource::Manifest(_) => None,
     };
@@ -57,6 +58,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let proxy = event_loop.create_proxy();
     let url = reader_url(
         &arguments,
+        &book.source,
         diagnostics.network_probe(),
         &state_key,
         content_version.as_deref(),

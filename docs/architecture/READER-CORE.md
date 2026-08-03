@@ -26,7 +26,11 @@ WebView2 是当前唯一阅读渲染技术。宿主只提供窗口、受控资�
 
 ## 书籍输入与阅读会话
 
-运行时书籍输入是受控书根内的 schema 1 manifest，不是 EPUB 文件。manifest 以书籍内容哈希标识版本，声明有序且唯一的 section、可访问资源和可选 TOC；未知字段、重复项、超量输入、编码绕过、绝对路径、查询和书根越界均拒绝。单 XHTML `entry` 只作为现有样本的兼容入口。
+阅读页的运行时书籍输入始终是受控书根内的 schema 1 manifest。manifest 以书籍内容哈希标识版本，声明有序且唯一的 section、可访问资源和可选 TOC；未知字段、重复项、超量输入、编码绕过、绝对路径、查询和书根越界均拒绝。单 XHTML `entry` 只作为现有样本的兼容入口。
+
+Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `reader::epub` module 读取一个 EPUB3 rendition 的 OCF、OPF manifest、spine 和 navigation document，把 spine XHTML 与当前支持的 CSS、SVG、PNG、JPEG、GIF、WebP 原子写入 `%LOCALAPPDATA%/Atha/ImportedBooks/<source-sha256>`，再交回既有 `BookRoot` 与 `ReadingSession`。缓存目录和 `contentVersion` 都使用完整源文件 SHA-256，因此相同内容跨路径复用身份，内容改变则形成新身份；导入器不解释 Locator、分页或阅读状态。
+
+首版只支持 UTF-8 XML 的 EPUB3、单 package、XHTML spine 和 EPUB3 TOC。源文件和解压总量上限为 512MiB，成员数上限 10000，单成员上限 16MiB；加密、DOCTYPE、外部 URL、重叠/重复/Windows 歧义路径、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。EPUB2/NCX fallback、多 rendition、远程资源、字体、混淆、修复和多格式工厂不属于当前契约。
 
 `Section` 是一次只加载一份的顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 前必须释放上一 section 的 DOM、书源样式和缓存；关闭后不保留书籍 DOM。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
 
@@ -40,7 +44,7 @@ schema 1 Locator 是同一书籍内容版本内的内容坐标：起点由 secti
 
 ### 阅读状态与书签
 
-Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。manifest 提供内容版本；旧 `entry` 兼容入口由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹，避免同一路径内容变化后误用旧状态，但它不是 M3 的正式书籍身份。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可用时当前会话仍可继续。
+Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。EPUB 导入入口的规范路径位于以完整源 SHA-256 命名的缓存目录，因此移动源文件不改变状态键；manifest 同时提供相同内容版本。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可用时当前会话仍可继续。
 
 稳定导航只在同一任务末尾合并写入一次小型进度记录，并在页面隐藏或离开时同步 flush。恢复顺序是有效偏好优先，再恢复同内容版本且可定位的进度；错版本进度不应用，错版本书签保留并显示为不可跳转。书签只提供当前位置创建、去重、跳转与删除；书籍身份迁移、跨版本重锚、同步和历史记录不属于本层。
 
@@ -98,6 +102,10 @@ Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未�
 
 本机门槛固定为进程树峰值不超过 1024MiB，以及 nearest-rank P95：冷启动 2000ms、首个稳定页 750ms、热打开 120ms、翻页 50ms、字号重排 150ms。只有总 gate 测出瓶颈时才增加对应优化；运行结果由代码库地图和当前 change 保存，不把本机数值当作跨设备性能承诺。
 
+### M3 EPUB 入口门槛
+
+`scripts/check-epub-source.ps1` 是单格式真实输入验收入口。它运行锁定的 Rust 检查，使用固定 SHA-256 的《数学及其历史 (2026)》通过 `--epub --verify-import` 启动真实 Windows WebView2 host，并核对导入结果为 173 个 spine section、2527 个受支持资源和 197 条 EPUB3 TOC。import probe 只验证前三个真实 spine section 的加载、旧 DOM 释放、重开和网络安全探针；内容特定的排版、交互、搜索、标注、恢复、内存与性能继续由 M2 gate 拥有。
+
 ## 性能策略
 
 - 使用内容已知尺寸或缓存测量结果为重内容预留空间，减少重排。
@@ -109,11 +117,11 @@ Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未�
 
 ## 位置与版本
 
-阅读位置按书籍状态键与内容版本保存，样式变化后仍以内容 Locator 恢复到同一文本附近。当前状态键与本机规范路径绑定，移动书籍后的身份迁移留给 M3 的真实导入身份；内容版本变化时不猜测旧位置。
+阅读位置按书籍状态键与内容版本保存，样式变化后仍以内容 Locator 恢复到同一文本附近。EPUB 状态键绑定内容哈希缓存路径，不绑定源文件位置；内容版本变化时不猜测旧位置。
 
 ## 非责任
 
-- 不定义书籍格式解包器或 parser 的具体实现；
+- 阅读页不定义书籍格式 parser；EPUB3 导入细节只属于后端 `reader::epub` module；
 - 不承载消息、AI 或同步协议；
 - 不替用户修复损坏书源；
 - 不预设跨机器性能数值，后续规格基于困难书籍样本决定。

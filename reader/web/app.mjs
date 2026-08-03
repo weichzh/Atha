@@ -235,6 +235,7 @@ async function start() {
     await readerState.verifyPersistence(stateProbe);
     await annotations.verifyPersistence(stateProbe);
   }
+  else if (params.has("verify-import")) await diagnostics.verifyImport();
   else if (params.has("verify")) await diagnostics.verify();
   if (params.get("benchmark") === "hot") await diagnostics.benchmark();
 

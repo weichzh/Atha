@@ -1,5 +1,7 @@
 use std::{env, error::Error, ffi::OsString, net::TcpListener, path::PathBuf};
 
+use atha_backend::reader::epub::{READER_MANIFEST, import_epub};
+
 use tao::dpi::LogicalSize;
 
 pub(super) const APP_PAGE: &str = "https://atha.localhost/atha-reader.html";
@@ -31,12 +33,25 @@ pub(super) struct Benchmark {
 }
 
 pub(super) struct Arguments {
-    pub(super) book_root: PathBuf,
-    pub(super) source: BookSource,
+    input: BookInput,
     pub(super) verify_sample: bool,
+    import_probe: bool,
     pub(super) hold_after_verify: bool,
     pub(super) state_probe: Option<StateProbe>,
     pub(super) benchmark: Option<Benchmark>,
+}
+
+enum BookInput {
+    Prepared {
+        book_root: PathBuf,
+        source: BookSource,
+    },
+    Epub(PathBuf),
+}
+
+pub(super) struct ResolvedBook {
+    pub(super) book_root: PathBuf,
+    pub(super) source: BookSource,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,6 +69,7 @@ impl StateProbe {
     }
 }
 
+#[derive(Clone)]
 pub(super) enum BookSource {
     Entry(String),
     Manifest(String),
@@ -74,9 +90,11 @@ impl Arguments {
 
     fn parse_values(mut values: impl Iterator<Item = OsString>) -> Result<Self, Box<dyn Error>> {
         let mut book_root = None;
+        let mut epub = None;
         let mut entry = None;
         let mut manifest = None;
         let mut verify_sample = false;
+        let mut import_probe = false;
         let mut hold_after_verify = false;
         let mut state_probe = None;
         let mut run_id = None;
@@ -85,6 +103,7 @@ impl Arguments {
         while let Some(flag) = values.next() {
             match flag.to_str() {
                 Some("--book-root") => book_root = Some(required(&mut values, "book root")?.into()),
+                Some("--epub") => epub = Some(required(&mut values, "EPUB path")?.into()),
                 Some("--entry") => {
                     entry = Some(
                         required(&mut values, "entry")?
@@ -100,6 +119,7 @@ impl Arguments {
                     )
                 }
                 Some("--verify-sample") => verify_sample = true,
+                Some("--verify-import") => import_probe = true,
                 Some("--hold-after-verify") => hold_after_verify = true,
                 Some("--state-probe") => {
                     state_probe = match required(&mut values, "state probe")?.to_str() {
@@ -133,12 +153,30 @@ impl Arguments {
                 _ => return Err("unknown or non-Unicode argument".into()),
             }
         }
-        let book_root = book_root.ok_or("missing --book-root")?;
-        let source = match (entry, manifest) {
-            (Some(path), None) => BookSource::Entry(path),
-            (None, Some(path)) => BookSource::Manifest(path),
-            _ => return Err("exactly one of --entry or --manifest is required".into()),
+        let input = match (epub, book_root, entry, manifest) {
+            (Some(path), None, None, None) => BookInput::Epub(path),
+            (None, Some(book_root), Some(path), None) => BookInput::Prepared {
+                book_root,
+                source: BookSource::Entry(path),
+            },
+            (None, Some(book_root), None, Some(path)) => BookInput::Prepared {
+                book_root,
+                source: BookSource::Manifest(path),
+            },
+            _ => {
+                return Err(
+                    "use either --epub or --book-root with exactly one of --entry/--manifest"
+                        .into(),
+                );
+            }
         };
+        if import_probe && !matches!(&input, BookInput::Epub(_)) {
+            return Err("import verification requires --epub".into());
+        }
+        if verify_sample && import_probe {
+            return Err("verification modes are mutually exclusive".into());
+        }
+        verify_sample |= import_probe;
         let benchmark = match (run_id, process_sample, mode) {
             (None, None, None) => None,
             (Some(run_id), Some(process_sample), Some(mode))
@@ -155,6 +193,9 @@ impl Arguments {
         if benchmark.is_some() && !verify_sample {
             return Err("benchmarks require --verify-sample".into());
         }
+        if import_probe && (benchmark.is_some() || state_probe.is_some() || hold_after_verify) {
+            return Err("import verification cannot benchmark, persist, or hold".into());
+        }
         if state_probe.is_some() && (!verify_sample || benchmark.is_some()) {
             return Err("state probe requires non-benchmark verification".into());
         }
@@ -164,28 +205,54 @@ impl Arguments {
             return Err("hold-after-verify requires plain or write verification".into());
         }
         Ok(Self {
-            book_root,
-            source,
+            input,
             verify_sample,
+            import_probe,
             hold_after_verify,
             state_probe,
             benchmark,
         })
     }
+
+    pub(super) fn resolve_book(&self) -> Result<ResolvedBook, Box<dyn Error>> {
+        match &self.input {
+            BookInput::Prepared { book_root, source } => Ok(ResolvedBook {
+                book_root: book_root.clone(),
+                source: source.clone(),
+            }),
+            BookInput::Epub(path) => {
+                let local_app_data = env::var_os("LOCALAPPDATA").ok_or("missing LOCALAPPDATA")?;
+                let imported = import_epub(
+                    path,
+                    PathBuf::from(local_app_data)
+                        .join("Atha")
+                        .join("ImportedBooks"),
+                )?;
+                Ok(ResolvedBook {
+                    book_root: imported.root,
+                    source: BookSource::Manifest(READER_MANIFEST.into()),
+                })
+            }
+        }
+    }
 }
 
 pub(super) fn reader_url(
     arguments: &Arguments,
+    source: &BookSource,
     probe: Option<&TcpListener>,
     state_key: &str,
     content_version: Option<&str>,
 ) -> String {
-    let mut query = vec![match &arguments.source {
+    let mut query = vec![match source {
         BookSource::Entry(path) => format!("entry={}", percent_encode(path)),
         BookSource::Manifest(path) => format!("manifest={}", percent_encode(path)),
     }];
     if arguments.verify_sample {
         query.push("verify=1".into());
+        if arguments.import_probe {
+            query.push("verify-import=1".into());
+        }
         let port = probe
             .expect("verification probe")
             .local_addr()
@@ -320,6 +387,10 @@ mod tests {
             ]))
             .is_ok()
         );
+        assert!(Arguments::parse_values(values(&["--epub", "book.epub"])).is_ok());
+        assert!(
+            Arguments::parse_values(values(&["--epub", "book.epub", "--verify-import"])).is_ok()
+        );
         assert!(
             Arguments::parse_values(values(&[
                 "--book-root",
@@ -346,6 +417,23 @@ mod tests {
         );
         for invalid in [
             vec!["--book-root", "book"],
+            vec![
+                "--epub",
+                "book.epub",
+                "--book-root",
+                "book",
+                "--entry",
+                "a.xhtml",
+            ],
+            vec!["--epub", "book.epub", "--manifest", ".atha-reader.json"],
+            vec!["--epub", "book.epub", "--verify-sample", "--verify-import"],
+            vec![
+                "--book-root",
+                "book",
+                "--manifest",
+                ".atha-reader.json",
+                "--verify-import",
+            ],
             vec![
                 "--book-root",
                 "book",

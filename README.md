@@ -2,12 +2,12 @@
 
 Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系统。
 
-当前只推进 Windows，并遵循“后端先于前端”。正式 Rust 后端工程基线已经建立，但尚无产品用例；移动平台和 Windows 前端仍未开始。现有 `p0/` 只用于 FFI 与 SQLite 技术验证，不属于正式后端。
+当前只推进 Windows，并遵循“后端先于前端”。WebView2 阅读器已经可以从 CLI 直接打开受限 EPUB3；书架、文件选择器、消息与移动平台尚未开始。现有 `p0/` 只用于 FFI 与 SQLite 技术验证，不属于正式后端。
 
 ## 工程入口
 
 - 根 `Cargo.toml`：正式 workspace；
-- `backend/atha-backend/`：零依赖后端库；
+- `backend/atha-backend/`：后端库、书根边界与 EPUB3 导入；
 - `scripts/Invoke-Atha.ps1`：统一运行已登记检查并记录本机流程；
 - `scripts/check-backend.ps1`：fmt、clippy、test 和 doc 统一检查；
 - `p0/`：独立实验，不进入根 workspace。
@@ -19,6 +19,16 @@ pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 report
 ```
 
 当前统一入口只试点 `docs` target；其他检查仍直接运行既有脚本，待真实样本证明有价值后再接入。
+
+## 打开 EPUB
+
+```powershell
+. .\scripts\Import-AthaEnvironment.ps1 -RepoRoot (Get-Location).Path
+& $env:ATHA_CARGO build --package atha-reader-host --locked
+.\target\debug\atha-reader-host.exe --epub 'E:\Books\book.epub'
+```
+
+当前入口只支持符合既定安全与资源边界的 EPUB3。导入缓存位于 `%LOCALAPPDATA%\Atha\ImportedBooks`；同一文件内容从不同路径打开会复用同一阅读状态。
 
 ## 本地开发环境
 

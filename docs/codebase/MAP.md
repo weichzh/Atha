@@ -8,15 +8,15 @@
 - M0 工作流提交：`fc104e0`
 - M1 规格提交：`5d255e4`
 - 远程仓库：`github.com/weichzh/Atha`。
-- 当前已有根 Cargo workspace、正式后端 crate、Windows WebView2 阅读 host 与原生 HTML/CSS/JavaScript 阅读页；没有前端框架。
+- 当前已有根 Cargo workspace、正式后端 crate、EPUB3 导入、Windows WebView2 阅读 host 与原生 HTML/CSS/JavaScript 阅读页；没有前端框架。
 
 ## 顶层结构
 
 | 路径 | 责任 | 状态 |
 |---|---|---|
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
-| `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M2 已验证 |
-| `backend/atha-backend/` | 正式零依赖后端库、书根资源边界与阅读遥测校验 | M2 阅读切片 |
+| `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
+| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 导入与阅读遥测校验 | M3 EPUB 输入 |
 | `reader/atha-reader-host/src/` | Wry/Tao Windows WebView2 承载；入口、启动参数、受控协议、状态键和诊断按职责分离 | M2 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、默认样式、原生阅读偏好、书签、标注、搜索面板与内容 dialog | M2 已验证 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、标注事实与投影、内容安全、分页、诊断、benchmark 和页面组合入口 | M2 已验证 |
@@ -31,6 +31,7 @@
 | `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页、manifest 和书根资源 | M2 R1 已通过 |
 | `scripts/check-reader-samples.ps1` | 四样本实际 host、内容交互、状态、搜索、标注与明暗主题截图总验收 | M2 已通过 |
 | `scripts/check-reader-gate.ps1` | 组合四样本、大书搜索、进程树内存、强杀恢复和固定 P95 性能门槛 | M2 R8 已通过 |
+| `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
 | `scripts/Measure-Workflow.ps1` | schema v1/v2 本机流程日志、兼容汇总与自检 | 本地已验证 |
 | `docs/agents/workflow.md` | 全局工作流的项目契约、任务类型和真实检查 gate | 已配置 |
@@ -42,14 +43,15 @@
 
 - workspace 包含 `atha-backend` 与 `atha-reader-host`，并显式排除 P0 Rust crate；
 - 版本 `0.1.0`、edition 2024、Rust `1.97.1` 和禁止 unsafe 的 lint 由 workspace 统一；
-- 后端 crate 没有外部依赖、公共业务接口或占位 trait；
-- 根锁文件包含正式后端与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
+- 后端 crate 只为真实 EPUB3 输入增加 `zip`、`quick-xml`、`sha2`、`serde` 与 `serde_json`，没有占位 trait 或多格式工厂；
+- 根锁文件包含正式后端导入依赖与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
 - SQLite 与迁移政策已固定，但数据库依赖和实现留待后续数据库里程碑。
 
 ### HTML 阅读切片
 
 - `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；
-- schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--manifest` 与兼容 `--entry` 互斥；
+- schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--epub` 与 `--book-root` 输入互斥，后者再从 `--manifest` 与兼容 `--entry` 二选一；
+- `reader::epub` 的公开 interface 只有 `import_epub`：`mod` 编排内容哈希与原子缓存，`archive` 拥有 ZIP/路径/大小边界，`package` 拥有 container、OPF spine、navigation 和 schema 1 计划；同一源字节跨路径得到相同缓存根和状态键；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
 - 阅读页源码保持原生 ES module：`locator` 校验、序列化并比较内容坐标；`navigation` 组合页、section、TOC 与重排恢复；`preferences` 合并应用默认与本书样式；`session` 拥有 manifest 和内容生命周期；`content` 校验并加载单份 XHTML、CSS 与 SVG；`pagination` 负责公式与固定页面布局；`content-actions` 处理链接、脚注与图片，`structured-actions` 处理表格与代码；`reader-state` 分区持久化偏好、书签与进度，`bookmarks` 处理最小书签交互；`search` 只读扫描各 section 并生成 range Locator；`annotation-store` 只拥有严格 schema 与事务式写入，`annotations` 只拥有选择、重锚、CSS Highlight 投影和 UI；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
@@ -116,7 +118,8 @@
 - R6 最终 10 样本基准中位数：冷启动 828.584ms、首个稳定页面 186.300ms、热打开 23.200ms、翻页 7.100ms、字号重排 31.400ms；均在正式门槛内，未执行旧代码同时间对照；
 - R7 最终 10 样本基准中位数：冷启动 820.208ms、首个稳定页面 180.000ms、热打开 23.650ms、翻页 7.100ms、字号重排 31.200ms；均在正式门槛内，未执行旧代码同时间对照；
 - R8 基准 `1785710178116-34252` 的 10 样本中位数/P95：冷启动 807.404/849.571ms、首个稳定页面 146.650/161.300ms、热打开 23.250/24.000ms、翻页 7.350/7.800ms、字号重排 29.950/31.400ms；五项 P95 分别低于 2000、750、120、50 和 150ms 固定门槛，未执行旧代码同时间对照；
-- metadata 证明正式后端仍是 workspace 中唯一零依赖包；
+- M3 指定 EPUB 的 SHA-256 为 `0af5dff0c0d1eb369a096b18d05eb77a4cd9c03808748db8274d5e77bbfe7368`；真实 `--epub` import probe 得到 173 个 spine section、2527 个资源和 197 条 TOC，并完成前三节加载、释放、重开与网络阻断；
+- M3 完整 M2 回归的三轮 WebView2 进程树峰值为 638.3、628.8 和 636.5MiB；基准 `1785720849357-40976` 的 10 样本中位数/P95 为冷启动 800.103/898.631ms、首稳 145.650/151.900ms、热开 22.850/23.800ms、翻页 7.550/7.800ms、重排 31.250/32.000ms，均在既有门槛内；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
 - 系统 SQLite 3.53.4 上回滚、FTS 完整性、外键和数据库完整性检查通过；
@@ -127,8 +130,8 @@
 - P0 schema 含 SQLite CLI 指令，尚未转为正式版本化迁移；
 - 正式后端尚未添加或编译已决策的随包 SQLite；
 - 除受限阅读遥测外，没有应用服务、领域 API 或通用跨进程接口；
-- 没有导入解析、跨内容版本 Locator 重锚定或富文本迁移；
-- 没有 CI、Windows 安装包或书籍导入产品链路；
+- 只有 CLI EPUB3 导入；没有书架、文件选择器、文件关联、EPUB2/NCX fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移；
+- 没有 CI 或 Windows 安装包；
 - 性能数据未记录设备指纹，也没有跨日期重复运行统计。
 
 ## 正式代码约定

@@ -179,6 +179,8 @@ export function createContent({ host, readerStyleSource, fail }) {
           } else if (name === "link") {
             ensure(element.getAttribute("rel") === "stylesheet", "active-content");
             element.setAttribute("href", localBookUrl(attribute.value));
+          } else if (name === "image") {
+            attribute.value = localBookUrl(attribute.value);
           } else {
             ensure(attribute.value.startsWith("#"), "external-resource");
           }
@@ -250,6 +252,7 @@ export function createContent({ host, readerStyleSource, fail }) {
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><script>1</script></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><p onclick='x()'>x</p></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><img src='https://example.com/x.png'/></body></html>",
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><svg><image href='https://example.com/x.png'/></svg></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><form/></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='javascript:alert(1)'>x</a></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='mailto:x@example.com'>x</a></body></html>",
