@@ -73,10 +73,10 @@ function Invoke-LibraryBrowserCheck {
         Invoke-Checked 'agent-browser' @('--session', $session, 'open', "http://127.0.0.1:$port/")
         Invoke-Checked 'agent-browser' @('--session', $session, 'set', 'viewport', '390', '840')
         Invoke-Checked 'agent-browser' @('--session', $session, 'wait', '--text', '开始你的书架')
-        $geometry = @(& agent-browser --session $session eval '({width:document.documentElement.scrollWidth,viewport:innerWidth,header:document.querySelector(".library-header")?.getBoundingClientRect().height,buttons:[...document.querySelectorAll("button")].every(button=>button.getBoundingClientRect().height>=42)})') -join "`n"
+        $geometry = @(& agent-browser --session $session eval '(()=>{const remove=document.createElement("button");remove.className="library-book-remove";document.querySelector(".library-shell").append(remove);const removeSize=remove.getBoundingClientRect();remove.remove();return {width:document.documentElement.scrollWidth,viewport:innerWidth,header:document.querySelector(".library-header")?.getBoundingClientRect().height,buttons:[...document.querySelectorAll("button")].every(button=>button.getBoundingClientRect().height>=42),removeButton:Math.min(removeSize.width,removeSize.height)}})()') -join "`n"
         if ($LASTEXITCODE -ne 0) { throw 'agent-browser geometry check failed.' }
         $result = $geometry | ConvertFrom-Json
-        if ($result.width -ne $result.viewport -or $result.header -lt 80 -or -not $result.buttons) {
+        if ($result.width -ne $result.viewport -or $result.header -lt 80 -or -not $result.buttons -or $result.removeButton -lt 44) {
             throw "Invalid library geometry: $geometry"
         }
         Invoke-Checked 'agent-browser' @(

@@ -221,8 +221,8 @@ button {
   top: 6px;
   right: 6px;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   border: 0;
   border-radius: 50%;
@@ -239,8 +239,8 @@ button {
 }
 
 .library-book-remove svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .library-status {

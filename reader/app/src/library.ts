@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 
 export interface LibraryBook {
   id: string;
@@ -32,13 +31,7 @@ export async function listBooks(): Promise<LibraryBook[]> {
 
 export async function importBooks(): Promise<ImportReport | null> {
   if (!libraryAvailable) return null;
-  const selected = await open({
-    multiple: true,
-    filters: [{ name: "EPUB", extensions: ["epub"] }],
-  });
-  const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
-  if (paths.length === 0) return null;
-  return invoke<ImportReport>("import_library_books", { paths });
+  return invoke<ImportReport | null>("import_library_books");
 }
 
 export async function openBook(id: string): Promise<void> {

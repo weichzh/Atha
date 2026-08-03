@@ -11,7 +11,7 @@ use std::{
 
 use atha_backend::reader::{
     READER_PAGE,
-    epub::READER_MANIFEST,
+    epub::{ImportError, READER_MANIFEST},
     library::{LibraryBook, LibraryError, LocalLibrary},
     resources::{BookRoot, Resource, ResourceError},
     telemetry::{ReaderEvent, parse_reader_event},
@@ -29,6 +29,7 @@ use tauri::{
     http::{Request, Response, StatusCode, header},
     webview::NewWindowResponse,
 };
+use tauri_plugin_dialog::DialogExt;
 
 const TAURI_READER_PAGE: &str = "https://tauri.localhost/index.html";
 const TAURI_READER_ORIGIN: &str = "https://tauri.localhost";
@@ -127,20 +128,37 @@ fn list_library_books(
 
 #[tauri::command]
 async fn import_library_books(
+    app: AppHandle,
     runtime: State<'_, ReaderRuntime>,
-    paths: Vec<String>,
-) -> Result<ImportReport, String> {
-    if paths.len() > MAX_IMPORT_FILES
-        || paths
-            .iter()
-            .any(|path| path.is_empty() || path.encode_utf16().count() > 32_767)
-    {
+) -> Result<Option<ImportReport>, String> {
+    let Some(paths) = app
+        .dialog()
+        .file()
+        .add_filter("EPUB", &["epub"])
+        .blocking_pick_files()
+    else {
+        return Ok(None);
+    };
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    if paths.len() > MAX_IMPORT_FILES {
         return Err("invalid-library-import".into());
     }
     let library = runtime.library.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut failures = Vec::new();
-        for path in paths {
+        for selected in paths {
+            let path = match selected.into_path() {
+                Ok(path) => path,
+                Err(_) => {
+                    failures.push(ImportFailure {
+                        name: "EPUB".into(),
+                        code: ImportError::InvalidSource.code(),
+                    });
+                    continue;
+                }
+            };
             if let Err(error) = library.import(&path) {
                 failures.push(ImportFailure {
                     name: display_name(&path),
@@ -148,10 +166,10 @@ async fn import_library_books(
                 });
             }
         }
-        Ok(ImportReport {
+        Ok(Some(ImportReport {
             books: library.list().map_err(|error| error.code().to_owned())?,
             failures,
-        })
+        }))
     })
     .await
     .map_err(|_| "library-import-task".to_owned())?
@@ -434,9 +452,8 @@ fn resource_response(
         .expect("valid resource response")
 }
 
-fn display_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
+fn display_name(path: &Path) -> String {
+    path.file_name()
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .unwrap_or("EPUB")

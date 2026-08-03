@@ -36,10 +36,13 @@
       return;
     }
     busy = true;
-    status = "";
+    status = "正在导入…";
     try {
       const report = await importBooks();
-      if (!report) return;
+      if (!report) {
+        status = "";
+        return;
+      }
       books = report.books;
       if (report.failures.length === 0) {
         status = "已加入书架。";
