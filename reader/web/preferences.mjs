@@ -1,5 +1,6 @@
 const APPLICATION_DEFAULTS = Object.freeze({
   theme: "system",
+  brightness: 100,
   fontSize: 32,
   fontFamily: "book",
   density: "standard",
@@ -34,15 +35,19 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   }
 
   function validateApplication(value) {
+    const normalized = { brightness: 100, ...value };
     ensure(
-      exact(value, APPLICATION_DEFAULTS) &&
-        ["system", "light", "dark"].includes(value.theme) &&
-        [24, 32, 40].includes(value.fontSize) &&
-        ["book", "serif", "sans"].includes(value.fontFamily) &&
-        Object.hasOwn(DENSITIES, value.density),
+      exact(normalized, APPLICATION_DEFAULTS) &&
+        ["system", "light", "dark"].includes(normalized.theme) &&
+        Number.isInteger(normalized.brightness) &&
+        normalized.brightness >= 70 &&
+        normalized.brightness <= 120 &&
+        [24, 32, 40].includes(normalized.fontSize) &&
+        ["book", "serif", "sans"].includes(normalized.fontFamily) &&
+        Object.hasOwn(DENSITIES, normalized.density),
       "invalid-preference",
     );
-    return { ...value };
+    return normalized;
   }
 
   function validateBook(value) {
@@ -59,6 +64,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
 
   function syncControls() {
     controls.theme.value = application.theme;
+    controls.brightness.value = String(application.brightness);
     controls.fontSize.value = String(application.fontSize);
     controls.fontFamily.value = application.fontFamily;
     controls.density.value = application.density;
@@ -78,6 +84,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       root.dataset.theme = application.theme;
       content.book.dataset.theme = application.theme;
     }
+    root.style.setProperty("--reader-brightness", String(application.brightness / 100));
     if (application.fontFamily === "book") delete content.book.dataset.fontFamily;
     else content.book.dataset.fontFamily = application.fontFamily;
     const density = DENSITIES[application.density];
@@ -143,6 +150,15 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         run(() => onUpdate("application", { [key]: convert(control.value) }), "已应用");
       });
     }
+    controls.brightness.addEventListener("input", () => {
+      root.style.setProperty("--reader-brightness", String(Number(controls.brightness.value) / 100));
+    });
+    controls.brightness.addEventListener("change", () => {
+      run(
+        () => onUpdate("application", { brightness: Number(controls.brightness.value) }),
+        "已应用",
+      );
+    });
     controls.sourceStyles.addEventListener("change", () => {
       run(() => onUpdate("book", { sourceStyles: controls.sourceStyles.checked }), "已应用");
     });
@@ -168,6 +184,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
 
   for (const invalid of [
     ["application", { theme: "sepia" }],
+    ["application", { brightness: 121 }],
     ["application", { fontSize: 31 }],
     ["book", { unknown: true }],
   ]) {

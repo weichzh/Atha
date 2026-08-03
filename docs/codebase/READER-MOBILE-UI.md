@@ -80,7 +80,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 - `app.mjs` 的 `toggleReaderTools()` 只切换 `data-reader-tools`；隐藏时同时关闭已打开面板。
 - `interaction.mjs` 只按横向比例区分左 35%、中间 30% 和右 35%；中间区调用 `toggleReaderTools()`。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；选择书签项直接跳转。
-- `#brightness` 只设置根元素的 `--reader-brightness`；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
+- `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
 ## 当前有意暂缓
@@ -98,3 +98,5 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 - `math-history-mobile-directory.png`；
 - `math-history-mobile-search.png`；
 - `math-history-mobile-settings.png`。
+
+同视口对照图为 `design-qa-controls-comparison.png` 和 `design-qa-directory-comparison.png`。本轮检查没有 P0、P1 或 P2 问题；暂缓项只有纸张纹理和原生表单的视觉精修。目录对照确认书签位于对应章节之后，而不是目录底部的独立区域。

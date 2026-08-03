@@ -49,6 +49,7 @@ const preferences = createPreferences({
   content,
   controls: {
     theme: document.querySelector("#theme"),
+    brightness: document.querySelector("#brightness"),
     fontSize: document.querySelector("#font-size"),
     fontFamily: document.querySelector("#font-family"),
     density: document.querySelector("#density"),
@@ -212,11 +213,6 @@ const interaction = createInteraction({
   onCenter: toggleReaderTools,
   assert,
   fail,
-});
-
-const brightness = document.querySelector("#brightness");
-brightness.addEventListener("input", () => {
-  root.style.setProperty("--reader-brightness", String(Number(brightness.value) / 100));
 });
 
 document.querySelector("#reader-back").addEventListener("click", () => {

@@ -1,7 +1,22 @@
-function findTocIndex(description, sectionIndex, preferred = -1) {
+function findTocIndex(
+  description,
+  sectionIndex,
+  preferred = -1,
+  contentOffset = 0,
+  offsetForFragment = () => null,
+) {
   const href = description.sections[sectionIndex]?.href;
   if (description.toc[preferred]?.href.split("#", 1)[0] === href) return preferred;
-  return description.toc.findIndex((item) => item.href.split("#", 1)[0] === href);
+  let best = { index: -1, offset: -1 };
+  description.toc.forEach((item, index) => {
+    const [itemHref, fragment] = item.href.split("#");
+    if (itemHref !== href) return;
+    const offset = fragment === undefined ? 0 : offsetForFragment(fragment);
+    if (offset !== null && offset <= contentOffset && offset >= best.offset) {
+      best = { index, offset };
+    }
+  });
+  return best.index;
 }
 
 export function createNavigation({
@@ -41,12 +56,24 @@ export function createNavigation({
     return locator.point(book(), state.currentSection, pagination.captureOffset());
   }
 
-  function syncControls(preferredTocIndex = -1) {
+  function currentTocIndex(preferred = -1, contentOffset = pagination.captureOffset()) {
+    const description = book();
+    const state = session.snapshot();
+    return findTocIndex(
+      description,
+      state.currentIndex,
+      preferred,
+      contentOffset,
+      (fragment) => pagination.offsetForFragment(fragment),
+    );
+  }
+
+  function syncControls(preferredTocIndex = -1, contentOffset = pagination.captureOffset()) {
     const state = session.snapshot();
     const page = pagination.snapshot();
     previous.disabled = state.currentIndex === 0 && page.page === 0;
     next.disabled = state.currentIndex + 1 === state.sections && page.page + 1 === page.pages;
-    const index = findTocIndex(book(), state.currentIndex, preferredTocIndex);
+    const index = currentTocIndex(preferredTocIndex, contentOffset);
     if (index >= 0) toc.value = String(index);
     chapterLabel.textContent = book().toc[index]?.label || book().sections[state.currentIndex]?.id || "";
   }
@@ -85,7 +112,7 @@ export function createNavigation({
     if (!(await pagination.showOffset(target.start.offset))) {
       return fallback("locator-offset", sectionIndex);
     }
-    syncControls();
+    syncControls(-1, target.start.offset);
     return true;
   }
 
@@ -199,7 +226,11 @@ export function createNavigation({
       onPrevious: () => run(previousPage),
       onNext: () => run(nextPage),
       onFontSize: (value) => run(() => setFontSize(value)),
-      onProgress: (value) => run(() => pagination.show(Number(value) - 1)),
+      onProgress: (value) =>
+        run(async () => {
+          await pagination.show(Number(value) - 1);
+          syncControls();
+        }),
     });
     preferences.bind({
       onUpdate: (scope, patch) => run(() => setPreferences(scope, patch)),
@@ -233,6 +264,22 @@ export function createNavigation({
       },
       0,
       1,
+    ) === 1,
+    "sample-boundary",
+  );
+  assert(
+    findTocIndex(
+      {
+        sections: [{ href: "section.xhtml" }],
+        toc: [
+          { href: "section.xhtml", label: "one" },
+          { href: "section.xhtml#two", label: "two" },
+        ],
+      },
+      0,
+      -1,
+      75,
+      (fragment) => (fragment === "two" ? 50 : null),
     ) === 1,
     "sample-boundary",
   );

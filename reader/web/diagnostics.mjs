@@ -128,12 +128,17 @@ export function createDiagnostics({
     if (pagination.snapshot().pages > 1) await pagination.show(1);
     const compactAnchor = await navigation.setPreferences("application", {
       theme: "dark",
+      brightness: 80,
       fontSize: 24,
       fontFamily: "serif",
       density: "compact",
     });
     assert(pagination.isOffsetVisible(compactAnchor.start.offset), "sample-boundary");
     assert(document.documentElement.dataset.theme === "dark", "sample-boundary");
+    assert(
+      document.documentElement.style.getPropertyValue("--reader-brightness") === "0.8",
+      "sample-boundary",
+    );
     assert(content.book.dataset.fontFamily === "serif", "sample-boundary");
     assert(reader.style.getPropertyValue("--page-inline-margin") === "80px", "sample-boundary");
     const compactStyle = getComputedStyle(content.book);
@@ -207,10 +212,12 @@ export function createDiagnostics({
     const restored = preferences.snapshot();
     assert(
       restored.application.theme === "system" &&
+        restored.application.brightness === 100 &&
         restored.application.fontSize === 32 &&
         restored.application.fontFamily === "book" &&
         restored.application.density === "standard" &&
         !document.documentElement.dataset.theme &&
+        document.documentElement.style.getPropertyValue("--reader-brightness") === "1" &&
         !content.book.dataset.fontFamily,
       "sample-boundary",
     );
@@ -295,6 +302,24 @@ export function createDiagnostics({
     await waitFor(() => pagination.snapshot().page === 1);
 
     await pagination.show(0);
+    document.documentElement.removeAttribute("data-reader-tools");
+    const center = rect.left + rect.width / 2;
+    pointer("pointerdown", {
+      pointerId: 7,
+      pointerType: "touch",
+      button: 0,
+      clientX: center,
+      clientY: rect.top + 80,
+    });
+    pointer("pointerup", {
+      pointerId: 7,
+      pointerType: "touch",
+      button: 0,
+      clientX: center,
+      clientY: rect.top + 80,
+    });
+    assert(document.documentElement.hasAttribute("data-reader-tools"), "sample-boundary");
+    document.documentElement.removeAttribute("data-reader-tools");
     const walker = document.createTreeWalker(content.book, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) =>
         node.data.trim().length >= 2 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
@@ -380,6 +405,7 @@ export function createDiagnostics({
       wheelVerified: counts.wheel === 1,
       mouseVerified: counts.mouse === 2,
       touchVerified: counts.touch === 1,
+      touchCenterVerified: true,
       selectionVerified: counts.selectionProtected === 1,
       controlsVerified: counts.controlProtected === 1,
       linksVerified: counts.contentProtected === 1,

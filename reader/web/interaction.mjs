@@ -149,7 +149,16 @@ export function createInteraction({ reader, content, navigation, onCenter, asser
     }
     if (start.type === "touch") {
       const direction = swipeDirection(start, event);
-      if (direction) run(direction, "touch");
+      if (direction) {
+        run(direction, "touch");
+        return;
+      }
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) return;
+      const rect = reader.getBoundingClientRect();
+      const ratio = (event.clientX - rect.left) / rect.width;
+      if (ratio < 0.35) run(-1, "touch");
+      else if (ratio > 0.65) run(1, "touch");
+      else onCenter();
       return;
     }
     if (start.type !== "mouse" || Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) {

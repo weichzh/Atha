@@ -18,7 +18,7 @@ export function createBookmarks({ state, navigation, session, locator, controls,
     const description = session.describe();
     const current = session.snapshot();
     const section = description.sections[current.currentIndex];
-    const heading = description.toc.find((item) => item.href.split("#", 1)[0] === section.href);
+    const heading = description.toc[navigation.snapshot().tocIndex];
     return heading?.label || section.id;
   }
 
@@ -47,9 +47,17 @@ export function createBookmarks({ state, navigation, session, locator, controls,
       }
       const description = session.describe();
       const section = description.sections.find((item) => item.id === sectionId);
-      const tocIndex = section
-        ? description.toc.findIndex((item) => item.href.split("#", 1)[0] === section.href)
+      let tocIndex = section
+        ? description.toc.findIndex(
+            (item) =>
+              item.href.split("#", 1)[0] === section.href && item.label === bookmark.label,
+          )
         : -1;
+      if (tocIndex < 0 && section) {
+        tocIndex = description.toc.findIndex(
+          (item) => item.href.split("#", 1)[0] === section.href,
+        );
+      }
       const chapter = controls.list.querySelector(`option[value="${tocIndex}"]`);
       let previous = chapter;
       while (previous?.nextElementSibling?.dataset.bookmarkId) {

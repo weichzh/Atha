@@ -156,6 +156,15 @@ $themeProbe = @'
     toc.dispatchEvent(new Event('change', { bubbles: true }));
     await waitForSection(expectedSequence[0]);
   }
+  const progress = document.querySelector('#progress-range');
+  if (Number(progress.max) > 1) {
+    progress.value = '2';
+    progress.dispatchEvent(new Event('change', { bubbles: true }));
+    for (let frame = 0; frame < 60 && (!document.querySelector('#position').textContent.startsWith('2 / ') || document.querySelector('#previous').disabled); frame += 1) {
+      await new Promise(requestAnimationFrame);
+    }
+    if (document.querySelector('#previous').disabled) throw new Error('progress-control');
+  }
   const preferences = document.querySelector('.preferences');
   const status = document.querySelector('#preferences-status');
   const readerBefore = document.querySelector('.reader').getBoundingClientRect();
@@ -223,7 +232,7 @@ $themeProbe = @'
   if (result.session.contentLoads < expectedSections + 1 || result.session.stableLayouts < expectedSections + 1 || result.session.closes < expectedSections) throw new Error('session-lifecycle');
   if (!result.navigation.locatorRoundTrip || !result.navigation.rangeCompared || !result.navigation.reflowRestored || result.navigation.fallback !== 'locator-version') throw new Error('locator-navigation');
   if (expectedSections > 1 && (result.navigation.tocSection !== expectedSequence[1] || result.navigation.previousSection !== expectedSequence[0] || result.navigation.nextSection !== expectedSequence[1])) throw new Error('section-navigation');
-  if (!result.interaction.keyboardVerified || !result.interaction.wheelVerified || !result.interaction.mouseVerified || !result.interaction.touchVerified || !result.interaction.selectionVerified || !result.interaction.controlsVerified || !result.interaction.linksVerified || !result.interaction.multiTouchVerified) throw new Error('page-input');
+  if (!result.interaction.keyboardVerified || !result.interaction.wheelVerified || !result.interaction.mouseVerified || !result.interaction.touchVerified || !result.interaction.touchCenterVerified || !result.interaction.selectionVerified || !result.interaction.controlsVerified || !result.interaction.linksVerified || !result.interaction.multiTouchVerified) throw new Error('page-input');
   if (!result.contentActions.selectionCopied || !result.contentActions.sameSection || !result.contentActions.tailFragmentRecovered || !result.contentActions.missingTargetRecovered || !result.contentActions.unknownSectionRecovered || !result.contentActions.auxiliaryActivation || !result.contentActions.externalBlocked || !result.contentActions.footnoteDialog || !result.contentActions.dialogInputProtected || !result.contentActions.focusRestored) throw new Error('content-actions');
   if (expectedSections > 1 && !result.contentActions.crossSection) throw new Error('content-link-section');
   if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
@@ -529,6 +538,8 @@ try {
                 Invoke-AgentBrowser @('--session', $session, 'click', '.directory > summary')
                 Invoke-AgentBrowser @('--session', $session, 'click', '#add-bookmark')
                 Invoke-AgentBrowser @('--session', $session, 'click', '.preferences > summary')
+                [void](Get-AgentBrowserScriptValue -Session $session -Script "(() => { const value = document.querySelector('#brightness'); value.value = '85'; value.dispatchEvent(new Event('input', { bubbles: true })); value.dispatchEvent(new Event('change', { bubbles: true })); return true; })()")
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "JSON.parse(localStorage.getItem('atha.reader.application.v1')).preferences.brightness === 85")
                 Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '24')
                 Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "JSON.parse(localStorage.getItem('atha.reader.application.v1')).preferences.fontSize === 24")
                 Invoke-AgentBrowser @('--session', $session, 'select', '#theme', 'dark')
@@ -541,6 +552,7 @@ try {
 (() => ({
   position: document.querySelector('#position').textContent,
   fontSize: document.querySelector('#font-size').value,
+  brightness: document.querySelector('#brightness').value,
   theme: document.querySelector('#theme').value,
   bookmarks: document.querySelectorAll('#toc option[data-bookmark-id]').length,
   ...(() => {
@@ -553,7 +565,7 @@ try {
   })(),
                 }))()
 '@ | ConvertFrom-Json
-                if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1 -or $restored.annotationActive -ne 0 -or $restored.annotationTombstones -ne 1) {
+                if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.brightness -ne '85' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1 -or $restored.annotationActive -ne 0 -or $restored.annotationTombstones -ne 1) {
                     throw "Persistent reader state did not restore. expectedPosition=$savedPosition actual=$($restored | ConvertTo-Json -Compress)"
                 }
                 [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
