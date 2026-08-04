@@ -3,7 +3,16 @@ const ANNOTATION_MAX_NOTE_LENGTH = 2000;
 const ANNOTATION_CONTEXT_LENGTH = 32;
 const HIGHLIGHT_NAME = "atha-annotations";
 
-export function createAnnotations({ store, content, session, navigation, locator, controls, assert }) {
+export function createAnnotations({
+  store,
+  content,
+  session,
+  navigation,
+  locator,
+  controls,
+  onNavigate,
+  assert,
+}) {
   let lastError = null;
   let overlayCount = 0;
   let reanchorFailures = 0;
@@ -110,30 +119,37 @@ export function createAnnotations({ store, content, session, navigation, locator
       "annotation-anchor": "标注位置无法重锚",
       "annotation-overlay": "当前浏览器不支持高亮",
       "annotation-note": "笔记最多 2000 个字符",
+      "annotation-copy": "复制失败，请使用系统复制命令",
     }[code];
   }
 
-  function sync(selectedId = controls.list.value) {
+  function sync() {
     const active = store.active();
     controls.list.replaceChildren(
       ...active.map((item) => {
-        const option = document.createElement("option");
-        option.value = item.id;
-        const text = item.sourceAnchor.selectedText.replace(/\s+/gu, " ").trim();
-        option.textContent = `${item.type === "note" ? "笔记" : "高亮"} · ${text.slice(0, 60)}`;
-        return option;
+        const button = document.createElement("button");
+        const kind = document.createElement("span");
+        const quote = document.createElement("span");
+        button.type = "button";
+        button.className = "annotation-item";
+        button.dataset.annotationId = item.id;
+        kind.className = "annotation-item-kind";
+        kind.textContent = item.type === "note" ? "笔记" : "标注";
+        quote.className = "annotation-item-quote";
+        quote.textContent = item.sourceAnchor.selectedText.replace(/\s+/gu, " ").trim().slice(0, 100);
+        button.append(kind, quote);
+        if (item.note) {
+          const note = document.createElement("span");
+          note.className = "annotation-item-note";
+          note.textContent = item.note.replace(/\s+/gu, " ").trim().slice(0, 140);
+          button.append(note);
+        }
+        return button;
       }),
     );
-    const nextId = active.some((item) => item.id === selectedId) ? selectedId : active[0]?.id;
-    if (nextId) controls.list.value = nextId;
-    const selected = store.item(controls.list.value);
-    controls.note.value = selected?.note || "";
-    for (const control of [controls.go, controls.saveNote, controls.remove]) {
-      control.disabled = !selected;
-    }
     const code = errorCode();
     controls.status.dataset.error = String(Boolean(code));
-    controls.status.textContent = statusText(code) || `${active.length} 条标注`;
+    controls.status.textContent = statusText(code) || `${active.length} 条笔记与标注`;
   }
 
   function fail(error) {
@@ -220,7 +236,6 @@ export function createAnnotations({ store, content, session, navigation, locator
     pendingSelection = null;
     content.book.getRootNode().getSelection?.().removeAllRanges();
     await redraw();
-    sync(result.id);
     return result;
   }
 
@@ -234,7 +249,7 @@ export function createAnnotations({ store, content, session, navigation, locator
     const result = store.updateNote(id, note);
     if (!result.ok) return fail(result.error);
     lastError = null;
-    sync(id);
+    sync();
     return result;
   }
 
@@ -264,7 +279,7 @@ export function createAnnotations({ store, content, session, navigation, locator
       return fail("annotation-anchor");
     }
     lastError = null;
-    sync(id);
+    sync();
     return Object.freeze({ ok: true });
   }
 
@@ -274,19 +289,103 @@ export function createAnnotations({ store, content, session, navigation, locator
     return snapshot();
   }
 
+  function hideSelectionActions() {
+    controls.selectionActions.hidden = true;
+  }
+
+  function dismissSelection() {
+    hideSelectionActions();
+    pendingSelection = null;
+  }
+
+  function finishSelection() {
+    dismissSelection();
+    content.book.getRootNode().getSelection?.().removeAllRanges();
+  }
+
   function bind() {
-    const captureSelection = () => {
-      pendingSelection = currentSelection();
+    const showSelectionActions = () => {
+      const range = currentSelection();
+      const text = range?.toString() || "";
+      if (!range || !text.trim() || text.length > ANNOTATION_MAX_SELECTED_LENGTH) {
+        dismissSelection();
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      if (!rect.width && !rect.height) {
+        dismissSelection();
+        return;
+      }
+      pendingSelection = range;
+      controls.selectionStatus.textContent = "";
+      controls.selectionActions.hidden = false;
+      const toolbar = controls.selectionActions.getBoundingClientRect();
+      const maxLeft = Math.max(8, innerWidth - toolbar.width - 8);
+      const maxTop = Math.max(8, innerHeight - toolbar.height - 8);
+      const above = rect.top - toolbar.height - 8;
+      controls.selectionActions.style.left = `${Math.min(maxLeft, Math.max(8, rect.left + rect.width / 2 - toolbar.width / 2))}px`;
+      controls.selectionActions.style.top = `${Math.min(maxTop, Math.max(8, above >= 8 ? above : rect.bottom + 8))}px`;
     };
+    const captureSelection = () => requestAnimationFrame(showSelectionActions);
+    const copySelection = () => {
+      if (!pendingSelection) return fail("annotation-selection");
+      const selection = content.book.getRootNode().getSelection?.();
+      try {
+        if (!selection) throw new Error("copy");
+        selection.removeAllRanges();
+        selection.addRange(pendingSelection.cloneRange());
+        if (!document.execCommand("copy")) throw new Error("copy");
+        lastError = null;
+        controls.selectionStatus.textContent = "已复制";
+        finishSelection();
+        sync();
+        return Object.freeze({ ok: true });
+      } catch {
+        controls.selectionStatus.textContent = statusText("annotation-copy");
+        return fail("annotation-copy");
+      }
+    };
+
+    content.book.addEventListener("pointerdown", () => {
+      hideSelectionActions();
+      pendingSelection = null;
+    });
     content.book.addEventListener("pointerup", captureSelection);
     content.book.addEventListener("keyup", captureSelection);
-    controls.add.addEventListener("click", () => void addSelection(controls.note.value));
-    controls.list.addEventListener("change", () => sync());
-    controls.go.addEventListener("click", () => void go(controls.list.value));
-    controls.saveNote.addEventListener("click", () =>
-      void updateNote(controls.list.value, controls.note.value),
-    );
-    controls.remove.addEventListener("click", () => void remove(controls.list.value));
+    controls.selectionActions.addEventListener("pointerdown", (event) => event.preventDefault());
+    controls.copy.addEventListener("click", copySelection);
+    controls.highlight.addEventListener("click", async () => {
+      if ((await addSelection("")).ok) hideSelectionActions();
+    });
+    controls.note.addEventListener("click", () => {
+      if (!pendingSelection) return fail("annotation-selection");
+      hideSelectionActions();
+      controls.noteInput.value = "";
+      controls.noteInput.setCustomValidity("");
+      controls.noteDialog.showModal();
+      requestAnimationFrame(() => controls.noteInput.focus());
+    });
+    controls.noteInput.addEventListener("input", () => controls.noteInput.setCustomValidity(""));
+    controls.noteForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const note = controls.noteInput.value.trim();
+      if (!note) {
+        controls.noteInput.setCustomValidity("请输入笔记内容");
+        controls.noteInput.reportValidity();
+        return;
+      }
+      const result = pendingSelection && (await addRange(pendingSelection, note));
+      if (result?.ok) controls.noteDialog.close();
+    });
+    controls.cancelNote.addEventListener("click", () => controls.noteDialog.close());
+    controls.noteDialog.addEventListener("close", finishSelection);
+    controls.list.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-annotation-id]");
+      if (!button) return;
+      const result = await go(button.dataset.annotationId);
+      if (result.ok) onNavigate?.();
+    });
+    addEventListener("resize", dismissSelection);
     sync();
   }
 
@@ -459,6 +558,7 @@ export function createAnnotations({ store, content, session, navigation, locator
   return Object.freeze({
     addSelection,
     bind,
+    dismissSelection,
     go,
     redraw,
     remove,

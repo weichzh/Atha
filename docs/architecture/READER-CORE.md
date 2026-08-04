@@ -72,7 +72,9 @@ Annotation Store 以独立的每书 schema 1 记录保存用户事实，不与�
 
 `SourceAnchor` 包含 canonical range Locator、至多 4096 个 UTF-16 code unit 的原文、前后各 32 个 code unit 的上下文和原文 UTF-8 SHA-256，字段语义可直接映射到未来消息链路的 `source_anchor`。同版本先验证 Locator 指向的原文；版本或文本不一致时，只在原 section 中接受唯一原文命中并更新 canonical Locator，零个、多个命中或缺失 section 都报告重锚失败。
 
-Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未删除事实投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。首版只提供创建、可选纯文本笔记、跳转、笔记更新和软删除；颜色、气泡、notebook、同步、tombstone 压缩、导入与 SQLite 留待后续真实需求。
+Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未删除事实投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。有效选区附近只显示复制、标注和笔记三个动作；笔记使用最长 2000 字符的纯文本 dialog。底栏笔记面板只投影未删除的 highlight 与 note，点击列表项即通过既有 Locator 跳转并返回沉浸阅读，不在列表中新增、编辑或删除。
+
+Annotation Store 继续保留笔记更新与软删除，作为 schema 兼容和后续数据管理的底层能力，但当前阅读界面不暴露入口。颜色、样式、notebook、同步、tombstone 压缩、导入与 SQLite 留待后续真实需求。
 
 ### 翻页输入
 
@@ -80,7 +82,7 @@ Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未�
 
 ### 文本、链接与脚注
 
-正文选择与复制保留浏览器原生行为，不由应用改写剪贴板。内容边界只接受同书 XHTML 链接和无凭据 HTTP/HTTPS 外链；危险 scheme、目标窗口与下载属性仍拒绝。同书链接统一由 Navigation 按 section URL 和 fragment 跳转，fragment 定位跳过目标开头的不可见空白；未知目标安全回落。外链不在 WebView 导航或请求网络，只显示已阻止反馈。
+正文选择与系统复制命令保留浏览器原生行为。选择动作条的复制只在用户手势中把已保留的原生 Range 交给浏览器复制命令；应用不读取剪贴板，不持久化复制内容，也不经 IPC 或网络传输。内容边界只接受同书 XHTML 链接和无凭据 HTTP/HTTPS 外链；危险 scheme、目标窗口与下载属性仍拒绝。同书链接统一由 Navigation 按 section URL 和 fragment 跳转，fragment 定位跳过目标开头的不可见空白；未知目标安全回落。外链不在 WebView 导航或请求网络，只显示已阻止反馈。
 
 同章 noteref 可以把目标纯文本投影到原生 dialog，关闭后焦点返回触发链接；跨章节脚注作为普通书内链接导航。脚注 HTML 不复制到应用壳，也不因此放宽脚本或资源信任边界。
 

@@ -12,7 +12,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | --- | --- |
 | `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
 | `reader/app/src/components/ReaderCanvas.svelte` | 自适应书页、章节和进度 DOM |
-| `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏与五个工具入口的组合 |
+| `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条与纯文本笔记 dialog 的组合 |
 | `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部五图标 |
 | `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
 | `reader/app/src/shell.css` | 顶部和底部覆盖层、面板、图标及壳层明暗视觉 |
@@ -39,18 +39,20 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 │     ├─ #page / #book-host
 │     ├─ #chapter-label
 │     └─ #position
-└─ .reader-controls
-   ├─ .top-toolbar
-   │  ├─ #reader-back
-   │  └─ .top-toolbar-actions
-   │     ├─ #add-bookmark
-   │     └─ .preferences
-   └─ .toolbar
-      ├─ .directory
-      ├─ .search
-      ├─ .notes
-      ├─ .progress
-      └─ .listen-placeholder
+├─ .reader-controls
+│  ├─ .top-toolbar
+│  │  ├─ #reader-back
+│  │  └─ .top-toolbar-actions
+│  │     ├─ #add-bookmark
+│  │     └─ .preferences
+│  └─ .toolbar
+│     ├─ .directory
+│     ├─ .search
+│     ├─ .notes
+│     ├─ .progress
+│     └─ .listen-placeholder
+├─ #selection-actions
+└─ #annotation-note-dialog
 ```
 
 顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不改变 `.reader`、`#page`、章节标题或进度的几何尺寸。四个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。
@@ -75,7 +77,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 所有弹出面板 | `.tool-panel` |
 | 目录和书签 | `.directory-panel`、`.directory-list`、`.directory-item`；隐藏数据源为 `#toc` 与 `option[data-bookmark-id]` |
 | 搜索 | `.search-panel`、`.search-actions` |
-| 笔记 | `.annotation-editor`、`.annotation-actions` |
+| 选区动作与笔记 | `.selection-actions`、`#annotation-note-dialog`、`.notes-panel`、`.annotation-list`、`.annotation-item` |
 | 进度 | `.progress-panel`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
 | 更多菜单 | `.preferences-panel`、`.settings-list`、`.settings-view` |
 | 主题 | `reader/atha-reader.css` 顶部语义令牌及 `data-theme="light|paper|dark"` 覆盖 |
@@ -90,12 +92,14 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
 - `#density` 只调整行距；四边距固定为上 144、右 32、下 144、左 32 设备像素，没有对应设置或持久化字段，旧记录中的边距字段会被忽略。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
+- 原生正文选区在 `pointerup` 或键盘选择完成后的下一帧投影 `#selection-actions`；复制只触发浏览器 copy，标注和笔记复用同一 Annotation Store。底栏 `#annotations` 只生成可点击列表项，跳转成功后关闭工具层并聚焦正文。
 - `#tap-to-paginate` 和 `#swipe-to-paginate` 只控制对应指针输入；键盘和滚轮继续保持原行为。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
 ## 当前有意暂缓
 
 - 听书只有禁用图标，没有播放逻辑；
+- 标注颜色、编辑、删除、搜索、导出与同步没有阅读界面入口；
 - 桌面横屏和大屏布局尚未设计；
 - 当前使用 Lucide Svelte 图标和原生表单控件；尚未引入额外 UI 组件库或动效框架。
 

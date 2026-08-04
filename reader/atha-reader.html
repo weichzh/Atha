@@ -232,22 +232,9 @@
             <summary class="icon-button" aria-label="笔记" title="笔记">
               <span class="fluent-icon" aria-hidden="true">&#xE70F;</span>
             </summary>
-            <section class="tool-panel notes-panel annotation-editor" aria-labelledby="annotation-heading">
+            <section class="tool-panel notes-panel" aria-labelledby="annotation-heading">
               <h2 id="annotation-heading">笔记</h2>
-              <label>
-                笔记（可选）
-                <textarea id="annotation-note" rows="3" maxlength="2000"></textarea>
-              </label>
-              <button id="add-annotation" type="button">保存当前选择</button>
-              <label>
-                已存标注
-                <select id="annotations" size="5" aria-label="已存标注"></select>
-              </label>
-              <div class="annotation-actions">
-                <button id="go-annotation" type="button">跳转</button>
-                <button id="save-annotation-note" type="button">保存笔记</button>
-                <button id="delete-annotation" type="button">删除</button>
-              </div>
+              <nav id="annotations" class="annotation-list" aria-label="笔记与标注"></nav>
               <output id="annotations-status" aria-live="polite"></output>
             </section>
           </details>
@@ -279,6 +266,23 @@
           </button>
         </nav>
       </section>
+      <div id="selection-actions" class="selection-actions" role="toolbar" aria-label="选中文字操作" hidden>
+        <button id="copy-selection" type="button">复制</button>
+        <button id="highlight-selection" type="button">标注</button>
+        <button id="note-selection" type="button">笔记</button>
+        <output id="selection-actions-status" class="visually-hidden" aria-live="polite"></output>
+      </div>
+      <dialog id="annotation-note-dialog" aria-labelledby="annotation-note-heading">
+        <form id="annotation-note-form" method="dialog">
+          <h2 id="annotation-note-heading">添加笔记</h2>
+          <label for="annotation-note">笔记内容</label>
+          <textarea id="annotation-note" rows="5" maxlength="2000" required></textarea>
+          <div class="annotation-dialog-actions">
+            <button id="cancel-annotation-note" type="button">取消</button>
+            <button type="submit">保存</button>
+          </div>
+        </form>
+      </dialog>
       <dialog id="content-dialog" aria-labelledby="content-dialog-title">
         <h2 id="content-dialog-title"></h2>
         <p id="content-dialog-body"></p>

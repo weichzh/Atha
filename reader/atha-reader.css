@@ -405,14 +405,12 @@ textarea:focus-visible,
   box-shadow: none;
 }
 
-.annotation-editor,
 .search-panel label {
   display: grid;
   gap: 6px;
 }
 
-.search-panel select,
-.annotation-editor select {
+.search-panel select {
   width: 100%;
   border: 0;
   background: transparent;
@@ -450,18 +448,8 @@ textarea:focus-visible,
   color: var(--ui-muted);
 }
 
-.search-panel option,
-.annotation-editor option {
+.search-panel option {
   padding: 12px 10px;
-}
-
-.annotation-editor textarea {
-  width: 100%;
-  resize: vertical;
-}
-
-.annotation-editor select {
-  min-height: 140px;
 }
 
 .search-panel {
@@ -482,14 +470,44 @@ textarea:focus-visible,
   flex: 1;
 }
 
-.annotation-actions {
-  display: flex;
-  gap: 8px;
+.notes-panel {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: min(58vh, 520px);
 }
 
-.annotation-actions > * {
-  min-width: 0;
-  flex: 1;
+.annotation-list {
+  display: grid;
+  align-content: start;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.annotation-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--ui-border);
+  background: transparent;
+  color: var(--ui-text);
+  text-align: left;
+}
+
+.annotation-item-kind {
+  color: var(--reader-accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.annotation-item-quote,
+.annotation-item-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-item-note {
+  color: var(--ui-muted);
 }
 
 .progress-panel {
@@ -535,6 +553,67 @@ textarea:focus-visible,
 
 #annotations-status[data-error="true"] {
   color: var(--ui-error);
+}
+
+.selection-actions {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  padding: 4px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  box-shadow: 0 8px 24px var(--ui-shadow);
+}
+
+.selection-actions[hidden] {
+  display: none;
+}
+
+.selection-actions button {
+  min-width: 56px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+}
+
+.selection-actions button + button {
+  border-left: 1px solid var(--ui-border);
+}
+
+#annotation-note-dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+}
+
+#annotation-note-dialog::backdrop {
+  background: var(--ui-backdrop);
+}
+
+#annotation-note-form {
+  display: grid;
+  gap: 12px;
+}
+
+#annotation-note-form h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+#annotation-note {
+  width: 100%;
+  resize: vertical;
+}
+
+.annotation-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 ::highlight(atha-annotations) {

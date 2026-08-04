@@ -9,6 +9,7 @@ function closeReaderTools() {
 }
 
 function toggleReaderTools() {
+  annotations?.dismissSelection();
   if (root.hasAttribute("data-reader-tools")) closeReaderTools();
   else root.setAttribute("data-reader-tools", "");
 }
@@ -155,13 +156,21 @@ annotations = createAnnotations({
   navigation,
   locator,
   controls: {
-    add: document.querySelector("#add-annotation"),
-    note: document.querySelector("#annotation-note"),
+    selectionActions: document.querySelector("#selection-actions"),
+    copy: document.querySelector("#copy-selection"),
+    highlight: document.querySelector("#highlight-selection"),
+    note: document.querySelector("#note-selection"),
+    selectionStatus: document.querySelector("#selection-actions-status"),
+    noteDialog: document.querySelector("#annotation-note-dialog"),
+    noteForm: document.querySelector("#annotation-note-form"),
+    noteInput: document.querySelector("#annotation-note"),
+    cancelNote: document.querySelector("#cancel-annotation-note"),
     list: document.querySelector("#annotations"),
-    go: document.querySelector("#go-annotation"),
-    saveNote: document.querySelector("#save-annotation-note"),
-    remove: document.querySelector("#delete-annotation"),
     status: document.querySelector("#annotations-status"),
+  },
+  onNavigate() {
+    closeReaderTools();
+    reader.focus({ preventScroll: true });
   },
   assert,
 });
