@@ -2,6 +2,6 @@
 
 本文件只登记当前可执行工作的路由；范围、证据和下一步由所指向的所有者维护。
 
-- `change`：已有标注的范围更新、笔记编辑删除、全屏笔记页与右键禁用已完成，下一产品切片等待真实使用反馈 → `docs/changes/reader-annotation-management.md`
+- `change`：图片悬停滚轮失效与连续滚轮不跟手已复现，正在建立量化探针并优化 → `docs/changes/reader-wheel-responsiveness.md`
 - `roadmap`：M2 阅读器 V1、M3 单格式真实输入与 M4 本地书架切片已完成 → `docs/roadmap/ROADMAP.md`
 - `Context Bundle`：`reader`
