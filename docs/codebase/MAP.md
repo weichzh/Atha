@@ -20,7 +20,7 @@
 | `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、默认样式、原生阅读偏好、书签、标注、搜索面板与内容 dialog | M2 已验证 |
-| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、标注事实与投影、内容安全、分页、诊断、benchmark 和页面组合入口 | M2 已验证 |
+| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、标注事实与投影、内容安全、分页、滚轮响应诊断、benchmark 和页面组合入口 | M2 已验证 |
 | `reader/samples.json` | 四个本地验收样本的入口、manifest、内容、搜索和边界断言清单 | M2 已验证 |
 | `p0/ffi/` | Rust/C++ 共享 C ABI 调用与所有权对照 | 本地 P0 实验 |
 | `p0/sqlite/` | SQLite、FTS5、Outbox schema 与故障检查 | 本地 P0 实验 |
@@ -31,6 +31,7 @@
 | `scripts/export_reader_sample.py` | 安全、可重复地从 EPUB 导出单章节、带 manifest 的多章节或 fixture-only 全 XHTML 验收样本 | M2 已通过 |
 | `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页、manifest 和书根资源 | M2 R1 已通过 |
 | `scripts/check-reader-samples.ps1` | 四样本实际 host、内容交互、状态、搜索、标注与明暗主题截图总验收 | M2 已通过 |
+| `scripts/check-reader-wheel.ps1` | 真实浏览器媒体滚轮、连续离散输入接受率与输入到稳定页 P95 快速检查 | 已通过 |
 | `scripts/check-reader-gate.ps1` | 组合四样本、大书搜索、进程树内存、强杀恢复和固定 P95 性能门槛 | M2 R8 已通过 |
 | `scripts/check-tauri-reader.ps1` | Svelte production build、workspace Rust 检查、Tauri build、真实 EPUB 与性能门槛 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
@@ -104,14 +105,14 @@
 - 四样本实际 host 与 Agent Browser 明暗验收通过：既有三样本保持原内容断言；《数学及其历史》R1 样本依次加载三个标题、两次释放旧 DOM、关闭后重新打开首章，首章含 23 个公式和 2 张普通 PNG；
 - R2 在实际浏览器验证 Locator 往返与 range 边界、32→40→24→32px 逐次位置恢复、TOC 控件切章、并发导航串行化、section 首尾导航和错版本安全回落；
 - R3 在实际浏览器验证系统/亮/暗主题、书源/衬线/无衬线字体、三档绝对密度、24/32/40px 字号、Locator 恢复、书源与用户样式启停、安全 CSS 拒绝和实际偏好控件；
-- R4A 在实际浏览器验证键盘、单手势滚轮、鼠标页区和单指横向滑动，保留文本选择与原生控件；多章节样本另验证输入跨 section 往返；
+- R4A 在实际浏览器验证键盘、逐次离散滚轮、小幅精密手势尾流抑制、鼠标页区和单指横向滑动；图片与公式允许滚轮翻页，编辑区、对话框、表格、代码、文本选择和壳层控件保留原生行为，多章节样本另验证输入跨 section 往返；
 - R4B 在实际浏览器验证真实鼠标选择和 trusted Ctrl+C copy 事件、同章与跨 section 链接、尾部空锚点、缺失 fragment 与未知 section 回落、外链零请求、脚注纯文本 dialog、背景翻页保护与焦点返回；
 - R4C 在实际浏览器验证非链接普通图片与公式的真实鼠标、Space、Enter 与 Escape 预览、原生 dialog、焦点返回、链接图片互斥，以及打开和关闭前后 section、页码与 Locator 不变；明暗公式预览分别为原色与反色，普通图片始终不反色；
 - R4D 在实际浏览器验证表格与代码的 Enter、Space、Escape、焦点返回、明暗滚动预览和代码内链接优先；模块诊断另覆盖双击、行列与跨度、图片替代文本、代码空白、纯文本安全投影，以及打开和关闭前后 section、页码与 Locator 不变；
 - R5 在实际浏览器验证应用与本书偏好分区、同任务进度合并、页面生命周期 flush、书签创建/去重/跳转/删除、错版本拒绝和损坏进度安全回落；兼容 `entry` 由内容字节指纹补齐版本边界，Windows host 以独立 probe 存储命名空间和状态键跨两个真实进程验证主题、字号、精确 Locator 与书签恢复并清理；
 - R6 在实际浏览器用三个单章节标题各验证 1 条结果，并在《数学及其历史》用“数”验证 66 条结果完整覆盖三个 section；真实搜索控件、跨章结果跳转与返回、结果起点可见、查询替换、显式取消、active content 拒绝和错误隔离均通过；
 - R7 四样本验收在《数学及其历史》用真实鼠标选择创建带笔记标注，验证 range Locator、原文与上下文、SHA-256 `SourceAnchor`、CSS Highlight、32→40→32px 重排、笔记更新、暗色重载恢复、精确跳转、软删除、tombstone 重载和两个 WebView2 host 进程恢复；损坏记录、写入失败回滚、事实不可变与唯一/零/多候选及缺失 section 重锚由隔离自检覆盖；
-- 当前选中文字入口在真实鼠标 Range 附近提供复制、标注和笔记；原生 copy 事件不写记录，highlight 与 note 共用既有 SourceAnchor 和 overlay。底栏笔记只投影两类记录，列表项直接完成 Locator 跳转、关闭工具层并把焦点还给正文；当前 UI 不提供新增、编辑或删除入口；
+- 当前选中文字入口在真实鼠标 Range 附近提供复制、标注和笔记；已有标注可恢复选区并重选范围、编辑笔记或软删除。全屏笔记页投影未删除记录，正文动作完成 Locator 跳转并返回阅读，独立编辑和删除不会误触发跳转；
 - R8 从固定 SHA-256 `0af5dff0c0d1eb369a096b18d05eb77a4cd9c03808748db8274d5e77bbfe7368`、16.03MiB 的《数学及其历史》导出 173 个 XHTML section 与 2527 个资源；真实浏览器查询“数学”精确得到 288 条结果并覆盖 104 个 section，状态完整、未截断且无错误；
 - R8 三次完整 WebView2 进程树峰值 working set 分别为 647.3、649.3 和 650.4MiB，每轮取得 5 个有效样本，最多观测到 8 个进程，低于 1024MiB 门槛；同一 host 确认进度、偏好、书签和标注耐久写入后被整树强杀，gate 确认已捕获的全部后代退出，再由新 host 精确恢复四类探针；
 - 明暗正文对比度分别为 15.94 和 13.84；暗色下只反色公式，普通图始终为 `filter: none`；

@@ -14,10 +14,16 @@ function createWheelDetector() {
       flipped = false;
     }
     last = timeStamp;
-    if (flipped) return 0;
     const scale = deltaMode === 1 ? 40 : deltaMode === 2 ? pageHeight : 1;
     const dominant = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY;
-    total += dominant * scale;
+    const amount = dominant * scale;
+    if (Math.abs(amount) >= WHEEL_THRESHOLD) {
+      total = 0;
+      flipped = true;
+      return Math.sign(amount);
+    }
+    if (flipped) return 0;
+    total += amount;
     if (Math.abs(total) < WHEEL_THRESHOLD) return 0;
     flipped = true;
     return Math.sign(total);
@@ -64,6 +70,17 @@ export function createInteraction({ reader, content, navigation, preferences, on
     return selections.some((selection) => selection && !selection.isCollapsed);
   }
 
+  function wheelProtectedTarget(event) {
+    const path = event.composedPath();
+    const media = path.some((node) => node instanceof Element && node.matches("img"));
+    if (!path.includes(content.book) || !media) return protectedTarget(event);
+    return path.some(
+      (node) =>
+        node instanceof Element &&
+        node.matches("input, select, textarea, dialog, table, pre, [contenteditable]"),
+    );
+  }
+
   function run(direction, kind) {
     counts[kind] += 1;
     Promise.resolve(direction < 0 ? navigation.previous() : navigation.next()).catch((error) => {
@@ -98,7 +115,7 @@ export function createInteraction({ reader, content, navigation, preferences, on
   }
 
   function onWheel(event) {
-    if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || protectedTarget(event)) {
+    if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || wheelProtectedTarget(event)) {
       return;
     }
     event.preventDefault();
@@ -201,8 +218,16 @@ export function createInteraction({ reader, content, navigation, preferences, on
     testWheel({ deltaX: 0, deltaY: 20, deltaMode: 0, timeStamp: 0, pageHeight: 100 }) === 0 &&
       testWheel({ deltaX: 0, deltaY: 20, deltaMode: 0, timeStamp: 10, pageHeight: 100 }) === 0 &&
       testWheel({ deltaX: 0, deltaY: 20, deltaMode: 0, timeStamp: 20, pageHeight: 100 }) === 1 &&
-      testWheel({ deltaX: 0, deltaY: 100, deltaMode: 0, timeStamp: 30, pageHeight: 100 }) === 0 &&
+      testWheel({ deltaX: 0, deltaY: 20, deltaMode: 0, timeStamp: 30, pageHeight: 100 }) === 0 &&
       testWheel({ deltaX: 0, deltaY: -60, deltaMode: 0, timeStamp: 300, pageHeight: 100 }) === -1,
+    "sample-boundary",
+  );
+  const discreteWheel = createWheelDetector();
+  assert(
+    [0, 100, 200, 300].every(
+      (timeStamp) =>
+        discreteWheel({ deltaX: 0, deltaY: 100, deltaMode: 0, timeStamp, pageHeight: 100 }) === 1,
+    ),
     "sample-boundary",
   );
   assert(

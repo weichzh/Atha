@@ -279,7 +279,7 @@ export function createDiagnostics({
       "sample-boundary",
     );
 
-    for (const deltaY of [20, 20, 20, 100]) {
+    for (const deltaY of [20, 20, 20, 20]) {
       reader.dispatchEvent(
         new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY, deltaMode: 0 }),
       );
@@ -611,16 +611,27 @@ export function createDiagnostics({
     return content.book.querySelector(selector);
   }
 
-  async function mediaPoint(kind) {
-    const source = mediaSource(kind);
-    if (!source) return null;
+  async function showSource(source) {
     const previousId = source.getAttribute("id");
     const probeId = `atha-media-${crypto.randomUUID()}`;
     source.id = probeId;
     const offset = pagination.offsetForFragment(probeId);
     if (previousId === null) source.removeAttribute("id");
     else source.id = previousId;
-    assert(offset !== null && (await pagination.showOffset(offset)), "sample-boundary");
+    assert(offset !== null, "sample-boundary");
+    const description = session.describe();
+    assert(
+      await navigation.goTo(
+        locator.point(description, session.snapshot().currentSection, offset),
+      ),
+      "sample-boundary",
+    );
+  }
+
+  async function mediaPoint(kind) {
+    const source = mediaSource(kind);
+    if (!source) return null;
+    await showSource(source);
     const rect = source.getBoundingClientRect();
     const viewport = reader.getBoundingClientRect();
     assert(
@@ -636,6 +647,76 @@ export function createDiagnostics({
     return Object.freeze({
       x: structured ? rect.left + 2 : rect.left + rect.width / 2,
       y: structured ? rect.top + 2 : rect.top + rect.height / 2,
+    });
+  }
+
+  async function wheelProbe() {
+    const pageKey = () => {
+      const section = session.snapshot().currentIndex;
+      const page = pagination.snapshot().page;
+      return `${section}:${page}`;
+    };
+    const reset = async () => {
+      const description = session.describe();
+      await navigation.goTo(locator.point(description, description.sections[0].id, 0));
+    };
+    const fire = async (target, deltaY) => {
+      const before = pageKey();
+      const started = performance.now();
+      const event = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY,
+        deltaMode: 0,
+      });
+      target.dispatchEvent(event);
+      await navigation.idle();
+      return Object.freeze({
+        accepted: pageKey() !== before,
+        defaultPrevented: event.defaultPrevented,
+        latencyMs: performance.now() - started,
+      });
+    };
+    const targets = {};
+    for (const [kind, selector] of Object.entries({
+      ordinary: "img[role='button']:not(.math-inline):not(.math-display)",
+      formula: "img[role='button'].math-inline, img[role='button'].math-display",
+      linked: "a[href] img",
+    })) {
+      const source = content.book.querySelector(selector);
+      if (!source) {
+        targets[kind] = Object.freeze({ present: false });
+        continue;
+      }
+      await showSource(source);
+      await new Promise((resolve) => setTimeout(resolve, 260));
+      const state = pagination.snapshot();
+      const description = session.describe();
+      const forward =
+        state.page + 1 < state.pages || session.snapshot().currentIndex + 1 < description.sections.length;
+      targets[kind] = Object.freeze({ present: true, ...(await fire(source, forward ? 100 : -100)) });
+    }
+
+    await reset();
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    const repeated = [];
+    for (let index = 0; index < 4; index += 1) {
+      const result = await fire(reader, 100);
+      repeated.push(result);
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, 100 - result.latencyMs)));
+    }
+    const acceptedLatencies = repeated
+      .filter((result) => result.accepted)
+      .map((result) => result.latencyMs)
+      .sort((left, right) => left - right);
+    const p95 = acceptedLatencies[Math.max(0, Math.ceil(acceptedLatencies.length * 0.95) - 1)] ?? null;
+    await reset();
+    return Object.freeze({
+      targets: Object.freeze(targets),
+      repeatedInputs: repeated.length,
+      repeatedAccepted: repeated.filter((result) => result.accepted).length,
+      repeatedDefaultPrevented: repeated.filter((result) => result.defaultPrevented).length,
+      inputToStableP95Ms: p95,
     });
   }
 
@@ -694,6 +775,7 @@ export function createDiagnostics({
         previewState,
         selectionProbe: contentActions.selectionProbe,
         snapshot: visualSnapshot,
+        wheelProbe,
       }),
       configurable: false,
       writable: false,

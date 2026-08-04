@@ -232,8 +232,13 @@ $themeProbe = @'
   document.documentElement.removeAttribute('data-reader-tools');
   const readerAfter = document.querySelector('.reader').getBoundingClientRect();
   if (readerBefore.width !== readerAfter.width || readerBefore.height !== readerAfter.height) throw new Error('preferences-control');
+  const wheelProbe = await globalThis.__athaReaderDiagnostics.wheelProbe();
+  const wheelTargets = Object.values(wheelProbe.targets).filter((target) => target.present);
+  if (!wheelTargets.length || wheelTargets.some((target) => !target.accepted || !target.defaultPrevented)) throw new Error('wheel-media');
+  if (wheelProbe.repeatedAccepted !== 4 || wheelProbe.repeatedDefaultPrevented !== 4) throw new Error(`wheel-responsiveness:${JSON.stringify(wheelProbe)}`);
   const result = globalThis.__athaReaderDiagnostics?.snapshot();
   if (!result) throw new Error('missing-reader-diagnostics');
+  result.wheelProbe = wheelProbe;
   const rgb = (value) => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
   const luminance = (value) => {
     const channels = rgb(value).map((channel) => {
