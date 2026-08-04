@@ -689,27 +689,28 @@ export function createDiagnostics({
         singleStep,
       });
     };
-    let linkedProbe = null;
-    if (!content.book.querySelector("a[href] img")) {
-      const source = content.book.querySelector("img");
-      if (source) {
-        linkedProbe = document.createElement("a");
-        linkedProbe.href = "#atha-wheel-linked-probe";
-        linkedProbe.style.position = "fixed";
-        linkedProbe.style.left = "-9999px";
-        const image = source.cloneNode(false);
-        image.removeAttribute("id");
-        linkedProbe.append(image);
-        content.book.append(linkedProbe);
-      }
-    }
     const targets = {};
     for (const [kind, selector] of Object.entries({
       ordinary: "img[role='button']:not(.math-inline):not(.math-display)",
       formula: "img[role='button'].math-inline, img[role='button'].math-display",
       linked: "a[href] img",
     })) {
-      const source = content.book.querySelector(selector);
+      await reset();
+      let linkedProbe = null;
+      let source = content.book.querySelector(selector);
+      if (!source && kind === "linked") {
+        const image = content.book.querySelector("img")?.cloneNode(false);
+        if (image) {
+          image.removeAttribute("id");
+          linkedProbe = document.createElement("a");
+          linkedProbe.href = "#atha-wheel-linked-probe";
+          linkedProbe.style.position = "fixed";
+          linkedProbe.style.left = "-9999px";
+          linkedProbe.append(image);
+          content.book.append(linkedProbe);
+          source = image;
+        }
+      }
       if (!source) {
         targets[kind] = Object.freeze({ present: false });
         continue;
@@ -725,8 +726,8 @@ export function createDiagnostics({
         synthetic: kind === "linked" && Boolean(linkedProbe),
         ...(await fire(source, forward ? 100 : -100)),
       });
+      linkedProbe?.remove();
     }
-    linkedProbe?.remove();
 
     await reset();
     await new Promise((resolve) => setTimeout(resolve, 260));
