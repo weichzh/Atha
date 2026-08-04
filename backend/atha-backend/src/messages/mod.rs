@@ -1,5 +1,6 @@
 //! Local message facts, revisions, source captures, relationships, and export.
 
+mod legacy;
 mod model;
 mod query;
 mod schema;

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::util::decode_hex;
 
@@ -77,6 +78,26 @@ pub struct ReselectDraft {
     pub snapshot: SourceSnapshotInput,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyAnnotationInput {
+    pub id: String,
+    pub anchor: SourceAnchorInput,
+    pub note: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub deleted_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyImport {
+    pub edition: EditionInput,
+    pub source_key: String,
+    pub record_hash: String,
+    pub items: Vec<LegacyAnnotationInput>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedRoot {
@@ -103,6 +124,23 @@ pub struct CreatedMessage {
 #[serde(rename_all = "camelCase")]
 pub struct CreatedSource {
     pub source_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyImportedItem {
+    pub legacy_id: String,
+    pub conversation_id: String,
+    pub message_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyImportResult {
+    pub imported: usize,
+    pub already_complete: bool,
+    pub record_hash: String,
+    pub items: Vec<LegacyImportedItem>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -202,6 +240,16 @@ pub struct SnapshotResourceData {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreHealth {
+    pub schema_version: i64,
+    pub sqlite_version: String,
+    pub foreign_keys: bool,
+    pub fts5: bool,
+    pub integrity: bool,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedResource {
     pub(crate) path: String,
@@ -219,6 +267,7 @@ pub enum MessageError {
     UnknownMessage,
     RevisionConflict,
     FutureDatabase,
+    LegacyConflict,
     CorruptData,
     Database,
 }
@@ -232,6 +281,7 @@ impl MessageError {
             Self::UnknownMessage => "unknown-message",
             Self::RevisionConflict => "message-revision-conflict",
             Self::FutureDatabase => "future-message-database",
+            Self::LegacyConflict => "legacy-message-conflict",
             Self::CorruptData => "corrupt-message-data",
             Self::Database => "message-database",
         }
@@ -247,30 +297,37 @@ impl fmt::Display for MessageError {
 impl Error for MessageError {}
 
 pub(crate) fn validate_root(draft: &RootMessageDraft) -> Result<(), MessageError> {
-    decode_hex::<32>(&draft.edition.content_version)?;
-    if draft.edition.title.trim().is_empty()
-        || draft.edition.title.chars().count() > 512
-        || draft.edition.authors.len() > 16
-        || draft
-            .edition
-            .authors
-            .iter()
-            .any(|value| value.trim().is_empty() || value.chars().count() > 512)
-        || draft
-            .text
-            .as_ref()
-            .is_some_and(|value| value.trim().is_empty() || value.chars().count() > 8_000)
+    validate_edition(&draft.edition)?;
+    if draft
+        .text
+        .as_ref()
+        .is_some_and(|value| value.trim().is_empty() || value.chars().count() > 8_000)
     {
         return Err(MessageError::InvalidInput);
     }
     validate_source(&draft.anchor, &draft.snapshot)
 }
 
+pub(crate) fn validate_edition(edition: &EditionInput) -> Result<(), MessageError> {
+    decode_hex::<32>(&edition.content_version)?;
+    if edition.title.trim().is_empty()
+        || edition.title.chars().count() > 512
+        || edition.authors.len() > 16
+        || edition
+            .authors
+            .iter()
+            .any(|value| value.trim().is_empty() || value.chars().count() > 512)
+    {
+        return Err(MessageError::InvalidInput);
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_source(
     anchor: &SourceAnchorInput,
     snapshot: &SourceSnapshotInput,
 ) -> Result<(), MessageError> {
-    decode_hex::<32>(&anchor.content_hash)?;
+    let content_hash = decode_hex::<32>(&anchor.content_hash)?;
     if anchor.canonical_locator.len() > 8192
         || serde_json::from_str::<serde_json::Value>(&anchor.canonical_locator).is_err()
         || anchor.section.is_empty()
@@ -286,6 +343,9 @@ pub(crate) fn validate_source(
         || snapshot.user_css.len() > 32_768
         || serde_json::from_str::<serde_json::Value>(&snapshot.presentation_json).is_err()
     {
+        return Err(MessageError::InvalidInput);
+    }
+    if Sha256::digest(anchor.selected_text.as_bytes()).as_slice() != content_hash {
         return Err(MessageError::InvalidInput);
     }
     validate_resources(&snapshot.resources)

@@ -111,3 +111,24 @@ CREATE INDEX conversation_edition_created ON conversation(edition_id, created_at
 CREATE INDEX source_anchor_section ON source_anchor(section_id, message_id);
 CREATE INDEX message_reference_target ON message_reference(target_message_id, source_message_id);
 "#;
+
+pub(crate) const SCHEMA_V2: &str = r#"
+CREATE TABLE legacy_import_state (
+    edition_id BLOB NOT NULL REFERENCES edition(id),
+    source_key TEXT NOT NULL CHECK(source_key <> ''),
+    record_hash BLOB NOT NULL CHECK(length(record_hash) = 32),
+    item_count INTEGER NOT NULL CHECK(item_count >= 0),
+    completed_at_ms INTEGER NOT NULL,
+    PRIMARY KEY(edition_id, source_key)
+);
+CREATE TABLE legacy_annotation_import (
+    edition_id BLOB NOT NULL,
+    source_key TEXT NOT NULL,
+    legacy_id TEXT NOT NULL CHECK(legacy_id <> ''),
+    message_id BLOB NOT NULL REFERENCES message(id),
+    PRIMARY KEY(edition_id, source_key, legacy_id),
+    FOREIGN KEY(edition_id, source_key)
+        REFERENCES legacy_import_state(edition_id, source_key)
+        DEFERRABLE INITIALLY DEFERRED
+);
+"#;

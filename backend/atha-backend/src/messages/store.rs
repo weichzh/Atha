@@ -9,12 +9,12 @@ use rusqlite::{Connection, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
 use super::{
-    model::{MessageError, PreparedResource, SnapshotResourceInput},
-    schema::SCHEMA_V1,
+    model::{MessageError, PreparedResource, SnapshotResourceInput, StoreHealth},
+    schema::{SCHEMA_V1, SCHEMA_V2},
     util::encode_hex,
 };
 
-const DATABASE_VERSION: i64 = 1;
+const DATABASE_VERSION: i64 = 2;
 const DATABASE_NAME: &str = "Messages.sqlite3";
 
 #[derive(Clone, Debug)]
@@ -34,6 +34,43 @@ impl MessageStore {
         };
         store.migrate()?;
         Ok(store)
+    }
+
+    pub fn health(&self) -> Result<StoreHealth, MessageError> {
+        let connection = self.connect()?;
+        let schema_version = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| MessageError::Database)?;
+        let sqlite_version = connection
+            .query_row("SELECT sqlite_version()", [], |row| row.get(0))
+            .map_err(|_| MessageError::Database)?;
+        let foreign_keys = connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .map_err(|_| MessageError::Database)?;
+        let fts5 = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'message_search' AND sql LIKE '%fts5%')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| MessageError::Database)?;
+        let integrity: String = connection
+            .pragma_query_value(None, "integrity_check", |row| row.get(0))
+            .map_err(|_| MessageError::Database)?;
+        let mut foreign_key_check = connection
+            .prepare("PRAGMA foreign_key_check")
+            .map_err(|_| MessageError::Database)?;
+        let foreign_key_violation = foreign_key_check
+            .query([])
+            .and_then(|mut rows| rows.next().map(|row| row.is_some()))
+            .map_err(|_| MessageError::Database)?;
+        Ok(StoreHealth {
+            schema_version,
+            sqlite_version,
+            foreign_keys,
+            fts5,
+            integrity: integrity == "ok" && !foreign_key_violation,
+        })
     }
 
     pub(crate) fn prepare_resources(
@@ -82,19 +119,23 @@ impl MessageStore {
         if version > DATABASE_VERSION {
             return Err(MessageError::FutureDatabase);
         }
-        if version == DATABASE_VERSION {
-            return Ok(());
+        for next in version + 1..=DATABASE_VERSION {
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| MessageError::Database)?;
+            transaction
+                .execute_batch(match next {
+                    1 => SCHEMA_V1,
+                    2 => SCHEMA_V2,
+                    _ => return Err(MessageError::Database),
+                })
+                .map_err(|_| MessageError::Database)?;
+            transaction
+                .pragma_update(None, "user_version", next)
+                .map_err(|_| MessageError::Database)?;
+            transaction.commit().map_err(|_| MessageError::Database)?;
         }
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| MessageError::Database)?;
-        transaction
-            .execute_batch(SCHEMA_V1)
-            .map_err(|_| MessageError::Database)?;
-        transaction
-            .pragma_update(None, "user_version", DATABASE_VERSION)
-            .map_err(|_| MessageError::Database)?;
-        transaction.commit().map_err(|_| MessageError::Database)
+        Ok(())
     }
 
     pub(crate) fn connect(&self) -> Result<Connection, MessageError> {

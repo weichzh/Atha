@@ -1,9 +1,10 @@
 use std::{fs, path::PathBuf, time::SystemTime};
 
 use atha_backend::messages::{
-    EditionInput, MessageSearch, MessageStore, ReplyDraft, ReselectDraft, RootMessageDraft,
-    SnapshotResourceInput, SourceAnchorInput, SourceSnapshotInput,
+    EditionInput, LegacyAnnotationInput, LegacyImport, MessageSearch, MessageStore, ReplyDraft,
+    ReselectDraft, RootMessageDraft, SnapshotResourceInput, SourceAnchorInput, SourceSnapshotInput,
 };
+use sha2::{Digest, Sha256};
 
 struct TestRoot(PathBuf);
 
@@ -35,14 +36,22 @@ fn edition() -> EditionInput {
     }
 }
 
+fn text_hash(value: &str) -> String {
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn anchor() -> SourceAnchorInput {
+    let selected_text = "算术与几何";
     SourceAnchorInput {
         canonical_locator: r#"{"schema":1,"contentVersion":"1111111111111111111111111111111111111111111111111111111111111111","start":{"section":"section-1","offset":10},"end":{"section":"section-1","offset":18}}"#.into(),
         section: "section-1".into(),
-        selected_text: "算术与几何".into(),
+        selected_text: selected_text.into(),
         prefix_text: "第一章".into(),
         suffix_text: "之间".into(),
-        content_hash: "22".repeat(32),
+        content_hash: text_hash(selected_text),
     }
 }
 
@@ -147,6 +156,7 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
         .expect("create first root");
     let mut second_anchor = anchor();
     second_anchor.selected_text = "有理数".into();
+    second_anchor.content_hash = text_hash("有理数");
     let second = store
         .create_root(RootMessageDraft {
             edition: edition(),
@@ -239,6 +249,7 @@ fn search_indexes_only_current_undeleted_revisions_and_filters_sections() {
     let mut second_anchor = anchor();
     second_anchor.section = "section-2".into();
     second_anchor.selected_text = "代数结构".into();
+    second_anchor.content_hash = text_hash("代数结构");
     let second = store
         .create_root(RootMessageDraft {
             edition: edition(),
@@ -340,6 +351,7 @@ fn reselect_switches_the_current_source_without_rewriting_old_captures() {
     let mut replacement_anchor = anchor();
     replacement_anchor.section = "section-2".into();
     replacement_anchor.selected_text = "代数结构".into();
+    replacement_anchor.content_hash = text_hash("代数结构");
     let mut replacement_snapshot = snapshot();
     replacement_snapshot.fragment_html = "<p>代数结构</p>".into();
 
@@ -372,4 +384,138 @@ fn reselect_switches_the_current_source_without_rewriting_old_captures() {
             .selected_text,
         "代数结构"
     );
+}
+
+#[test]
+fn legacy_annotation_import_is_atomic_and_idempotent() {
+    let root = TestRoot::new("message-legacy-import");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let input = LegacyImport {
+        edition: edition(),
+        source_key: "atha.reader.annotations.math-history.v1".into(),
+        record_hash: "33".repeat(32),
+        items: vec![
+            LegacyAnnotationInput {
+                id: "highlight-1".into(),
+                anchor: anchor(),
+                note: None,
+                created_at: 100,
+                updated_at: 100,
+                deleted_at: None,
+            },
+            LegacyAnnotationInput {
+                id: "note-2".into(),
+                anchor: anchor(),
+                note: Some("旧版笔记".into()),
+                created_at: 200,
+                updated_at: 300,
+                deleted_at: Some(400),
+            },
+        ],
+    };
+
+    let mut invalid = input.clone();
+    invalid.items[1].anchor.content_hash = "00".repeat(32);
+    assert_eq!(
+        store.import_legacy_annotations(invalid),
+        Err(atha_backend::messages::MessageError::InvalidInput)
+    );
+
+    let imported = store
+        .import_legacy_annotations(input.clone())
+        .expect("import legacy annotations");
+    let repeated = store
+        .import_legacy_annotations(input)
+        .expect("repeat legacy import");
+    let active = store
+        .conversation(&imported.items[0].conversation_id)
+        .expect("load active import");
+    let deleted = store
+        .conversation(&imported.items[1].conversation_id)
+        .expect("load deleted import");
+
+    assert_eq!(imported.imported, 2);
+    assert!(!imported.already_complete);
+    assert_eq!(repeated.imported, 0);
+    assert!(repeated.already_complete);
+    assert_eq!(repeated.items, imported.items);
+    assert!(!active.messages[0].deleted);
+    assert_eq!(active.messages[0].kind, "source-only");
+    assert!(deleted.messages[0].deleted);
+    assert_eq!(
+        store
+            .revisions(&imported.items[1].message_id)
+            .expect("load imported revision")[0]
+            .text,
+        "旧版笔记"
+    );
+}
+
+#[test]
+fn database_migrations_and_required_capabilities_are_verified_on_open() {
+    let root = TestRoot::new("message-database-health");
+    let first = MessageStore::open(&root.0).expect("open empty database");
+    let health = first.health().expect("database health");
+    drop(first);
+    MessageStore::open(&root.0).expect("repeat open");
+
+    assert_eq!(health.schema_version, 2);
+    assert!(health.foreign_keys);
+    assert!(health.fts5);
+    assert!(health.integrity);
+
+    let future = TestRoot::new("message-future-database");
+    let database_root = future.0.join("Messages");
+    fs::create_dir_all(&database_root).expect("create database root");
+    let connection = rusqlite::Connection::open(database_root.join("Messages.sqlite3"))
+        .expect("open future database");
+    connection
+        .pragma_update(None, "user_version", 999)
+        .expect("set future version");
+    drop(connection);
+    assert!(matches!(
+        MessageStore::open(&future.0),
+        Err(atha_backend::messages::MessageError::FutureDatabase)
+    ));
+}
+
+#[test]
+fn outbox_failure_rolls_back_the_message_fact() {
+    let root = TestRoot::new("message-outbox-rollback");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let database = root.0.join("Messages/Messages.sqlite3");
+    let connection = rusqlite::Connection::open(&database).expect("open fault injector");
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_message_outbox BEFORE INSERT ON outbox_event
+             BEGIN SELECT RAISE(ABORT, 'forced outbox failure'); END;",
+        )
+        .expect("install outbox fault");
+    drop(connection);
+    let mut failed_anchor = anchor();
+    failed_anchor.selected_text = "事务回滚原文".into();
+    failed_anchor.content_hash = text_hash("事务回滚原文");
+
+    assert_eq!(
+        store.create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: failed_anchor,
+            snapshot: snapshot(),
+            text: Some("不能留下来的笔记".into()),
+        }),
+        Err(atha_backend::messages::MessageError::Database)
+    );
+    let connection = rusqlite::Connection::open(database).expect("reopen fault injector");
+    connection
+        .execute_batch("DROP TRIGGER fail_message_outbox;")
+        .expect("remove outbox fault");
+    let matches = store
+        .search(MessageSearch {
+            edition_id: edition().content_version,
+            text: "不能留下来的笔记".into(),
+            section: None,
+        })
+        .expect("search rolled back fact");
+
+    assert!(matches.is_empty());
 }
