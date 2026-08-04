@@ -392,10 +392,10 @@ textarea:focus-visible,
   box-shadow: 0 12px 32px var(--ui-shadow);
 }
 
-.directory-panel {
+.directory-panel,
+.notes-panel {
   z-index: 2;
   inset: 0;
-  grid-template-rows: 56px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   max-height: none;
@@ -403,6 +403,10 @@ textarea:focus-visible,
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+.directory-panel {
+  grid-template-rows: 56px minmax(0, 1fr);
 }
 
 .search-panel label {
@@ -471,16 +475,7 @@ textarea:focus-visible,
 }
 
 .notes-panel {
-  z-index: 2;
-  inset: 0;
   grid-template-rows: 56px minmax(0, 1fr) auto;
-  width: 100vw;
-  height: 100vh;
-  max-height: none;
-  padding: 0 20px 20px;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 .annotation-list {

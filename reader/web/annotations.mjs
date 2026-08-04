@@ -473,7 +473,7 @@ export function createAnnotations({
     content.book.addEventListener("pointerdown", () => {
       hideSelectionActions();
       pendingSelection = null;
-      if (!currentSelection() && !rangeEditingId) selectedAnnotationId = null;
+      if (!rangeEditingId) selectedAnnotationId = null;
     });
     content.book.addEventListener("pointerup", (event) => {
       if (currentSelection()) {
@@ -712,6 +712,10 @@ export function createAnnotations({
     await failedStore.restore();
     const failedWrite = await failedStore.add(sourceAnchor, "");
     assert(!failedWrite.ok && failedStore.active().length === 0, "sample-boundary");
+    selectedAnnotationId = "stale-selection";
+    rangeEditingId = null;
+    content.book.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    assert(selectedAnnotationId === null, "sample-boundary");
     const selection = content.book.getRootNode().getSelection?.();
     const verifySelectionInput = async (event) => {
       selection.removeAllRanges();
@@ -749,6 +753,7 @@ export function createAnnotations({
       corruptHashRejected: true,
       writeFailureRejected: true,
       softDeleted: true,
+      freshSelectionClearsAnnotation: true,
       touchSelectionActions: true,
       keyboardSelectionActions: true,
       invalidSelectionDismissed: true,

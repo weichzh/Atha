@@ -282,7 +282,7 @@ $themeProbe = @'
   if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
   if (!result.bookmarks.created || !result.bookmarks.toggled || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
   if (!result.search.replaced || !result.search.canceled || !result.search.errorIsolated || !result.search.activeContentRejected) throw new Error('search');
-  if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.rangeUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected) throw new Error('annotations');
+  if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.rangeUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected || !result.annotations.freshSelectionClearsAnnotation) throw new Error('annotations');
   return result;
 })()
 '@
