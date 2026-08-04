@@ -1,53 +1,49 @@
-# 数据库 P0 基线
+# 消息数据库
 
-## 状态
+## 状态与位置
 
-该文档记录已实现的实验语义，不是生产迁移规范。事实源为 `p0/sqlite/schema.sql` 和相应检查脚本。
+正式消息数据库由 `backend::messages::MessageStore` 拥有，使用锁定的 `rusqlite 0.40.1` 与 bundled SQLite。Windows 产品入口把数据放在 `%LOCALAPPDATA%\Atha\Messages\Messages.sqlite3`，快照资源按 SHA-256 内容寻址保存在相邻的 `Assets/`；界面和导出均不暴露该路径。
 
-## 已接受的正式政策
-
-`docs/decisions/ADR-0002-sqlite-and-migrations.md` 已固定 M2 的方向：精确使用 `rusqlite 0.40.1`、关闭默认 features、启用 `bundled`，并用 `PRAGMA user_version` 和 `IMMEDIATE` 事务执行仅向前的顺序迁移。
-
-该政策尚未在正式后端中实现。P0 schema 只是 v1 语义来源，不能连同 SQLite CLI、benchmark 或故障注入指令复制为生产迁移。
+数据库当前为 schema v2。`MessageStore::open` 按 `PRAGMA user_version` 在 `IMMEDIATE` 事务中顺序执行只向前迁移，拒绝未来版本；每个连接启用外键和 WAL。P0 的 `p0/sqlite/` 只保留历史对照，不再是正式 schema 来源。
 
 ## 当前表
 
-| 表 | 当前责任 |
-|---|---|
-| `work` | 抽象作品身份与题名 |
-| `edition` | 具体 EPUB/TXT 文件、指纹、解析器和元数据 |
-| `conversation` | 某版本的阅读对话 |
-| `message` | 稳定消息身份、类型、回复和当前修订 |
-| `message_revision` | 版本化富文本 JSON 与纯文本投影 |
-| `source_anchor` | 规范 Locator、后端 Locator、原文上下文和内容哈希 |
-| `outbox_event` | 与事实同事务写入的待处理事件 |
-| `message_fts` | `message_revision.plain_text` 的 FTS5 外部内容索引 |
+| 表 | 责任 |
+| --- | --- |
+| `work`、`edition` | 作品与内容哈希 Edition；同一内容重导复用身份 |
+| `conversation` | Edition 内由根 Message 开始的阅读对话及最近活动时间 |
+| `message` | 稳定身份、顺序、父回复、当前修订、当前原文引用和删除墓碑 |
+| `message_revision` | schema 1 的不可变 source-only 或 text 修订与纯文本投影 |
+| `source_anchor` | 不可变原始 Locator、可唯一重锚的当前 Locator、原文、上下文和哈希 |
+| `source_snapshot` | 创建或重选时的 HTML、reader/book/user CSS 与呈现参数 |
+| `snapshot_resource` | 快照资源的原始相对路径、媒体类型、长度、哈希和资产名 |
+| `message_reference` | Message 之间可正反向查询的有向引用 |
+| `message_search` | 仅当前、未删除修订的 FTS5 trigram 投影 |
+| `legacy_import_state`、`legacy_annotation_import` | localStorage 标注原子、幂等迁移的完成凭据与旧 ID 映射 |
+| `outbox_event` | 与每次事实写入同事务保存的本地待处理事件 |
 
-## 已验证不变量
+## 已实现不变量
 
-- ID 为 16 字节 BLOB，文件指纹和内容哈希为 32 字节 BLOB。
-- `message.current_revision_id` 必须属于同一消息。
-- JSON 列必须通过 SQLite `json_valid`。
-- 书籍会话必须关联 `edition`。
-- FTS 触发器覆盖插入、更新和删除，并通过 `integrity-check`。
-- 消息事实与 Outbox 事件可在同一事务回滚。
-- 外键检查与 `integrity_check` 通过。
+- 根 Message 必须拥有同 Edition 的 `SourceAnchor` 与 `SourceSnapshot`；回复不拥有原文快照。
+- 添加笔记和编辑只追加 `MessageRevision`，调用方必须提交期望修订 ID；旧版本冲突不会覆盖新版本。
+- 自动唯一重锚只更新当前 Locator；主动重选创建新的 Anchor 与 Snapshot，并保留旧捕获。
+- 删除只写墓碑和 deleted 修订；修订、关系、快照和资源仍可查询或导出。
+- 引用目标必须存在、未删除且属于同一 Edition；拒绝未知、跨 Edition、父消息和自身引用。
+- 快照再次校验 Locator 版本、原文哈希、HTML 文本、活动元素/属性、CSS 外部引用、资源路径、媒体类型、长度和 SHA-256；未绑定资源和多余资源均拒绝。
+- 每次写入与 Outbox 事件同事务提交；资产或数据库失败不能留下部分消息事实。
+- FTS 只返回当前未删除修订，可按 Edition 与 section 过滤；对话最近有回复、编辑、重选或删除时，根消息投影随之上浮。
+- 书架移除不触碰消息数据库或快照资产；同内容重新导入后继续使用相同 Edition。
 
-## 尚未决定或实现
+## 公开 interface
 
-- M2 迁移代码的具体文件布局；
-- ID 生成算法；
-- 富文本 JSON 的完整 schema；
-- FTS 是否只物理索引当前修订，或索引全部修订后在查询中连接过滤；
-- 删除墓碑、附件、阅读会话和导入任务表；
-- 备份、加密、checkpoint 和升级策略。
+`MessageStore` 直接提供根消息、对话、搜索、关系、修订、历史捕获与资源查询，以及创建根消息、回复、修订、删除、重选、重锚、旧标注导入和自包含 ZIP 导出。它是唯一 SQLite 实现，不存在 repository trait 或 UI 数据副本。
 
-未决项目必须在对应后端规格中明确，不能把 P0 DDL 直接当成生产 schema。
+Tauri 只暴露受限 DTO command，并校验调用窗口仍位于阅读路由。前端 `message-store.mjs` 把根 Message 投影为既有标注/笔记 interface；`conversations.mjs` 使用同一事实显示回复、引用关系、修订、历史快照、跳回和导出。
 
 ## 验证入口
 
 ```powershell
-pwsh -NoProfile -File .\scripts\check-p0-sqlite.ps1
+pwsh -NoProfile -File .\scripts\check-message-reading.ps1
 ```
 
-该命令会删除并重建 `build/p0-sqlite/atha-p0.sqlite`。输出属于 Windows 本地证据。
+该检查覆盖正式迁移、重复打开、未来版本拒绝、外键、FTS5、完整性、回滚、并发修订、墓碑、重锚、资源、旧标注迁移、关系、搜索和自包含导出，并编译 Tauri 前端与 command seam。证据等级为 Windows 本地；真实书籍的完整交互闭环由最终阅读器验收单独记录。

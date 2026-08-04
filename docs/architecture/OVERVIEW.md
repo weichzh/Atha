@@ -34,7 +34,7 @@ SQLite 与本地资产是事实源。用户可变数据、全文索引、缓存�
 
 ## 共读语义
 
-阅读中的消息、引用、存档和未来 AI 书友边界见 `docs/architecture/MESSAGE-READING.md`。现有 P0 数据库只验证部分语义，不能替代该架构定义或直接视为生产 schema。
+阅读中的消息、引用、存档和未来 AI 书友边界见 `docs/architecture/MESSAGE-READING.md`。正式 `backend::messages` 已实现本地事实、迁移、查询、快照资产和导出；P0 数据库只保留为历史技术对照。
 
 ## 质量边界
 

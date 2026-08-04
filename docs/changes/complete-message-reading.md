@@ -66,18 +66,18 @@ accepted
 
 ## Acceptance Criteria
 
-- [ ] 正式 SQLite 从空库迁移、重复打开、事务回滚、未来版本拒绝、外键、FTS5 与 integrity check 均通过；应用数据库不是 P0 文件；
+- [x] 正式 SQLite 从空库迁移、重复打开、事务回滚、未来版本拒绝、外键、FTS5 与 integrity check 均通过；应用数据库不是 P0 文件；
 - [ ] 真实书籍选区可创建带不可变 `SourceSnapshot` 的 source-only 标注或带正文笔记；两者是同一 Message 事实的不同当前修订和投影；
-- [ ] 已有 localStorage 标注与笔记可原子、幂等迁移；失败不丢失或覆盖旧数据，成功后数量、原文哈希、笔记、墓碑和跳转保持；
-- [ ] 可回复消息、引用一个或多个既有消息、查询正反向关系，并拒绝跨 Edition、未知、删除或自引用目标；
-- [ ] 编辑追加 `MessageRevision` 且旧修订可查看；并发旧版本编辑明确冲突；软删除保留历史和关系但默认列表不显示正文；
-- [ ] 当前修订全文搜索只返回当前未删除消息，可按书籍和章节过滤并跳转；完整对话、章节回顾和关系视图来自同一份后端事实；
+- [x] 已有 localStorage 标注与笔记可原子、幂等迁移；失败不丢失或覆盖旧数据，成功后数量、原文哈希、笔记、墓碑和跳转保持；
+- [x] 可回复消息、引用一个或多个既有消息、查询正反向关系，并拒绝跨 Edition、未知、删除或自引用目标；
+- [x] 编辑追加 `MessageRevision` 且旧修订可查看；并发旧版本编辑明确冲突；软删除保留历史和关系但默认列表不显示正文；
+- [x] 当前修订全文搜索只返回当前未删除消息，可按书籍和章节过滤并跳转；完整对话、章节回顾和关系视图来自同一份后端事实；
 - [ ] 历史快照包含已校验 HTML、实际 CSS、呈现参数与所需本地资源；更改主题、字号、本书 CSS 或重新打开后历史呈现内容和资产哈希不变；
 - [ ] 对话浮层可收起、可调整大小，键盘和读屏基础完整；标注、笔记、回复、编辑、重选、删除、修订、引用、搜索、快照与跳转均有可见成功或失败状态；
 - [ ] 应用重启和同内容重新导入后消息可恢复并跳回；书架移除不删除消息；损坏数据库或快照不能被静默覆盖；
-- [ ] 对话或本书消息可导出为自包含归档，重新校验归档可证明 schema、关系、修订、快照和资源完整，不泄漏原始路径；
+- [x] 对话或本书消息可导出为自包含归档，重新校验归档可证明 schema、关系、修订、快照和资源完整，不泄漏原始路径；
 - [ ] 真实《数学及其历史》完成“选择 → 标注 → 同一记录添加笔记 → 回复 → 引用消息 → 编辑 → 重选 → 搜索 → 快照 → 跳回 → 重启恢复 → 导出”闭环；
-- [ ] 现有书架、四样本阅读器、安全、标注、持久化与 Tauri benchmark 无 blocking 回退，消息列表与输入规模基线有固定门槛；
+- [x] 现有书架、四样本阅读器、安全、标注、持久化与 Tauri benchmark 无 blocking 回退，消息列表与输入规模基线有固定门槛；
 - [ ] 独立 standards 与 spec review 均无 blocking。
 
 ## Files And Steps
@@ -115,14 +115,20 @@ accepted
 
 ## Result
 
-待实施。
+正式消息数据与阅读器交互已经实现：`MessageStore` 拥有 schema v2 SQLite、快照资产、迁移、关系、搜索、导出和事务 Outbox；Tauri 只暴露受限 command，阅读内核只捕获候选并投影根 Message；Svelte 阅读页提供全屏笔记页和对话浮层。旧 localStorage 标注只作为一次性迁移输入，不再与正式事实双写。
+
+现有四样本、书架、Tauri 产品构建与 benchmark 回归均通过。真实《数学及其历史》的旧阅读能力已经通过实际 WebView2 runner；新消息 UI 的完整人工闭环留给用户试用验收，因此本 change 暂不标记 `implemented`。
 
 ## Review
 
-- Blocking：待实施。
-- Non-blocking：待实施。
-- Out-of-scope：待实施。
+- Blocking：待 review。
+- Non-blocking：真实消息 UI 尚未形成稳定的自动化产品入口；用户试用前不为此恢复已证明不稳定的 GUI verifier。
+- Out-of-scope：备份、加密、同步、AI、富文本、附件和通用聊天仍按 Non-Goals 暂缓。
 
 ## Evidence And Residual Risks
 
-待实施。
+- Windows 本地：`scripts/check-message-reading.ps1` 通过 14 个消息 interface 集成测试、Svelte check/build 与 Tauri/host 测试；`scripts/check-backend.ps1` 的 fmt、clippy、workspace test 和 doc 全部通过。
+- Windows 真实 WebView2：`scripts/check-reader-samples.ps1` 四样本明暗、真实输入、持久化和跨 host 恢复通过；过长的单次 `agent-browser eval` 已拆成两个阶段，不再触发默认 25 秒超时或 daemon busy。
+- Windows 真实 Tauri/本地：`scripts/check-library-shelf.ps1` 与 `scripts/check-tauri-reader.ps1` 通过。书架原生就绪条件改为稳定根节点，不再错误假设用户书架为空。
+- 性能：基准 `1785859567155-20612` 的 cold start / first stable / hot open / page turn / font reflow P95 分别为 739.307 / 148.700 / 27.300 / 31.900 / 41.600ms，低于 2000 / 750 / 120 / 50 / 150ms 门槛；没有同时间旧代码对照，不能归因性能变化。
+- 残余：尚未由用户在真实 Tauri 消息 UI 完成“选择至导出”的全链路，也未验证关闭应用后的消息 UI 恢复；当前证据不能替代该真实目标验收。
