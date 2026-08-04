@@ -675,9 +675,13 @@ export function createDiagnostics({
       const singleStep =
         deltaY > 0
           ? (after.section === before.section && after.page === before.page + 1) ||
-            (after.section === before.section + 1 && after.page === 0)
+            (after.section === before.section + 1 &&
+              before.page === before.pages - 1 &&
+              after.page === 0)
           : (after.section === before.section && after.page === before.page - 1) ||
-            (after.section === before.section - 1 && after.page === after.pages - 1);
+            (after.section === before.section - 1 &&
+              before.page === 0 &&
+              after.page === after.pages - 1);
       return Object.freeze({
         accepted: after.section !== before.section || after.page !== before.page,
         defaultPrevented: event.defaultPrevented,
