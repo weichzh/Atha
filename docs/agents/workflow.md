@@ -2,6 +2,8 @@
 
 全局 `project-workflow` 管理任务 claim、工站证据、关闭状态和跨项目日志；本仓库只提供项目事实与真实检查命令。进入任务时仍按 `AGENTS.md` 读取 `CONTEXT.md`、`ACTIVE.md` 和对应 Context Bundle。
 
+`docs/agents/references.md` 是外部技术与标准的项目参考地图。进入任务时先读它；涉及框架行为、API 语义、兼容性、错误或性能时，从地图直达对应版本的官方文档或源码，不凭记忆试错。
+
 ## 路由
 
 - `audit` 是有停止条件的只读调查，不 claim 文件，也不要求提交；

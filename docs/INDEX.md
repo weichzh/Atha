@@ -9,7 +9,7 @@
 | `product` | `product/OVERVIEW.md`、`architecture/OVERVIEW.md`、相关当前 change |
 | `reader` | `architecture/READER-CORE.md`、`codebase/MAP.md`、相关 ADR/change 与样本契约 |
 | `messages` | `architecture/MESSAGE-READING.md`、`codebase/DATABASE.md`、相关 change |
-| `workflow` | `agents/workflow.md`、`workflow/PROTOCOL.md`、活动 change |
+| `workflow` | `agents/workflow.md`、`agents/references.md`、`workflow/PROTOCOL.md`、活动 change |
 | `audit` | 直接事实所有者与一份必要证据；不自动升级为实施 |
 
 ## 当前注册表
@@ -20,6 +20,7 @@
 | [CONTEXT.md](../CONTEXT.md) | 稳定目标、目录和所有权 |
 | [ACTIVE.md](ACTIVE.md) | 当前执行指针 |
 | [agents/workflow.md](agents/workflow.md) | 全局工作流的项目契约与检查 gate |
+| [agents/references.md](agents/references.md) | 外部技术与标准的官方入口和项目快速用法 |
 | [workflow/PROTOCOL.md](workflow/PROTOCOL.md) | 任务和 change 生命周期 |
 | [product/OVERVIEW.md](product/OVERVIEW.md) | 产品目标与体验边界 |
 | [architecture/OVERVIEW.md](architecture/OVERVIEW.md) | 系统边界 |
