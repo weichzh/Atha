@@ -1,11 +1,12 @@
 use std::{collections::HashSet, error::Error, fmt};
 
+use dom_query::Document;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::util::decode_hex;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditionInput {
     pub content_version: String,
@@ -336,7 +337,11 @@ pub(crate) fn validate_root(draft: &RootMessageDraft) -> Result<(), MessageError
     {
         return Err(MessageError::InvalidInput);
     }
-    validate_source(&draft.anchor, &draft.snapshot)
+    validate_source(&draft.anchor, &draft.snapshot)?;
+    if locator_content_version(&draft.anchor.canonical_locator)? != draft.edition.content_version {
+        return Err(MessageError::InvalidInput);
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_edition(edition: &EditionInput) -> Result<(), MessageError> {
@@ -383,7 +388,95 @@ pub(crate) fn validate_source(
     if Sha256::digest(anchor.selected_text.as_bytes()).as_slice() != content_hash {
         return Err(MessageError::InvalidInput);
     }
+    validate_snapshot_markup(
+        &snapshot.fragment_html,
+        &anchor.selected_text,
+        &snapshot.resources,
+    )?;
+    validate_snapshot_css(&snapshot.reader_css)?;
+    validate_snapshot_css(&snapshot.book_css)?;
+    validate_snapshot_css(&snapshot.user_css)?;
     validate_resources(&snapshot.resources)
+}
+
+fn locator_content_version(value: &str) -> Result<String, MessageError> {
+    serde_json::from_str::<serde_json::Value>(value)
+        .ok()
+        .and_then(|locator| locator.get("contentVersion")?.as_str().map(str::to_owned))
+        .ok_or(MessageError::InvalidInput)
+}
+
+fn validate_snapshot_markup(
+    fragment: &str,
+    selected_text: &str,
+    resources: &[SnapshotResourceInput],
+) -> Result<(), MessageError> {
+    let document = Document::fragment(fragment);
+    if !document.errors.borrow().is_empty()
+        || document.text().as_ref() != selected_text
+        || document
+            .try_select(
+                "script,iframe,object,embed,form,input,button,select,textarea,video,audio,source,track,style,link,meta,base",
+            )
+            .is_some()
+    {
+        return Err(MessageError::InvalidInput);
+    }
+    let declared = resources
+        .iter()
+        .map(|resource| resource.path.clone())
+        .collect::<HashSet<_>>();
+    let mut referenced = HashSet::new();
+    for node in document
+        .root()
+        .descendants()
+        .into_iter()
+        .filter(|node| node.is_element())
+    {
+        let name = node.node_name().ok_or(MessageError::InvalidInput)?;
+        for attribute in node.attrs() {
+            let attribute_name = attribute.name.local.as_ref();
+            if attribute_name.starts_with("on")
+                || matches!(attribute_name, "style" | "srcset")
+                || attribute_name == "href" && name.as_ref() != "image"
+                || attribute_name == "src" && name.as_ref() != "img"
+            {
+                return Err(MessageError::InvalidInput);
+            }
+            if matches!(
+                (name.as_ref(), attribute_name),
+                ("img", "src") | ("image", "href")
+            ) {
+                let path = attribute.value.as_ref();
+                validate_resource_path(path)?;
+                if !declared.contains(path) {
+                    return Err(MessageError::InvalidInput);
+                }
+                referenced.insert(path.to_owned());
+            }
+        }
+    }
+    if referenced == declared {
+        Ok(())
+    } else {
+        Err(MessageError::InvalidInput)
+    }
+}
+
+fn validate_snapshot_css(css: &str) -> Result<(), MessageError> {
+    let lower = css.to_ascii_lowercase();
+    if lower.contains("@import")
+        || lower.contains("javascript:")
+        || lower.contains("data:")
+        || lower.contains("http:")
+        || lower.contains("https:")
+        || lower.contains("//")
+        || css.contains('\\')
+    {
+        Err(MessageError::InvalidInput)
+    } else {
+        Ok(())
+    }
 }
 
 pub(crate) fn validate_range_locator(

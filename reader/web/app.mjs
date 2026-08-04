@@ -84,6 +84,7 @@ const pagination = createPagination({
 });
 
 let annotations;
+let conversations;
 let bookmarks;
 async function renderCachedSource() {
   await content.renderCached();
@@ -144,13 +145,27 @@ readerState = createReaderState({
   locator,
   assert,
 });
-const annotationStore = createAnnotationStore({
+const legacyAnnotationStore = createAnnotationStore({
   storage: durableStorage(),
   requireDurable: !params.has("verify") || params.has("persist"),
   keyPrefix,
   bookKey,
   locator,
 });
+const messageMode = Boolean(window.athaMessages && !params.has("verify"));
+const annotationStore =
+  messageMode
+    ? createMessageStore({
+        client: window.athaMessages,
+        legacy: legacyAnnotationStore,
+        keyPrefix,
+        bookKey,
+        session,
+        content,
+        preferences,
+        locator,
+      })
+    : legacyAnnotationStore;
 annotations = createAnnotations({
   store: annotationStore,
   content,
@@ -170,6 +185,8 @@ annotations = createAnnotations({
     noteHeading: document.querySelector("#annotation-note-heading"),
     noteInput: document.querySelector("#annotation-note"),
     cancelNote: document.querySelector("#cancel-annotation-note"),
+    filterQuery: document.querySelector("#annotation-filter-query"),
+    filterSection: document.querySelector("#annotation-filter-section"),
     list: document.querySelector("#annotations"),
     status: document.querySelector("#annotations-status"),
   },
@@ -177,8 +194,43 @@ annotations = createAnnotations({
     closeReaderTools();
     reader.focus({ preventScroll: true });
   },
+  onOpenConversation: messageMode
+    ? (conversationId, messageId) => conversations?.open(conversationId, messageId)
+    : null,
   assert,
 });
+if (messageMode) {
+  conversations = createConversations({
+    store: annotationStore,
+    annotations,
+    closeTools: closeReaderTools,
+    editionId: session.describe().contentVersion,
+    readingSurface: content.book,
+    returnFocus: reader,
+    controls: {
+      overlay: document.querySelector("#message-conversation"),
+      source: document.querySelector("#message-conversation-source"),
+      close: document.querySelector("#message-conversation-close"),
+      collapse: document.querySelector("#message-conversation-collapse"),
+      exportButton: document.querySelector("#message-conversation-export"),
+      exportAllButton: document.querySelector("#message-export-all"),
+      content: document.querySelector("#message-conversation-content"),
+      list: document.querySelector("#message-conversation-list"),
+      form: document.querySelector("#message-composer"),
+      composerContext: document.querySelector("#message-composer-context"),
+      text: document.querySelector("#message-composer-text"),
+      references: document.querySelector("#message-composer-references"),
+      cancelEdit: document.querySelector("#message-composer-cancel"),
+      status: document.querySelector("#message-conversation-status"),
+      historyDialog: document.querySelector("#message-history-dialog"),
+      historyTitle: document.querySelector("#message-history-title"),
+      historyContent: document.querySelector("#message-history-content"),
+      snapshotDialog: document.querySelector("#message-snapshot-dialog"),
+      snapshotVersions: document.querySelector("#message-snapshot-versions"),
+      snapshotContent: document.querySelector("#message-snapshot-content"),
+    },
+  });
+}
 bookmarks = createBookmarks({
   state: readerState,
   navigation,
@@ -358,6 +410,7 @@ async function start() {
   bindDirectoryProjection();
   search.bind();
   annotations.bind();
+  conversations?.bind();
   contentActions.bind();
   structuredActions.bind();
   interaction.bind();
@@ -378,7 +431,8 @@ async function start() {
 
 start().catch((error) => {
   if (!document.documentElement.dataset.error) {
-    const code = error instanceof Error && /^[a-z-]+$/.test(error.message) ? error.message : "book-load";
+    const reason = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+    const code = /^[a-z-]+$/.test(reason) ? reason : "book-load";
     fail(code);
   }
 });

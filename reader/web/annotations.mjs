@@ -11,6 +11,7 @@ export function createAnnotations({
   locator,
   controls,
   onNavigate,
+  onOpenConversation,
   assert,
 }) {
   let lastError = null;
@@ -21,6 +22,9 @@ export function createAnnotations({
   let editingNoteId = null;
   let rangeEditingId = null;
   let renderedRanges = new Map();
+  let filterGeneration = 0;
+  let filterTimer = null;
+  let searchConversations = null;
 
   function textNodes() {
     const nodes = [];
@@ -123,12 +127,22 @@ export function createAnnotations({
       "annotation-anchor": "标注位置无法重锚",
       "annotation-overlay": "当前浏览器不支持高亮",
       "annotation-note": "笔记最多 2000 个字符",
+      "annotation-search": "笔记搜索失败",
       "annotation-copy": "复制失败，请使用系统复制命令",
     }[code];
   }
 
   function sync() {
-    const active = store.active();
+    const all = store.active();
+    const query = controls.filterQuery.value.trim().toLocaleLowerCase();
+    const section = controls.filterSection.value;
+    const active = all.filter((item) => {
+      const itemSection = locator.inspect(item.sourceAnchor.canonicalLocator).start.section;
+      if (section && itemSection !== section) return false;
+      if (!query) return true;
+      if (searchConversations) return searchConversations.has(item.conversationId);
+      return `${item.sourceAnchor.selectedText}\n${item.note}`.toLocaleLowerCase().includes(query);
+    });
     controls.list.replaceChildren(
       ...active.map((item) => {
         const row = document.createElement("article");
@@ -142,7 +156,7 @@ export function createAnnotations({
         button.type = "button";
         button.className = "annotation-item-main";
         button.dataset.annotationId = item.id;
-        button.dataset.annotationAction = "go";
+        button.dataset.annotationAction = onOpenConversation ? "conversation" : "go";
         kind.className = "annotation-item-kind";
         kind.textContent = item.type === "note" ? "笔记" : "标注";
         quote.className = "annotation-item-quote";
@@ -174,7 +188,31 @@ export function createAnnotations({
     );
     const code = errorCode();
     controls.status.dataset.error = String(Boolean(code));
-    controls.status.textContent = statusText(code) || `${active.length} 条笔记与标注`;
+    controls.status.textContent =
+      statusText(code) ||
+      (query || section
+        ? `${active.length} 条符合条件，共 ${all.length} 条`
+        : `${active.length} 条笔记与标注`);
+  }
+
+  async function applyFilters() {
+    const generation = ++filterGeneration;
+    const query = controls.filterQuery.value.trim();
+    const section = controls.filterSection.value || null;
+    searchConversations = null;
+    sync();
+    if (!query || typeof store.search !== "function") return;
+    try {
+      const hits = await store.search(session.describe().contentVersion, query, section);
+      if (generation !== filterGeneration) return;
+      searchConversations = new Set(hits.map((hit) => hit.conversationId));
+      if (lastError === "annotation-search") lastError = null;
+    } catch {
+      if (generation !== filterGeneration) return;
+      lastError = "annotation-search";
+      searchConversations = new Set();
+    }
+    sync();
   }
 
   function fail(error) {
@@ -216,12 +254,12 @@ export function createAnnotations({
     };
   }
 
-  function resolve(item) {
+  async function resolve(item) {
     const candidate = reanchor(item);
     if (!candidate || candidate === false || !candidate.sourceAnchor) {
       return candidate && candidate.range;
     }
-    const replaced = store.replaceAnchor(item.id, candidate.sourceAnchor);
+    const replaced = await store.reanchor(item.id, candidate.sourceAnchor);
     if (!replaced.ok) lastError = replaced.error;
     return replaced.ok ? candidate.range : "write";
   }
@@ -238,7 +276,7 @@ export function createAnnotations({
     const nextRenderedRanges = new Map();
     reanchorFailures = 0;
     for (const item of store.active()) {
-      const range = resolve(item);
+      const range = await resolve(item);
       if (range === false) reanchorFailures += 1;
       else if (range !== "write" && range) {
         ranges.push(range);
@@ -262,12 +300,13 @@ export function createAnnotations({
     } catch {
       return fail("annotation-selection");
     }
-    const result = await store.add(sourceAnchor, note);
+    const result = await store.add(sourceAnchor, note, range);
     if (!result.ok) return fail(result.error);
     lastError = null;
     pendingSelection = null;
     content.book.getRootNode().getSelection?.().removeAllRanges();
     await redraw();
+    if (note && result.conversationId) onOpenConversation?.(result.conversationId, result.id);
     return result;
   }
 
@@ -278,7 +317,7 @@ export function createAnnotations({
 
   async function updateNote(id, note) {
     if (String(note).trim().length > ANNOTATION_MAX_NOTE_LENGTH) return fail("annotation-note");
-    const result = store.updateNote(id, note);
+    const result = await store.updateNote(id, note);
     if (!result.ok) return fail(result.error);
     lastError = null;
     sync();
@@ -292,7 +331,7 @@ export function createAnnotations({
     } catch {
       return fail("annotation-selection");
     }
-    const result = store.replaceAnchor(id, sourceAnchor);
+    const result = await store.replaceAnchor(id, sourceAnchor, range);
     if (!result.ok) return fail(result.error);
     lastError = null;
     content.book.getRootNode().getSelection?.().removeAllRanges();
@@ -301,7 +340,7 @@ export function createAnnotations({
   }
 
   async function remove(id) {
-    const result = store.remove(id);
+    const result = await store.remove(id);
     if (!result.ok) return fail(result.error);
     lastError = null;
     await redraw();
@@ -319,7 +358,7 @@ export function createAnnotations({
     if (session.snapshot().currentSection !== inspected.start.section) {
       await session.open(index);
     }
-    const resolved = resolve(store.item(id));
+    const resolved = await resolve(store.item(id));
     if (!resolved || resolved === "write") return fail(lastError || "annotation-anchor");
     item = store.item(id);
     if (!item || !(await navigation.goTo(item.sourceAnchor.canonicalLocator))) {
@@ -354,6 +393,23 @@ export function createAnnotations({
   }
 
   function bind() {
+    const description = session.describe();
+    controls.filterSection.append(
+      ...description.sections.map((section, index) => {
+        const option = document.createElement("option");
+        option.value = section.id;
+        option.textContent =
+          description.toc.find((item) => item.href.split("#", 1)[0] === section.href)?.label ||
+          `第 ${index + 1} 节`;
+        return option;
+      }),
+    );
+    const scheduleFilters = () => {
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => applyFilters(), 150);
+    };
+    controls.filterQuery.addEventListener("input", scheduleFilters);
+    controls.filterSection.addEventListener("change", () => applyFilters());
     const selectedItem = () => selectedAnnotationId && store.item(selectedAnnotationId);
     const matchingAnnotation = (range) => {
       const start = offsetForBoundary(range.startContainer, range.startOffset);
@@ -553,6 +609,11 @@ export function createAnnotations({
         openNoteDialog(button.dataset.annotationId);
       } else if (button.dataset.annotationAction === "delete") {
         await remove(button.dataset.annotationId);
+      } else if (button.dataset.annotationAction === "conversation") {
+        const item = store.item(button.dataset.annotationId);
+        if (item) {
+          await onOpenConversation(item.conversationId, item.id);
+        }
       } else {
         const result = await go(button.dataset.annotationId);
         if (result.ok) onNavigate?.();

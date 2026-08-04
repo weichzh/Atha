@@ -429,8 +429,60 @@ export function createContent({ host, readerStyleSource, fail }) {
     });
   }
 
+  async function captureRange(range, presentation) {
+    ensure(range instanceof Range && book.contains(range.commonAncestorContainer), "annotation-selection");
+    const wrapper = document.createElement("div");
+    wrapper.append(range.cloneContents());
+    wrapper
+      .querySelectorAll(
+        "script,iframe,object,embed,form,input,button,select,textarea,video,audio,source,track,style,link,meta,base",
+      )
+      .forEach((element) => element.remove());
+    for (const element of wrapper.querySelectorAll("*")) {
+      for (const attribute of [...element.attributes]) {
+        const name = attribute.name.toLowerCase();
+        if (
+          name.startsWith("on") ||
+          ["style", "srcset"].includes(name) ||
+          (name === "href" && element.localName.toLowerCase() !== "image")
+        ) {
+          element.removeAttribute(attribute.name);
+        }
+      }
+    }
+    const resources = new Map();
+    for (const element of wrapper.querySelectorAll("img[src], image[href]")) {
+      const attribute = element.localName.toLowerCase() === "img" ? "src" : "href";
+      const url = new URL(localBookUrl(element.getAttribute(attribute)));
+      const path = url.pathname.slice(1);
+      element.setAttribute(attribute, path);
+      if (resources.has(path)) continue;
+      const response = await fetch(url);
+      ensure(response.ok, "image-load");
+      const mediaType = (response.headers.get("content-type") || "")
+        .split(";", 1)[0]
+        .trim()
+        .toLowerCase();
+      ensure(mediaType.startsWith("image/"), "image-load");
+      resources.set(path, {
+        path,
+        mediaType,
+        bytes: [...new Uint8Array(await response.arrayBuffer())],
+      });
+    }
+    return Object.freeze({
+      fragmentHtml: wrapper.innerHTML,
+      readerCss: readerStyle.textContent,
+      bookCss: bookStyle.textContent,
+      userCss: userStyle.textContent,
+      presentationJson: JSON.stringify({ schema: 1, ...presentation }),
+      resources: Object.freeze([...resources.values()].map(Object.freeze)),
+    });
+  }
+
   return Object.freeze({
     book,
+    captureRange,
     close,
     initialize,
     loadSection,

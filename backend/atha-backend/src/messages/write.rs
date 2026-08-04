@@ -348,6 +348,12 @@ impl MessageStore {
         if changed != 1 {
             return Err(MessageError::RevisionConflict);
         }
+        transaction
+            .execute(
+                "UPDATE conversation SET updated_at_ms = ?2 WHERE id = (SELECT conversation_id FROM message WHERE id = ?1)",
+                params![message, now],
+            )
+            .map_err(|_| MessageError::Database)?;
         refresh_conversation_search(&transaction, &message)?;
         transaction
             .execute(
@@ -454,6 +460,12 @@ impl MessageStore {
             .map_err(|_| MessageError::Database)?;
         transaction
             .execute(
+                "UPDATE conversation SET updated_at_ms = ?2 WHERE id = (SELECT conversation_id FROM message WHERE id = ?1)",
+                params![message, now],
+            )
+            .map_err(|_| MessageError::Database)?;
+        transaction
+            .execute(
                 "DELETE FROM message_search WHERE message_id = ?1",
                 params![message_id],
             )
@@ -524,6 +536,12 @@ impl MessageStore {
         if changed != 1 {
             return Err(MessageError::RevisionConflict);
         }
+        transaction
+            .execute(
+                "UPDATE conversation SET updated_at_ms = ?2 WHERE id = (SELECT conversation_id FROM message WHERE id = ?1)",
+                params![message, now],
+            )
+            .map_err(|_| MessageError::Database)?;
         refresh_search(&transaction, &message)?;
         transaction
             .execute(

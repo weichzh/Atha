@@ -24,14 +24,14 @@ impl MessageStore {
             .prepare(
                 "SELECT c.id, m.id, r.id, r.kind, r.plain_text,
                         a.id, a.original_locator_json, a.current_locator_json, a.section_id,
-                        a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, m.updated_at_ms
+                        a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, c.updated_at_ms
                  FROM conversation c
                  JOIN message m ON m.id = c.root_message_id AND m.conversation_id = c.id
                  JOIN message_revision r ON r.id = m.current_revision_id AND r.message_id = m.id
                  JOIN source_anchor a ON a.id = m.current_source_anchor_id AND a.message_id = m.id
                  WHERE c.edition_id = ?1 AND m.deleted_at_ms IS NULL
                    AND (?2 IS NULL OR a.section_id = ?2)
-                 ORDER BY m.updated_at_ms DESC, m.id LIMIT 1000",
+                 ORDER BY c.updated_at_ms DESC, m.id LIMIT 1000",
             )
             .map_err(|_| MessageError::Database)?;
         statement

@@ -3,6 +3,7 @@ import { mount } from "svelte";
 
 import App from "./App.svelte";
 import "./library.css";
+import { messageClient } from "./messages";
 import "./shell.css";
 import { isReaderRoute } from "./route";
 
@@ -20,6 +21,7 @@ if (window.__TAURI_INTERNALS__) {
       );
     },
   };
+  window.athaMessages = messageClient;
 }
 
 if (isReaderRoute()) await import("virtual:atha-reader-runtime");

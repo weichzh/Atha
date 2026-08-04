@@ -66,6 +66,12 @@ fn snapshot() -> SourceSnapshotInput {
     }
 }
 
+fn snapshot_for(selected_text: &str) -> SourceSnapshotInput {
+    let mut value = snapshot();
+    value.fragment_html = format!("<p>{selected_text}</p>");
+    value
+}
+
 fn set_anchor_text(anchor: &mut SourceAnchorInput, selected_text: &str) {
     let end = 10 + selected_text.encode_utf16().count();
     anchor.selected_text = selected_text.into();
@@ -173,7 +179,7 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
         .create_root(RootMessageDraft {
             edition: edition(),
             anchor: second_anchor,
-            snapshot: snapshot(),
+            snapshot: snapshot_for("有理数"),
             text: Some("第二条笔记".into()),
         })
         .expect("create second root");
@@ -265,7 +271,7 @@ fn search_indexes_only_current_undeleted_revisions_and_filters_sections() {
         .create_root(RootMessageDraft {
             edition: edition(),
             anchor: second_anchor,
-            snapshot: snapshot(),
+            snapshot: snapshot_for("代数结构"),
             text: Some("即将删除的笔记".into()),
         })
         .expect("create second");
@@ -314,6 +320,7 @@ fn source_snapshot_resources_are_content_addressed_and_retrievable() {
     let root = TestRoot::new("message-snapshot-resource");
     let store = MessageStore::open(&root.0).expect("open store");
     let mut captured = snapshot();
+    captured.fragment_html = "<p>算术与几何<img src=\"images/formula.png\"></p>".into();
     captured.resources.push(SnapshotResourceInput {
         path: "images/formula.png".into(),
         media_type: "image/png".into(),
@@ -337,11 +344,48 @@ fn source_snapshot_resources_are_content_addressed_and_retrievable() {
 
     assert_eq!(captures.len(), 1);
     assert!(captures[0].current);
-    assert_eq!(captures[0].snapshot.fragment_html, "<p>算术与几何</p>");
+    assert_eq!(
+        captures[0].snapshot.fragment_html,
+        "<p>算术与几何<img src=\"images/formula.png\"></p>"
+    );
     assert_eq!(captures[0].snapshot.resources.len(), 1);
     assert_eq!(captures[0].snapshot.resources[0].content_hash.len(), 64);
     assert_eq!(resource.media_type, "image/png");
     assert_eq!(resource.bytes, b"safe local image");
+}
+
+#[test]
+fn source_snapshot_rejects_active_markup_unbound_assets_and_wrong_edition() {
+    let root = TestRoot::new("message-snapshot-validation");
+    let store = MessageStore::open(&root.0).expect("open store");
+    for fragment_html in [
+        "<script>alert(1)</script>",
+        "<p onclick=\"alert(1)\">算术与几何</p>",
+        "<img src=\"images/missing.png\">",
+    ] {
+        let mut invalid = snapshot();
+        invalid.fragment_html = fragment_html.into();
+        assert_eq!(
+            store.create_root(RootMessageDraft {
+                edition: edition(),
+                anchor: anchor(),
+                snapshot: invalid,
+                text: None,
+            }),
+            Err(atha_backend::messages::MessageError::InvalidInput)
+        );
+    }
+    let mut wrong_edition = edition();
+    wrong_edition.content_version = "22".repeat(32);
+    assert_eq!(
+        store.create_root(RootMessageDraft {
+            edition: wrong_edition,
+            anchor: anchor(),
+            snapshot: snapshot(),
+            text: None,
+        }),
+        Err(atha_backend::messages::MessageError::InvalidInput)
+    );
 }
 
 #[test]
@@ -509,7 +553,7 @@ fn outbox_failure_rolls_back_the_message_fact() {
         store.create_root(RootMessageDraft {
             edition: edition(),
             anchor: failed_anchor,
-            snapshot: snapshot(),
+            snapshot: snapshot_for("事务回滚原文"),
             text: Some("不能留下来的笔记".into()),
         }),
         Err(atha_backend::messages::MessageError::Database)
@@ -534,6 +578,7 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
     let root = TestRoot::new("message-export");
     let store = MessageStore::open(&root.0).expect("open store");
     let mut first_snapshot = snapshot();
+    first_snapshot.fragment_html = "<p>算术与几何<img src=\"images/proof.png\"></p>".into();
     first_snapshot.resources.push(SnapshotResourceInput {
         path: "images/proof.png".into(),
         media_type: "image/png".into(),
@@ -556,7 +601,7 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
         .create_root(RootMessageDraft {
             edition: edition(),
             anchor: second_anchor,
-            snapshot: snapshot(),
+            snapshot: snapshot_for("数学证明"),
             text: None,
         })
         .expect("create second");
@@ -574,7 +619,7 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
         .create_root(RootMessageDraft {
             edition: edition(),
             anchor: unrelated_anchor,
-            snapshot: snapshot(),
+            snapshot: snapshot_for("无关章节"),
             text: Some("不应进入单对话导出".into()),
         })
         .expect("create unrelated conversation");
@@ -628,14 +673,15 @@ fn edition_roots_are_a_single_section_filterable_projection() {
         .create_root(RootMessageDraft {
             edition: edition(),
             anchor: second_anchor,
-            snapshot: snapshot(),
+            snapshot: snapshot_for("第二章原文"),
             text: None,
         })
         .expect("create second");
+    std::thread::sleep(std::time::Duration::from_millis(2));
     store
         .reply(ReplyDraft {
-            conversation_id: first.conversation_id,
-            reply_to_message_id: first.message_id,
+            conversation_id: first.conversation_id.clone(),
+            reply_to_message_id: first.message_id.clone(),
             text: "回复不应成为根消息列表项".into(),
             reference_ids: Vec::new(),
         })
@@ -649,6 +695,7 @@ fn edition_roots_are_a_single_section_filterable_projection() {
         .expect("filter roots");
 
     assert_eq!(all.len(), 2);
+    assert_eq!(all[0].conversation_id, first.conversation_id);
     assert_eq!(section.len(), 1);
     assert_eq!(section[0].kind, "source-only");
     assert_eq!(section[0].source.selected_text, "第二章原文");

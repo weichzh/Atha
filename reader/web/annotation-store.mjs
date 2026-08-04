@@ -147,6 +147,10 @@ export function createAnnotationStore({ storage, requireDurable, keyPrefix, book
     return items.filter((item) => item.deletedAt === null);
   }
 
+  function all() {
+    return items.map((value) => freezeItem(value));
+  }
+
   function item(id) {
     return active().find((value) => value.id === id) || null;
   }
@@ -282,10 +286,12 @@ export function createAnnotationStore({ storage, requireDurable, keyPrefix, book
 
   return Object.freeze({
     active,
+    all,
     add,
     clear,
     item,
     remove,
+    reanchor: replaceAnchor,
     replaceAnchor,
     restore,
     snapshot,

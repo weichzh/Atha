@@ -5,6 +5,7 @@ interface Window {
   athaReaderIpc?: {
     postMessage(message: string): void;
   };
+  athaMessages?: import("./messages").MessageClient;
   ipc?: {
     postMessage(message: string): void;
   };

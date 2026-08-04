@@ -27,6 +27,122 @@
   color: var(--ui-text);
 }
 
+.message-conversation {
+  position: fixed;
+  z-index: 15;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: 56px;
+  left: max(12px, env(safe-area-inset-left));
+  min-height: 220px;
+  height: min(52dvh, 520px);
+  max-height: calc(100dvh - 112px);
+  resize: vertical;
+  overflow: auto;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: 16px;
+  box-shadow: 0 18px 48px var(--ui-shadow);
+}
+
+.message-conversation[data-collapsed="true"] {
+  min-height: 0;
+  height: auto;
+  resize: none;
+}
+
+.message-conversation-heading,
+.message-conversation-heading-actions,
+.message-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-conversation-heading {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.message-conversation-heading h2,
+.message-conversation-heading p {
+  margin: 0;
+}
+
+.message-conversation-source {
+  max-width: 60vw;
+  overflow: hidden;
+  color: var(--ui-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-conversation-list,
+.message-composer {
+  padding: 14px;
+}
+
+.message-conversation-list {
+  display: grid;
+  gap: 12px;
+}
+
+.message-card {
+  padding: 12px;
+  background: var(--ui-surface-muted);
+  border-radius: 12px;
+}
+
+.message-card[data-deleted="true"] {
+  color: var(--ui-muted);
+}
+
+.message-card blockquote,
+.message-card p {
+  margin: 0 0 8px;
+}
+
+.message-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.message-composer {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--ui-border);
+}
+
+.message-composer textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+}
+
+.message-composer fieldset {
+  max-height: 120px;
+  overflow: auto;
+}
+
+.message-detail-dialog {
+  width: min(680px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: 16px;
+}
+
+#message-snapshot-content {
+  min-height: 220px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -475,7 +591,13 @@ textarea:focus-visible,
 }
 
 .notes-panel {
-  grid-template-rows: 56px minmax(0, 1fr) auto;
+  grid-template-rows: 56px auto minmax(0, 1fr) auto;
+}
+
+.annotation-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.4fr);
+  gap: 8px;
 }
 
 .annotation-list {

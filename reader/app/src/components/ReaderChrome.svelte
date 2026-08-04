@@ -1,5 +1,6 @@
 <script lang="ts">
   import BottomToolbar from "./chrome/BottomToolbar.svelte";
+  import ConversationOverlay from "./ConversationOverlay.svelte";
   import TopToolbar from "./chrome/TopToolbar.svelte";
 </script>
 
@@ -28,3 +29,5 @@
     </div>
   </form>
 </dialog>
+
+<ConversationOverlay />

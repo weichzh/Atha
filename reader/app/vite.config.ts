@@ -23,7 +23,9 @@ const runtimeSources = [
   "bookmarks.mjs",
   "search.mjs",
   "annotation-store.mjs",
+  "message-store.mjs",
   "annotations.mjs",
+  "conversations.mjs",
   "diagnostics.mjs",
   "app.mjs",
 ];
