@@ -36,15 +36,20 @@ try {
         [void]$startInfo.ArgumentList.Add($argument)
     }
     $server = [Diagnostics.Process]::Start($startInfo)
+    $ready = $false
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
         try {
-            if ((Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/health" -TimeoutSec 1).StatusCode -eq 200) { break }
+            if ((Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/health" -TimeoutSec 1).StatusCode -eq 200) {
+                $ready = $true
+                break
+            }
         }
         catch {
             Start-Sleep -Milliseconds 100
         }
     }
     if ($server.HasExited) { throw "Reader validation server exited with code $($server.ExitCode)." }
+    if (-not $ready) { throw 'Reader validation server did not become ready.' }
 
     $entry = '/book/EPUB/text/ch008.xhtml'
     $entryPath = Join-Path $bookRoot 'EPUB/text/ch008.xhtml'
