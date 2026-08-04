@@ -308,7 +308,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                         header::HeaderValue::from_static(PERMISSIONS_POLICY),
                     );
                 })
-                .on_navigation(|url| is_reader_url(url.as_str()))
+                .on_navigation(|url| is_app_navigation_url(url.as_str()))
                 .on_new_window(|_, _| NewWindowResponse::Deny)
                 .on_download(|_, _| false)
                 .prevent_overflow()
@@ -368,6 +368,10 @@ fn is_reader_url(url: &str) -> bool {
         return false;
     };
     suffix.is_empty() || suffix.starts_with('?') || suffix.starts_with('#')
+}
+
+fn is_app_navigation_url(url: &str) -> bool {
+    url == "https://tauri.localhost/" || is_reader_url(url)
 }
 
 fn handle_diagnostic_error(
@@ -494,6 +498,13 @@ mod tests {
         ));
         assert!(!is_reader_url("https://tauri.localhost/other.html"));
         assert!(!is_reader_url("https://example.com/index.html"));
+    }
+
+    #[test]
+    fn canonical_app_root_navigation_is_allowed() {
+        assert!(is_app_navigation_url("https://tauri.localhost/"));
+        assert!(is_app_navigation_url("https://tauri.localhost/index.html"));
+        assert!(!is_app_navigation_url("https://example.com/"));
     }
 
     #[test]

@@ -9,6 +9,7 @@ $hostPath = Join-Path $repoRoot 'target\debug\atha-reader-app.exe'
 $appRoot = Join-Path $repoRoot 'reader\app'
 $screenshots = Join-Path $repoRoot 'artifacts\local\screenshots'
 $session = "atha-library-check-$PID"
+$nativeSession = "$session-native"
 $port = 1421
 
 . (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
@@ -37,9 +38,18 @@ function Wait-LocalPort {
     throw "Local UI did not listen on port $Port."
 }
 
-function Invoke-LibraryWindowSmoke {
+function Get-FreePort {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    try { return ([Net.IPEndPoint]$listener.LocalEndpoint).Port }
+    finally { $listener.Stop() }
+}
+
+function Invoke-LibraryWindowCheck {
+    $nativePort = Get-FreePort
     $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
     $startInfo.UseShellExecute = $false
+    $startInfo.Environment['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = "--remote-debugging-port=$nativePort"
     $process = [Diagnostics.Process]::Start($startInfo)
     try {
         $deadline = [DateTime]::UtcNow.AddSeconds(30)
@@ -52,8 +62,18 @@ function Invoke-LibraryWindowSmoke {
         if ($process.MainWindowTitle -ne 'Atha') {
             throw "Unexpected Atha library window title: $($process.MainWindowTitle)"
         }
+        Wait-LocalPort $nativePort
+        Invoke-Checked 'agent-browser' @(
+            '--session', $nativeSession, '--cdp', $nativePort,
+            'wait', '--text', '开始你的书架'
+        )
+        $nativeUrl = @(& agent-browser --session $nativeSession --cdp $nativePort get url) -join "`n"
+        if ($LASTEXITCODE -ne 0 -or $nativeUrl -notmatch '^https://tauri\.localhost/?$') {
+            throw "Unexpected Atha library URL: $nativeUrl"
+        }
     }
     finally {
+        & agent-browser --session $nativeSession close 2>$null | Out-Null
         if (-not $process.HasExited) {
             $process.Kill($true)
             $process.WaitForExit()
@@ -113,7 +133,7 @@ try {
         Pop-Location
     }
     Invoke-Checked $env:ATHA_CARGO @('build', '--locked', '-p', 'atha-reader-app')
-    Invoke-LibraryWindowSmoke
+    Invoke-LibraryWindowCheck
     Invoke-LibraryBrowserCheck
 }
 finally {

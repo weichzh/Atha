@@ -71,7 +71,7 @@ Readest 的有效经验是把文件选择、内容哈希去重、耐久书目和
 
 ## Result
 
-无参数 Tauri 入口现在显示本地书架；官方文件对话框、源路径和 EPUB 导入全部收口在 Rust command。`LocalLibrary` 以内容哈希管理每书 JSON，复用既有导入缓存，并向 Svelte 只暴露受限书目。OPF 标题、作者和可选封面随导入缓存生成；动态正文协议与独立封面协议都从已校验书架记录解析资源。Svelte 提供空状态、导入反馈、响应式卡片、打开、返回和仅移除书架记录的操作；阅读路由才加载原有 reader runtime。
+无参数 Tauri 入口现在显示本地书架；官方文件对话框、源路径和 EPUB 导入全部收口在 Rust command。`LocalLibrary` 以内容哈希管理每书 JSON，复用既有导入缓存，并向 Svelte 只暴露受限书目。OPF 标题、作者和可选封面随导入缓存生成；动态正文协议与独立封面协议都从已校验书架记录解析资源。Svelte 提供空状态、导入反馈、响应式卡片、打开、返回和仅移除书架记录的操作；阅读路由才加载原有 reader runtime。用户首次试用发现无参数窗口停在 `about:blank`；根因是 Tauri 把 `index.html` 规范化为应用根 `/`，而导航白名单只接受 `/index.html`。宿主现单独允许规范应用根，书内遥测来源校验保持不变。
 
 ## Review
 
@@ -81,9 +81,9 @@ Readest 的有效经验是把文件选择、内容哈希去重、耐久书目和
 
 ## Evidence And Residual Risks
 
-- Windows 本地：`scripts/check-library-shelf.ps1` 通过后端 2 个导入/书架测试、锁定前端安装、Svelte check、production build、Tauri debug build、真实无参数窗口 smoke，以及 390 × 840 的空书架、无横向溢出和最小控件尺寸检查。
+- Windows 本地：原先只检查窗口标题的无参数 smoke 对 `about:blank` 产生假阳性。修复后的 `scripts/check-library-shelf.ps1` 通过 WebView2 调试端口让 Agent Browser 连接真实 Tauri DOM，明确断言应用根 URL 和“开始你的书架”；同时通过后端 2 个导入/书架测试、锁定前端安装、Svelte check、production build，以及 390 × 840 的无横向溢出和最小控件尺寸检查。
 - Windows 本地：`scripts/check-reader-samples.ps1` 在四个困难样本上通过；重排后的进度恢复允许最多等待 60 个 animation frame，但最终仍要求精确位置与进度相等。
-- Windows 本地：`scripts/check-tauri-reader.ps1` 在最终修复后通过 12 个 Rust 测试、production build、真实 EPUB import probe 和五项门槛。基准 `1785776709434-27872` 的 P95 为冷启动 609.962ms、首稳 187.000ms、热开 24.000ms、翻页 7.700ms、字号重排 51.300ms，均低于 2000/750/120/50/150ms 门槛。
+- Windows 本地：`scripts/check-tauri-reader.ps1` 在书架启动修复后通过 13 个 Rust 测试、production build、真实 EPUB import probe 和五项门槛。基准 `1785803101324-25568` 的 P95 为冷启动 749.057ms、首稳 157.500ms、热开 21.000ms、翻页 6.700ms、字号重排 48.600ms，均低于 2000/750/120/50/150ms 门槛。
 - Agent Browser 在 390 × 840 和 960 × 720 检查空书架及六本演示书架，无横向溢出；演示数据只用于布局，不是产品持久数据。
-- 原生文件对话框已由 Rust 官方插件按 EPUB filter 实现，但本轮自动化未可靠操作 Windows 文件选择器；真实无参数窗口已启动，选择文件这一步由用户试用验收。
+- 原生文件对话框已由 Rust 官方插件按 EPUB filter 实现，但本轮自动化未操作 Windows 文件选择器；真实无参数书架 DOM 已验收，选择文件这一步继续由用户试用验收。
 - Windows Cargo 偶发报告 incremental compilation session 最终化“拒绝访问”，所有正式命令仍以 0 退出；未推送、发布或生成安装包。
