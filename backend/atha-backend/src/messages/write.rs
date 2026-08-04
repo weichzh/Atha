@@ -366,6 +366,64 @@ impl MessageStore {
         })
     }
 
+    pub fn reanchor_source(
+        &self,
+        source_id: &str,
+        expected_locator: &str,
+        current_locator: &str,
+    ) -> Result<(), MessageError> {
+        let source = decode_hex::<16>(source_id)?;
+        let mut connection = self.connect()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| MessageError::Database)?;
+        let (stored_locator, section, selected_text, message): (String, String, String, Vec<u8>) =
+            transaction
+                .query_row(
+                    "SELECT a.current_locator_json, a.section_id, a.selected_text, a.message_id
+                     FROM source_anchor a JOIN message m ON m.current_source_anchor_id = a.id
+                     WHERE a.id = ?1 AND m.deleted_at_ms IS NULL",
+                    params![source],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => MessageError::UnknownMessage,
+                    _ => MessageError::Database,
+                })?;
+        if stored_locator != expected_locator {
+            return Err(MessageError::RevisionConflict);
+        }
+        let selected_length = selected_text.encode_utf16().count();
+        validate_range_locator(expected_locator, &section, selected_length)?;
+        validate_range_locator(current_locator, &section, selected_length)?;
+        let now = now_millis()?;
+        let outbox = random_id(&transaction)?;
+        let changed = transaction
+            .execute(
+                "UPDATE source_anchor SET current_locator_json = ?2
+                 WHERE id = ?1 AND current_locator_json = ?3
+                   AND EXISTS(SELECT 1 FROM message m WHERE m.id = ?4 AND m.current_source_anchor_id = ?1)",
+                params![source, current_locator, expected_locator, message],
+            )
+            .map_err(|_| MessageError::Database)?;
+        if changed != 1 {
+            return Err(MessageError::RevisionConflict);
+        }
+        transaction
+            .execute(
+                "INSERT INTO outbox_event (id, aggregate_type, aggregate_id, event_type, payload_json, created_at_ms)
+                 VALUES (?1, 'message', ?2, 'message-source-reanchored', ?3, ?4)",
+                params![
+                    outbox,
+                    message,
+                    serde_json::json!({ "messageId": encode_hex(&message), "sourceId": source_id }).to_string(),
+                    now
+                ],
+            )
+            .map_err(|_| MessageError::Database)?;
+        transaction.commit().map_err(|_| MessageError::Database)
+    }
+
     pub fn delete(&self, message_id: &str, expected_revision_id: &str) -> Result<(), MessageError> {
         let message = decode_hex::<16>(message_id)?;
         let expected = decode_hex::<16>(expected_revision_id)?;

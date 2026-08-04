@@ -188,6 +188,18 @@ pub struct ConversationView {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RootMessageView {
+    pub conversation_id: String,
+    pub message_id: String,
+    pub revision_id: String,
+    pub kind: String,
+    pub text: String,
+    pub source: MessageSourceView,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageRelationships {
     pub references: Vec<String>,
     pub referenced_by: Vec<String>,
@@ -347,8 +359,12 @@ pub(crate) fn validate_source(
     snapshot: &SourceSnapshotInput,
 ) -> Result<(), MessageError> {
     let content_hash = decode_hex::<32>(&anchor.content_hash)?;
-    if anchor.canonical_locator.len() > 8192
-        || serde_json::from_str::<serde_json::Value>(&anchor.canonical_locator).is_err()
+    if validate_range_locator(
+        &anchor.canonical_locator,
+        &anchor.section,
+        anchor.selected_text.encode_utf16().count(),
+    )
+    .is_err()
         || anchor.section.is_empty()
         || anchor.section.len() > 256
         || anchor.selected_text.trim().is_empty()
@@ -368,6 +384,66 @@ pub(crate) fn validate_source(
         return Err(MessageError::InvalidInput);
     }
     validate_resources(&snapshot.resources)
+}
+
+pub(crate) fn validate_range_locator(
+    value: &str,
+    expected_section: &str,
+    expected_length: usize,
+) -> Result<(), MessageError> {
+    if value.is_empty() || value.len() > 2048 {
+        return Err(MessageError::InvalidInput);
+    }
+    let locator =
+        serde_json::from_str::<serde_json::Value>(value).map_err(|_| MessageError::InvalidInput)?;
+    let object = locator.as_object().ok_or(MessageError::InvalidInput)?;
+    if object.len() != 4
+        || object.get("schema").and_then(serde_json::Value::as_u64) != Some(1)
+        || object
+            .get("contentVersion")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|version| decode_hex::<32>(version).is_err())
+    {
+        return Err(MessageError::InvalidInput);
+    }
+    let start = locator_point(object.get("start"))?;
+    let end = locator_point(object.get("end"))?;
+    if start.0 != expected_section
+        || end.0 != start.0
+        || end.1 < start.1
+        || usize::try_from(end.1 - start.1).ok() != Some(expected_length)
+    {
+        return Err(MessageError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn locator_point(value: Option<&serde_json::Value>) -> Result<(&str, i64), MessageError> {
+    let object = value
+        .and_then(serde_json::Value::as_object)
+        .ok_or(MessageError::InvalidInput)?;
+    if object.len() != 2 {
+        return Err(MessageError::InvalidInput);
+    }
+    let section = object
+        .get("section")
+        .and_then(serde_json::Value::as_str)
+        .filter(|section| {
+            !section.is_empty()
+                && section.len() <= 64
+                && section.bytes().enumerate().all(|(index, byte)| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || index > 0 && matches!(byte, b'.' | b'_' | b'-')
+                })
+        })
+        .ok_or(MessageError::InvalidInput)?;
+    let offset = object
+        .get("offset")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|offset| (0..=i64::from(i32::MAX)).contains(offset))
+        .ok_or(MessageError::InvalidInput)?;
+    Ok((section, offset))
 }
 
 pub(crate) fn validate_resources(resources: &[SnapshotResourceInput]) -> Result<(), MessageError> {

@@ -46,7 +46,7 @@ fn text_hash(value: &str) -> String {
 fn anchor() -> SourceAnchorInput {
     let selected_text = "算术与几何";
     SourceAnchorInput {
-        canonical_locator: r#"{"schema":1,"contentVersion":"1111111111111111111111111111111111111111111111111111111111111111","start":{"section":"section-1","offset":10},"end":{"section":"section-1","offset":18}}"#.into(),
+        canonical_locator: r#"{"schema":1,"contentVersion":"1111111111111111111111111111111111111111111111111111111111111111","start":{"section":"section-1","offset":10},"end":{"section":"section-1","offset":15}}"#.into(),
         section: "section-1".into(),
         selected_text: selected_text.into(),
         prefix_text: "第一章".into(),
@@ -64,6 +64,19 @@ fn snapshot() -> SourceSnapshotInput {
         presentation_json: r#"{"schema":1,"theme":"paper","fontSize":32}"#.into(),
         resources: Vec::new(),
     }
+}
+
+fn set_anchor_text(anchor: &mut SourceAnchorInput, selected_text: &str) {
+    let end = 10 + selected_text.encode_utf16().count();
+    anchor.selected_text = selected_text.into();
+    anchor.content_hash = text_hash(selected_text);
+    anchor.canonical_locator = serde_json::json!({
+        "schema": 1,
+        "contentVersion": edition().content_version,
+        "start": { "section": anchor.section, "offset": 10 },
+        "end": { "section": anchor.section, "offset": end }
+    })
+    .to_string();
 }
 
 #[test]
@@ -155,8 +168,7 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
         })
         .expect("create first root");
     let mut second_anchor = anchor();
-    second_anchor.selected_text = "有理数".into();
-    second_anchor.content_hash = text_hash("有理数");
+    set_anchor_text(&mut second_anchor, "有理数");
     let second = store
         .create_root(RootMessageDraft {
             edition: edition(),
@@ -248,8 +260,7 @@ fn search_indexes_only_current_undeleted_revisions_and_filters_sections() {
         .expect("create first");
     let mut second_anchor = anchor();
     second_anchor.section = "section-2".into();
-    second_anchor.selected_text = "代数结构".into();
-    second_anchor.content_hash = text_hash("代数结构");
+    set_anchor_text(&mut second_anchor, "代数结构");
     let second = store
         .create_root(RootMessageDraft {
             edition: edition(),
@@ -350,8 +361,7 @@ fn reselect_switches_the_current_source_without_rewriting_old_captures() {
         .expect("load original");
     let mut replacement_anchor = anchor();
     replacement_anchor.section = "section-2".into();
-    replacement_anchor.selected_text = "代数结构".into();
-    replacement_anchor.content_hash = text_hash("代数结构");
+    set_anchor_text(&mut replacement_anchor, "代数结构");
     let mut replacement_snapshot = snapshot();
     replacement_snapshot.fragment_html = "<p>代数结构</p>".into();
 
@@ -493,8 +503,7 @@ fn outbox_failure_rolls_back_the_message_fact() {
         .expect("install outbox fault");
     drop(connection);
     let mut failed_anchor = anchor();
-    failed_anchor.selected_text = "事务回滚原文".into();
-    failed_anchor.content_hash = text_hash("事务回滚原文");
+    set_anchor_text(&mut failed_anchor, "事务回滚原文");
 
     assert_eq!(
         store.create_root(RootMessageDraft {
@@ -542,8 +551,7 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
         .revise(&first.message_id, &first.revision_id, Some("第二版笔记"))
         .expect("revise first");
     let mut second_anchor = anchor();
-    second_anchor.selected_text = "数学证明".into();
-    second_anchor.content_hash = text_hash("数学证明");
+    set_anchor_text(&mut second_anchor, "数学证明");
     let second = store
         .create_root(RootMessageDraft {
             edition: edition(),
@@ -561,8 +569,7 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
         })
         .expect("create referenced reply");
     let mut unrelated_anchor = anchor();
-    unrelated_anchor.selected_text = "无关章节".into();
-    unrelated_anchor.content_hash = text_hash("无关章节");
+    set_anchor_text(&mut unrelated_anchor, "无关章节");
     store
         .create_root(RootMessageDraft {
             edition: edition(),
@@ -599,5 +606,92 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
     assert!(
         !String::from_utf8_lossy(&fs::read(archive).expect("read export"))
             .contains(root.0.to_string_lossy().as_ref())
+    );
+}
+
+#[test]
+fn edition_roots_are_a_single_section_filterable_projection() {
+    let root = TestRoot::new("message-roots");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let first = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: snapshot(),
+            text: Some("第一章笔记".into()),
+        })
+        .expect("create first");
+    let mut second_anchor = anchor();
+    second_anchor.section = "section-2".into();
+    set_anchor_text(&mut second_anchor, "第二章原文");
+    store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: second_anchor,
+            snapshot: snapshot(),
+            text: None,
+        })
+        .expect("create second");
+    store
+        .reply(ReplyDraft {
+            conversation_id: first.conversation_id,
+            reply_to_message_id: first.message_id,
+            text: "回复不应成为根消息列表项".into(),
+            reference_ids: Vec::new(),
+        })
+        .expect("create reply");
+
+    let all = store
+        .roots(&edition().content_version, None)
+        .expect("list roots");
+    let section = store
+        .roots(&edition().content_version, Some("section-2"))
+        .expect("filter roots");
+
+    assert_eq!(all.len(), 2);
+    assert_eq!(section.len(), 1);
+    assert_eq!(section[0].kind, "source-only");
+    assert_eq!(section[0].source.selected_text, "第二章原文");
+}
+
+#[test]
+fn automatic_reanchor_updates_only_the_current_locator() {
+    let root = TestRoot::new("message-reanchor");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let created = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: snapshot(),
+            text: None,
+        })
+        .expect("create root");
+    let before = store
+        .source_captures(&created.message_id)
+        .expect("load source");
+    let replacement = r#"{"schema":1,"contentVersion":"1111111111111111111111111111111111111111111111111111111111111111","start":{"section":"section-1","offset":20},"end":{"section":"section-1","offset":25}}"#;
+
+    store
+        .reanchor_source(
+            &before[0].source.id,
+            &before[0].source.canonical_locator,
+            replacement,
+        )
+        .expect("update current locator");
+    let after = store
+        .source_captures(&created.message_id)
+        .expect("reload source");
+
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].source.original_locator, anchor().canonical_locator);
+    assert_eq!(after[0].source.canonical_locator, replacement);
+    assert_eq!(after[0].snapshot.fragment_html, snapshot().fragment_html);
+    assert_eq!(
+        store.reanchor_source(
+            &after[0].source.id,
+            &before[0].source.canonical_locator,
+            &anchor().canonical_locator,
+        ),
+        Err(atha_backend::messages::MessageError::RevisionConflict)
     );
 }

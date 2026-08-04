@@ -10,6 +10,61 @@ use super::{
 };
 
 impl MessageStore {
+    pub fn roots(
+        &self,
+        edition_id: &str,
+        section: Option<&str>,
+    ) -> Result<Vec<RootMessageView>, MessageError> {
+        let edition = decode_hex::<32>(edition_id)?;
+        if section.is_some_and(|value| value.is_empty() || value.len() > 256) {
+            return Err(MessageError::InvalidInput);
+        }
+        let connection = self.connect()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT c.id, m.id, r.id, r.kind, r.plain_text,
+                        a.id, a.original_locator_json, a.current_locator_json, a.section_id,
+                        a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, m.updated_at_ms
+                 FROM conversation c
+                 JOIN message m ON m.id = c.root_message_id AND m.conversation_id = c.id
+                 JOIN message_revision r ON r.id = m.current_revision_id AND r.message_id = m.id
+                 JOIN source_anchor a ON a.id = m.current_source_anchor_id AND a.message_id = m.id
+                 WHERE c.edition_id = ?1 AND m.deleted_at_ms IS NULL
+                   AND (?2 IS NULL OR a.section_id = ?2)
+                 ORDER BY m.updated_at_ms DESC, m.id LIMIT 1000",
+            )
+            .map_err(|_| MessageError::Database)?;
+        statement
+            .query_map(params![edition, section], |row| {
+                let conversation: Vec<u8> = row.get(0)?;
+                let message: Vec<u8> = row.get(1)?;
+                let revision: Vec<u8> = row.get(2)?;
+                let source: Vec<u8> = row.get(5)?;
+                let content_hash: Vec<u8> = row.get(12)?;
+                Ok(RootMessageView {
+                    conversation_id: encode_hex(&conversation),
+                    message_id: encode_hex(&message),
+                    revision_id: encode_hex(&revision),
+                    kind: row.get(3)?,
+                    text: row.get(4)?,
+                    source: MessageSourceView {
+                        id: encode_hex(&source),
+                        original_locator: row.get(6)?,
+                        canonical_locator: row.get(7)?,
+                        section: row.get(8)?,
+                        selected_text: row.get(9)?,
+                        prefix_text: row.get(10)?,
+                        suffix_text: row.get(11)?,
+                        content_hash: encode_hex(&content_hash),
+                    },
+                    updated_at: row.get(13)?,
+                })
+            })
+            .map_err(|_| MessageError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| MessageError::Database)
+    }
+
     pub fn conversation(&self, id: &str) -> Result<ConversationView, MessageError> {
         let conversation_id = decode_hex::<16>(id)?;
         let connection = self.connect()?;
