@@ -6,7 +6,7 @@ description: 量化并修复图片悬停滚轮失效与连续滚轮翻页不跟�
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -29,11 +29,11 @@ accepted
 
 ## Acceptance Criteria
 
-- [ ] 普通图片、公式及链接包裹图片上的滚轮可以翻页，点击和键盘预览行为不回退；
-- [ ] 4 次 `deltaY=100`、间隔 100ms 的离散滚轮输入接受 4 次，每次只产生一次翻页；
-- [ ] 小幅连续输入仍需累计达到阈值，同一精密手势的尾流不会重复翻页；
-- [ ] 新探针记录滚轮输入到 Navigation 稳定的 nearest-rank P95，并在当前基线下不超过既有 50ms 翻页门槛；
-- [ ] 正式样书、Svelte/Tauri 检查、持久化交互和独立 review 无 blocking 回退。
+- [x] 普通图片、公式及链接包裹图片上的滚轮可以翻页，点击和键盘预览行为不回退；
+- [x] 4 次 `deltaY=100`、间隔 100ms 的离散滚轮输入接受 4 次，每次只产生一次翻页；
+- [x] 小幅连续输入仍需累计达到阈值，同一精密手势的尾流不会重复翻页；
+- [x] 新探针记录滚轮输入到 Navigation 稳定的 nearest-rank P95，并在当前基线下不超过既有 50ms 翻页门槛；
+- [x] 正式样书、Svelte/Tauri 检查、持久化交互和独立 review 无 blocking 回退。
 
 ## Files And Steps
 
@@ -63,14 +63,20 @@ accepted
 
 ## Result
 
-待实施。
+- 图片不再因预览按钮语义吞掉滚轮；普通图片、公式和链接包裹图片均沿既有 Navigation 路径翻页，点击与键盘预览规则未改变；
+- 标准离散滚轮每个事件翻一页，小幅精密滚轮仍累计阈值并抑制同一手势尾流；
+- 新增快速真实浏览器探针，固定检查媒体目标、4 次连续输入、单步翻页和输入到稳定页面的 P95，不增加依赖或第二套导航队列。
 
 ## Review
 
-- Blocking：待实施。
-- Non-blocking：待实施。
-- Out-of-scope：待实施。
+- Blocking：两轮独立复核最终均无 blocking；过程中发现的链接图片零覆盖、只比较页键而未严格断言单步、正式样书类型条件过严及无关 MAP 改动均已修正。
+- Non-blocking：链接图片路径因当前 fixture 没有真实样本，使用挂接到书页 DOM 的 `a[href] > img` 合成目标覆盖精确事件路径。
+- Out-of-scope：未调整图片解码、绘制、触摸与点击翻页，也未把本机结果外推为跨设备承诺。
 
 ## Evidence And Residual Risks
 
-待实施。
+- 修复前快速探针：普通图片目标不接受滚轮，4 次标准输入仅接受 1 次；证明问题位于输入策略，不在约 6.7ms 的 Pagination 本身。
+- 修复后 `scripts/check-reader-wheel.ps1`：真实鼠标停在普通图片上可翻页；普通图片、公式和链接图片均 accepted、defaultPrevented 且 singleStep；连续输入 4/4，nearest-rank P95 为 1.4ms，低于 50ms 门槛。
+- `scripts/check-tauri-reader.ps1`：Svelte 检查和构建、Rust 测试及 benchmark 通过；run `1785848000505-27260` 的 page-turn P95 为 6.7ms，cold-start 584.571ms，first-stable 156.5ms，hot-open 21.1ms，font-reflow 41.6ms，均在门槛内。
+- 正式样书入口曾完整通过；最终运行中前三本样书的浅色、深色及滚轮探针通过，数学样书在调用新增 `wheelProbe()` 前的既有真实 `Ctrl+C` 验证后由 Agent Browser daemon 返回 EOF。独立 namespace、关闭扩展和数学样书单跑均复现该工具链故障；同一数学样书的隔离滚轮探针当前通过。
+- 最高证据等级为本机真实 Chrome/Agent Browser 与本机 Tauri benchmark；尚未覆盖物理精密触控板、不同滚轮驱动和其他电脑。
