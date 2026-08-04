@@ -1,3 +1,69 @@
+const SNAPSHOT_LINE_HEIGHTS = Object.freeze({ compact: 1.45, standard: 1.6, comfortable: 1.8 });
+const SNAPSHOT_PRESENTATION_KEYS = new Set([
+  "schema",
+  "theme",
+  "brightness",
+  "fontSize",
+  "fontFamily",
+  "density",
+  "sourceStyles",
+  "userStylesEnabled",
+  "userStylesheet",
+]);
+
+export function parseSnapshotPresentation(value, prefersDark = false) {
+  if (typeof value !== "string" || value.length > 65_536) {
+    throw new Error("invalid-message-snapshot");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("invalid-message-snapshot");
+  }
+  if (
+    parsed?.schema === 1 &&
+    parsed.legacy === true &&
+    Object.keys(parsed).length === 2
+  ) {
+    return Object.freeze({
+      theme: prefersDark ? "dark" : "light",
+      brightness: 100,
+      fontSize: 32,
+      fontFamily: "book",
+      lineHeightPx: 51.2,
+    });
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    Object.keys(parsed).some((key) => !SNAPSHOT_PRESENTATION_KEYS.has(key)) ||
+    parsed.schema !== 1 ||
+    !["system", "light", "paper", "dark"].includes(parsed.theme) ||
+    !Number.isInteger(parsed.brightness) ||
+    parsed.brightness < 70 ||
+    parsed.brightness > 120 ||
+    ![24, 32, 40].includes(parsed.fontSize) ||
+    !["book", "serif", "sans"].includes(parsed.fontFamily) ||
+    !Object.hasOwn(SNAPSHOT_LINE_HEIGHTS, parsed.density) ||
+    (Object.hasOwn(parsed, "sourceStyles") && typeof parsed.sourceStyles !== "boolean") ||
+    (Object.hasOwn(parsed, "userStylesEnabled") &&
+      typeof parsed.userStylesEnabled !== "boolean") ||
+    (Object.hasOwn(parsed, "userStylesheet") && typeof parsed.userStylesheet !== "string")
+  ) {
+    throw new Error("invalid-message-snapshot");
+  }
+  return Object.freeze({
+    theme:
+      parsed.theme === "system" ? (prefersDark ? "dark" : "light") : parsed.theme,
+    brightness: parsed.brightness,
+    fontSize: parsed.fontSize,
+    fontFamily: parsed.fontFamily,
+    lineHeightPx: parsed.fontSize * SNAPSHOT_LINE_HEIGHTS[parsed.density],
+  });
+}
+
 export function createConversations({
   store,
   annotations,
@@ -193,6 +259,7 @@ export function createConversations({
 
   function safeSnapshotFragment(html, resourcePaths) {
     const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+    const referenced = new Set();
     if (
       parsed.querySelector(
         "script,iframe,object,embed,form,input,button,select,textarea,video,audio,source,track,style,link,meta,base",
@@ -209,15 +276,18 @@ export function createConversations({
         if (
           name.startsWith("on") ||
           ["srcset", "style"].includes(name) ||
-          (name === "href" && resourceAttribute !== "href")
+          (name === "href" && resourceAttribute !== "href") ||
+          (name === "src" && resourceAttribute !== "src")
         ) {
-          element.removeAttribute(attribute.name);
+          throw new Error("invalid-message-snapshot");
         }
       }
       if (resourceAttribute && (!resourcePath || !resourcePaths.has(resourcePath))) {
-        element.remove();
+        throw new Error("invalid-message-snapshot");
       }
+      if (resourcePath) referenced.add(resourcePath);
     }
+    if (referenced.size !== resourcePaths.size) throw new Error("invalid-message-snapshot");
     return parsed.body;
   }
 
@@ -231,6 +301,10 @@ export function createConversations({
   }
 
   async function renderSnapshot(capture) {
+    const presentation = parseSnapshotPresentation(
+      capture.snapshot.presentationJson,
+      globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches,
+    );
     const resources = new Map();
     for (const resource of capture.snapshot.resources) {
       const data = await store.snapshotResource(capture.source.id, resource.path);
@@ -242,12 +316,23 @@ export function createConversations({
       image.setAttribute(attribute, resources.get(image.getAttribute(attribute)));
     }
     const host = document.createElement("div");
+    host.dataset.theme = presentation.theme;
+    host.style.filter = `brightness(${presentation.brightness / 100})`;
     const shadow = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    const css = `${capture.snapshot.readerCss}\n${capture.snapshot.bookCss}\n${capture.snapshot.userCss}`;
-    if (/@import/i.test(css)) throw new Error("invalid-message-snapshot");
-    style.textContent = css.replace(/url\s*\([^)]*\)/gi, "none");
-    shadow.append(style, ...document.importNode(parsed, true).childNodes);
+    const css = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss}\n${capture.snapshot.userCss}`;
+    if (/@import|url\s*\(|image-set\s*\(|:host|::part|::slotted/i.test(css)) {
+      throw new Error("invalid-message-snapshot");
+    }
+    style.textContent = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss.replace(/:root\b/g, ":host")}\n${capture.snapshot.userCss}`;
+    const book = document.createElement("article");
+    book.className = "book";
+    book.dataset.theme = presentation.theme;
+    if (presentation.fontFamily !== "book") book.dataset.fontFamily = presentation.fontFamily;
+    book.style.fontSize = `${presentation.fontSize}px`;
+    book.style.setProperty("--reader-line-height", `${presentation.lineHeightPx}px`);
+    book.append(...document.importNode(parsed, true).childNodes);
+    shadow.append(style, book);
     controls.snapshotContent.replaceChildren(host);
   }
 

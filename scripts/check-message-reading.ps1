@@ -19,6 +19,7 @@ Push-Location $repoRoot
 try {
     Invoke-Checked $env:ATHA_CARGO @('fmt', '--all', '--check')
     Invoke-Checked $env:ATHA_CARGO @('test', '-p', 'atha-backend', '--test', 'message_reading')
+    Invoke-Checked $env:ATHA_NODE @('reader/web/conversations.test.mjs')
     Push-Location 'reader/app'
     try {
         Invoke-Checked $env:ATHA_PNPM @('check')

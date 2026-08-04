@@ -55,6 +55,10 @@ accepted
 - 阅读内核的 `message-capture` module 只负责从当前已验证 Range 构造候选和重锚，并把现有高亮、笔记列表改为 Message 投影；Svelte 对话浮层只负责交互状态，不拥有耐久消息事实；
 - 测试通过与调用方相同的 `MessageStore` interface 使用临时 SQLite 文件，不测试内部表实现细节。
 
+### Approved Workflow Interruption
+
+2026-08-04，用户在实现期间明确要求改进全局 `project-workflow`：项目必须提供固定的官方文档入口和快速使用说明，CLI 在入口缺失时拒绝 start，setup 负责创建或修复。该流程改动不是消息产品能力，但经用户单独批准；因 Atha docs gate 检查整个脏工作树，项目端 `docs/agents/references.md`、workflow/INDEX/CONTEXT 更新由当前 task 明确 adopt，避免另一个 task 与同一工作树互相阻塞。
+
 ## Non-Goals
 
 - 不实现 AI 调用、AI 角色、群组、账户、云同步、网络发送或多人冲突合并；
@@ -88,6 +92,7 @@ accepted
 4. 把现有 Annotation Store 收敛为一次性迁移输入，在阅读内核增加选区捕获与 Message 投影，在 Svelte 增加对话浮层和本书消息回顾；
 5. 用真实样书完成端到端恢复、历史呈现、搜索、关系和导出检查，再运行现有 reader、library 与 Tauri 回归；
 6. 更新消息架构、数据库事实、代码地图和路线图，独立 review 后关闭 change。
+7. 按用户批准补充全局 workflow 的参考地图门禁，并在 Atha 建立 Tauri、Svelte、WebView2、EPUB 与 SQLite 官方入口。
 
 ## Checks
 
@@ -113,6 +118,8 @@ accepted
 
 2026-08-04：用户确认现有引用与笔记前置能力已经完成；消息式阅读是重要功能，要求按既有产品和架构文档完整实现，并批准开始。同日进一步确认标注、笔记与引用不应强制分成不同事实，采用统一 Message 模型。
 
+同日，用户指出反复诊断没有优先查官方 Tauri 文档，明确批准中断实现并优化全局 `project-workflow` 与项目参考地图；完成后继续消息实现。
+
 ## Result
 
 正式消息数据与阅读器交互已经实现：`MessageStore` 拥有 schema v2 SQLite、快照资产、迁移、关系、搜索、导出和事务 Outbox；Tauri 只暴露受限 command，阅读内核只捕获候选并投影根 Message；Svelte 阅读页提供全屏笔记页和对话浮层。旧 localStorage 标注只作为一次性迁移输入，不再与正式事实双写。
@@ -121,13 +128,13 @@ accepted
 
 ## Review
 
-- Blocking：待 review。
-- Non-blocking：真实消息 UI 尚未形成稳定的自动化产品入口；用户试用前不为此恢复已证明不稳定的 GUI verifier。
-- Out-of-scope：备份、加密、同步、AI、富文本、附件和通用聊天仍按 Non-Goals 暂缓。
+- Blocking：首轮 Spec/Standards review 发现 presentation 只存不读、CSS 子资源可进入快照且显示端会静默改写；现已冻结实际主题、严格校验 presentation/CSS、用 `.book` 和捕获参数显示并改为 fail-closed，等待复审。真实消息 UI 完整闭环仍待用户验收。
+- Non-blocking：打开对话会从全屏笔记页回到阅读浮层；这是当前阅读页优先的交互，但“同页关系回顾”的最终设计可在用户试用后调整。`write.rs` 与 `legacy.rs` 有相似的内部写入形状；在第二种迁移或真实漂移出现前不增加 helper。
+- Out-of-scope：备份、加密、同步、AI、富文本、附件和通用聊天仍按 Non-Goals 暂缓。参考地图是用户单独批准的流程中断，已在本 change 补记范围，不属于未授权产品扩张。
 
 ## Evidence And Residual Risks
 
-- Windows 本地：`scripts/check-message-reading.ps1` 通过 14 个消息 interface 集成测试、Svelte check/build 与 Tauri/host 测试；`scripts/check-backend.ps1` 的 fmt、clippy、workspace test 和 doc 全部通过。
+- Windows 本地：`scripts/check-message-reading.ps1` 通过 14 个消息 interface 集成测试、历史呈现参数单元检查、Svelte check/build 与 Tauri/host 测试；`scripts/check-backend.ps1` 的 fmt、clippy、workspace test 和 doc 全部通过。
 - Windows 真实 WebView2：`scripts/check-reader-samples.ps1` 四样本明暗、真实输入、持久化和跨 host 恢复通过；过长的单次 `agent-browser eval` 已拆成两个阶段，不再触发默认 25 秒超时或 daemon busy。
 - Windows 真实 Tauri/本地：`scripts/check-library-shelf.ps1` 与 `scripts/check-tauri-reader.ps1` 通过。书架原生就绪条件改为稳定根节点，不再错误假设用户书架为空。
 - 性能：基准 `1785859567155-20612` 的 cold start / first stable / hot open / page turn / font reflow P95 分别为 739.307 / 148.700 / 27.300 / 31.900 / 41.600ms，低于 2000 / 750 / 120 / 50 / 150ms 门槛；没有同时间旧代码对照，不能归因性能变化。

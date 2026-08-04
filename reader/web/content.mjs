@@ -98,6 +98,14 @@ export function createContent({ host, readerStyleSource, fail }) {
     }
   }
 
+  function snapshotReaderCss() {
+    ensure(readerStyle.sheet, "invalid-message-snapshot");
+    return [...readerStyle.sheet.cssRules]
+      .filter((rule) => !/@import|url\s*\(|image-set\s*\(/i.test(rule.cssText))
+      .map((rule) => rule.cssText)
+      .join("\n");
+  }
+
   function setStyles(value) {
     ensure(
       value &&
@@ -470,12 +478,25 @@ export function createContent({ host, readerStyleSource, fail }) {
         bytes: [...new Uint8Array(await response.arrayBuffer())],
       });
     }
+    const capturedTheme =
+      presentation.theme === "system"
+        ? globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light"
+        : presentation.theme;
     return Object.freeze({
       fragmentHtml: wrapper.innerHTML,
-      readerCss: readerStyle.textContent,
+      readerCss: snapshotReaderCss(),
       bookCss: bookStyle.textContent,
       userCss: userStyle.textContent,
-      presentationJson: JSON.stringify({ schema: 1, ...presentation }),
+      presentationJson: JSON.stringify({
+        schema: 1,
+        theme: capturedTheme,
+        brightness: presentation.brightness,
+        fontSize: presentation.fontSize,
+        fontFamily: presentation.fontFamily,
+        density: presentation.density,
+      }),
       resources: Object.freeze([...resources.values()].map(Object.freeze)),
     });
   }

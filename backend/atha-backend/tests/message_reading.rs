@@ -61,7 +61,7 @@ fn snapshot() -> SourceSnapshotInput {
         reader_css: ".book { color: #222; }".into(),
         book_css: "p { text-indent: 2em; }".into(),
         user_css: String::new(),
-        presentation_json: r#"{"schema":1,"theme":"paper","fontSize":32}"#.into(),
+        presentation_json: r#"{"schema":1,"theme":"paper","brightness":100,"fontSize":32,"fontFamily":"book","density":"standard"}"#.into(),
         resources: Vec::new(),
     }
 }
@@ -365,6 +365,27 @@ fn source_snapshot_rejects_active_markup_unbound_assets_and_wrong_edition() {
     ] {
         let mut invalid = snapshot();
         invalid.fragment_html = fragment_html.into();
+        assert_eq!(
+            store.create_root(RootMessageDraft {
+                edition: edition(),
+                anchor: anchor(),
+                snapshot: invalid,
+                text: None,
+            }),
+            Err(atha_backend::messages::MessageError::InvalidInput)
+        );
+    }
+    for change in [
+        |snapshot: &mut SourceSnapshotInput| snapshot.presentation_json = "{}".into(),
+        |snapshot: &mut SourceSnapshotInput| {
+            snapshot.book_css = "p { background: url(images/a.png); }".into()
+        },
+        |snapshot: &mut SourceSnapshotInput| {
+            snapshot.user_css = "p { background: image-set('a.png' 1x); }".into()
+        },
+    ] {
+        let mut invalid = snapshot();
+        change(&mut invalid);
         assert_eq!(
             store.create_root(RootMessageDraft {
                 edition: edition(),

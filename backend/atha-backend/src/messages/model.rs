@@ -44,6 +44,24 @@ pub struct SourceSnapshotInput {
     pub resources: Vec<SnapshotResourceInput>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SnapshotPresentation {
+    schema: u8,
+    theme: String,
+    brightness: u8,
+    font_size: u8,
+    font_family: String,
+    density: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LegacySnapshotPresentation {
+    schema: u8,
+    legacy: bool,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RootMessageDraft {
@@ -381,7 +399,8 @@ pub(crate) fn validate_source(
         || snapshot.reader_css.len() > 1_048_576
         || snapshot.book_css.len() > 1_048_576
         || snapshot.user_css.len() > 32_768
-        || serde_json::from_str::<serde_json::Value>(&snapshot.presentation_json).is_err()
+        || snapshot.presentation_json.len() > 4_096
+        || validate_snapshot_presentation(&snapshot.presentation_json).is_err()
     {
         return Err(MessageError::InvalidInput);
     }
@@ -397,6 +416,31 @@ pub(crate) fn validate_source(
     validate_snapshot_css(&snapshot.book_css)?;
     validate_snapshot_css(&snapshot.user_css)?;
     validate_resources(&snapshot.resources)
+}
+
+fn validate_snapshot_presentation(value: &str) -> Result<(), MessageError> {
+    if let Ok(legacy) = serde_json::from_str::<LegacySnapshotPresentation>(value) {
+        return if legacy.schema == 1 && legacy.legacy {
+            Ok(())
+        } else {
+            Err(MessageError::InvalidInput)
+        };
+    }
+    let presentation = serde_json::from_str::<SnapshotPresentation>(value)
+        .map_err(|_| MessageError::InvalidInput)?;
+    if presentation.schema != 1
+        || !matches!(presentation.theme.as_str(), "light" | "paper" | "dark")
+        || !(70..=120).contains(&presentation.brightness)
+        || !matches!(presentation.font_size, 24 | 32 | 40)
+        || !matches!(presentation.font_family.as_str(), "book" | "serif" | "sans")
+        || !matches!(
+            presentation.density.as_str(),
+            "compact" | "standard" | "comfortable"
+        )
+    {
+        return Err(MessageError::InvalidInput);
+    }
+    Ok(())
 }
 
 fn locator_content_version(value: &str) -> Result<String, MessageError> {
@@ -466,6 +510,11 @@ fn validate_snapshot_markup(
 fn validate_snapshot_css(css: &str) -> Result<(), MessageError> {
     let lower = css.to_ascii_lowercase();
     if lower.contains("@import")
+        || contains_css_function(&lower, "url")
+        || contains_css_function(&lower, "image-set")
+        || lower.contains(":host")
+        || lower.contains("::part")
+        || lower.contains("::slotted")
         || lower.contains("javascript:")
         || lower.contains("data:")
         || lower.contains("http:")
@@ -477,6 +526,11 @@ fn validate_snapshot_css(css: &str) -> Result<(), MessageError> {
     } else {
         Ok(())
     }
+}
+
+fn contains_css_function(css: &str, name: &str) -> bool {
+    css.match_indices(name)
+        .any(|(index, _)| css[index + name.len()..].trim_start().starts_with('('))
 }
 
 pub(crate) fn validate_range_locator(
