@@ -128,7 +128,7 @@ accepted
 
 ## Review
 
-- Blocking：首轮 Spec/Standards review 发现 presentation 只存不读、CSS 子资源可进入快照且显示端会静默改写；现已冻结实际主题、严格校验 presentation/CSS、用 `.book` 和捕获参数显示并改为 fail-closed，等待复审。真实消息 UI 完整闭环仍待用户验收。
+- Blocking：两轮独立 Standards/Spec review 发现的 presentation 只存不读、CSS 网络函数/转义可绕过和显示端静默改写均已修复，最终 Standards 复核无 blocking。当前只剩规格本身要求的真实《数学及其历史》消息 UI 完整闭环与重启恢复验收，不能用本地接口和 build 证据替代。
 - Non-blocking：打开对话会从全屏笔记页回到阅读浮层；这是当前阅读页优先的交互，但“同页关系回顾”的最终设计可在用户试用后调整。`write.rs` 与 `legacy.rs` 有相似的内部写入形状；在第二种迁移或真实漂移出现前不增加 helper。
 - Out-of-scope：备份、加密、同步、AI、富文本、附件和通用聊天仍按 Non-Goals 暂缓。参考地图是用户单独批准的流程中断，已在本 change 补记范围，不属于未授权产品扩张。
 
@@ -139,3 +139,4 @@ accepted
 - Windows 真实 Tauri/本地：`scripts/check-library-shelf.ps1` 与 `scripts/check-tauri-reader.ps1` 通过。书架原生就绪条件改为稳定根节点，不再错误假设用户书架为空。
 - 性能：基准 `1785859567155-20612` 的 cold start / first stable / hot open / page turn / font reflow P95 分别为 739.307 / 148.700 / 27.300 / 31.900 / 41.600ms，低于 2000 / 750 / 120 / 50 / 150ms 门槛；没有同时间旧代码对照，不能归因性能变化。
 - 残余：尚未由用户在真实 Tauri 消息 UI 完成“选择至导出”的全链路，也未验证关闭应用后的消息 UI 恢复；当前证据不能替代该真实目标验收。
+- 兼容性：若曾在本次未交付的中间提交上手工创建消息，旧快照可能仍含未冻结的 system theme、额外 presentation 字段或 reader CSS 子资源，严格显示会拒绝这些开发期记录；正式实现不为未发布中间格式增加迁移。
