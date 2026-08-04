@@ -383,6 +383,15 @@ fn source_snapshot_rejects_active_markup_unbound_assets_and_wrong_edition() {
         |snapshot: &mut SourceSnapshotInput| {
             snapshot.user_css = "p { background: image-set('a.png' 1x); }".into()
         },
+        |snapshot: &mut SourceSnapshotInput| {
+            snapshot.book_css = "p { background: src('a.png'); }".into()
+        },
+        |snapshot: &mut SourceSnapshotInput| {
+            snapshot.book_css = "p { background: image('a.png'); }".into()
+        },
+        |snapshot: &mut SourceSnapshotInput| {
+            snapshot.book_css = r"p { background: u\72l('a.png'); }".into()
+        },
     ] {
         let mut invalid = snapshot();
         change(&mut invalid);

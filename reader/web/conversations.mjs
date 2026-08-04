@@ -11,6 +11,14 @@ const SNAPSHOT_PRESENTATION_KEYS = new Set([
   "userStylesheet",
 ]);
 
+export function isSnapshotCssSafe(value) {
+  return (
+    typeof value === "string" &&
+    !/@import|(?:url|src|image|image-set)\s*\(|:host|::part|::slotted/i.test(value) &&
+    !value.includes("\\")
+  );
+}
+
 export function parseSnapshotPresentation(value, prefersDark = false) {
   if (typeof value !== "string" || value.length > 65_536) {
     throw new Error("invalid-message-snapshot");
@@ -321,9 +329,7 @@ export function createConversations({
     const shadow = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     const css = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss}\n${capture.snapshot.userCss}`;
-    if (/@import|url\s*\(|image-set\s*\(|:host|::part|::slotted/i.test(css)) {
-      throw new Error("invalid-message-snapshot");
-    }
+    if (!isSnapshotCssSafe(css)) throw new Error("invalid-message-snapshot");
     style.textContent = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss.replace(/:root\b/g, ":host")}\n${capture.snapshot.userCss}`;
     const book = document.createElement("article");
     book.className = "book";

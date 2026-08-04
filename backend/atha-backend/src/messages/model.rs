@@ -510,8 +510,9 @@ fn validate_snapshot_markup(
 fn validate_snapshot_css(css: &str) -> Result<(), MessageError> {
     let lower = css.to_ascii_lowercase();
     if lower.contains("@import")
-        || contains_css_function(&lower, "url")
-        || contains_css_function(&lower, "image-set")
+        || ["url", "src", "image", "image-set"]
+            .iter()
+            .any(|name| contains_css_function(&lower, name))
         || lower.contains(":host")
         || lower.contains("::part")
         || lower.contains("::slotted")

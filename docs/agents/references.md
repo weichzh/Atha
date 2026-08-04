@@ -25,6 +25,13 @@
 - 项目快速用法：书籍内容保持脚本、网络、路径和未知资源隔离；真实交互回归使用 `scripts/check-reader-samples.ps1`，Tauri 产品入口使用 `scripts/check-tauri-reader.ps1`。
 - 必须重查：runtime 分发、浏览器能力差异、窗口缩放、输入事件、进程模型、安全边界和性能诊断。
 
+## CSS 渲染与资源边界
+
+- 版本事实：`reader/atha-reader.css`、`reader/web/content.mjs` 与 `backend/atha-backend/src/messages/model.rs`。
+- 官方入口：[CSS Values 4](https://www.w3.org/TR/css-values-4/)、[CSS Images 4](https://www.w3.org/TR/css-images-4/)、[CSS Syntax 3](https://www.w3.org/TR/css-syntax-3/)。
+- 项目快速用法：书籍和快照 CSS 不允许发起资源请求；`url()`、`src()`、`image()`、`image-set()`、`@import`、反斜杠转义和 Shadow DOM 穿透选择器在写入与显示两端均拒绝。快照捕获只保存不含子资源的 reader CSS 规则。
+- 必须重查：新增 CSS 资源函数、转义语法、CSSOM 序列化、Shadow DOM selector 和浏览器实现变化。
+
 ## EPUB 3.3
 
 - 版本事实：`backend/atha-backend/src/reader/epub/` 的导入实现与测试样本。

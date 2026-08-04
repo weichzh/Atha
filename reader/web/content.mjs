@@ -66,13 +66,20 @@ export function createContent({ host, readerStyleSource, fail }) {
   function validateCss(css, declarations = false) {
     const cacheKey = `${declarations ? "declaration" : "stylesheet"}:${css}`;
     if (validatedCss.has(cacheKey)) return validatedCss.get(cacheKey);
-    ensure(!/@import|url\s*\(/i.test(css), "css-subresource");
+    ensure(
+      !/@import|(?:url|src|image|image-set)\s*\(/i.test(css) && !css.includes("\\"),
+      "css-subresource",
+    );
     ensure(!/:host(?:-context)?\b|::part\b|::slotted\b/i.test(css), "active-style");
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(declarations ? `.atha-inline { ${css} }` : css);
     const inspect = (rules) => {
       for (const rule of rules) {
-        ensure(!/url\s*\(|image-set\s*\(/i.test(rule.cssText), "css-subresource");
+        ensure(
+          !/(?:url|src|image|image-set)\s*\(/i.test(rule.cssText) &&
+            !rule.cssText.includes("\\"),
+          "css-subresource",
+        );
         ensure(
           !/:host(?:-context)?\b|::part\b|::slotted\b/i.test(rule.cssText),
           "active-style",
@@ -101,7 +108,11 @@ export function createContent({ host, readerStyleSource, fail }) {
   function snapshotReaderCss() {
     ensure(readerStyle.sheet, "invalid-message-snapshot");
     return [...readerStyle.sheet.cssRules]
-      .filter((rule) => !/@import|url\s*\(|image-set\s*\(/i.test(rule.cssText))
+      .filter(
+        (rule) =>
+          !/@import|(?:url|src|image|image-set)\s*\(/i.test(rule.cssText) &&
+          !rule.cssText.includes("\\"),
+      )
       .map((rule) => rule.cssText)
       .join("\n");
   }
