@@ -57,8 +57,30 @@ try {
     $startup = Get-AgentBrowserScriptValue "({ status: document.documentElement.dataset.status, error: document.documentElement.dataset.error || null })" | ConvertFrom-Json
     if ($startup.status -ne 'pass') { throw "Reader startup failed: $($startup | ConvertTo-Json -Compress)" }
 
+    $media = Get-AgentBrowserScriptValue @'
+(async () => {
+  const point = await globalThis.__athaReaderDiagnostics.mediaPoint('ordinary');
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  return { point, position: document.querySelector('#position').textContent };
+})()
+'@ | ConvertFrom-Json
+    Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string][Math]::Round($media.point.x), [string][Math]::Round($media.point.y))
+    Invoke-AgentBrowser @('--session', $session, 'mouse', 'wheel', '100')
+    $actualMediaAccepted = Get-AgentBrowserScriptValue @'
+(async () => {
+  const before = __POSITION__;
+  for (let frame = 0; frame < 30; frame += 1) {
+    if (document.querySelector('#position').textContent !== before) return true;
+    await new Promise(requestAnimationFrame);
+  }
+  return false;
+})()
+'@.Replace('__POSITION__', (ConvertTo-Json ([string]$media.position) -Compress)) | ConvertFrom-Json
+
     $result = Get-AgentBrowserScriptValue "globalThis.__athaReaderDiagnostics.wheelProbe()" | ConvertFrom-Json
+    $result | Add-Member -NotePropertyName actualMediaAccepted -NotePropertyValue $actualMediaAccepted
     $result | ConvertTo-Json -Depth 5
+    if (-not $actualMediaAccepted) { throw 'Actual mouse wheel input was lost over book media.' }
     $presentTargets = @($result.targets.psobject.Properties.Value | Where-Object present)
     if ($presentTargets.Count -eq 0 -or @($presentTargets | Where-Object { -not $_.accepted -or -not $_.defaultPrevented }).Count -gt 0) {
         throw 'Wheel input was lost over book media.'
