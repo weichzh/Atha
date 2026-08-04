@@ -651,17 +651,17 @@ export function createDiagnostics({
   }
 
   async function wheelProbe() {
-    const pageKey = () => {
-      const section = session.snapshot().currentIndex;
-      const page = pagination.snapshot().page;
-      return `${section}:${page}`;
-    };
+    const pageState = () =>
+      Object.freeze({
+        section: session.snapshot().currentIndex,
+        ...pagination.snapshot(),
+      });
     const reset = async () => {
       const description = session.describe();
       await navigation.goTo(locator.point(description, description.sections[0].id, 0));
     };
     const fire = async (target, deltaY) => {
-      const before = pageKey();
+      const before = pageState();
       const started = performance.now();
       const event = new WheelEvent("wheel", {
         bubbles: true,
@@ -671,12 +671,34 @@ export function createDiagnostics({
       });
       target.dispatchEvent(event);
       await navigation.idle();
+      const after = pageState();
+      const singleStep =
+        deltaY > 0
+          ? (after.section === before.section && after.page === before.page + 1) ||
+            (after.section === before.section + 1 && after.page === 0)
+          : (after.section === before.section && after.page === before.page - 1) ||
+            (after.section === before.section - 1 && after.page === after.pages - 1);
       return Object.freeze({
-        accepted: pageKey() !== before,
+        accepted: after.section !== before.section || after.page !== before.page,
         defaultPrevented: event.defaultPrevented,
         latencyMs: performance.now() - started,
+        singleStep,
       });
     };
+    let linkedProbe = null;
+    if (!content.book.querySelector("a[href] img")) {
+      const source = content.book.querySelector("img");
+      if (source) {
+        linkedProbe = document.createElement("a");
+        linkedProbe.href = "#atha-wheel-linked-probe";
+        linkedProbe.style.position = "fixed";
+        linkedProbe.style.left = "-9999px";
+        const image = source.cloneNode(false);
+        image.removeAttribute("id");
+        linkedProbe.append(image);
+        content.book.append(linkedProbe);
+      }
+    }
     const targets = {};
     for (const [kind, selector] of Object.entries({
       ordinary: "img[role='button']:not(.math-inline):not(.math-display)",
@@ -694,8 +716,13 @@ export function createDiagnostics({
       const description = session.describe();
       const forward =
         state.page + 1 < state.pages || session.snapshot().currentIndex + 1 < description.sections.length;
-      targets[kind] = Object.freeze({ present: true, ...(await fire(source, forward ? 100 : -100)) });
+      targets[kind] = Object.freeze({
+        present: true,
+        synthetic: kind === "linked" && Boolean(linkedProbe),
+        ...(await fire(source, forward ? 100 : -100)),
+      });
     }
+    linkedProbe?.remove();
 
     await reset();
     await new Promise((resolve) => setTimeout(resolve, 260));
@@ -716,6 +743,7 @@ export function createDiagnostics({
       repeatedInputs: repeated.length,
       repeatedAccepted: repeated.filter((result) => result.accepted).length,
       repeatedDefaultPrevented: repeated.filter((result) => result.defaultPrevented).length,
+      repeatedSingleStep: repeated.filter((result) => result.singleStep).length,
       inputToStableP95Ms: p95,
     });
   }

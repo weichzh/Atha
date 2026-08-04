@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$bookRoot = (Resolve-Path (Join-Path $repoRoot 'fixtures/local/category-coproduct-5-6')).Path
+$bookRoot = (Resolve-Path (Join-Path $repoRoot 'fixtures/local/macro-human-capital-5-2')).Path
 $serverScript = Join-Path $PSScriptRoot 'Serve-ReaderValidation.ps1'
 $session = "atha-reader-wheel-$PID"
 $server = $null
@@ -51,8 +51,8 @@ try {
     if ($server.HasExited) { throw "Reader validation server exited with code $($server.ExitCode)." }
     if (-not $ready) { throw 'Reader validation server did not become ready.' }
 
-    $entry = '/book/EPUB/text/ch008.xhtml'
-    $entryPath = Join-Path $bookRoot 'EPUB/text/ch008.xhtml'
+    $entry = '/book/EPUB/text/ch042.xhtml'
+    $entryPath = Join-Path $bookRoot 'EPUB/text/ch042.xhtml'
     $version = (Get-FileHash -LiteralPath $entryPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $url = "http://127.0.0.1:$Port/reader/atha-reader.html?book=$([Uri]::EscapeDataString($entry))&search-probe=1&state=wheel-check&version=$version"
     Invoke-AgentBrowser @('--session', $session, '--allowed-domains', '127.0.0.1', 'open', $url)
@@ -87,10 +87,10 @@ try {
     $result | ConvertTo-Json -Depth 5
     if (-not $actualMediaAccepted) { throw 'Actual mouse wheel input was lost over book media.' }
     $presentTargets = @($result.targets.psobject.Properties.Value | Where-Object present)
-    if ($presentTargets.Count -eq 0 -or @($presentTargets | Where-Object { -not $_.accepted -or -not $_.defaultPrevented }).Count -gt 0) {
+    if ($presentTargets.Count -ne 3 -or @($presentTargets | Where-Object { -not $_.accepted -or -not $_.defaultPrevented -or -not $_.singleStep }).Count -gt 0) {
         throw 'Wheel input was lost over book media.'
     }
-    if ($result.repeatedAccepted -ne 4 -or $result.repeatedDefaultPrevented -ne 4) {
+    if ($result.repeatedAccepted -ne 4 -or $result.repeatedDefaultPrevented -ne 4 -or $result.repeatedSingleStep -ne 4) {
         throw 'Repeated discrete wheel input was not accepted one-for-one.'
     }
     if ($null -eq $result.inputToStableP95Ms -or $result.inputToStableP95Ms -gt 50) {
