@@ -72,9 +72,9 @@ Annotation Store 以独立的每书 schema 1 记录保存用户事实，不与�
 
 `SourceAnchor` 包含 canonical range Locator、至多 4096 个 UTF-16 code unit 的原文、前后各 32 个 code unit 的上下文和原文 UTF-8 SHA-256，字段语义可直接映射到未来消息链路的 `source_anchor`。同版本先验证 Locator 指向的原文；版本或文本不一致时，只在原 section 中接受唯一原文命中并更新 canonical Locator，零个、多个命中或缺失 section 都报告重锚失败。
 
-Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未删除事实投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。有效选区附近只显示复制、标注和笔记三个动作；笔记使用最长 2000 字符的纯文本 dialog。底栏笔记面板只投影未删除的 highlight 与 note，点击列表项即通过既有 Locator 跳转并返回沉浸阅读，不在列表中新增、编辑或删除。
+Annotations 从原生选择产生 `SourceAnchor`，只把当前 section 的未删除事实投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。有效新选区附近显示复制、标注和笔记；点击已有标注则恢复其 Range，并显示复制、重选、笔记和删除。重选使用浏览器原生选区分两步保存新锚点，保持原记录 id 与笔记；重叠命中选择最近更新的一条，其他记录仍可从笔记页管理。
 
-Annotation Store 继续保留笔记更新与软删除，作为 schema 兼容和后续数据管理的底层能力，但当前阅读界面不暴露入口。颜色、样式、notebook、同步、tombstone 压缩、导入与 SQLite 留待后续真实需求。
+笔记继续使用最长 2000 字符的纯文本 dialog，同一个入口负责新建、为 highlight 添加笔记和预填编辑。全屏笔记页只投影未删除的 highlight 与 note；项目正文通过既有 Locator 跳转并返回沉浸阅读，独立编辑和删除动作不触发跳转。删除调用 Annotation Store 的 tombstone 写入并立即撤销正文投影。颜色、样式、notebook、同步、tombstone 压缩、导入与 SQLite 留待后续真实需求。
 
 ### 翻页输入
 

@@ -11,7 +11,9 @@
 <div id="selection-actions" class="selection-actions" role="toolbar" aria-label="选中文字操作" hidden>
   <button id="copy-selection" type="button">复制</button>
   <button id="highlight-selection" type="button">标注</button>
+  <button id="update-selection" type="button" hidden>更新</button>
   <button id="note-selection" type="button">笔记</button>
+  <button id="delete-selection" type="button" hidden>删除</button>
   <output id="selection-actions-status" class="visually-hidden" aria-live="polite"></output>
 </div>
 

@@ -282,7 +282,7 @@ $themeProbe = @'
   if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
   if (!result.bookmarks.created || !result.bookmarks.toggled || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
   if (!result.search.replaced || !result.search.canceled || !result.search.errorIsolated || !result.search.activeContentRejected) throw new Error('search');
-  if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected) throw new Error('annotations');
+  if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.rangeUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected) throw new Error('annotations');
   return result;
 })()
 '@
@@ -414,7 +414,9 @@ try {
                 Write-Host "  Rendering $theme mode..."
                 Invoke-AgentBrowser @('--session', $session, 'set', 'media', $theme)
                 Invoke-AgentBrowser @('--session', $session, 'reload')
-                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.status === 'pass'")
+                Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.status === 'pass' || (document.documentElement.dataset.status === 'fail' && Boolean(document.documentElement.dataset.error))")
+                $readerStatus = Get-AgentBrowserScriptValue -Session $session -Script "({ status: document.documentElement.dataset.status, error: document.documentElement.dataset.error || null })" | ConvertFrom-Json
+                if ($readerStatus.status -ne 'pass') { throw "Reader failed in $theme mode: $($readerStatus.error)" }
                 $selectionProbe = Get-AgentBrowserScriptValue -Session $session -Script @'
 (() => {
   const point = globalThis.__athaReaderDiagnostics.selectionProbe();
@@ -507,13 +509,26 @@ try {
 })()
 '@ | ConvertFrom-Json
                         if (@($annotationProbe).Count -ne 4) { throw 'No visible text was available for annotation.' }
+                        [void](Get-AgentBrowserScriptValue -Session $session -Script @'
+(() => {
+  globalThis.__athaContextMenuPrevented = false;
+  document.addEventListener('contextmenu', (event) => {
+    globalThis.__athaContextMenuPrevented = event.defaultPrevented;
+  }, { once: true });
+  return true;
+})()
+'@)
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[0], [string]$annotationProbe[1])
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'right')
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'right')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', 'globalThis.__athaContextMenuPrevented === true')
                         Invoke-ReaderTextSelection -Session $session -Points $annotationProbe
                         $selectionUi = Get-AgentBrowserScriptValue -Session $session -Script @'
 (() => {
   const toolbar = document.querySelector('#selection-actions');
   const rect = toolbar.getBoundingClientRect();
   return {
-    actions: [...toolbar.querySelectorAll('button')].map((button) => button.textContent),
+    actions: [...toolbar.querySelectorAll('button:not([hidden])')].map((button) => button.textContent),
     visible: !toolbar.hidden,
     insideViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
     noteControlsInPanel: document.querySelectorAll('.notes-panel textarea, .notes-panel form, .notes-panel #add-annotation').length,
@@ -541,29 +556,62 @@ try {
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.active[0].type === 'highlight' && value.overlayCount === 1; })()")
                         $highlightText = Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.snapshot().annotations.active[0].sourceAnchor.selectedText" | ConvertFrom-Json
                         if ($highlightText.Length -ne $copyBefore.selectionLength) { throw 'Selection copy and highlight did not use the same selected range.' }
+                        $highlightId = Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.snapshot().annotations.active[0].id" | ConvertFrom-Json
 
-                        Invoke-ReaderTextSelection -Session $session -Points $annotationProbe
+                        $annotationPointX = [Math]::Round(([int]$annotationProbe[0] + [int]$annotationProbe[2]) / 2)
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationPointX, [string]$annotationProbe[1])
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const toolbar = document.querySelector('#selection-actions'); return !toolbar.hidden && [...toolbar.querySelectorAll('button:not([hidden])')].map((button) => button.textContent).join(',') === '复制,重选,笔记,删除'; })()")
+                        $updatedProbe = @($annotationProbe)
+                        $updatedProbe[2] = [Math]::Round(([int]$annotationProbe[0] + [int]$annotationProbe[2]) / 2)
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#update-selection')
+                        Invoke-ReaderTextSelection -Session $session -Points $updatedProbe
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#update-selection').textContent === '保存'")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#update-selection')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.active[0].id === '$highlightId' && value.active[0].sourceAnchor.selectedText !== $(ConvertTo-Json $highlightText -Compress) && value.overlayCount === 1; })()")
+
+                        $annotationPointX = [Math]::Round(([int]$updatedProbe[0] + [int]$updatedProbe[2]) / 2)
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationPointX, [string]$updatedProbe[1])
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "!document.querySelector('#selection-actions').hidden && !document.querySelector('#note-selection').hidden")
                         Invoke-AgentBrowser @('--session', $session, 'click', '#note-selection')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#annotation-note-dialog').open && document.activeElement === document.querySelector('#annotation-note')")
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#annotation-note-dialog').open && document.querySelector('#annotation-note-heading').textContent === '添加笔记' && document.activeElement === document.querySelector('#annotation-note')")
                         Invoke-AgentBrowser @('--session', $session, 'fill', '#annotation-note', '真实阅读笔记')
                         Invoke-AgentBrowser @('--session', $session, 'click', '#annotation-note-form button[type=submit]')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 2 && value.overlayCount === 2 && value.active[1].type === 'note' && value.active[1].note === '真实阅读笔记' && value.active.every((item) => item.sourceAnchor.contentHash.length === 64); })()")
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.overlayCount === 1 && value.active[0].id === '$highlightId' && value.active[0].type === 'note' && value.active[0].note === '真实阅读笔记' && value.active[0].sourceAnchor.contentHash.length === 64; })()")
                         Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '40')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "globalThis.__athaReaderDiagnostics.snapshot().annotations.overlayCount === 2")
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "globalThis.__athaReaderDiagnostics.snapshot().annotations.overlayCount === 1")
                         Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '32')
                         [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
                         Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#annotations .annotation-item').length === 2")
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const panel = document.querySelector('.notes-panel').getBoundingClientRect(); return document.querySelectorAll('#annotations .annotation-item').length === 1 && panel.left === 0 && panel.top === 0 && panel.right === innerWidth && panel.bottom === innerHeight; })()")
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-light-annotation.png'))
-                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotations .annotation-item:last-child')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot(); const anchor = JSON.parse(value.annotations.active[1].sourceAnchor.canonicalLocator).start; const current = JSON.parse(value.navigation.current).start; return anchor.section === current.section && anchor.offset === current.offset && !document.documentElement.hasAttribute('data-reader-tools') && !document.querySelector('.notes').open && document.activeElement === document.querySelector('.reader'); })()")
-                    }
-                    else {
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 2 && value.overlayCount === 2 && value.active[1].note === '真实阅读笔记'; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotations .annotation-item-edit')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#annotation-note-dialog').open && document.querySelector('#annotation-note-heading').textContent === '编辑笔记' && document.querySelector('#annotation-note').value === '真实阅读笔记'")
+                        Invoke-AgentBrowser @('--session', $session, 'fill', '#annotation-note', '编辑后的笔记')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotation-note-form button[type=submit]')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "globalThis.__athaReaderDiagnostics.snapshot().annotations.active[0].note === '编辑后的笔记' && document.querySelector('.notes').open")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotations .annotation-item-main')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot(); const anchor = JSON.parse(value.annotations.active[0].sourceAnchor.canonicalLocator).start; const current = JSON.parse(value.navigation.current).start; return anchor.section === current.section && anchor.offset === current.offset && !document.documentElement.hasAttribute('data-reader-tools') && !document.querySelector('.notes').open && document.activeElement === document.querySelector('.reader'); })()")
                         [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
                         Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#annotations .annotation-item').length === 2")
-                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotations .annotation-item:first-child')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotations .annotation-item-delete')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 0 && value.overlayCount === 0 && value.tombstones === 1 && document.querySelectorAll('#annotations .annotation-item').length === 0; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes-panel [data-close-reader-tools]')
+                        Invoke-ReaderTextSelection -Session $session -Points $annotationProbe
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#note-selection')
+                        Invoke-AgentBrowser @('--session', $session, 'fill', '#annotation-note', '保留笔记')
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotation-note-form button[type=submit]')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.overlayCount === 1 && value.tombstones === 1 && value.active[0].note === '保留笔记'; })()")
+                    }
+                    else {
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.overlayCount === 1 && value.tombstones === 1 && value.active[0].note === '保留笔记'; })()")
+                        [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelectorAll('#annotations .annotation-item').length === 1")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '#annotations .annotation-item-main')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot(); const anchor = JSON.parse(value.annotations.active[0].sourceAnchor.canonicalLocator).start; const current = JSON.parse(value.navigation.current).start; return anchor.section === current.section && anchor.offset === current.offset && !document.documentElement.hasAttribute('data-reader-tools') && !document.querySelector('.notes').open; })()")
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-dark-annotation.png'))
                     }
@@ -611,12 +659,14 @@ try {
                     Invoke-AgentBrowser @('--session', $session, 'set', 'viewport', [string]$viewport.width, [string]$viewport.height, [string]$viewport.scale)
                     $stableSize = "$($viewport.internalWidth)x$($viewport.internalHeight)"
                     Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.documentElement.dataset.viewportStable === '$stableSize' && !document.documentElement.dataset.error")
+                    [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); document.querySelector('.notes').open = true; true")
                     $geometry = Get-AgentBrowserScriptValue -Session $session -Script @'
 (() => {
   const reader = document.querySelector('.reader');
   const page = document.querySelector('#page').getBoundingClientRect();
   const top = document.querySelector('.top-toolbar').getBoundingClientRect();
   const bottom = document.querySelector('.toolbar').getBoundingClientRect();
+  const notes = document.querySelector('.notes-panel').getBoundingClientRect();
   const rect = reader.getBoundingClientRect();
   const style = getComputedStyle(reader);
   return {
@@ -625,6 +675,7 @@ try {
     internalWidth: reader.clientWidth,
     internalHeight: reader.clientHeight,
     safe: top.bottom <= page.top + 1 && bottom.top >= page.bottom - 1,
+    notesFull: notes.left === 0 && notes.top === 0 && notes.right === innerWidth && notes.bottom === innerHeight,
     margins: [
       style.getPropertyValue('--page-top-margin').trim(),
       style.getPropertyValue('--page-right-margin').trim(),
@@ -641,11 +692,13 @@ try {
                         $geometry.internalWidth -ne $viewport.internalWidth -or
                         $geometry.internalHeight -ne $viewport.internalHeight -or
                         -not $geometry.safe -or
+                        -not $geometry.notesFull -or
                         (@($geometry.margins) -join ',') -ne '144px,32px,144px,32px' -or
                         $geometry.marginControls -ne 0
                     ) {
                         throw "Adaptive reader geometry failed: $($geometry | ConvertTo-Json -Compress)"
                     }
+                    [void](Get-AgentBrowserScriptValue -Session $session -Script "document.querySelector('.notes').open = false; document.documentElement.removeAttribute('data-reader-tools'); true")
                 }
             }
             if ($sample.id -eq 'math-history-r1') {
@@ -687,7 +740,7 @@ try {
   })(),
                 }))()
 '@ | ConvertFrom-Json
-                if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.brightness -ne '85' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1 -or $restored.annotationActive -ne 2 -or $restored.annotationTombstones -ne 0) {
+                if ($restored.position -ne $savedPosition -or $restored.fontSize -ne '24' -or $restored.brightness -ne '85' -or $restored.theme -ne 'dark' -or $restored.bookmarks -ne 1 -or $restored.annotationActive -ne 1 -or $restored.annotationTombstones -ne 1) {
                     throw "Persistent reader state did not restore. expectedPosition=$savedPosition actual=$($restored | ConvertTo-Json -Compress)"
                 }
                 [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")

@@ -3,6 +3,8 @@ const root = document.documentElement;
 const reader = document.querySelector(".reader");
 const errorBox = document.querySelector("#error");
 
+document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
 function closeReaderTools() {
   root.removeAttribute("data-reader-tools");
   for (const panel of document.querySelectorAll(".reader-tool[open]")) panel.open = false;
@@ -159,10 +161,13 @@ annotations = createAnnotations({
     selectionActions: document.querySelector("#selection-actions"),
     copy: document.querySelector("#copy-selection"),
     highlight: document.querySelector("#highlight-selection"),
+    update: document.querySelector("#update-selection"),
     note: document.querySelector("#note-selection"),
+    delete: document.querySelector("#delete-selection"),
     selectionStatus: document.querySelector("#selection-actions-status"),
     noteDialog: document.querySelector("#annotation-note-dialog"),
     noteForm: document.querySelector("#annotation-note-form"),
+    noteHeading: document.querySelector("#annotation-note-heading"),
     noteInput: document.querySelector("#annotation-note"),
     cancelNote: document.querySelector("#cancel-annotation-note"),
     list: document.querySelector("#annotations"),

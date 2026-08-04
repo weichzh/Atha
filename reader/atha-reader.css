@@ -471,8 +471,16 @@ textarea:focus-visible,
 }
 
 .notes-panel {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: min(58vh, 520px);
+  z-index: 2;
+  inset: 0;
+  grid-template-rows: 56px minmax(0, 1fr) auto;
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  padding: 0 20px 20px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .annotation-list {
@@ -484,13 +492,36 @@ textarea:focus-visible,
 
 .annotation-item {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.annotation-item-main {
+  display: grid;
   gap: 5px;
   padding: 12px 8px;
   border: 0;
-  border-bottom: 1px solid var(--ui-border);
   background: transparent;
   color: var(--ui-text);
   text-align: left;
+}
+
+.annotation-item-actions {
+  display: flex;
+}
+
+.annotation-item-action {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ui-muted);
+}
+
+.annotation-item-delete {
+  color: var(--ui-error);
 }
 
 .annotation-item-kind {

@@ -233,7 +233,12 @@
               <span class="fluent-icon" aria-hidden="true">&#xE70F;</span>
             </summary>
             <section class="tool-panel notes-panel" aria-labelledby="annotation-heading">
-              <h2 id="annotation-heading">笔记</h2>
+              <header class="panel-heading">
+                <button class="icon-button panel-back" type="button" data-close-reader-tools aria-label="返回阅读">
+                  <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
+                </button>
+                <h2 id="annotation-heading">笔记</h2>
+              </header>
               <nav id="annotations" class="annotation-list" aria-label="笔记与标注"></nav>
               <output id="annotations-status" aria-live="polite"></output>
             </section>
@@ -269,7 +274,9 @@
       <div id="selection-actions" class="selection-actions" role="toolbar" aria-label="选中文字操作" hidden>
         <button id="copy-selection" type="button">复制</button>
         <button id="highlight-selection" type="button">标注</button>
+        <button id="update-selection" type="button" hidden>更新</button>
         <button id="note-selection" type="button">笔记</button>
+        <button id="delete-selection" type="button" hidden>删除</button>
         <output id="selection-actions-status" class="visually-hidden" aria-live="polite"></output>
       </div>
       <dialog id="annotation-note-dialog" aria-labelledby="annotation-note-heading">

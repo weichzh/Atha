@@ -55,7 +55,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 └─ #annotation-note-dialog
 ```
 
-顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不改变 `.reader`、`#page`、章节标题或进度的几何尺寸。四个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。
+顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不改变 `.reader`、`#page`、章节标题或进度的几何尺寸。四个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录和笔记使用相同的全屏几何与返回入口。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。
 
 ## 尺寸与缩放
 
@@ -86,20 +86,20 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 ## 交互连接
 
-- `app.mjs` 的 `toggleReaderTools()` 先撤销待处理的选区动作，再切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录的返回按钮使用同一关闭入口。
+- `app.mjs` 的 `toggleReaderTools()` 先撤销待处理的选区动作，再切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录和笔记页的返回按钮使用同一关闭入口；根级 `contextmenu` 监听统一禁止 WebView 默认右键菜单。
 - `interaction.mjs` 只按横向比例区分左 35%、中间 30% 和右 35%；中间区调用 `toggleReaderTools()`。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；投影目录中的章节或书签完成跳转后自动关闭目录。
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
 - `#density` 只调整行距；四边距固定为上 144、右 32、下 144、左 32 设备像素，没有对应设置或持久化字段，旧记录中的边距字段会被忽略。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
-- 原生正文选区在 `pointerup` 或键盘选择完成后的下一帧投影 `#selection-actions`；复制只触发浏览器 copy，标注和笔记复用同一 Annotation Store。底栏 `#annotations` 只生成可点击列表项，跳转成功后关闭工具层并聚焦正文。
+- 原生正文选区在 `pointerup` 或键盘选择完成后的下一帧投影 `#selection-actions`；复制只触发浏览器 copy，标注和笔记复用同一 Annotation Store。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存即可替换 SourceAnchor，笔记动作预填已有纯文本，删除写入 tombstone。全屏 `#annotations` 的项目正文负责跳转并关闭工具层，独立编辑和删除按钮不触发跳转。
 - `#tap-to-paginate` 和 `#swipe-to-paginate` 只控制对应指针输入；键盘和滚轮继续保持原行为。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
 ## 当前有意暂缓
 
 - 听书只有禁用图标，没有播放逻辑；
-- 标注颜色、编辑、删除、搜索、导出与同步没有阅读界面入口；
+- 标注颜色、样式、搜索、导出与同步没有阅读界面入口；
 - 桌面横屏和大屏布局尚未设计；
 - 当前使用 Lucide Svelte 图标和原生表单控件；尚未引入额外 UI 组件库或动效框架。
 

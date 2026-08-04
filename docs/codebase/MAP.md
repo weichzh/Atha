@@ -58,7 +58,7 @@
 - `reader::library::LocalLibrary` 复用 EPUB importer，以内容哈希为身份，用每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`；移除记录不删除导入缓存或阅读状态；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
-- 阅读页源码保持原生 ES module：`locator` 校验、序列化并比较内容坐标；`navigation` 组合页、section、TOC、窗口尺寸变化与重排恢复；`preferences` 合并应用默认与本书样式；`session` 拥有 manifest 和内容生命周期；`content` 校验并加载单份 XHTML、CSS 与 SVG；`pagination` 负责公式与自适应视口分页；`content-actions` 处理链接、脚注与图片，`structured-actions` 处理表格与代码；`reader-state` 分区持久化偏好、书签与进度，`bookmarks` 处理最小书签交互；`search` 只读扫描各 section 并生成 range Locator；`annotation-store` 只拥有严格 schema 与事务式写入，`annotations` 只拥有原生选区动作、重锚、CSS Highlight 投影和列表跳转；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 只组合打开流程；
+- 阅读页源码保持原生 ES module：`locator` 校验、序列化并比较内容坐标；`navigation` 组合页、section、TOC、窗口尺寸变化与重排恢复；`preferences` 合并应用默认与本书样式；`session` 拥有 manifest 和内容生命周期；`content` 校验并加载单份 XHTML、CSS 与 SVG；`pagination` 负责公式与自适应视口分页；`content-actions` 处理链接、脚注与图片，`structured-actions` 处理表格与代码；`reader-state` 分区持久化偏好、书签与进度，`bookmarks` 处理最小书签交互；`search` 只读扫描各 section 并生成 range Locator；`annotation-store` 只拥有严格 schema 与事务式写入，`annotations` 拥有新选区动作、已有标注命中、范围与笔记更新、软删除、重锚、CSS Highlight 投影和列表跳转；`diagnostics` 负责自检、benchmark 和仅验证模式可见的只读快照；`app` 组合打开流程并禁用 WebView 默认右键菜单；
 - 十六份页面源码由应用资源协议按固定顺序交付为单个 `atha-reader.mjs`，避免为源码分层增加多次自定义协议请求；浏览器验证服务器使用同一顺序，并对拼接后的整体 bundle 运行语法检查；
 - Locator 以内容版本、section id 和 DOM 文本 UTF-16 偏移表示 point/range；R2 range 限于单 section 并检查实际文本边界，无效输入安全回落并留下诊断，页码不作为内容坐标；
 - 上一页和下一页可跨 section；manifest TOC 与已有书签继续共用隐藏的原生 `select` 数据源，壳层把它投影为全屏目录按钮，书签紧随对应章节并通过 Locator 跳转；用户点击章节或书签后等待导航稳定并返回沉浸阅读；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
