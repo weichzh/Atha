@@ -67,6 +67,19 @@ function Get-AgentBrowserScriptValue {
     return [string]::Join("`n", $output).Trim()
 }
 
+function Invoke-ReaderTextSelection {
+    param(
+        [string]$Session,
+        [object[]]$Points
+    )
+
+    Invoke-AgentBrowser @('--session', $Session, 'mouse', 'move', [string]$Points[0], [string]$Points[1])
+    Invoke-AgentBrowser @('--session', $Session, 'mouse', 'down', 'left')
+    Invoke-AgentBrowser @('--session', $Session, 'mouse', 'move', [string]$Points[2], [string]$Points[3])
+    Invoke-AgentBrowser @('--session', $Session, 'mouse', 'up', 'left')
+    Invoke-AgentBrowser @('--session', $Session, 'wait', '--fn', "!document.querySelector('#selection-actions').hidden")
+}
+
 function Invoke-ReaderHost {
     param(
         [string]$BookRoot,
@@ -494,11 +507,7 @@ try {
 })()
 '@ | ConvertFrom-Json
                         if (@($annotationProbe).Count -ne 4) { throw 'No visible text was available for annotation.' }
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[0], [string]$annotationProbe[1])
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[2], [string]$annotationProbe[3])
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "!document.querySelector('#selection-actions').hidden")
+                        Invoke-ReaderTextSelection -Session $session -Points $annotationProbe
                         $selectionUi = Get-AgentBrowserScriptValue -Session $session -Script @'
 (() => {
   const toolbar = document.querySelector('#selection-actions');
@@ -522,24 +531,18 @@ try {
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-light-selection-actions.png'))
                         $copyBefore = Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.snapshot().contentActions" | ConvertFrom-Json
                         if ($copyBefore.selectionLength -le 0) { throw 'Selection copy had no native selected text.' }
+                        Invoke-AgentBrowser @('--session', $session, 'focus', '#copy-selection')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.activeElement === document.querySelector('#copy-selection') && !document.querySelector('#selection-actions').hidden")
                         Invoke-AgentBrowser @('--session', $session, 'click', '#copy-selection')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot(); return value.contentActions.trustedCopies === $([int]$copyBefore.trustedCopies + 1) && value.contentActions.selectionLength === 0 && value.annotations.active.length === 0 && document.querySelector('#selection-actions').hidden; })()")
 
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[0], [string]$annotationProbe[1])
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[2], [string]$annotationProbe[3])
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "!document.querySelector('#selection-actions').hidden")
+                        Invoke-ReaderTextSelection -Session $session -Points $annotationProbe
                         Invoke-AgentBrowser @('--session', $session, 'click', '#highlight-selection')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const value = globalThis.__athaReaderDiagnostics.snapshot().annotations; return value.active.length === 1 && value.active[0].type === 'highlight' && value.overlayCount === 1; })()")
                         $highlightText = Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.snapshot().annotations.active[0].sourceAnchor.selectedText" | ConvertFrom-Json
                         if ($highlightText.Length -ne $copyBefore.selectionLength) { throw 'Selection copy and highlight did not use the same selected range.' }
 
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[0], [string]$annotationProbe[1])
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$annotationProbe[2], [string]$annotationProbe[3])
-                        Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "!document.querySelector('#selection-actions').hidden")
+                        Invoke-ReaderTextSelection -Session $session -Points $annotationProbe
                         Invoke-AgentBrowser @('--session', $session, 'click', '#note-selection')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#annotation-note-dialog').open && document.activeElement === document.querySelector('#annotation-note')")
                         Invoke-AgentBrowser @('--session', $session, 'fill', '#annotation-note', '真实阅读笔记')

@@ -202,6 +202,7 @@ export function createAnnotations({
   }
 
   async function redraw() {
+    dismissSelection();
     if (!globalThis.CSS?.highlights || typeof globalThis.Highlight !== "function") {
       lastError = "annotation-overlay";
       sync();
@@ -352,6 +353,17 @@ export function createAnnotations({
     });
     content.book.addEventListener("pointerup", captureSelection);
     content.book.addEventListener("keyup", captureSelection);
+    document.addEventListener("selectionchange", () => {
+      requestAnimationFrame(() => {
+        if (
+          !controls.noteDialog.open &&
+          !controls.selectionActions.contains(document.activeElement) &&
+          !currentSelection()
+        ) {
+          dismissSelection();
+        }
+      });
+    });
     controls.selectionActions.addEventListener("pointerdown", (event) => event.preventDefault());
     controls.copy.addEventListener("click", copySelection);
     controls.highlight.addEventListener("click", async () => {
@@ -533,6 +545,30 @@ export function createAnnotations({
     await failedStore.restore();
     const failedWrite = await failedStore.add(sourceAnchor, "");
     assert(!failedWrite.ok && failedStore.active().length === 0, "sample-boundary");
+    const selection = content.book.getRootNode().getSelection?.();
+    const verifySelectionInput = async (event) => {
+      selection.removeAllRanges();
+      selection.addRange(firstTextRange());
+      content.book.dispatchEvent(event);
+      await new Promise(requestAnimationFrame);
+      assert(
+        !controls.selectionActions.hidden &&
+          [controls.copy, controls.highlight, controls.note].every(
+            (control) => !control.disabled && control.tabIndex >= 0,
+          ),
+        "sample-boundary",
+      );
+      dismissSelection();
+    };
+    assert(selection, "sample-boundary");
+    await verifySelectionInput(
+      new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }),
+    );
+    await verifySelectionInput(new KeyboardEvent("keyup", { bubbles: true, key: "ArrowRight" }));
+    selection.removeAllRanges();
+    content.book.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "ArrowRight" }));
+    await new Promise(requestAnimationFrame);
+    assert(controls.selectionActions.hidden, "sample-boundary");
     return Object.freeze({
       sourceAnchor: true,
       noteUpdated: true,
@@ -543,6 +579,9 @@ export function createAnnotations({
       corruptHashRejected: true,
       writeFailureRejected: true,
       softDeleted: true,
+      touchSelectionActions: true,
+      keyboardSelectionActions: true,
+      invalidSelectionDismissed: true,
     });
   }
 

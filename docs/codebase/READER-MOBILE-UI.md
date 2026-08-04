@@ -86,7 +86,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 ## 交互连接
 
-- `app.mjs` 的 `toggleReaderTools()` 只切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录的返回按钮使用同一关闭入口。
+- `app.mjs` 的 `toggleReaderTools()` 先撤销待处理的选区动作，再切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录的返回按钮使用同一关闭入口。
 - `interaction.mjs` 只按横向比例区分左 35%、中间 30% 和右 35%；中间区调用 `toggleReaderTools()`。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；投影目录中的章节或书签完成跳转后自动关闭目录。
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
