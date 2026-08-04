@@ -250,6 +250,19 @@ pub struct StoreHealth {
     pub integrity: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportInspection {
+    pub edition_id: String,
+    pub conversations: usize,
+    pub messages: usize,
+    pub revisions: usize,
+    pub sources: usize,
+    pub snapshots: usize,
+    pub relationships: usize,
+    pub resources: usize,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedResource {
     pub(crate) path: String,
@@ -264,11 +277,14 @@ pub enum MessageError {
     InvalidRoot,
     InvalidInput,
     UnknownConversation,
+    UnknownEdition,
     UnknownMessage,
     RevisionConflict,
     FutureDatabase,
     LegacyConflict,
     CorruptData,
+    Export,
+    InvalidExport,
     Database,
 }
 
@@ -278,11 +294,14 @@ impl MessageError {
             Self::InvalidRoot => "invalid-message-root",
             Self::InvalidInput => "invalid-message-input",
             Self::UnknownConversation => "unknown-conversation",
+            Self::UnknownEdition => "unknown-edition",
             Self::UnknownMessage => "unknown-message",
             Self::RevisionConflict => "message-revision-conflict",
             Self::FutureDatabase => "future-message-database",
             Self::LegacyConflict => "legacy-message-conflict",
             Self::CorruptData => "corrupt-message-data",
+            Self::Export => "message-export",
+            Self::InvalidExport => "invalid-message-export",
             Self::Database => "message-database",
         }
     }

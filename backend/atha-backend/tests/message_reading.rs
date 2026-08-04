@@ -519,3 +519,85 @@ fn outbox_failure_rolls_back_the_message_fact() {
 
     assert!(matches.is_empty());
 }
+
+#[test]
+fn edition_export_is_self_contained_and_passes_public_inspection() {
+    let root = TestRoot::new("message-export");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let mut first_snapshot = snapshot();
+    first_snapshot.resources.push(SnapshotResourceInput {
+        path: "images/proof.png".into(),
+        media_type: "image/png".into(),
+        bytes: b"exported image".to_vec(),
+    });
+    let first = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: first_snapshot,
+            text: Some("第一版笔记".into()),
+        })
+        .expect("create first");
+    store
+        .revise(&first.message_id, &first.revision_id, Some("第二版笔记"))
+        .expect("revise first");
+    let mut second_anchor = anchor();
+    second_anchor.selected_text = "数学证明".into();
+    second_anchor.content_hash = text_hash("数学证明");
+    let second = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: second_anchor,
+            snapshot: snapshot(),
+            text: None,
+        })
+        .expect("create second");
+    store
+        .reply(ReplyDraft {
+            conversation_id: first.conversation_id.clone(),
+            reply_to_message_id: first.message_id.clone(),
+            text: "引用另一条标注".into(),
+            reference_ids: vec![second.message_id],
+        })
+        .expect("create referenced reply");
+    let mut unrelated_anchor = anchor();
+    unrelated_anchor.selected_text = "无关章节".into();
+    unrelated_anchor.content_hash = text_hash("无关章节");
+    store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: unrelated_anchor,
+            snapshot: snapshot(),
+            text: Some("不应进入单对话导出".into()),
+        })
+        .expect("create unrelated conversation");
+    let archive = root.0.join("math-history.atha-messages.zip");
+    let conversation_archive = root.0.join("conversation.atha-messages.zip");
+
+    store
+        .export_edition(&edition().content_version, &archive)
+        .expect("export edition");
+    store
+        .export_conversation(&first.conversation_id, &conversation_archive)
+        .expect("export conversation");
+    let inspected = MessageStore::inspect_export(&archive).expect("inspect export");
+    let conversation_inspected =
+        MessageStore::inspect_export(&conversation_archive).expect("inspect conversation export");
+
+    assert_eq!(inspected.edition_id, edition().content_version);
+    assert_eq!(inspected.conversations, 3);
+    assert_eq!(inspected.messages, 4);
+    assert_eq!(inspected.revisions, 5);
+    assert_eq!(inspected.sources, 3);
+    assert_eq!(inspected.snapshots, 3);
+    assert_eq!(inspected.relationships, 1);
+    assert_eq!(inspected.resources, 1);
+    assert_eq!(conversation_inspected.conversations, 2);
+    assert_eq!(conversation_inspected.messages, 3);
+    assert_eq!(conversation_inspected.relationships, 1);
+    assert_eq!(conversation_inspected.resources, 1);
+    assert!(
+        !String::from_utf8_lossy(&fs::read(archive).expect("read export"))
+            .contains(root.0.to_string_lossy().as_ref())
+    );
+}
