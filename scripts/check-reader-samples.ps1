@@ -142,15 +142,10 @@ function Start-ValidationServer {
     throw 'Reader validation server did not become ready.'
 }
 
-$themeProbe = @'
+$interactionProbe = @'
 (async () => {
-  const expectedDark = __EXPECTED_DARK__;
-  const requireFormulas = __REQUIRE_FORMULAS__;
-  const expectedOrdinaryImages = __EXPECTED_ORDINARY_IMAGES__;
-  const requireCodeBlock = __REQUIRE_CODE_BLOCK__;
   const expectedSections = __EXPECTED_SECTIONS__;
   const expectedSequence = __EXPECTED_SEQUENCE__;
-  const expectedHeadings = __EXPECTED_HEADINGS__;
   if (expectedSections > 1) {
     const toc = document.querySelector('#toc');
     if (toc.querySelectorAll('option:not([data-bookmark-id])').length !== expectedSections) throw new Error('toc-control');
@@ -232,6 +227,19 @@ $themeProbe = @'
   document.documentElement.removeAttribute('data-reader-tools');
   const readerAfter = document.querySelector('.reader').getBoundingClientRect();
   if (readerBefore.width !== readerAfter.width || readerBefore.height !== readerAfter.height) throw new Error('preferences-control');
+  return true;
+})()
+'@
+
+$themeProbe = @'
+(async () => {
+  const expectedDark = __EXPECTED_DARK__;
+  const requireFormulas = __REQUIRE_FORMULAS__;
+  const expectedOrdinaryImages = __EXPECTED_ORDINARY_IMAGES__;
+  const requireCodeBlock = __REQUIRE_CODE_BLOCK__;
+  const expectedSections = __EXPECTED_SECTIONS__;
+  const expectedSequence = __EXPECTED_SEQUENCE__;
+  const expectedHeadings = __EXPECTED_HEADINGS__;
   const wheelProbe = await globalThis.__athaReaderDiagnostics.wheelProbe();
   const wheelTargets = Object.values(wheelProbe.targets).filter((target) => target.present);
   if (!wheelProbe.targets.linked.present || !wheelTargets.length || wheelTargets.some((target) => !target.accepted || !target.defaultPrevented || !target.singleStep)) throw new Error(`wheel-media:${JSON.stringify(wheelProbe)}`);
@@ -288,7 +296,7 @@ $themeProbe = @'
   if (!result.bookmarks.created || !result.bookmarks.toggled || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
   if (!result.search.replaced || !result.search.canceled || !result.search.errorIsolated || !result.search.activeContentRejected) throw new Error('search');
   if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.rangeUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected || !result.annotations.freshSelectionClearsAnnotation) throw new Error('annotations');
-  return result;
+  return true;
 })()
 '@
 
@@ -448,6 +456,9 @@ try {
                 $requireCodeBlock = if ($sample.requireCodeBlock) { 'true' } else { 'false' }
                 $sequenceJson = ConvertTo-Json @($expectedSequence) -Compress
                 $headingsJson = ConvertTo-Json @($expectedHeadings) -Compress
+                $interaction = $interactionProbe.Replace('__EXPECTED_SECTIONS__', [string]$expectedSections).
+                    Replace('__EXPECTED_SEQUENCE__', $sequenceJson)
+                Invoke-AgentBrowserScript -Session $session -Script $interaction
                 $probe = $themeProbe.Replace('__EXPECTED_DARK__', $expectedDark).
                     Replace('__REQUIRE_FORMULAS__', $requireFormulas).
                     Replace('__EXPECTED_ORDINARY_IMAGES__', [string]$sample.ordinaryImages).

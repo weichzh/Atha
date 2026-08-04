@@ -65,7 +65,7 @@ function Invoke-LibraryWindowCheck {
         Wait-LocalPort $nativePort
         Invoke-Checked 'agent-browser' @(
             '--session', $nativeSession, '--cdp', $nativePort,
-            'wait', '--text', '开始你的书架'
+            'wait', '--fn', "Boolean(document.querySelector('.library-shell'))"
         )
         $nativeUrl = @(& agent-browser --session $nativeSession --cdp $nativePort get url) -join "`n"
         if ($LASTEXITCODE -ne 0 -or $nativeUrl -notmatch '^https://tauri\.localhost/?$') {
