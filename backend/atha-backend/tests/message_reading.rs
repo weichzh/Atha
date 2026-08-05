@@ -521,6 +521,71 @@ fn reselect_switches_the_current_source_without_rewriting_old_captures() {
 }
 
 #[test]
+fn reopening_the_same_edition_restores_the_message_conversation() {
+    let root = TestRoot::new("message-reopen");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let created = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: snapshot(),
+            text: None,
+        })
+        .expect("create highlight");
+    store
+        .revise(
+            &created.message_id,
+            &created.revision_id,
+            Some("重启后保留的笔记"),
+        )
+        .expect("add note");
+    store
+        .reply(ReplyDraft {
+            conversation_id: created.conversation_id.clone(),
+            reply_to_message_id: created.message_id.clone(),
+            text: "重启后保留的回复".into(),
+            rich_text: None,
+            reference_ids: Vec::new(),
+        })
+        .expect("add reply");
+    let original = store
+        .source_captures(&created.message_id)
+        .expect("load source");
+    let mut replacement_anchor = anchor();
+    set_anchor_text(&mut replacement_anchor, "勾股定理");
+    store
+        .reselect(ReselectDraft {
+            message_id: created.message_id.clone(),
+            expected_source_id: original[0].source.id.clone(),
+            anchor: replacement_anchor,
+            snapshot: snapshot_for("勾股定理"),
+        })
+        .expect("reselect source");
+    drop(store);
+
+    let reopened = MessageStore::open(&root.0).expect("reopen store");
+    let conversation = reopened
+        .conversation(&created.conversation_id)
+        .expect("restore conversation");
+    let captures = reopened
+        .source_captures(&created.message_id)
+        .expect("restore captures");
+
+    assert_eq!(conversation.messages.len(), 2);
+    assert_eq!(conversation.messages[0].text, "重启后保留的笔记");
+    assert_eq!(conversation.messages[1].text, "重启后保留的回复");
+    assert_eq!(
+        conversation.messages[0]
+            .source
+            .as_ref()
+            .expect("current source")
+            .selected_text,
+        "勾股定理"
+    );
+    assert_eq!(captures.len(), 2);
+}
+
+#[test]
 fn legacy_annotation_import_is_atomic_and_idempotent() {
     let root = TestRoot::new("message-legacy-import");
     let store = MessageStore::open(&root.0).expect("open store");

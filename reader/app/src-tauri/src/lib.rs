@@ -58,6 +58,7 @@ struct PreparedReader {
     root: BookRoot,
     app_path: String,
     diagnostics: Diagnostics,
+    edition: Option<EditionInput>,
 }
 
 #[derive(Serialize)]
@@ -527,6 +528,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let hold_after_verify = arguments
         .as_ref()
         .is_some_and(|arguments| arguments.hold_after_verify);
+    let current_edition = prepared.as_ref().and_then(|reader| reader.edition.clone());
     let diagnostics = prepared.map(|reader| reader.diagnostics);
     let protocol_book = Arc::clone(&current_book);
     let cover_library = library.clone();
@@ -538,7 +540,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             verify_sample,
             hold_after_verify,
             current_book,
-            current_edition: RwLock::new(None),
+            current_edition: RwLock::new(current_edition),
             library,
             messages,
         })
@@ -642,6 +644,15 @@ fn prepare_reader(
         BookSource::Entry(_) => Some(content_fingerprint(&source_resource.bytes)),
         BookSource::Manifest(_) => None,
     };
+    let edition = book
+        .content_version
+        .as_ref()
+        .or(content_version.as_ref())
+        .map(|content_version| EditionInput {
+            content_version: content_version.clone(),
+            title: book.title.clone().unwrap_or_else(|| "未命名书籍".into()),
+            authors: book.authors.clone(),
+        });
     let diagnostics = Diagnostics::new(
         startup,
         arguments.verify_sample,
@@ -659,6 +670,7 @@ fn prepare_reader(
         root: book_root,
         app_path: format!("index.html?{query}"),
         diagnostics,
+        edition,
     })
 }
 

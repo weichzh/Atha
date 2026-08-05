@@ -53,6 +53,9 @@ enum BookInput {
 pub struct ResolvedBook {
     pub book_root: PathBuf,
     pub source: BookSource,
+    pub content_version: Option<String>,
+    pub title: Option<String>,
+    pub authors: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -220,6 +223,9 @@ impl Arguments {
             BookInput::Prepared { book_root, source } => Ok(ResolvedBook {
                 book_root: book_root.clone(),
                 source: source.clone(),
+                content_version: None,
+                title: None,
+                authors: Vec::new(),
             }),
             BookInput::Epub(path) => {
                 let local_app_data = env::var_os("LOCALAPPDATA").ok_or("missing LOCALAPPDATA")?;
@@ -232,6 +238,9 @@ impl Arguments {
                 Ok(ResolvedBook {
                     book_root: imported.root,
                     source: BookSource::Manifest(READER_MANIFEST.into()),
+                    content_version: Some(imported.content_version),
+                    title: imported.title,
+                    authors: imported.authors,
                 })
             }
         }

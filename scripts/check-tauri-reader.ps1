@@ -4,7 +4,8 @@
 param(
     [string]$Epub = 'fixtures/local/数学及其历史 (2026).epub',
     [string]$BookRoot = 'fixtures/local/math-history-r8',
-    [string]$Entry = 'EPUB/text/ch012.xhtml'
+    [string]$Entry = 'EPUB/text/ch012.xhtml',
+    [string]$ExpectedTitle = '数学及其历史 (2026)'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,10 +75,13 @@ function Invoke-TauriInteractiveOpen {
             '--session', $session, '--cdp', $port,
             'wait', '--fn', "['pass','fail'].includes(document.documentElement.dataset.status)"
         )
-        $result = @(& agent-browser --session $session --cdp $port eval '({status:document.documentElement.dataset.status,error:document.documentElement.dataset.error||null})') -join "`n"
+        $result = @(& agent-browser --session $session --cdp $port eval "(async()=>{const manifest=await fetch('https://atha-book.localhost/.atha-reader.json').then(response=>response.json());const edition=await window.__TAURI_INTERNALS__.invoke('message_edition_context',{contentVersion:manifest.contentVersion});return {status:document.documentElement.dataset.status,error:document.documentElement.dataset.error||null,edition}})()") -join "`n"
         if ($LASTEXITCODE -ne 0) { throw 'Could not read the Tauri reader result.' }
         $result = $result | ConvertFrom-Json
         if ($result.status -ne 'pass') { throw "Tauri reader failed with $($result.error)." }
+        if ($result.edition.title -ne $ExpectedTitle) {
+            throw "Unexpected direct EPUB edition title: $($result.edition.title)"
+        }
     }
     finally {
         & agent-browser --session $session close 2>$null | Out-Null
