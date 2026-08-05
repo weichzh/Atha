@@ -1,4 +1,9 @@
 const SNAPSHOT_LINE_HEIGHTS = Object.freeze({ compact: 1.45, standard: 1.6, comfortable: 1.8 });
+const MESSAGE_TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 const SNAPSHOT_PRESENTATION_KEYS = new Set([
   "schema",
   "theme",
@@ -72,6 +77,35 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
   });
 }
 
+export function messagePreview(message) {
+  if (message.deleted) return "这条消息已删除";
+  return message.text || message.source?.selectedText || "仅标注原文";
+}
+
+export function linkedMessagePreviews(message, messages) {
+  const byId = new Map(messages.map((candidate) => [candidate.id, candidate]));
+  const seen = new Set();
+  const linked = [];
+  const add = (id, fallback = null) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    const local = byId.get(id);
+    linked.push({
+      id,
+      text: local ? messagePreview(local) : fallback?.deleted ? "这条消息已删除" : fallback?.text || "引用消息",
+      local: Boolean(local),
+    });
+  };
+  add(message.replyToMessageId);
+  for (const preview of message.referencePreviews || []) add(preview.id, preview);
+  return linked;
+}
+
+export function formatMessageTime(value) {
+  if (!Number.isFinite(value)) return "";
+  return MESSAGE_TIME_FORMAT.format(new Date(value));
+}
+
 export function createConversations({
   store,
   annotations,
@@ -84,6 +118,7 @@ export function createConversations({
   let conversation = null;
   let parentId = null;
   let editing = null;
+  let reportTimer = null;
 
   const action = (label, name, message) => {
     const button = document.createElement("button");
@@ -95,8 +130,14 @@ export function createConversations({
   };
 
   function report(message, error = false) {
+    clearTimeout(reportTimer);
     controls.status.textContent = message;
     controls.status.dataset.error = String(error);
+    if (!error && message) {
+      reportTimer = setTimeout(() => {
+        if (controls.status.textContent === message) controls.status.textContent = "";
+      }, 1800);
+    }
   }
 
   function close() {
@@ -106,33 +147,34 @@ export function createConversations({
 
   function messageLabel(message, index) {
     if (message.deleted) return `第 ${index + 1} 条消息（已删除）`;
-    return message.text || message.source?.selectedText || `第 ${index + 1} 条消息`;
+    return messagePreview(message) || `第 ${index + 1} 条消息`;
+  }
+
+  function setComposerContext(message = null, mode = "reply") {
+    const root = conversation?.messages.find((candidate) => !candidate.deleted);
+    const syncSelectedMessage = () => {
+      for (const card of controls.list.querySelectorAll(".message-card")) {
+        card.dataset.selected = String(message?.id === card.dataset.messageId && message.id !== root?.id);
+      }
+    };
+    if (mode === "edit") {
+      controls.composerContext.hidden = false;
+      controls.composerContext.dataset.mode = "edit";
+      controls.composerContextText.textContent = message.text ? "编辑消息" : "为标注添加笔记";
+      syncSelectedMessage();
+      return;
+    }
+    controls.composerContext.dataset.mode = "reply";
+    controls.composerContext.hidden = !message || message.id === root?.id;
+    controls.composerContextText.textContent = message ? messagePreview(message) : "";
+    syncSelectedMessage();
   }
 
   function resetComposer() {
     editing = null;
     controls.text.value = "";
-    controls.cancelEdit.hidden = true;
     parentId = conversation?.messages.find((message) => !message.deleted)?.id || null;
-    controls.composerContext.textContent = "回复原文";
-    renderReferences();
-  }
-
-  function renderReferences() {
-    if (!conversation) return;
-    controls.references.replaceChildren(
-      controls.references.querySelector("legend"),
-      ...conversation.messages
-        .filter((message) => !message.deleted && message.id !== parentId)
-        .map((message, index) => {
-          const label = document.createElement("label");
-          const input = document.createElement("input");
-          input.type = "checkbox";
-          input.value = message.id;
-          label.append(input, document.createTextNode(messageLabel(message, index).slice(0, 80)));
-          return label;
-        }),
-    );
+    setComposerContext(conversation?.messages.find((message) => message.id === parentId));
   }
 
   function renderConversation() {
@@ -143,40 +185,80 @@ export function createConversations({
       ...messages.map((message, index) => {
         const card = document.createElement("article");
         const body = document.createElement("p");
+        const footer = document.createElement("footer");
+        const time = document.createElement("time");
         const actions = document.createElement("div");
         card.className = "message-card";
         card.dataset.deleted = String(message.deleted);
+        card.dataset.selected = String(message.id === parentId && index > 0);
         card.dataset.messageId = message.id;
-        if (message.source && !message.deleted) {
-          const quote = document.createElement("blockquote");
-          quote.textContent = message.source.selectedText;
+        for (const preview of linkedMessagePreviews(message, messages)) {
+          const quote = document.createElement(preview.local ? "button" : "div");
+          const mark = document.createElement("span");
+          const text = document.createElement("span");
+          quote.className = "message-reference-preview";
+          if (preview.local) {
+            quote.type = "button";
+            quote.dataset.messageTarget = preview.id;
+            quote.title = "跳到被引用消息";
+          }
+          mark.className = "message-quote-mark";
+          mark.setAttribute("aria-hidden", "true");
+          mark.textContent = "“";
+          text.textContent = preview.text;
+          quote.append(mark, text);
           card.append(quote);
         }
-        body.textContent = message.deleted ? "这条消息已删除" : message.text || "标注原文";
+        body.className = "message-card-body";
+        body.textContent = messagePreview(message);
+        const createdAt = new Date(message.createdAt);
+        time.dateTime = Number.isFinite(createdAt.valueOf()) ? createdAt.toISOString() : "";
+        time.textContent = `${formatMessageTime(message.createdAt)}${message.updatedAt > message.createdAt ? " · 已编辑" : ""}`;
         actions.className = "message-card-actions";
         if (!message.deleted) {
-          actions.append(
-            action("回复", "reply", message),
-            action(message.text ? "编辑" : "添加笔记", "edit", message),
-            action("删除", "delete", message),
-          );
+          actions.append(action("回复", "reply", message));
+        }
+        const more = document.createElement("button");
+        const menu = document.createElement("div");
+        more.type = "button";
+        more.className = "message-more-button";
+        more.textContent = "更多";
+        more.dataset.messageMenu = message.id;
+        more.setAttribute("aria-expanded", "false");
+        menu.id = `message-menu-${message.id}`;
+        more.setAttribute("aria-controls", menu.id);
+        menu.className = "message-menu message-card-menu";
+        menu.setAttribute("popover", "auto");
+        menu.addEventListener("toggle", () => {
+          more.setAttribute("aria-expanded", String(menu.matches(":popover-open")));
+        });
+        if (!message.deleted) {
+          menu.append(action(message.text ? "编辑" : "添加笔记", "edit", message));
           if (message.source) {
-            actions.append(
+            menu.append(
               action("历史引用", "snapshot", message),
               action("跳回原文", "jump", message),
             );
           }
+          const remove = action("删除", "delete", message);
+          remove.dataset.tone = "danger";
+          menu.append(remove);
         }
-        actions.append(action("修订", "history", message), action("关联", "relations", message));
-        card.append(body, actions);
+        menu.append(action("修订历史", "history", message), action("引用关系", "relations", message));
+        actions.append(more);
+        footer.append(time, actions);
+        card.append(body, footer, menu);
         return card;
       }),
     );
-    renderReferences();
   }
 
   async function reload() {
     conversation = await store.conversation(conversation.id);
+    if (!conversation.messages.some((message) => message.id === parentId && !message.deleted)) {
+      parentId = conversation.messages.find((message) => !message.deleted)?.id || null;
+    }
+    setComposerContext(conversation.messages.find((message) => message.id === parentId));
     renderConversation();
   }
 
@@ -189,14 +271,11 @@ export function createConversations({
         null;
       editing = null;
       controls.text.value = "";
-      controls.cancelEdit.hidden = true;
       const parent = conversation.messages.find((message) => message.id === parentId);
-      controls.composerContext.textContent =
-        !parent || parent === conversation.messages[0]
-          ? "回复原文"
-          : `回复：${messageLabel(parent, conversation.messages.indexOf(parent)).slice(0, 60)}`;
+      setComposerContext(parent);
       controls.overlay.hidden = false;
       controls.overlay.dataset.collapsed = "false";
+      controls.collapse.textContent = "收起对话";
       controls.collapse.setAttribute("aria-expanded", "true");
       controls.content.hidden = false;
       renderConversation();
@@ -372,16 +451,13 @@ export function createConversations({
         editing = null;
         parentId = message.id;
         controls.text.value = "";
-        controls.cancelEdit.hidden = true;
-        controls.composerContext.textContent = `回复：${messageLabel(message, 0).slice(0, 60)}`;
-        renderReferences();
+        setComposerContext(message);
         controls.text.focus();
         break;
       case "edit":
         editing = message;
         controls.text.value = message.text;
-        controls.cancelEdit.hidden = false;
-        controls.composerContext.textContent = message.text ? "编辑消息" : "为标注添加笔记";
+        setComposerContext(message, "edit");
         controls.text.focus();
         break;
       case "delete":
@@ -405,8 +481,34 @@ export function createConversations({
     }
   }
 
+  function toggleMessageMenu(button) {
+    const menu = document.getElementById(button.getAttribute("aria-controls"));
+    if (!menu) return;
+    if (menu.matches(":popover-open")) {
+      menu.hidePopover();
+      return;
+    }
+    menu.showPopover();
+    const anchor = button.getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
+    menu.style.top = `${Math.max(8, Math.min(anchor.bottom + 4, innerHeight - bounds.height - 8))}px`;
+    menu.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, innerWidth - bounds.width - 8))}px`;
+  }
+
   function bind() {
     controls.close.addEventListener("click", close);
+    controls.sourceJump.addEventListener("click", async () => {
+      const sourceMessage = conversation?.messages.find(
+        (message) => message.source && !message.deleted,
+      );
+      if (!sourceMessage) return;
+      try {
+        if ((await annotations.go(sourceMessage.id)).ok) close();
+        else report("无法返回原文", true);
+      } catch {
+        report("无法返回原文", true);
+      }
+    });
     controls.overlay.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
     });
@@ -415,8 +517,9 @@ export function createConversations({
       const collapsed = controls.overlay.dataset.collapsed !== "true";
       controls.overlay.dataset.collapsed = String(collapsed);
       controls.content.hidden = collapsed;
-      controls.collapse.textContent = collapsed ? "展开" : "收起";
+      controls.collapse.textContent = collapsed ? "展开对话" : "收起对话";
       controls.collapse.setAttribute("aria-expanded", String(!collapsed));
+      controls.collapse.closest("details").open = false;
     });
     controls.exportButton.addEventListener("click", async () => {
       try {
@@ -424,6 +527,7 @@ export function createConversations({
       } catch {
         report("导出失败，请重试", true);
       }
+      controls.exportButton.closest("details").open = false;
     });
     controls.exportAllButton.addEventListener("click", async () => {
       try {
@@ -436,8 +540,28 @@ export function createConversations({
       }
     });
     controls.list.addEventListener("click", (event) => {
+      const menuButton = event.target.closest("button[data-message-menu]");
+      if (menuButton) {
+        toggleMessageMenu(menuButton);
+        return;
+      }
+      const target = event.target.closest("button[data-message-target]");
+      if (target) {
+        const card = controls.list.querySelector(
+          `[data-message-id="${CSS.escape(target.dataset.messageTarget)}"]`,
+        );
+        card?.scrollIntoView({ block: "center", behavior: "smooth" });
+        if (card) {
+          card.dataset.flash = "true";
+          setTimeout(() => delete card.dataset.flash, 1200);
+        }
+        return;
+      }
       const button = event.target.closest("button[data-message-action]");
-      if (button) handleAction(button).catch(() => report("操作失败，请重试", true));
+      if (button) {
+        button.closest("[popover]")?.hidePopover();
+        handleAction(button).catch(() => report("操作失败，请重试", true));
+      }
     });
     controls.cancelEdit.addEventListener("click", resetComposer);
     controls.form.addEventListener("submit", async (event) => {
@@ -448,14 +572,11 @@ export function createConversations({
         if (editing) await store.revise(editing.id, editing.revisionId, text);
         else {
           if (!parentId) throw new Error("missing-message-parent");
-          const referenceIds = [...controls.references.querySelectorAll("input:checked")].map(
-            (input) => input.value,
-          );
           await store.reply({
             conversationId: conversation.id,
             replyToMessageId: parentId,
             text,
-            referenceIds,
+            referenceIds: [],
           });
         }
         await reload();

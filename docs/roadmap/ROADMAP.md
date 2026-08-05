@@ -114,6 +114,8 @@ R8 通过后，只选择 EPUB3，将其转换为 R1 已稳定的内容输入。W
 
 复用 R7 已稳定的选区、Locator 与 `SourceAnchor`，把现有标注和笔记迁移为同一 Message 事实的不同投影，不再长期维护 Annotation 双存储。正式后端使用 SQLite 保存 Conversation、Message、不可变修订、原文引用、历史渲染快照、消息关系与 Outbox；阅读页完成标注、笔记、回复、编辑、软删除、搜索、关系回顾、历史快照、跳回、重启恢复和自包含导出。完整范围和验收见 `docs/changes/complete-message-reading.md`；AI、同步与通用聊天继续暂缓。
 
+初版只交付 Atha 自有的聊天界面和语义样式令牌。微信、Telegram、QQ 风格模拟、主题选择与用户自定义界面放在消息主循环验收之后，届时只替换展示主题，不复制消息数据或交互状态。
+
 ## 暂缓范围
 
 - iOS、HarmonyOS 和其他移动平台；

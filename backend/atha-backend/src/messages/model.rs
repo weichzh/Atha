@@ -193,7 +193,18 @@ pub struct MessageView {
     pub text: String,
     pub reply_to_message_id: Option<String>,
     pub reference_ids: Vec<String>,
+    pub reference_previews: Vec<MessageReferencePreview>,
     pub source: Option<MessageSourceView>,
+    pub deleted: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageReferencePreview {
+    pub id: String,
+    pub text: String,
     pub deleted: bool,
 }
 

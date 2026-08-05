@@ -183,13 +183,31 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
             text: Some("第二条笔记".into()),
         })
         .expect("create second root");
+    let mut third_anchor = anchor();
+    set_anchor_text(&mut third_anchor, "无理数");
+    let third = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: third_anchor,
+            snapshot: snapshot_for("无理数"),
+            text: Some("第三条笔记".into()),
+        })
+        .expect("create third root");
+    let nested = store
+        .reply(ReplyDraft {
+            conversation_id: second.conversation_id.clone(),
+            reply_to_message_id: second.message_id.clone(),
+            text: "带引用的笔记".into(),
+            reference_ids: vec![third.message_id.clone()],
+        })
+        .expect("create nested reference");
 
     let reply = store
         .reply(ReplyDraft {
             conversation_id: first.conversation_id.clone(),
             reply_to_message_id: first.message_id.clone(),
             text: "把两处内容联系起来".into(),
-            reference_ids: vec![second.message_id.clone()],
+            reference_ids: vec![second.message_id.clone(), nested.message_id.clone()],
         })
         .expect("create reply");
     let conversation = store
@@ -201,18 +219,46 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
     let incoming = store
         .relationships(&second.message_id)
         .expect("referenced relationships");
+    let root_incoming = store
+        .relationships(&first.message_id)
+        .expect("reply parent relationships");
 
     assert_eq!(conversation.messages.len(), 2);
     assert_eq!(
         conversation.messages[1].reply_to_message_id,
-        Some(first.message_id)
+        Some(first.message_id.clone())
     );
-    assert_eq!(
-        conversation.messages[1].reference_ids,
-        vec![second.message_id.clone()]
+    let mut direct_reference_ids = conversation.messages[1].reference_ids.clone();
+    direct_reference_ids.sort();
+    let mut expected_reference_ids = vec![second.message_id.clone(), nested.message_id.clone()];
+    expected_reference_ids.sort();
+    assert_eq!(direct_reference_ids, expected_reference_ids);
+    let mut preview_texts = conversation.messages[1]
+        .reference_previews
+        .iter()
+        .map(|preview| preview.text.as_str())
+        .collect::<Vec<_>>();
+    preview_texts.sort();
+    assert_eq!(preview_texts, vec!["带引用的笔记", "第二条笔记"]);
+    assert!(
+        !conversation.messages[1]
+            .reference_ids
+            .contains(&third.message_id)
     );
-    assert_eq!(outgoing.references, vec![second.message_id.clone()]);
-    assert_eq!(incoming.referenced_by, vec![reply.message_id]);
+    assert!(conversation.messages[1].created_at > 0);
+    assert!(conversation.messages[1].updated_at >= conversation.messages[1].created_at);
+    let mut outgoing_ids = outgoing.references;
+    outgoing_ids.sort();
+    let mut expected_outgoing_ids = expected_reference_ids;
+    expected_outgoing_ids.push(first.message_id.clone());
+    expected_outgoing_ids.sort();
+    assert_eq!(outgoing_ids, expected_outgoing_ids);
+    let mut incoming_ids = incoming.referenced_by;
+    incoming_ids.sort();
+    let mut expected_incoming_ids = vec![nested.message_id, reply.message_id.clone()];
+    expected_incoming_ids.sort();
+    assert_eq!(incoming_ids, expected_incoming_ids);
+    assert_eq!(root_incoming.referenced_by, vec![reply.message_id]);
 }
 
 #[test]

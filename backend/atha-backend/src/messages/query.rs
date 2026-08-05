@@ -80,7 +80,7 @@ impl MessageStore {
             })?;
         let mut statement = connection
             .prepare(
-                "SELECT m.id, r.id, r.kind, r.plain_text, m.reply_to_message_id, a.id, a.original_locator_json, a.current_locator_json, a.section_id, a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, m.deleted_at_ms
+                "SELECT m.id, r.id, r.kind, r.plain_text, m.reply_to_message_id, a.id, a.original_locator_json, a.current_locator_json, a.section_id, a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, m.created_at_ms, m.updated_at_ms, m.deleted_at_ms
                  FROM message m
                  JOIN message_revision r ON r.id = m.current_revision_id AND r.message_id = m.id
                  LEFT JOIN source_anchor a ON a.id = m.current_source_anchor_id AND a.message_id = m.id
@@ -95,7 +95,7 @@ impl MessageStore {
                 let reply_to: Option<Vec<u8>> = row.get(4)?;
                 let source_id: Option<Vec<u8>> = row.get(5)?;
                 let content_hash: Option<Vec<u8>> = row.get(12)?;
-                let deleted = row.get::<_, Option<i64>>(13)?.is_some();
+                let deleted = row.get::<_, Option<i64>>(15)?.is_some();
                 Ok(MessageView {
                     id: encode_hex(&message_id),
                     revision_id: encode_hex(&revision_id),
@@ -107,6 +107,7 @@ impl MessageStore {
                     text: if deleted { String::new() } else { row.get(3)? },
                     reply_to_message_id: reply_to.as_deref().map(encode_hex),
                     reference_ids: Vec::new(),
+                    reference_previews: Vec::new(),
                     source: (!deleted).then_some(source_id).flatten().map(|source_id| {
                         MessageSourceView {
                             id: encode_hex(&source_id),
@@ -122,6 +123,8 @@ impl MessageStore {
                         }
                     }),
                     deleted,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
                 })
             })
             .map_err(|_| MessageError::Database)?
@@ -129,7 +132,12 @@ impl MessageStore {
             .map_err(|_| MessageError::Database)?;
         drop(statement);
         for message in &mut messages {
-            message.reference_ids = relationship_ids(&connection, &message.id, true)?;
+            message.reference_previews = reference_previews(&connection, &message.id)?;
+            message.reference_ids = message
+                .reference_previews
+                .iter()
+                .map(|preview| preview.id.clone())
+                .collect();
         }
         Ok(ConversationView {
             id: id.to_owned(),
@@ -389,9 +397,15 @@ fn relationship_ids(
 ) -> Result<Vec<String>, MessageError> {
     let message = decode_hex::<16>(message_id)?;
     let sql = if outgoing {
-        "SELECT target_message_id FROM message_reference WHERE source_message_id = ?1 ORDER BY target_message_id"
+        "SELECT target_message_id FROM message_reference WHERE source_message_id = ?1
+         UNION
+         SELECT reply_to_message_id FROM message WHERE id = ?1 AND reply_to_message_id IS NOT NULL
+         ORDER BY target_message_id"
     } else {
-        "SELECT source_message_id FROM message_reference WHERE target_message_id = ?1 ORDER BY source_message_id"
+        "SELECT source_message_id FROM message_reference WHERE target_message_id = ?1
+         UNION
+         SELECT id FROM message WHERE reply_to_message_id = ?1
+         ORDER BY source_message_id"
     };
     let mut statement = connection
         .prepare(sql)
@@ -400,6 +414,45 @@ fn relationship_ids(
         .query_map(params![message], |row| {
             let id: Vec<u8> = row.get(0)?;
             Ok(encode_hex(&id))
+        })
+        .map_err(|_| MessageError::Database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| MessageError::Database)
+}
+
+fn reference_previews(
+    connection: &Connection,
+    message_id: &str,
+) -> Result<Vec<MessageReferencePreview>, MessageError> {
+    let message = decode_hex::<16>(message_id)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT target.id, revision.plain_text, anchor.selected_text, target.deleted_at_ms
+             FROM message_reference relation
+             JOIN message target ON target.id = relation.target_message_id
+             JOIN message_revision revision ON revision.id = target.current_revision_id
+             LEFT JOIN source_anchor anchor ON anchor.id = target.current_source_anchor_id
+             WHERE relation.source_message_id = ?1
+             ORDER BY target.id",
+        )
+        .map_err(|_| MessageError::Database)?;
+    statement
+        .query_map(params![message], |row| {
+            let id: Vec<u8> = row.get(0)?;
+            let deleted = row.get::<_, Option<i64>>(3)?.is_some();
+            let note: String = row.get(1)?;
+            let source: Option<String> = row.get(2)?;
+            Ok(MessageReferencePreview {
+                id: encode_hex(&id),
+                text: if deleted {
+                    String::new()
+                } else if note.is_empty() {
+                    source.unwrap_or_default()
+                } else {
+                    note
+                },
+                deleted,
+            })
         })
         .map_err(|_| MessageError::Database)?
         .collect::<Result<Vec<_>, _>>()

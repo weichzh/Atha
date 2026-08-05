@@ -380,6 +380,7 @@ async function start() {
       controls: {
         overlay: document.querySelector("#message-conversation"),
         source: document.querySelector("#message-conversation-source"),
+        sourceJump: document.querySelector("#message-conversation-source-jump"),
         close: document.querySelector("#message-conversation-close"),
         collapse: document.querySelector("#message-conversation-collapse"),
         exportButton: document.querySelector("#message-conversation-export"),
@@ -388,8 +389,8 @@ async function start() {
         list: document.querySelector("#message-conversation-list"),
         form: document.querySelector("#message-composer"),
         composerContext: document.querySelector("#message-composer-context"),
+        composerContextText: document.querySelector("#message-composer-context-text"),
         text: document.querySelector("#message-composer-text"),
-        references: document.querySelector("#message-composer-references"),
         cancelEdit: document.querySelector("#message-composer-cancel"),
         status: document.querySelector("#message-conversation-status"),
         historyDialog: document.querySelector("#message-history-dialog"),

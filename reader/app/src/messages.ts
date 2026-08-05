@@ -69,7 +69,16 @@ export interface MessageView {
   text: string;
   replyToMessageId: string | null;
   referenceIds: string[];
+  referencePreviews: MessageReferencePreview[];
   source: MessageSource | null;
+  deleted: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MessageReferencePreview {
+  id: string;
+  text: string;
   deleted: boolean;
 }
 

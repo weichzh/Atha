@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
-import { isSnapshotCssSafe, parseSnapshotPresentation } from "./conversations.mjs";
+import {
+  formatMessageTime,
+  isSnapshotCssSafe,
+  linkedMessagePreviews,
+  parseSnapshotPresentation,
+} from "./conversations.mjs";
 
 const captured = parseSnapshotPresentation(
   '{"schema":1,"theme":"paper","brightness":90,"fontSize":40,"fontFamily":"serif","density":"comfortable"}',
@@ -30,3 +35,24 @@ for (const css of [
 ]) {
   assert.equal(isSnapshotCssSafe(css), false);
 }
+
+const rootMessage = {
+  id: "root",
+  text: "根消息",
+  source: null,
+  deleted: false,
+  referencePreviews: [{ id: "nested", text: "不应展开的间接引用", deleted: false }],
+};
+const replyMessage = {
+  id: "reply",
+  text: "回复正文",
+  source: null,
+  deleted: false,
+  replyToMessageId: "root",
+  referencePreviews: [{ id: "external", text: "外部引用", deleted: false }],
+};
+assert.deepEqual(linkedMessagePreviews(replyMessage, [rootMessage, replyMessage]), [
+  { id: "root", text: "根消息", local: true },
+  { id: "external", text: "外部引用", local: false },
+]);
+assert.equal(formatMessageTime(new Date(2026, 0, 1, 14, 5).valueOf()), "14:05");

@@ -13,7 +13,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
 | `reader/app/src/components/ReaderCanvas.svelte` | 自适应书页、章节和进度 DOM |
 | `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条、纯文本笔记 dialog 与对话浮层的组合 |
-| `reader/app/src/components/ConversationOverlay.svelte` | 对话、消息编辑器、修订/关系 dialog 与历史快照 dialog 的 DOM |
+| `reader/app/src/components/ConversationOverlay.svelte` | Atha 默认对话界面、消息编辑器、修订/关系 dialog 与历史快照 dialog 的 DOM |
 | `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部五图标 |
 | `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
 | `reader/app/src/shell.css` | 顶部和底部覆盖层、面板、图标及壳层明暗视觉 |
@@ -84,7 +84,8 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 目录和书签 | `.directory-panel`、`.directory-list`、`.directory-item`；隐藏数据源为 `#toc` 与 `option[data-bookmark-id]` |
 | 搜索 | `.search-panel`、`.search-actions` |
 | 选区动作与笔记 | `.selection-actions`、`#annotation-note-dialog`、`.notes-panel`、`.annotation-filters`、`.annotation-list`、`.annotation-item` |
-| 阅读对话 | `.message-conversation`、`.message-card`、`.message-composer`、`.message-detail-dialog` |
+| 阅读对话 | `.message-conversation`、`.message-source-context`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
+| 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
 | 进度 | `.progress-panel`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
 | 更多菜单 | `.preferences-panel`、`.settings-list`、`.settings-view` |
 | 主题 | `reader/atha-reader.css` 顶部语义令牌及 `data-theme="light|paper|dark"` 覆盖 |
@@ -100,7 +101,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - `#density` 只调整行距；四边距固定为上 144、右 32、下 144、左 32 设备像素，没有对应设置或持久化字段，旧记录中的边距字段会被忽略。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
 - 原生正文选区在 `pointerup` 或键盘选择完成后的下一帧投影 `#selection-actions`；复制只触发浏览器 copy，标注和笔记在 Tauri 产品中写入同一根 Message。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存会追加 SourceAnchor/SourceSnapshot，笔记动作追加修订，删除写入墓碑。全屏 `#annotations` 支持章节和全文筛选；点击项目打开对话浮层，独立编辑和删除按钮不触发跳转。
-- `#message-conversation` 可垂直调整、收起或关闭；正文点击与 Escape 返回阅读。消息可回复、引用当前对话中的既有消息、编辑或删除，并可查看修订、正反向关系和历史引用快照。笔记页导出本书消息，浮层导出当前对话。
+- `#message-conversation` 在移动竖屏占满应用视口，较宽窗口继续作为可调整大小的右侧浮层；两种形态都可收起或关闭。顶部固定显示原文短预览和跳回入口；消息按时间单列排列，被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记页导出本书消息，浮层导出当前对话。
 - `#tap-to-paginate` 和 `#swipe-to-paginate` 只控制对应指针输入；键盘和滚轮继续保持原行为。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
@@ -110,6 +111,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - 标注颜色、样式、notebook 与同步没有阅读界面入口；
 - 桌面横屏和大屏布局尚未设计；
 - 当前使用 Lucide Svelte 图标和原生表单控件；尚未引入额外 UI 组件库或动效框架。
+- 当前只实现 Atha 默认聊天主题；微信、Telegram、QQ 风格模拟、主题选择和用户自定义界面等待消息主循环验收后单独设计。
 
 ## 截图证据
 
