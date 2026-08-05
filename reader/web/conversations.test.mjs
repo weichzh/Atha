@@ -18,12 +18,10 @@ assert.deepEqual(captured, {
   fontFamily: "serif",
   lineHeightPx: 72,
 });
-assert.equal(
+assert.throws(() =>
   parseSnapshotPresentation(
     '{"schema":1,"theme":"system","brightness":100,"fontSize":32,"fontFamily":"book","density":"standard"}',
-    true,
-  ).theme,
-  "dark",
+  ),
 );
 assert.throws(() => parseSnapshotPresentation('{"schema":1,"theme":"dark"}'));
 assert.equal(isSnapshotCssSafe("p { color: #222; }"), true);

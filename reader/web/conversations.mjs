@@ -60,7 +60,7 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
     Array.isArray(parsed) ||
     Object.keys(parsed).some((key) => !SNAPSHOT_PRESENTATION_KEYS.has(key)) ||
     parsed.schema !== 1 ||
-    !["system", "light", "paper", "dark"].includes(parsed.theme) ||
+    !["light", "paper", "dark"].includes(parsed.theme) ||
     !Number.isInteger(parsed.brightness) ||
     parsed.brightness < 70 ||
     parsed.brightness > 120 ||
@@ -75,8 +75,7 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
     throw new Error("invalid-message-snapshot");
   }
   return Object.freeze({
-    theme:
-      parsed.theme === "system" ? (prefersDark ? "dark" : "light") : parsed.theme,
+    theme: parsed.theme,
     brightness: parsed.brightness,
     fontSize: parsed.fontSize,
     fontFamily: parsed.fontFamily,

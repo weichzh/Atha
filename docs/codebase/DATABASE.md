@@ -27,7 +27,7 @@
 - 根 Message 必须拥有同 Edition 的 `SourceAnchor` 与 `SourceSnapshot`；回复不拥有原文快照。
 - 添加笔记和编辑只追加 `MessageRevision`，调用方必须提交期望修订 ID；旧版本冲突不会覆盖新版本。
 - 自动唯一重锚只更新当前 Locator；主动重选创建新的 Anchor 与 Snapshot，并保留旧捕获。
-- 删除只写墓碑和 deleted 修订；修订、关系、快照和资源仍可查询或导出。
+- 删除只写 Message 墓碑，不改写或追加正文修订；既有修订、关系、快照和资源仍可查询或导出。
 - 引用目标必须存在、未删除且属于同一 Edition；拒绝未知、跨 Edition、父消息和自身引用。
 - 快照再次校验 Locator 版本、原文哈希、HTML 文本、活动元素/属性、CSS 子资源、Shadow DOM 穿透选择器、presentation schema/长度、资源路径、媒体类型、长度和 SHA-256；未绑定资源和多余资源均拒绝。系统主题在捕获时冻结为实际明暗主题。
 - 每次写入与 Outbox 事件同事务提交；资产或数据库失败不能留下部分消息事实。

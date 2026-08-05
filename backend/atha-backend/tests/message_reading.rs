@@ -1,4 +1,9 @@
-use std::{fs, path::PathBuf, time::SystemTime};
+use std::{
+    fs::{self, File},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 use atha_backend::messages::{
     EditionInput, LegacyAnnotationInput, LegacyImport, MessageSearch, MessageStore, ReplyDraft,
@@ -6,6 +11,7 @@ use atha_backend::messages::{
     SourceSnapshotInput,
 };
 use sha2::{Digest, Sha256};
+use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 struct TestRoot(PathBuf);
 
@@ -84,6 +90,39 @@ fn set_anchor_text(anchor: &mut SourceAnchorInput, selected_text: &str) {
         "end": { "section": anchor.section, "offset": end }
     })
     .to_string();
+}
+
+fn tamper_export_manifest(
+    source: &Path,
+    target: &Path,
+    mutate: impl FnOnce(&mut serde_json::Value),
+) {
+    let mut archive = ZipArchive::new(File::open(source).expect("open source export"))
+        .expect("read source export");
+    let mut entries = Vec::with_capacity(archive.len());
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).expect("read export entry");
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).expect("read export bytes");
+        entries.push((entry.name().to_owned(), bytes));
+    }
+    let manifest = entries
+        .iter_mut()
+        .find(|(name, _)| name == "manifest.json")
+        .expect("manifest entry");
+    let mut value = serde_json::from_slice(&manifest.1).expect("parse manifest");
+    mutate(&mut value);
+    manifest.1 = serde_json::to_vec_pretty(&value).expect("serialize manifest");
+
+    let mut writer = ZipWriter::new(File::create(target).expect("create tampered export"));
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    for (name, bytes) in entries {
+        writer
+            .start_file(name, options)
+            .expect("start export entry");
+        writer.write_all(&bytes).expect("write export entry");
+    }
+    writer.finish().expect("finish tampered export");
 }
 
 #[test]
@@ -750,13 +789,31 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
             text: None,
         })
         .expect("create second");
+    let second_reply = store
+        .reply(ReplyDraft {
+            conversation_id: second.conversation_id.clone(),
+            reply_to_message_id: second.message_id.clone(),
+            text: "另一条标注的首层回复".into(),
+            rich_text: None,
+            reference_ids: Vec::new(),
+        })
+        .expect("create first nested reply");
+    let nested_reply = store
+        .reply(ReplyDraft {
+            conversation_id: second.conversation_id.clone(),
+            reply_to_message_id: second_reply.message_id,
+            text: "另一条标注的二层回复".into(),
+            rich_text: None,
+            reference_ids: Vec::new(),
+        })
+        .expect("create second nested reply");
     store
         .reply(ReplyDraft {
             conversation_id: first.conversation_id.clone(),
             reply_to_message_id: first.message_id.clone(),
             text: "引用另一条标注".into(),
             rich_text: None,
-            reference_ids: vec![second.message_id],
+            reference_ids: vec![nested_reply.message_id],
         })
         .expect("create referenced reply");
     let mut unrelated_anchor = anchor();
@@ -784,20 +841,40 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
 
     assert_eq!(inspected.edition_id, edition().content_version);
     assert_eq!(inspected.conversations, 3);
-    assert_eq!(inspected.messages, 4);
-    assert_eq!(inspected.revisions, 5);
+    assert_eq!(inspected.messages, 6);
+    assert_eq!(inspected.revisions, 7);
     assert_eq!(inspected.sources, 3);
     assert_eq!(inspected.snapshots, 3);
     assert_eq!(inspected.relationships, 1);
     assert_eq!(inspected.resources, 1);
     assert_eq!(conversation_inspected.conversations, 2);
-    assert_eq!(conversation_inspected.messages, 3);
+    assert_eq!(conversation_inspected.messages, 5);
     assert_eq!(conversation_inspected.relationships, 1);
     assert_eq!(conversation_inspected.resources, 1);
     assert!(
         !String::from_utf8_lossy(&fs::read(archive).expect("read export"))
             .contains(root.0.to_string_lossy().as_ref())
     );
+
+    for corruption in ["revision", "snapshot", "source", "relationship"] {
+        let tampered = root.0.join(format!("tampered-{corruption}.zip"));
+        tamper_export_manifest(
+            &conversation_archive,
+            &tampered,
+            |manifest| match corruption {
+                "revision" => manifest["revisions"][0]["content"]["schema"] = 9.into(),
+                "snapshot" => manifest["snapshots"][0]["presentation"]["theme"] = "system".into(),
+                "source" => manifest["sources"][0]["contentHash"] = "00".repeat(32).into(),
+                "relationship" => manifest["relationships"][0]["kind"] = "recursive".into(),
+                _ => unreachable!(),
+            },
+        );
+        assert_eq!(
+            MessageStore::inspect_export(&tampered),
+            Err(atha_backend::messages::MessageError::InvalidExport),
+            "accepts tampered {corruption}"
+        );
+    }
 }
 
 #[test]
