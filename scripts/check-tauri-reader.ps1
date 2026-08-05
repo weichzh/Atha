@@ -40,6 +40,54 @@ function Invoke-TauriSmoke {
     }
 }
 
+function Get-FreePort {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    try { return ([Net.IPEndPoint]$listener.LocalEndpoint).Port }
+    finally { $listener.Stop() }
+}
+
+function Invoke-TauriInteractiveOpen {
+    $port = Get-FreePort
+    $session = "atha-reader-open-$PID"
+    $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
+    $startInfo.UseShellExecute = $false
+    $startInfo.Environment['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = "--remote-debugging-port=$port"
+    foreach ($argument in @('--epub', $epubPath)) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($startInfo)
+    try {
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            if ($process.HasExited) { throw "Tauri reader exited with code $($process.ExitCode)." }
+            try {
+                $client = [Net.Sockets.TcpClient]::new('127.0.0.1', $port)
+                $client.Dispose()
+                break
+            }
+            catch { Start-Sleep -Milliseconds 100 }
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if ([DateTime]::UtcNow -ge $deadline) { throw 'Tauri reader debug endpoint did not appear.' }
+
+        Invoke-Checked 'agent-browser' @(
+            '--session', $session, '--cdp', $port,
+            'wait', '--fn', "['pass','fail'].includes(document.documentElement.dataset.status)"
+        )
+        $result = @(& agent-browser --session $session --cdp $port eval '({status:document.documentElement.dataset.status,error:document.documentElement.dataset.error||null})') -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read the Tauri reader result.' }
+        $result = $result | ConvertFrom-Json
+        if ($result.status -ne 'pass') { throw "Tauri reader failed with $($result.error)." }
+    }
+    finally {
+        & agent-browser --session $session close 2>$null | Out-Null
+        if (-not $process.HasExited) {
+            $process.Kill($true)
+            $process.WaitForExit()
+        }
+    }
+}
+
 function Invoke-TauriWindowBehavior {
     if (-not ('AthaWindowProbe' -as [type])) {
         Add-Type @'
@@ -151,6 +199,7 @@ try {
         '-HostPackage', 'atha-reader-app',
         '-HostPath', 'target/debug/atha-reader-app.exe'
     )
+    Invoke-TauriInteractiveOpen
     Invoke-TauriSmoke
     Invoke-TauriWindowBehavior
 }

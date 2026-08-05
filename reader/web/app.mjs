@@ -199,38 +199,6 @@ annotations = createAnnotations({
     : null,
   assert,
 });
-if (messageMode) {
-  conversations = createConversations({
-    store: annotationStore,
-    annotations,
-    closeTools: closeReaderTools,
-    editionId: session.describe().contentVersion,
-    readingSurface: content.book,
-    returnFocus: reader,
-    controls: {
-      overlay: document.querySelector("#message-conversation"),
-      source: document.querySelector("#message-conversation-source"),
-      close: document.querySelector("#message-conversation-close"),
-      collapse: document.querySelector("#message-conversation-collapse"),
-      exportButton: document.querySelector("#message-conversation-export"),
-      exportAllButton: document.querySelector("#message-export-all"),
-      content: document.querySelector("#message-conversation-content"),
-      list: document.querySelector("#message-conversation-list"),
-      form: document.querySelector("#message-composer"),
-      composerContext: document.querySelector("#message-composer-context"),
-      text: document.querySelector("#message-composer-text"),
-      references: document.querySelector("#message-composer-references"),
-      cancelEdit: document.querySelector("#message-composer-cancel"),
-      status: document.querySelector("#message-conversation-status"),
-      historyDialog: document.querySelector("#message-history-dialog"),
-      historyTitle: document.querySelector("#message-history-title"),
-      historyContent: document.querySelector("#message-history-content"),
-      snapshotDialog: document.querySelector("#message-snapshot-dialog"),
-      snapshotVersions: document.querySelector("#message-snapshot-versions"),
-      snapshotContent: document.querySelector("#message-snapshot-content"),
-    },
-  });
-}
 bookmarks = createBookmarks({
   state: readerState,
   navigation,
@@ -401,6 +369,38 @@ async function start() {
   await content.initialize();
   const firstStableStarted = performance.now();
   await session.open();
+  if (messageMode) {
+    conversations = createConversations({
+      store: annotationStore,
+      annotations,
+      closeTools: closeReaderTools,
+      editionId: session.describe().contentVersion,
+      readingSurface: content.book,
+      returnFocus: reader,
+      controls: {
+        overlay: document.querySelector("#message-conversation"),
+        source: document.querySelector("#message-conversation-source"),
+        close: document.querySelector("#message-conversation-close"),
+        collapse: document.querySelector("#message-conversation-collapse"),
+        exportButton: document.querySelector("#message-conversation-export"),
+        exportAllButton: document.querySelector("#message-export-all"),
+        content: document.querySelector("#message-conversation-content"),
+        list: document.querySelector("#message-conversation-list"),
+        form: document.querySelector("#message-composer"),
+        composerContext: document.querySelector("#message-composer-context"),
+        text: document.querySelector("#message-composer-text"),
+        references: document.querySelector("#message-composer-references"),
+        cancelEdit: document.querySelector("#message-composer-cancel"),
+        status: document.querySelector("#message-conversation-status"),
+        historyDialog: document.querySelector("#message-history-dialog"),
+        historyTitle: document.querySelector("#message-history-title"),
+        historyContent: document.querySelector("#message-history-content"),
+        snapshotDialog: document.querySelector("#message-snapshot-dialog"),
+        snapshotVersions: document.querySelector("#message-snapshot-versions"),
+        snapshotContent: document.querySelector("#message-snapshot-content"),
+      },
+    });
+  }
   navigation.bindControls();
   pagination.bindResize(() => navigation.resize());
   await annotations.restore();

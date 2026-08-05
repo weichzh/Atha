@@ -33,7 +33,7 @@
 | `scripts/check-reader-samples.ps1` | 四样本实际 host、内容交互、状态、搜索、标注与明暗主题截图总验收 | M2 已通过 |
 | `scripts/check-reader-wheel.ps1` | 真实浏览器媒体滚轮、连续离散输入接受率与输入到稳定页 P95 快速检查 | 已通过 |
 | `scripts/check-reader-gate.ps1` | 组合四样本、大书搜索、进程树内存、强杀恢复和固定 P95 性能门槛 | M2 R8 已通过 |
-| `scripts/check-tauri-reader.ps1` | Svelte production build、workspace Rust 检查、Tauri build、真实 EPUB 与性能门槛 | 已通过 |
+| `scripts/check-tauri-reader.ps1` | Svelte production build、workspace Rust 检查、Tauri build、普通 EPUB 消息模式启动、导入探针与性能门槛 | 已通过 |
 | `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build 与 Tauri/host 测试 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 无参数启动与移动书架 UI | M4 已通过 |
@@ -144,6 +144,7 @@
 - 选中文字切片的四样本正式回归通过：真实鼠标与浏览器自检覆盖复制、标注、笔记、触摸/键盘入口、失效选区撤销、重排/重载恢复和列表跳转；Tauri 基准 `1785818772540-28968` 的 P95 为冷启动 559.453ms、首稳 142.400ms、热开 20.900ms、翻页 10.000ms、字号重排 48.500ms，均低于既有门槛；
 - 完整消息后端 interface 集成测试 14/14 通过，覆盖迁移、事务、修订冲突、关系、FTS、快照资源、旧标注迁移和自包含导出；Svelte check 为 0 errors/0 warnings，production build 与 Tauri command seam 测试通过；
 - 消息实现后的四样本正式 runner、书架与 Tauri 产品回归均通过；基准 `1785859567155-20612` 的 P95 为冷启动 739.307ms、首稳 148.700ms、热开 27.300ms、翻页 31.900ms、字号重排 41.600ms，均低于既有门槛。本轮未做同时间旧代码对照，不能把差异归因于消息改动；
+- 普通 `--epub` 消息模式曾在 manifest 加载前读取 edition 而以 `invalid-manifest` 失败；初始化顺序修复后，真实 Tauri/WebView2 启动检查进入 `pass`，并作为 `scripts/check-tauri-reader.ps1` 固定回归。基准 `1785889633788-21736` 的 P95 为冷启动 724.373ms、首稳 133.500ms、热开 21.500ms、翻页 6.700ms、字号重排 41.700ms，均低于既有门槛；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
 - 系统 SQLite 3.53.4 上回滚、FTS 完整性、外键和数据库完整性检查通过；
