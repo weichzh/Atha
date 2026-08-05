@@ -1,6 +1,7 @@
 //! Constrained access to one canonical book root.
 
 use std::{
+    collections::HashSet,
     error::Error,
     fmt, fs,
     path::{Component, Path, PathBuf},
@@ -11,6 +12,7 @@ const MAX_RESOURCE_BYTES: u64 = 16 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct BookRoot {
     root: PathBuf,
+    xhtml_paths: HashSet<PathBuf>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -38,12 +40,13 @@ impl BookRoot {
         if !root.is_dir() {
             return Err(ResourceError::InvalidRoot);
         }
-        Ok(Self { root })
+        let xhtml_paths = manifest_xhtml_paths(&root);
+        Ok(Self { root, xhtml_paths })
     }
 
     pub fn read(&self, request_path: &str) -> Result<Resource, ResourceError> {
         let relative = decode_request_path(request_path)?;
-        let candidate = fs::canonicalize(self.root.join(relative)).map_err(|error| {
+        let candidate = fs::canonicalize(self.root.join(&relative)).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 ResourceError::NotFound
             } else {
@@ -62,13 +65,50 @@ impl BookRoot {
         if metadata.len() > MAX_RESOURCE_BYTES {
             return Err(ResourceError::TooLarge);
         }
-        let content_type = content_type(&candidate).ok_or(ResourceError::UnsupportedMediaType)?;
+        let content_type = if self.xhtml_paths.contains(&relative) {
+            "application/xhtml+xml; charset=utf-8"
+        } else {
+            content_type(&candidate).ok_or(ResourceError::UnsupportedMediaType)?
+        };
         let bytes = fs::read(candidate).map_err(|_| ResourceError::ReadFailed)?;
         Ok(Resource {
             bytes,
             content_type,
         })
     }
+}
+
+fn manifest_xhtml_paths(root: &Path) -> HashSet<PathBuf> {
+    let manifest_path = root.join(".atha-reader.json");
+    let Ok(metadata) = manifest_path.metadata() else {
+        return HashSet::new();
+    };
+    if !metadata.is_file() || metadata.len() > MAX_RESOURCE_BYTES {
+        return HashSet::new();
+    }
+    let Ok(bytes) = fs::read(manifest_path) else {
+        return HashSet::new();
+    };
+    let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return HashSet::new();
+    };
+    if manifest.get("schema").and_then(serde_json::Value::as_u64) != Some(1) {
+        return HashSet::new();
+    }
+    let Some(sections) = manifest
+        .get("sections")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return HashSet::new();
+    };
+    if sections.len() > 1_000 {
+        return HashSet::new();
+    }
+    sections
+        .iter()
+        .filter_map(|section| section.get("href").and_then(serde_json::Value::as_str))
+        .filter_map(|href| decode_request_path(&format!("/{href}")).ok())
+        .collect()
 }
 
 impl ResourceError {

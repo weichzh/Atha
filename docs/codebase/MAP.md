@@ -54,9 +54,9 @@
 
 ### HTML 阅读切片
 
-- `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；
+- `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；reader manifest 已声明的 section 以 XHTML 返回，因此不依赖源文件扩展名，也不把未声明的无扩展名文件当作 XHTML；
 - schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--epub` 与 `--book-root` 输入互斥，后者再从 `--manifest` 与兼容 `--entry` 二选一；
-- `reader::epub` 的公开 interface 只有 `import_epub`：`mod` 编排内容哈希与原子缓存，`archive` 拥有 ZIP/路径/大小边界，`package` 拥有 container、OPF spine、navigation 和 schema 1 计划；同一源字节跨路径得到相同缓存根和状态键；
+- `reader::epub` 的公开 interface 只有 `import_epub`：`mod` 编排内容哈希与原子缓存，`archive` 拥有 ZIP/路径/大小边界，`package` 拥有 container、OPF spine、navigation 和 schema 1 计划；XHTML 由 OPF media type 判定，navigation 仅额外允许标准 HTML5 DOCTYPE；同一源字节跨路径得到相同缓存根和状态键；
 - `reader::library::LocalLibrary` 复用 EPUB importer，以内容哈希为身份，用每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`；移除记录不删除导入缓存或阅读状态；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
@@ -136,6 +136,7 @@
 - R7 最终 10 样本基准中位数：冷启动 820.208ms、首个稳定页面 180.000ms、热打开 23.650ms、翻页 7.100ms、字号重排 31.200ms；均在正式门槛内，未执行旧代码同时间对照；
 - R8 基准 `1785710178116-34252` 的 10 样本中位数/P95：冷启动 807.404/849.571ms、首个稳定页面 146.650/161.300ms、热打开 23.250/24.000ms、翻页 7.350/7.800ms、字号重排 29.950/31.400ms；五项 P95 分别低于 2000、750、120、50 和 150ms 固定门槛，未执行旧代码同时间对照；
 - M3 指定 EPUB 的 SHA-256 为 `0af5dff0c0d1eb369a096b18d05eb77a4cd9c03808748db8274d5e77bbfe7368`；真实 `--epub` import probe 得到 173 个 spine section、2527 个资源和 197 条 TOC，并完成前三节加载、释放、重开与网络阻断；
+- 《唯物主义（2023）》真实 Tauri/WebView2 验收识别 11 个 spine section 和 10 条 TOC；无扩展名章节通过受控协议返回 XHTML MIME，10 条目录项逐章打开均保持 `pass`，最后到达“译者简介”；
 - M3 完整 M2 回归的三轮 WebView2 进程树峰值为 638.3、628.8 和 636.5MiB；基准 `1785720849357-40976` 的 10 样本中位数/P95 为冷启动 800.103/898.631ms、首稳 145.650/151.900ms、热开 22.850/23.800ms、翻页 7.550/7.800ms、重排 31.250/32.000ms，均在既有门槛内；
 - Tauri/Svelte 基准 `1785763863358-21204` 的 10 样本中位数/P95 为冷启动 551.941/605.253ms、首稳 130.650/138.700ms、热开 20.800/21.400ms、翻页 6.600/6.900ms、重排 27.800/41.700ms，均在 2000/750/120/50/150ms 门槛内；真实 EPUB import probe、移动竖屏沉浸态与控制层通过，四边距为不进入偏好的页面内部固定值，真实文档策略确认相机、麦克风、定位和显示捕获不可用；
 - 移动阅读壳可用性升级的 reader samples 正式 runner 在 Windows 本地通过：四样本逻辑、明暗主题、目录投影、书签导航后返回阅读、连续进度往返、偏好持久化、WebView2 host 状态和截图链路均通过；production Svelte build 在 390 × 840、DPR 2 下完成微信读书源图同图 Design QA，最终无 P0、P1 或 P2；Tauri 基准 `1785769614666-29748` 的 10 样本中位数/P95 为冷启动 563.409/575.663ms、首稳 133.200/142.900ms、热开 20.800/21.000ms、翻页 6.600/6.800ms、重排 27.800/41.700ms，均低于既有门槛，本轮未做同时间旧代码对照，不能把差异归因于界面改动；

@@ -478,18 +478,14 @@ pub(super) fn plan_import(
         .values()
         .find(|item| item.path == package.nav_path)
         .ok_or(ImportError::InvalidXml)?;
-    if nav_item.media_type != "application/xhtml+xml"
-        || !nav_item.path.to_lowercase().ends_with(".xhtml")
-    {
+    if nav_item.media_type != "application/xhtml+xml" {
         return Err(ImportError::UnsupportedEpub);
     }
     let mut sections = Vec::with_capacity(package.spine.len());
     let mut section_paths = HashSet::with_capacity(package.spine.len());
     for (position, idref) in package.spine.iter().enumerate() {
         let item = package.items.get(idref).ok_or(ImportError::InvalidXml)?;
-        if item.media_type != "application/xhtml+xml"
-            || !item.path.to_lowercase().ends_with(".xhtml")
-        {
+        if item.media_type != "application/xhtml+xml" {
             return Err(ImportError::UnsupportedEpub);
         }
         archive::require(index, &item.path)?;
@@ -641,7 +637,12 @@ fn parse_navigation(
             }
             Event::Empty(_) if depth == 0 => return Err(ImportError::UnsupportedEpub),
             Event::Empty(_) => {}
-            Event::DocType(_) => return Err(ImportError::InvalidXml),
+            Event::DocType(value) => {
+                let value: &[u8] = value.as_ref();
+                if value != b"html" {
+                    return Err(ImportError::InvalidXml);
+                }
+            }
             Event::Text(text) if depth == 0 && !xml_whitespace(text.as_ref()) => {
                 return Err(ImportError::InvalidXml);
             }

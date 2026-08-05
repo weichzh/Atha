@@ -53,7 +53,7 @@ export function createContent({ host, readerStyleSource, fail }) {
     ensure(!target.username && !target.password, "active-link");
     ensure(["http:", "https:"].includes(target.protocol), "active-link");
     if (target.origin === bookOrigin) {
-      ensure(!target.search && target.pathname.toLowerCase().endsWith(".xhtml"), "active-link");
+      ensure(!target.search, "active-link");
       return Object.freeze({
         kind: "internal",
         href: target.href,
@@ -382,7 +382,6 @@ export function createContent({ host, readerStyleSource, fail }) {
     const source = new DOMParser().parseFromString(cachedXhtml, "application/xhtml+xml");
     validateMarkup(source);
     const styleSources = detachSourceStyles(source);
-    ensure(styleSources.some(({ url }) => url), "missing-stylesheet");
     const stylesheets = await Promise.all(
       styleSources.map(async ({ css, url }) => {
         if (css !== undefined) return css;

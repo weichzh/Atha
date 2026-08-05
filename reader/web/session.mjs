@@ -26,7 +26,7 @@ export function createReadingSession({ params, content, render, onState, assert,
     );
   }
 
-  function safePath(value, extensions) {
+  function safePath(value, extensions = null) {
     manifestAssert(
       typeof value === "string" &&
         value.length > 0 &&
@@ -34,7 +34,7 @@ export function createReadingSession({ params, content, render, onState, assert,
         !/[\\%:?#\u0000-\u001f\u007f]/.test(value) &&
         !value.startsWith("/") &&
         value.split("/").every((part) => part && part !== "." && part !== "..") &&
-        extensions.some((extension) => value.toLowerCase().endsWith(extension)),
+        (!extensions || extensions.some((extension) => value.toLowerCase().endsWith(extension))),
     );
     return value;
   }
@@ -59,13 +59,12 @@ export function createReadingSession({ params, content, render, onState, assert,
       manifestAssert(section && typeof section === "object" && !Array.isArray(section));
       exactKeys(section, ["id", "href"]);
       manifestAssert(typeof section.id === "string" && /^[a-z0-9][a-z0-9._-]{0,63}$/.test(section.id));
-      const href = safePath(section.href, [".xhtml"]);
+      const href = safePath(section.href);
       manifestAssert(!sectionIds.has(section.id) && !sectionPaths.has(href));
       sectionIds.add(section.id);
       sectionPaths.add(href);
       return Object.freeze({ id: section.id, href, url: new URL(href, rootUrl) });
     });
-
     const resourcePaths = new Set();
     const resourceUrls = new Set();
     for (const resource of value.resources) {
@@ -87,7 +86,7 @@ export function createReadingSession({ params, content, render, onState, assert,
       );
       manifestAssert(typeof item.href === "string" && item.href.length <= 768);
       const [path, fragment, ...extra] = item.href.split("#");
-      manifestAssert(extra.length === 0 && sectionPaths.has(safePath(path, [".xhtml"])));
+      manifestAssert(extra.length === 0 && sectionPaths.has(safePath(path)));
       if (fragment !== undefined) {
         manifestAssert(
           fragment.length > 0 &&
@@ -134,6 +133,14 @@ export function createReadingSession({ params, content, render, onState, assert,
       toc: [{ label: "One", href: "text/one.xhtml#start" }],
     };
     validateManifest(valid, new URL("https://atha-book.localhost/.atha-reader.json"));
+    validateManifest(
+      {
+        ...valid,
+        sections: [{ id: "one", href: "text/one" }],
+        toc: [{ label: "One", href: "text/one#start" }],
+      },
+      new URL("https://atha-book.localhost/.atha-reader.json"),
+    );
     for (const invalid of [
       { ...valid, schema: 2 },
       { ...valid, unknown: true },

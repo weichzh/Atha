@@ -9,6 +9,7 @@ use std::{
 use atha_backend::reader::{
     epub::{ImportError, READER_MANIFEST, import_epub},
     library::{LibraryError, LocalLibrary},
+    resources::{BookRoot, ResourceError},
 };
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
@@ -25,6 +26,36 @@ enum EpubVariant {
     ExternalReference,
     Encryption,
     TruncatedNavigation,
+    ExtensionlessXhtml,
+    InvalidNavigationDoctype,
+}
+
+#[test]
+fn imports_extensionless_xhtml_with_html5_navigation_doctype() {
+    let root = TestRoot::new();
+    let source = root.0.join("extensionless.epub");
+    write_epub(&source, EpubVariant::ExtensionlessXhtml);
+
+    let imported = import_epub(&source, root.0.join("cache")).expect("import compatible epub");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(manifest["sections"][0]["href"], "OEBPS/text/one");
+
+    let book = BookRoot::new(&imported.root).expect("open imported root");
+    assert_eq!(
+        book.read("/OEBPS/text/one")
+            .expect("read extensionless xhtml")
+            .content_type,
+        "application/xhtml+xml; charset=utf-8"
+    );
+    fs::write(imported.root.join("OEBPS/text/undeclared"), b"not declared")
+        .expect("write undeclared file");
+    assert_eq!(
+        book.read("/OEBPS/text/undeclared"),
+        Err(ResourceError::UnsupportedMediaType)
+    );
 }
 
 struct TestRoot(PathBuf);
@@ -132,6 +163,11 @@ fn imports_epub_and_rejects_unsafe_or_unsupported_sources() {
         (
             "truncated-nav.epub",
             EpubVariant::TruncatedNavigation,
+            ImportError::InvalidXml,
+        ),
+        (
+            "invalid-nav-doctype.epub",
+            EpubVariant::InvalidNavigationDoctype,
             ImportError::InvalidXml,
         ),
     ] {
@@ -257,24 +293,41 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="https://example.com/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.as_slice()
     } else if matches!(variant, EpubVariant::ExtraPackageRoot) {
         br#"<?xml version="1.0"?><extra/><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.as_slice()
+    } else if matches!(variant, EpubVariant::ExtensionlessXhtml) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title>Example Book</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one" media-type="application/xhtml+xml"/><item id="two" href="text/two" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.as_slice()
     } else {
         br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title> Example   Book </dc:title><dc:creator>Example Author</dc:creator></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"></item><item id="css" href="styles/book.css" media-type="text/css"/><item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"></itemref></spine></package>"#.as_slice()
     };
     let navigation = if matches!(variant, EpubVariant::TruncatedNavigation) {
         br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One"#.as_slice()
+    } else if matches!(variant, EpubVariant::InvalidNavigationDoctype) {
+        br#"<?xml version="1.0"?><!DOCTYPE svg><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li></ol></nav></body></html>"#.as_slice()
+    } else if matches!(variant, EpubVariant::ExtensionlessXhtml) {
+        br#"<?xml version="1.0"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one">One</a></li><li><a href="text/two#start">Two</a></li></ol></nav></body></html>"#.as_slice()
     } else {
         br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li><li><a href="text/two.xhtml#start"><span>Two</span></a></li></ol></nav></body></html>"#.as_slice()
+    };
+    let extensionless = matches!(variant, EpubVariant::ExtensionlessXhtml);
+    let one_path = if extensionless {
+        "OEBPS/text/one"
+    } else {
+        "OEBPS/text/one.xhtml"
+    };
+    let two_path = if extensionless {
+        "OEBPS/text/two"
+    } else {
+        "OEBPS/text/two.xhtml"
     };
     for (name, bytes) in [
         ("META-INF/container.xml", container),
         ("OEBPS/book.opf", package),
         ("OEBPS/nav.xhtml", navigation),
         (
-            "OEBPS/text/one.xhtml",
+            one_path,
             br#"<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>"#.as_slice(),
         ),
         (
-            "OEBPS/text/two.xhtml",
+            two_path,
             br#"<html xmlns="http://www.w3.org/1999/xhtml"><body id="start">Two</body></html>"#
                 .as_slice(),
         ),

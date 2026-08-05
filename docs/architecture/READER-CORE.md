@@ -40,9 +40,9 @@ EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持
 
 阅读页的运行时书籍输入始终是受控书根内的 schema 1 manifest。manifest 以书籍内容哈希标识版本，声明有序且唯一的 section、可访问资源和可选 TOC；未知字段、重复项、超量输入、编码绕过、绝对路径、查询和书根越界均拒绝。单 XHTML `entry` 只作为现有样本的兼容入口。
 
-Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `reader::epub` module 读取一个 EPUB3 rendition 的 OCF、OPF manifest、spine 和 navigation document，把 spine XHTML 与当前支持的 CSS、SVG、PNG、JPEG、GIF、WebP 原子写入 `%LOCALAPPDATA%/Atha/ImportedBooks/<source-sha256>`，再交回既有 `BookRoot` 与 `ReadingSession`。缓存目录和 `contentVersion` 都使用完整源文件 SHA-256，因此相同内容跨路径复用身份，内容改变则形成新身份；导入器不解释 Locator、分页或阅读状态。
+Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `reader::epub` module 读取一个 EPUB3 rendition 的 OCF、OPF manifest、spine 和 navigation document，把 spine XHTML 与当前支持的 CSS、SVG、PNG、JPEG、GIF、WebP 原子写入 `%LOCALAPPDATA%/Atha/ImportedBooks/<source-sha256>`，再交回既有 `BookRoot` 与 `ReadingSession`。XHTML 身份以 OPF manifest 的 `application/xhtml+xml` 为准，不依赖文件扩展名；`BookRoot` 只对 reader manifest 已声明的 section 返回 XHTML MIME。缓存目录和 `contentVersion` 都使用完整源文件 SHA-256，因此相同内容跨路径复用身份，内容改变则形成新身份；导入器不解释 Locator、分页或阅读状态。
 
-首版只支持 UTF-8 XML 的 EPUB3、单 package、XHTML spine 和 EPUB3 TOC。源文件和解压总量上限为 512MiB，成员数上限 10000，单成员上限 16MiB；加密、DOCTYPE、外部 URL、重叠/重复/Windows 歧义路径、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。EPUB2/NCX fallback、多 rendition、远程资源、字体、混淆、修复和多格式工厂不属于当前契约。
+首版只支持 UTF-8 XML 的 EPUB3、单 package、XHTML spine 和 EPUB3 TOC。navigation document 可包含精确的 HTML5 `<!DOCTYPE html>`；container、OPF 和其他 DOCTYPE 继续拒绝。章节可以没有书源样式表，此时只应用阅读器样式。源文件和解压总量上限为 512MiB，成员数上限 10000，单成员上限 16MiB；加密、外部 URL、重叠/重复/Windows 歧义路径、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。EPUB2/NCX fallback、多 rendition、远程资源、字体、混淆、修复和多格式工厂不属于当前契约。
 
 `Section` 是一次只加载一份的顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 前必须释放上一 section 的 DOM、书源样式和缓存；关闭后不保留书籍 DOM。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
 
