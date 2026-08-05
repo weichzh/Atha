@@ -547,6 +547,7 @@ fn parse_navigation(
     reader.config_mut().trim_text(false);
     let mut depth = 0_usize;
     let mut html_seen = false;
+    let mut doctype_seen = false;
     let mut body_depth = None;
     let mut body_count = 0_u8;
     let mut toc_depth = None;
@@ -639,9 +640,10 @@ fn parse_navigation(
             Event::Empty(_) => {}
             Event::DocType(value) => {
                 let value: &[u8] = value.as_ref();
-                if value != b"html" {
+                if depth != 0 || html_seen || doctype_seen || value != b"html" {
                     return Err(ImportError::InvalidXml);
                 }
+                doctype_seen = true;
             }
             Event::Text(text) if depth == 0 && !xml_whitespace(text.as_ref()) => {
                 return Err(ImportError::InvalidXml);

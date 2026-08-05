@@ -83,7 +83,7 @@ fn book_root_rejects_path_and_media_escapes() {
 
 #[cfg(windows)]
 #[test]
-fn book_root_rejects_a_symlink_outside_the_root() {
+fn book_root_rejects_symlinks_outside_the_root() {
     use std::os::windows::fs::symlink_file;
 
     let tree = TestTree::new();
@@ -92,12 +92,21 @@ fn book_root_rejects_a_symlink_outside_the_root() {
     let outside = tree.path().join("outside.svg");
     fs::write(&outside, b"<svg/>").expect("write outside file");
     symlink_file(&outside, root.join("linked.svg")).expect("create test symlink");
+    let outside_manifest = tree.path().join("outside.json");
+    fs::write(
+        &outside_manifest,
+        br#"{"schema":1,"sections":[{"href":"undeclared"}]}"#,
+    )
+    .expect("write outside manifest");
+    symlink_file(&outside_manifest, root.join(".atha-reader.json"))
+        .expect("create manifest symlink");
+    fs::write(root.join("undeclared"), b"not xhtml").expect("write undeclared file");
 
+    let book = BookRoot::new(root).expect("open book root");
+    assert_eq!(book.read("/linked.svg"), Err(ResourceError::OutsideRoot));
     assert_eq!(
-        BookRoot::new(root)
-            .expect("open book root")
-            .read("/linked.svg"),
-        Err(ResourceError::OutsideRoot)
+        book.read("/undeclared"),
+        Err(ResourceError::UnsupportedMediaType)
     );
 }
 

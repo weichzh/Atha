@@ -79,7 +79,12 @@ impl BookRoot {
 }
 
 fn manifest_xhtml_paths(root: &Path) -> HashSet<PathBuf> {
-    let manifest_path = root.join(".atha-reader.json");
+    let Ok(manifest_path) = fs::canonicalize(root.join(".atha-reader.json")) else {
+        return HashSet::new();
+    };
+    if !manifest_path.starts_with(root) {
+        return HashSet::new();
+    }
     let Ok(metadata) = manifest_path.metadata() else {
         return HashSet::new();
     };

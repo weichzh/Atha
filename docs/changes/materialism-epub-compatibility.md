@@ -10,13 +10,14 @@ implemented
 
 ## Problem
 
-《唯物主义（2023）》是未加密 EPUB 3，具备单一 OPF、EPUB 3 导航和 XHTML 书脊；但部分书脊资源没有 `.xhtml` 扩展名，导航包含标准 `<!DOCTYPE html>`。当前导入器在已声明 `application/xhtml+xml` 后仍强制检查文件扩展名，并拒绝导航中的所有 DOCTYPE，导致应用报 `unsupported-epub`。
+《唯物主义（2023）》是未加密 EPUB 3，具备单一 OPF、EPUB 3 导航和 XHTML 书脊；但部分书脊资源没有 `.xhtml` 扩展名，导航包含标准 `<!DOCTYPE html>`。当前导入器在已声明 `application/xhtml+xml` 后仍强制检查文件扩展名，并拒绝导航中的所有 DOCTYPE，导致应用报 `unsupported-epub`。修复这两项后，阅读内核又因无扩展名章节没有书源样式表而报 `missing-stylesheet`。
 
 ## Scope
 
 - 以 OPF manifest 的 `application/xhtml+xml` 声明判断导航和书脊资源，不再额外要求 `.xhtml` 后缀；
 - 允许导航文档使用精确的 HTML5 `<!DOCTYPE html>`，继续拒绝其他 DOCTYPE，container 与 OPF 的现有限制不变；
 - 让受限资源服务把已导入的无扩展名书脊作为 XHTML 返回；
+- 允许合法 XHTML 章节不引用书源样式表，此时只应用阅读器样式；
 - 用合成 EPUB 固定上述兼容性，并用指定真实样书验证普通应用入口能够进入阅读页。
 
 ## Non-Goals
@@ -30,6 +31,7 @@ implemented
 - [x] 合成 EPUB 可导入无扩展名 XHTML 书脊和带 HTML5 DOCTYPE 的导航；
 - [x] 无扩展名书脊由 `BookRoot` 以 `application/xhtml+xml` 返回；
 - [x] container 中的 DOCTYPE、非 HTML5 导航 DOCTYPE 与既有不安全输入仍被拒绝；
+- [x] 不带书源样式表的合法章节能够呈现；
 - [x] 指定《唯物主义（2023）》通过普通 Tauri 入口打开并进入阅读页；
 - [x] 现有后端、EPUB 和 Tauri 阅读器回归无 blocking。
 
