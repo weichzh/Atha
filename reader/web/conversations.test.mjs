@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  conversationFeed,
   formatMessageTime,
   isSnapshotCssSafe,
   linkedMessagePreviews,
@@ -56,3 +57,36 @@ assert.deepEqual(linkedMessagePreviews(replyMessage, [rootMessage, replyMessage]
   { id: "external", text: "外部引用", local: false },
 ]);
 assert.equal(formatMessageTime(new Date(2026, 0, 1, 14, 5).valueOf()), "14:05");
+
+const firstConversation = {
+  id: "first",
+  messages: [
+    { id: "first-root", createdAt: 20, source: { canonicalLocator: "later" }, deleted: false },
+    { id: "first-reply", createdAt: 40, source: null, deleted: false },
+  ],
+};
+const secondConversation = {
+  id: "second",
+  messages: [
+    { id: "second-root", createdAt: 10, source: { canonicalLocator: "earlier" }, deleted: false },
+    { id: "second-reply", createdAt: 30, source: null, deleted: false },
+  ],
+};
+const conversations = [firstConversation, secondConversation];
+assert.deepEqual(
+  conversationFeed(conversations, "time").map(({ message }) => message.id),
+  ["second-root", "first-root", "second-reply", "first-reply"],
+);
+const bookFeed = conversationFeed(
+  conversations,
+  "book",
+  (left, right) => left.canonicalLocator.localeCompare(right.canonicalLocator),
+);
+assert.deepEqual(
+  bookFeed.map(({ message }) => message.id),
+  ["second-root", "second-reply", "first-root", "first-reply"],
+);
+assert.deepEqual(
+  bookFeed.filter(({ showSource }) => showSource).map(({ message }) => message.id),
+  ["second-root", "first-root"],
+);

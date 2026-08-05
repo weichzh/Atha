@@ -379,6 +379,10 @@ async function start() {
       returnFocus: reader,
       controls: {
         overlay: document.querySelector("#message-conversation"),
+        scopeButtons: document.querySelectorAll("[data-message-scope]"),
+        orderButtons: document.querySelectorAll("[data-message-order]"),
+        orderControls: document.querySelector("#message-order-controls"),
+        sourceLabel: document.querySelector("#message-conversation-source-label"),
         source: document.querySelector("#message-conversation-source"),
         sourceJump: document.querySelector("#message-conversation-source-jump"),
         handle: document.querySelector("#message-conversation-handle"),

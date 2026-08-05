@@ -4,6 +4,13 @@ const MESSAGE_TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
   minute: "2-digit",
   hour12: false,
 });
+const MESSAGE_DATE_TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 const SNAPSHOT_PRESENTATION_KEYS = new Set([
   "schema",
   "theme",
@@ -101,9 +108,56 @@ export function linkedMessagePreviews(message, messages) {
   return linked;
 }
 
+export function conversationFeed(conversations, order, compareSources = () => 0) {
+  const threads = conversations
+    .map((conversation) => ({
+      conversation,
+      root: conversation.messages.find((message) => message.source && !message.deleted),
+    }))
+    .filter(({ root }) => root);
+  if (order === "time") {
+    return threads
+      .flatMap(({ conversation, root }) =>
+        conversation.messages.map((message, index) => ({
+          conversation,
+          root,
+          message,
+          index,
+          showSource: true,
+        })),
+      )
+      .sort(
+        (left, right) =>
+          left.message.createdAt - right.message.createdAt ||
+          left.message.id.localeCompare(right.message.id),
+      );
+  }
+  if (order !== "book") throw new Error("invalid-message-order");
+  return threads
+    .sort(
+      (left, right) =>
+        compareSources(left.root.source, right.root.source) ||
+        left.conversation.id.localeCompare(right.conversation.id),
+    )
+    .flatMap(({ conversation, root }) =>
+      conversation.messages.map((message, index) => ({
+        conversation,
+        root,
+        message,
+        index,
+        showSource: index === 0,
+      })),
+    );
+}
+
 export function formatMessageTime(value) {
   if (!Number.isFinite(value)) return "";
   return MESSAGE_TIME_FORMAT.format(new Date(value));
+}
+
+export function formatMessageFeedTime(value) {
+  if (!Number.isFinite(value)) return "";
+  return MESSAGE_DATE_TIME_FORMAT.format(new Date(value));
 }
 
 export function createConversations({
@@ -120,6 +174,11 @@ export function createConversations({
   let editing = null;
   let reportTimer = null;
   let sheetDrag = null;
+  let feedConversations = [];
+  let scope = "mark";
+  let order = "time";
+  let anchorSection = null;
+  let scopeGeneration = 0;
 
   const composer = () => window.athaMessageComposer;
 
@@ -144,6 +203,7 @@ export function createConversations({
   }
 
   function close() {
+    scopeGeneration += 1;
     composer()?.collapse();
     controls.overlay.hidden = true;
     returnFocus.focus({ preventScroll: true });
@@ -188,81 +248,138 @@ export function createConversations({
     setComposerContext(conversation?.messages.find((message) => message.id === parentId));
   }
 
+  function openConversationButton(label, conversationId, messageId, className = "") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = label;
+    button.dataset.conversationOpen = conversationId;
+    button.dataset.messageId = messageId;
+    return button;
+  }
+
+  function renderMessageCard(entry) {
+    const { conversation: entryConversation, root, message, index, showSource } = entry;
+    const messages = entryConversation.messages;
+    const aggregate = scope !== "mark";
+    const card = document.createElement("article");
+    const body = document.createElement("div");
+    const footer = document.createElement("footer");
+    const time = document.createElement("time");
+    const actions = document.createElement("div");
+    card.className = "message-card";
+    card.dataset.deleted = String(message.deleted);
+    card.dataset.selected = String(!aggregate && message.id === parentId && index > 0);
+    card.dataset.messageId = message.id;
+    if (showSource) {
+      const source = openConversationButton(
+        root.source.selectedText || "原文已删除",
+        entryConversation.id,
+        message.id,
+        "message-feed-source",
+      );
+      source.setAttribute("aria-label", `打开标记：${root.source.selectedText || "原文已删除"}`);
+      card.append(source);
+    }
+    for (const preview of linkedMessagePreviews(message, messages)) {
+      const quote = document.createElement(preview.local ? "button" : "div");
+      const mark = document.createElement("span");
+      const text = document.createElement("span");
+      quote.className = "message-reference-preview";
+      if (preview.local) {
+        quote.type = "button";
+        quote.dataset.messageTarget = preview.id;
+        quote.title = "跳到被引用消息";
+      }
+      mark.className = "message-quote-mark";
+      mark.setAttribute("aria-hidden", "true");
+      mark.textContent = "“";
+      text.textContent = preview.text;
+      quote.append(mark, text);
+      card.append(quote);
+    }
+    body.className = "message-card-body";
+    if (message.deleted) body.textContent = messagePreview(message);
+    else composer()?.render(body, message.contentJson, messagePreview(message));
+    const createdAt = new Date(message.createdAt);
+    time.dateTime = Number.isFinite(createdAt.valueOf()) ? createdAt.toISOString() : "";
+    time.textContent = `${aggregate ? formatMessageFeedTime(message.createdAt) : formatMessageTime(message.createdAt)}${message.updatedAt > message.createdAt ? " · 已编辑" : ""}`;
+    actions.className = "message-card-actions";
+    if (aggregate) {
+      actions.append(openConversationButton("打开", entryConversation.id, message.id));
+      footer.append(time, actions);
+      card.append(body, footer);
+      return card;
+    }
+    if (!message.deleted) actions.append(action("回复", "reply", message));
+    const more = document.createElement("button");
+    const menu = document.createElement("div");
+    more.type = "button";
+    more.className = "message-more-button";
+    more.textContent = "更多";
+    more.dataset.messageMenu = message.id;
+    more.setAttribute("aria-expanded", "false");
+    menu.id = `message-menu-${message.id}`;
+    more.setAttribute("aria-controls", menu.id);
+    menu.className = "message-menu message-card-menu";
+    menu.setAttribute("popover", "auto");
+    menu.addEventListener("toggle", () => {
+      more.setAttribute("aria-expanded", String(menu.matches(":popover-open")));
+    });
+    if (!message.deleted) {
+      menu.append(action(message.text ? "编辑" : "添加笔记", "edit", message));
+      if (message.source) {
+        menu.append(
+          action("历史引用", "snapshot", message),
+          action("跳回原文", "jump", message),
+        );
+      }
+      const remove = action("删除", "delete", message);
+      remove.dataset.tone = "danger";
+      menu.append(remove);
+    }
+    menu.append(action("修订历史", "history", message), action("引用关系", "relations", message));
+    actions.append(more);
+    footer.append(time, actions);
+    card.append(body, footer, menu);
+    return card;
+  }
+
   function renderConversation() {
-    const messages = conversation?.messages || [];
+    const entries =
+      scope === "mark"
+        ? (conversation?.messages || []).map((message, index) => ({
+            conversation,
+            root: conversation.messages.find((candidate) => candidate.source && !candidate.deleted),
+            message,
+            index,
+            showSource: false,
+          }))
+        : conversationFeed(feedConversations, order, store.compareSources);
+    const markCount = scope === "mark" ? 1 : feedConversations.length;
+    controls.sourceLabel.textContent =
+      scope === "mark" ? "原文引用" : scope === "chapter" ? "本章记录" : "本书记录";
     controls.source.textContent =
-      messages.find((message) => message.source)?.source?.selectedText || "原文已删除";
-    controls.list.replaceChildren(
-      ...messages.map((message, index) => {
-        const card = document.createElement("article");
-        const body = document.createElement("div");
-        const footer = document.createElement("footer");
-        const time = document.createElement("time");
-        const actions = document.createElement("div");
-        card.className = "message-card";
-        card.dataset.deleted = String(message.deleted);
-        card.dataset.selected = String(message.id === parentId && index > 0);
-        card.dataset.messageId = message.id;
-        for (const preview of linkedMessagePreviews(message, messages)) {
-          const quote = document.createElement(preview.local ? "button" : "div");
-          const mark = document.createElement("span");
-          const text = document.createElement("span");
-          quote.className = "message-reference-preview";
-          if (preview.local) {
-            quote.type = "button";
-            quote.dataset.messageTarget = preview.id;
-            quote.title = "跳到被引用消息";
-          }
-          mark.className = "message-quote-mark";
-          mark.setAttribute("aria-hidden", "true");
-          mark.textContent = "“";
-          text.textContent = preview.text;
-          quote.append(mark, text);
-          card.append(quote);
-        }
-        body.className = "message-card-body";
-        if (message.deleted) body.textContent = messagePreview(message);
-        else composer()?.render(body, message.contentJson, messagePreview(message));
-        const createdAt = new Date(message.createdAt);
-        time.dateTime = Number.isFinite(createdAt.valueOf()) ? createdAt.toISOString() : "";
-        time.textContent = `${formatMessageTime(message.createdAt)}${message.updatedAt > message.createdAt ? " · 已编辑" : ""}`;
-        actions.className = "message-card-actions";
-        if (!message.deleted) {
-          actions.append(action("回复", "reply", message));
-        }
-        const more = document.createElement("button");
-        const menu = document.createElement("div");
-        more.type = "button";
-        more.className = "message-more-button";
-        more.textContent = "更多";
-        more.dataset.messageMenu = message.id;
-        more.setAttribute("aria-expanded", "false");
-        menu.id = `message-menu-${message.id}`;
-        more.setAttribute("aria-controls", menu.id);
-        menu.className = "message-menu message-card-menu";
-        menu.setAttribute("popover", "auto");
-        menu.addEventListener("toggle", () => {
-          more.setAttribute("aria-expanded", String(menu.matches(":popover-open")));
-        });
-        if (!message.deleted) {
-          menu.append(action(message.text ? "编辑" : "添加笔记", "edit", message));
-          if (message.source) {
-            menu.append(
-              action("历史引用", "snapshot", message),
-              action("跳回原文", "jump", message),
-            );
-          }
-          const remove = action("删除", "delete", message);
-          remove.dataset.tone = "danger";
-          menu.append(remove);
-        }
-        menu.append(action("修订历史", "history", message), action("引用关系", "relations", message));
-        actions.append(more);
-        footer.append(time, actions);
-        card.append(body, footer, menu);
-        return card;
-      }),
-    );
+      scope === "mark"
+        ? entries[0]?.root?.source?.selectedText || "原文已删除"
+        : `${markCount} 条标记 · ${entries.length} 条消息`;
+    controls.sourceJump.hidden = scope !== "mark";
+    controls.form.hidden = scope !== "mark";
+    controls.orderControls.hidden = scope === "mark";
+    for (const button of controls.scopeButtons) {
+      button.setAttribute("aria-pressed", String(button.dataset.messageScope === scope));
+    }
+    for (const button of controls.orderButtons) {
+      button.setAttribute("aria-pressed", String(button.dataset.messageOrder === order));
+    }
+    if (!entries.length) {
+      const empty = document.createElement("p");
+      empty.className = "message-feed-empty";
+      empty.textContent = scope === "chapter" ? "本章还没有标记" : "本书还没有标记";
+      controls.list.replaceChildren(empty);
+      return;
+    }
+    controls.list.replaceChildren(...entries.map(renderMessageCard));
   }
 
   async function reload() {
@@ -274,10 +391,39 @@ export function createConversations({
     renderConversation();
   }
 
+  async function setScope(nextScope) {
+    if (!["mark", "chapter", "book"].includes(nextScope)) return;
+    scope = nextScope;
+    const generation = ++scopeGeneration;
+    if (scope === "mark") {
+      renderConversation();
+      return;
+    }
+    controls.form.hidden = true;
+    controls.orderControls.hidden = false;
+    controls.list.textContent = "正在加载聊天记录…";
+    try {
+      const section = scope === "chapter" ? anchorSection : null;
+      const loaded = await store.conversations(editionId, section);
+      if (generation !== scopeGeneration) return;
+      feedConversations = loaded;
+      renderConversation();
+    } catch {
+      if (generation === scopeGeneration) {
+        controls.list.textContent = "无法加载聊天记录";
+        report("无法加载聊天记录", true);
+      }
+    }
+  }
+
   async function open(conversationId, messageId = null, edit = false) {
     try {
+      scopeGeneration += 1;
+      scope = "mark";
+      feedConversations = [];
       await window.athaEnsureMessageComposer?.();
       conversation = await store.conversation(conversationId);
+      anchorSection = conversation.messages.find((message) => message.source)?.source?.section || null;
       parentId =
         conversation.messages.find((message) => message.id === messageId && !message.deleted)?.id ||
         conversation.messages.find((message) => !message.deleted)?.id ||
@@ -553,6 +699,15 @@ export function createConversations({
       event.preventDefault();
       setFullscreen(true);
     });
+    for (const button of controls.scopeButtons) {
+      button.addEventListener("click", () => setScope(button.dataset.messageScope));
+    }
+    for (const button of controls.orderButtons) {
+      button.addEventListener("click", () => {
+        order = button.dataset.messageOrder;
+        if (scope !== "mark") renderConversation();
+      });
+    }
     controls.sourceJump.addEventListener("click", async () => {
       const sourceMessage = conversation?.messages.find(
         (message) => message.source && !message.deleted,
@@ -582,6 +737,11 @@ export function createConversations({
     controls.list.addEventListener("click", (event) => {
       if (event.target.closest(".message-card-body a")) {
         event.preventDefault();
+        return;
+      }
+      const conversationButton = event.target.closest("button[data-conversation-open]");
+      if (conversationButton) {
+        open(conversationButton.dataset.conversationOpen, conversationButton.dataset.messageId);
         return;
       }
       const menuButton = event.target.closest("button[data-message-menu]");

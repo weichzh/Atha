@@ -284,6 +284,20 @@ async fn message_conversation(
 }
 
 #[tauri::command]
+async fn message_conversations(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    edition_id: String,
+    section: Option<String>,
+) -> Result<Vec<ConversationView>, String> {
+    require_reader_window(&window)?;
+    runtime
+        .messages
+        .conversations(&edition_id, section.as_deref())
+        .map_err(message_error)
+}
+
+#[tauri::command]
 async fn message_create_root(
     window: WebviewWindow,
     runtime: State<'_, ReaderRuntime>,
@@ -543,6 +557,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             message_roots,
             message_edition_context,
             message_conversation,
+            message_conversations,
             message_create_root,
             message_revise,
             message_reply,

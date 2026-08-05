@@ -60,7 +60,7 @@
 - `reader::library::LocalLibrary` 复用 EPUB importer，以内容哈希为身份，用每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`；移除记录不删除导入缓存或阅读状态；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
-- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`content` 额外从已验证 Range 捕获 Snapshot 候选；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
+- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`content` 额外从已验证 Range 捕获 Snapshot 候选；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
 - 十八份页面源码由 Vite 或应用资源协议按固定顺序交付为单个 `atha-reader` runtime，避免为源码分层增加多次请求；浏览器验证服务器使用同一顺序，并对各 module 与拼接后的整体 bundle 运行语法检查；
 - Locator 以内容版本、section id 和 DOM 文本 UTF-16 偏移表示 point/range；R2 range 限于单 section 并检查实际文本边界，无效输入安全回落并留下诊断，页码不作为内容坐标；
 - 上一页和下一页可跨 section；manifest TOC 与已有书签继续共用隐藏的原生 `select` 数据源，壳层把它投影为全屏目录按钮，书签紧随对应章节并通过 Locator 跳转；用户点击章节或书签后等待导航稳定并返回沉浸阅读；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
@@ -95,7 +95,7 @@
 - schema v2 `MessageStore`、不可变修订、墓碑、回复、正反向引用、SourceAnchor/SourceSnapshot 版本、当前修订 FTS5 与事务 Outbox；
 - HTML/CSS/呈现参数与图片资源双层信任边界校验，资源按 SHA-256 内容寻址；
 - localStorage 标注原子幂等迁移、Edition/单对话自包含 ZIP 导出与公开完整性检查；
-- Tauri TypeScript client、根 Message 标注/笔记投影、全屏筛选、半屏/全屏对话浮层、受限富文本与 Markdown 输入、历史/关系/快照/跳回和本书导出入口。
+- Tauri TypeScript client、根 Message 标注/笔记投影、全屏筛选、半屏/全屏对话浮层、本条/本章/本书记录及时间/书序投影、受限富文本与 Markdown 输入、历史/关系/快照/跳回和本书导出入口。
 
 ## 最近验证基线
 
@@ -120,7 +120,7 @@
 - R5 在实际浏览器验证应用与本书偏好分区、同任务进度合并、页面生命周期 flush、书签创建/去重/跳转/删除、错版本拒绝和损坏进度安全回落；兼容 `entry` 由内容字节指纹补齐版本边界，Windows host 以独立 probe 存储命名空间和状态键跨两个真实进程验证主题、字号、精确 Locator 与书签恢复并清理；
 - R6 在实际浏览器用三个单章节标题各验证 1 条结果，并在《数学及其历史》用“数”验证 66 条结果完整覆盖三个 section；真实搜索控件、跨章结果跳转与返回、结果起点可见、查询替换、显式取消、active content 拒绝和错误隔离均通过；
 - R7 四样本验收在《数学及其历史》用真实鼠标选择创建带笔记标注，验证 range Locator、原文与上下文、SHA-256 `SourceAnchor`、CSS Highlight、32→40→32px 重排、笔记更新、暗色重载恢复、精确跳转、软删除、tombstone 重载和两个 WebView2 host 进程恢复；损坏记录、写入失败回滚、事实不可变与唯一/零/多候选及缺失 section 重锚由隔离自检覆盖；
-- 当前选中文字入口在真实鼠标 Range 附近提供复制、标注和笔记；原生 copy 事件不写记录。Tauri 产品把 highlight 与 note 投影到同一根 Message，底栏笔记页可筛选和导出，列表项进入对话浮层；浮层提供回复、引用、编辑、删除、修订、关系、历史快照和跳回，标题栏只保留返回与全屏；
+- 当前选中文字入口在真实鼠标 Range 附近提供复制、标注和笔记；原生 copy 事件不写记录。Tauri 产品把 highlight 与 note 投影到同一根 Message，底栏笔记页可筛选和导出，列表项进入对话浮层；浮层提供本条、本章和本书三种范围，聚合范围可切换时间或书序，进入单条后提供回复、引用、编辑、删除、修订、关系、历史快照和跳回，标题栏只保留返回与全屏；
 - R8 从固定 SHA-256 `0af5dff0c0d1eb369a096b18d05eb77a4cd9c03808748db8274d5e77bbfe7368`、16.03MiB 的《数学及其历史》导出 173 个 XHTML section 与 2527 个资源；真实浏览器查询“数学”精确得到 288 条结果并覆盖 104 个 section，状态完整、未截断且无错误；
 - R8 三次完整 WebView2 进程树峰值 working set 分别为 647.3、649.3 和 650.4MiB，每轮取得 5 个有效样本，最多观测到 8 个进程，低于 1024MiB 门槛；同一 host 确认进度、偏好、书签和标注耐久写入后被整树强杀，gate 确认已捕获的全部后代退出，再由新 host 精确恢复四类探针；
 - 明暗正文对比度分别为 15.94 和 13.84；暗色下只反色公式，普通图始终为 `filter: none`；
@@ -147,6 +147,7 @@
 - 普通 `--epub` 消息模式曾在 manifest 加载前读取 edition 而以 `invalid-manifest` 失败；初始化顺序修复后，真实 Tauri/WebView2 启动检查进入 `pass`，并作为 `scripts/check-tauri-reader.ps1` 固定回归。基准 `1785889633788-21736` 的 P95 为冷启动 724.373ms、首稳 133.500ms、热开 21.500ms、翻页 6.700ms、字号重排 41.700ms，均低于既有门槛；
 - Tauri 主窗口曾因 capability 未启用消息 permission，导致书架打开书籍后创建标注在 IPC 边界被拒绝；现以 `allow-message-commands` 授权全部消息接口，消息检查脚本固定校验 capability 与 command 清单。隔离应用数据下的真实 Tauri/WebView2 已完成“书架打开 → 鼠标选择 → 标注 → 笔记页显示 1 条记录”，未写入用户现有消息数据库；
 - 半屏/全屏富文本输入完成后，消息专项、四样本、书架和 Tauri 产品回归通过；修复全屏宽屏定位与 Markdown 无损门禁后的基准 `1785936897004-15436` 的 P95 为冷启动 632.048ms、首稳 117.500ms、热开 20.800ms、翻页 6.900ms、字号重排 55.600ms，均低于既有门槛。首次打开对话时才加载普通可视编辑器，切换输入模式时才加载 Markdown 转换；主 reader bundle 未引入编辑器依赖；
+- 标记范围查询完成后，后端使用一次 Tauri IPC 返回当前 Edition 或 section 的完整 Conversation；时间和书序只在前端投影，不复制消息事实。消息专项与 Tauri 产品回归通过；基准 `1785938288886-20832` 的 P95 为冷启动 597.112ms、首稳 133.700ms、热开 20.900ms、翻页 6.800ms、字号重排 41.900ms，均低于既有门槛；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
 - 系统 SQLite 3.53.4 上回滚、FTS 完整性、外键和数据库完整性检查通过；

@@ -20,6 +20,7 @@ commands.allow = [
   "message_roots",
   "message_edition_context",
   "message_conversation",
+  "message_conversations",
   "message_create_root",
   "message_revise",
   "message_reply",

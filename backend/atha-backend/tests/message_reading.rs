@@ -775,12 +775,22 @@ fn edition_roots_are_a_single_section_filterable_projection() {
     let section = store
         .roots(&edition().content_version, Some("section-2"))
         .expect("filter roots");
+    let conversations = store
+        .conversations(&edition().content_version, None)
+        .expect("list conversations");
+    let first_section = store
+        .conversations(&edition().content_version, Some("section-1"))
+        .expect("filter conversations");
 
     assert_eq!(all.len(), 2);
     assert_eq!(all[0].conversation_id, first.conversation_id);
     assert_eq!(section.len(), 1);
     assert_eq!(section[0].kind, "source-only");
     assert_eq!(section[0].source.selected_text, "第二章原文");
+    assert_eq!(conversations.len(), 2);
+    assert_eq!(first_section.len(), 1);
+    assert_eq!(first_section[0].id, first.conversation_id);
+    assert_eq!(first_section[0].messages.len(), 2);
 }
 
 #[test]

@@ -66,8 +66,49 @@ impl MessageStore {
     }
 
     pub fn conversation(&self, id: &str) -> Result<ConversationView, MessageError> {
-        let conversation_id = decode_hex::<16>(id)?;
         let connection = self.connect()?;
+        self.conversation_from_connection(&connection, id)
+    }
+
+    pub fn conversations(
+        &self,
+        edition_id: &str,
+        section: Option<&str>,
+    ) -> Result<Vec<ConversationView>, MessageError> {
+        let edition = decode_hex::<32>(edition_id)?;
+        if section.is_some_and(|value| value.is_empty() || value.len() > 256) {
+            return Err(MessageError::InvalidInput);
+        }
+        let connection = self.connect()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT c.id
+                 FROM conversation c
+                 JOIN message root ON root.id = c.root_message_id AND root.conversation_id = c.id
+                 JOIN source_anchor anchor ON anchor.id = root.current_source_anchor_id
+                 WHERE c.edition_id = ?1 AND root.deleted_at_ms IS NULL
+                   AND (?2 IS NULL OR anchor.section_id = ?2)
+                 ORDER BY c.created_at_ms, c.id",
+            )
+            .map_err(|_| MessageError::Database)?;
+        let ids = statement
+            .query_map(params![edition, section], |row| row.get::<_, Vec<u8>>(0))
+            .map_err(|_| MessageError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| MessageError::Database)?;
+        drop(statement);
+        // ponytail: one local conversation load per root; batch SQL when a large-book feed measures slow.
+        ids.into_iter()
+            .map(|id| self.conversation_from_connection(&connection, &encode_hex(&id)))
+            .collect()
+    }
+
+    fn conversation_from_connection(
+        &self,
+        connection: &Connection,
+        id: &str,
+    ) -> Result<ConversationView, MessageError> {
+        let conversation_id = decode_hex::<16>(id)?;
         let edition_id: Vec<u8> = connection
             .query_row(
                 "SELECT edition_id FROM conversation WHERE id = ?1",
@@ -133,7 +174,7 @@ impl MessageStore {
             .map_err(|_| MessageError::Database)?;
         drop(statement);
         for message in &mut messages {
-            message.reference_previews = reference_previews(&connection, &message.id)?;
+            message.reference_previews = reference_previews(connection, &message.id)?;
             message.reference_ids = message
                 .reference_previews
                 .iter()

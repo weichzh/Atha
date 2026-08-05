@@ -158,6 +158,8 @@ export const messageClient = Object.freeze({
     invoke<RootMessageView[]>("message_roots", { editionId, section }),
   conversation: (conversationId: string) =>
     invoke<ConversationView>("message_conversation", { conversationId }),
+  conversations: (editionId: string, section: string | null = null) =>
+    invoke<ConversationView[]>("message_conversations", { editionId, section }),
   createRoot: (draft: RootMessageDraft) =>
     invoke<{ conversationId: string; messageId: string; revisionId: string }>(
       "message_create_root",

@@ -207,6 +207,15 @@ export function createMessageStore({
     });
   }
 
+  function compareSources(left, right) {
+    const description = session.describe();
+    return locator.compare(
+      description,
+      locator.inspect(left.canonicalLocator),
+      locator.inspect(right.canonicalLocator),
+    );
+  }
+
   return Object.freeze({
     active,
     add,
@@ -223,6 +232,8 @@ export function createMessageStore({
     updateNote,
     validSourceAnchor: legacy.validSourceAnchor,
     conversation: client.conversation,
+    conversations: client.conversations,
+    compareSources,
     export: client.export,
     relationships: client.relationships,
     reply: client.reply,

@@ -60,9 +60,21 @@
     </button>
   </header>
 
+  <nav class="message-view-controls" aria-label="聊天记录范围与顺序">
+    <div class="message-segmented" role="group" aria-label="标记范围">
+      <button type="button" data-message-scope="mark" aria-pressed="true">本条标记</button>
+      <button type="button" data-message-scope="chapter" aria-pressed="false">本章标记</button>
+      <button type="button" data-message-scope="book" aria-pressed="false">本书标记</button>
+    </div>
+    <div id="message-order-controls" class="message-segmented message-order-controls" role="group" aria-label="排列顺序" hidden>
+      <button type="button" data-message-order="time" aria-pressed="true">时间顺序</button>
+      <button type="button" data-message-order="book" aria-pressed="false">书籍顺序</button>
+    </div>
+  </nav>
+
   <div class="message-source-context">
     <div>
-      <span>原文引用</span>
+      <span id="message-conversation-source-label">原文引用</span>
       <p id="message-conversation-source"></p>
     </div>
     <button id="message-conversation-source-jump" type="button">
