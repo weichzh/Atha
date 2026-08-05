@@ -24,6 +24,12 @@ assert.throws(() =>
   ),
 );
 assert.throws(() => parseSnapshotPresentation('{"schema":1,"theme":"dark"}'));
+assert.throws(() =>
+  parseSnapshotPresentation(
+    '{"schema":1,"theme":"dark","brightness":100,"fontSize":32,"fontFamily":"book","density":"standard","sourceStyles":true}',
+  ),
+);
+assert.throws(() => parseSnapshotPresentation(" ".repeat(4_097)));
 assert.equal(isSnapshotCssSafe("p { color: #222; }"), true);
 for (const css of [
   "p { background: url(a.png); }",

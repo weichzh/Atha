@@ -856,7 +856,16 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
             .contains(root.0.to_string_lossy().as_ref())
     );
 
-    for corruption in ["revision", "snapshot", "source", "relationship"] {
+    for corruption in [
+        "revision",
+        "snapshot",
+        "source",
+        "relationship",
+        "root-parent",
+        "reply-cycle",
+        "reply-source",
+        "parent-reference",
+    ] {
         let tampered = root.0.join(format!("tampered-{corruption}.zip"));
         tamper_export_manifest(
             &conversation_archive,
@@ -866,6 +875,53 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
                 "snapshot" => manifest["snapshots"][0]["presentation"]["theme"] = "system".into(),
                 "source" => manifest["sources"][0]["contentHash"] = "00".repeat(32).into(),
                 "relationship" => manifest["relationships"][0]["kind"] = "recursive".into(),
+                "root-parent" => {
+                    let root = manifest["messages"]
+                        .as_array_mut()
+                        .expect("messages")
+                        .iter_mut()
+                        .find(|message| message["replyToMessageId"].is_null())
+                        .expect("root message");
+                    let id = root["id"].clone();
+                    root["replyToMessageId"] = id;
+                }
+                "reply-cycle" => {
+                    let reply = manifest["messages"]
+                        .as_array_mut()
+                        .expect("messages")
+                        .iter_mut()
+                        .find(|message| !message["replyToMessageId"].is_null())
+                        .expect("reply message");
+                    let id = reply["id"].clone();
+                    reply["replyToMessageId"] = id;
+                }
+                "reply-source" => {
+                    let reply_id = manifest["messages"]
+                        .as_array()
+                        .expect("messages")
+                        .iter()
+                        .find(|message| !message["replyToMessageId"].is_null())
+                        .expect("reply message")["id"]
+                        .clone();
+                    let mut source = manifest["sources"][0].clone();
+                    source["id"] = "ab".repeat(16).into();
+                    source["messageId"] = reply_id;
+                    manifest["sources"]
+                        .as_array_mut()
+                        .expect("sources")
+                        .push(source);
+                }
+                "parent-reference" => {
+                    let source_id = manifest["relationships"][0]["sourceMessageId"].clone();
+                    let parent_id = manifest["messages"]
+                        .as_array()
+                        .expect("messages")
+                        .iter()
+                        .find(|message| message["id"] == source_id)
+                        .expect("relationship source")["replyToMessageId"]
+                        .clone();
+                    manifest["relationships"][0]["targetMessageId"] = parent_id;
+                }
                 _ => unreachable!(),
             },
         );

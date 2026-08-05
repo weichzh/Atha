@@ -653,21 +653,41 @@ fn validate_manifest(manifest: &ExportManifest) -> Result<(), MessageError> {
         let conversation = conversations
             .get(row.conversation_id.as_str())
             .ok_or_else(invalid)?;
+        let is_root = conversation.root_message_id == row.id;
+        let parent = row
+            .reply_to_message_id
+            .as_deref()
+            .and_then(|parent| messages.get(parent));
         if revisions
             .get(row.current_revision_id.as_str())
             .is_none_or(|revision| revision.message_id != row.id)
-            || row.reply_to_message_id.as_deref().is_some_and(|parent| {
-                messages
-                    .get(parent)
-                    .is_none_or(|parent| parent.conversation_id != row.conversation_id)
-            })
             || row.current_source_id.as_deref().is_some_and(|source| {
                 sources
                     .get(source)
                     .is_none_or(|source| source.message_id != row.id)
             })
-            || (conversation.root_message_id == row.id) != row.current_source_id.is_some()
+            || is_root
+                && (row.ordinal != 0
+                    || row.reply_to_message_id.is_some()
+                    || row.current_source_id.is_none())
+            || !is_root
+                && (row.current_source_id.is_some()
+                    || parent.is_none_or(|parent| {
+                        parent.conversation_id != row.conversation_id
+                            || parent.ordinal >= row.ordinal
+                    }))
         {
+            return Err(invalid());
+        }
+    }
+    for source in sources.values() {
+        let message = messages
+            .get(source.message_id.as_str())
+            .ok_or_else(invalid)?;
+        let conversation = conversations
+            .get(message.conversation_id.as_str())
+            .ok_or_else(invalid)?;
+        if conversation.root_message_id != message.id {
             return Err(invalid());
         }
     }
@@ -689,11 +709,14 @@ fn validate_manifest(manifest: &ExportManifest) -> Result<(), MessageError> {
 
     let mut relationships = HashSet::new();
     for row in &manifest.relationships {
+        let source = messages
+            .get(row.source_message_id.as_str())
+            .ok_or_else(invalid)?;
         if row.kind != "quote"
             || row.created_at < 0
             || row.source_message_id == row.target_message_id
-            || !messages.contains_key(row.source_message_id.as_str())
             || !messages.contains_key(row.target_message_id.as_str())
+            || source.reply_to_message_id.as_deref() == Some(row.target_message_id.as_str())
             || !relationships.insert((
                 row.source_message_id.as_str(),
                 row.target_message_id.as_str(),

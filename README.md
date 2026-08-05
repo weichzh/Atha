@@ -39,7 +39,7 @@ pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 report
 
 当前入口只支持符合既定安全与资源边界的 EPUB3。书架记录位于 `%LOCALAPPDATA%\Atha\Library`，导入缓存位于 `%LOCALAPPDATA%\Atha\ImportedBooks`；同一内容从不同路径导入只产生一个书架项，并复用同一阅读状态。
 
-标注、笔记、回复、引用和历史快照统一保存在 `%LOCALAPPDATA%\Atha\Messages`。书架移除不会删除这些记录；阅读页的笔记面板可导出本书消息，对话浮层可导出当前对话。
+标注、笔记、回复、引用和历史快照统一保存在 `%LOCALAPPDATA%\Atha\Messages`。书架移除不会删除这些记录；阅读页的笔记面板可导出本书消息。
 
 ## 本地开发环境
 

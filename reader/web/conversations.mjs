@@ -18,9 +18,6 @@ const SNAPSHOT_PRESENTATION_KEYS = new Set([
   "fontSize",
   "fontFamily",
   "density",
-  "sourceStyles",
-  "userStylesEnabled",
-  "userStylesheet",
 ]);
 
 export function isSnapshotCssSafe(value) {
@@ -32,7 +29,7 @@ export function isSnapshotCssSafe(value) {
 }
 
 export function parseSnapshotPresentation(value, prefersDark = false) {
-  if (typeof value !== "string" || value.length > 65_536) {
+  if (typeof value !== "string" || value.length > 4_096) {
     throw new Error("invalid-message-snapshot");
   }
   let parsed;
@@ -66,11 +63,7 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
     parsed.brightness > 120 ||
     ![24, 32, 40].includes(parsed.fontSize) ||
     !["book", "serif", "sans"].includes(parsed.fontFamily) ||
-    !Object.hasOwn(SNAPSHOT_LINE_HEIGHTS, parsed.density) ||
-    (Object.hasOwn(parsed, "sourceStyles") && typeof parsed.sourceStyles !== "boolean") ||
-    (Object.hasOwn(parsed, "userStylesEnabled") &&
-      typeof parsed.userStylesEnabled !== "boolean") ||
-    (Object.hasOwn(parsed, "userStylesheet") && typeof parsed.userStylesheet !== "string")
+    !Object.hasOwn(SNAPSHOT_LINE_HEIGHTS, parsed.density)
   ) {
     throw new Error("invalid-message-snapshot");
   }
