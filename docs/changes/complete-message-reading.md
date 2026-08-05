@@ -6,7 +6,7 @@ description: 完整实现本地消息式阅读、引用存档、关系回顾和�
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -84,10 +84,10 @@ accepted
 - [x] 新增或编辑笔记打开定位到根消息的半屏底部对话浮层；拖拽条可连续调整高度，轻点或标题栏全屏按钮可全屏，关闭后仍回到阅读位置；
 - [x] 消息输入器随换行增高并在达到紧凑上限后提供全屏编辑；全屏编辑可随时收起，以两层工具栏提供输入模式、撤销、重做、段落/标题、粗体、斜体、列表、引用和安全链接，并可在原始 Markdown 与可视化编辑间无损切换；两种输入都持久化为同一受限 JSON，格式在发送、编辑、重启与修订历史中保持；
 - [x] 应用重启和同内容重新导入后消息可恢复并跳回；书架移除不删除消息；损坏数据库或快照不能被静默覆盖；
-- [ ] 对话或本书消息可导出为自包含归档，重新校验归档可证明 schema、关系、修订、快照和资源完整，不泄漏原始路径；
+- [x] 对话或本书消息可导出为自包含归档，重新校验归档可证明 schema、关系、修订、快照和资源完整，不泄漏原始路径；
 - [x] 真实《数学及其历史》完成“选择 → 标注 → 同一记录添加笔记 → 回复关系 → 编辑 → 重选 → 搜索 → 快照 → 跳回 → 重启恢复 → 同内容重导恢复 → 导出”闭环；额外直接引用由后端接口和导出回归覆盖；
 - [x] 现有书架、四样本阅读器、安全、标注、持久化与 Tauri benchmark 无 blocking 回退，消息列表与输入规模基线有固定门槛；
-- [ ] 独立 standards 与 spec review 均无 blocking。
+- [x] 独立 standards 与 spec review 均无 blocking。
 
 ## Files And Steps
 
@@ -151,9 +151,10 @@ accepted
 
 ## Review
 
-- Blocking：两轮独立 Standards/Spec review 发现的 presentation 只存不读、CSS 网络函数/转义可绕过和显示端静默改写均已修复。本轮消息 UI Spec 复核无 blocking；Standards 复核发现返回原文异常未反馈、Popover 语义错误、消息主题绕过语义令牌和 QA 文档记录临时用户路径，均已逐项修复。首轮最终候选复核发现的回复祖先闭包、归档语义复验、写出/检查容量不一致和显示端接受未冻结 system theme 均已修复，修复后候选等待二次双轴复核。
+- Blocking：两轮独立 Standards/Spec review 发现的 presentation 只存不读、CSS 网络函数/转义可绕过和显示端静默改写均已修复。本轮消息 UI Spec 复核无 blocking；Standards 复核发现返回原文异常未反馈、Popover 语义错误、消息主题绕过语义令牌和 QA 文档记录临时用户路径，均已逐项修复。首轮最终候选复核发现的回复祖先闭包、归档语义复验、写出/检查容量不一致、显示端接受未冻结 system theme、展示字段静默忽略和消息图不变量均已修复；修复后 Standards/Spec 最终复核均无 blocking。
 - 富文本输入两轴复核发现的短消息无法直达 Markdown、不支持语法被静默规范化、空段落转换丢失、宽屏全屏偏移、拖拽条键盘操作、格式按钮状态、编辑器提前加载和文档漂移均已修复；Markdown 对无法无损表示的内容保留原事实并明确拒绝切换。
 - 标记范围的 Standards/Spec 双轴复核均无 blocking；批量入口当前仍按根逐个加载 Conversation，待大书记录实测变慢后再合并 SQL。三个范围的少量显隐分支保持局部实现，不为未提出的新范围增加描述表。
+- 最终复核的 non-blocking 只剩 `write.rs` / `legacy.rs` 的 Edition 写入形状重复，以及当前捕获链路不可达的 font MIME 分支；前者等待第二种迁移或真实漂移，后者等待字体资源成为真实快照输入后再决定，不为整洁度单独扩张当前 change。
 - Non-blocking：打开对话会从全屏笔记页回到阅读浮层；这是当前阅读页优先的交互，但“同页关系回顾”的最终设计可在用户试用后调整。`write.rs` 与 `legacy.rs` 有相似的内部写入形状；在第二种迁移或真实漂移出现前不增加 helper。
 - Out-of-scope：备份、加密、同步、AI、附件和通用聊天仍按 Non-Goals 暂缓；富文本仅实现当前消息输入所需的受限文字 schema。参考地图是用户单独批准的流程中断，已在本 change 补记范围，不属于未授权产品扩张。
 
@@ -176,5 +177,6 @@ accepted
 - Windows 真实 Tauri/WebView2：在隔离应用数据中完成“选择 → 标注 → 同一记录添加笔记 → 回复 → 编辑 → 重选 → 搜索 → 快照 → 跳回”，关闭并以相同数据目录重启后恢复章节、主题、字号、当前原文、笔记和已编辑回复；把同一 EPUB 内容复制到新路径重导后仍恢复同一 Message。
 - Windows 真实原生导出：通过系统“另存为”对话框导出 ZIP，重新读取 `manifest.json` 确认 Conversation、修订、回复关系、两份原文快照和 Edition 书名完整；归档不含源路径。最终回归基准 `1785941967575-37292` 的 P95 为冷启动 613.274ms、首稳 129.400ms、热开 22.300ms、翻页 6.800ms、字号重排 48.400ms，均低于固定门槛。
 - Windows 本地：首轮最终复核修复后，消息专项 16 个 interface 测试、归档容量单元测试、篡改归档负向检查、Svelte check/build、Tauri/host 测试及完整后端 fmt、clippy、workspace test、doc 全部通过；跨会话二级回复用例固定验证单对话导出补齐父链。
+- 静态独立复核：修复后的 Standards 与 Spec 最终复核均无 blocking；规格复核同时确认 README、归档图不变量、presentation 边界和当前 UI 导出范围一致，未发现新增 scope creep。
 - 残余：当前没有已知 blocking；微信、Telegram、QQ 主题、自定义界面、同步、AI 和附件仍按 Non-Goals 留给后续独立 change。
 - 兼容性：若曾在本次未交付的中间提交上手工创建消息，旧快照可能仍含未冻结的 system theme、额外 presentation 字段或 reader CSS 子资源，严格显示会拒绝这些开发期记录；正式实现不为未发布中间格式增加迁移。
