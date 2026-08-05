@@ -65,7 +65,8 @@ EPUB importer 现在以 OPF media type 判定 XHTML，并只在 navigation docum
 
 ## Review
 
-待独立 Standards/Spec 复核。
+- 首轮 Standards/Spec 双轴复核发现两个 blocking：manifest MIME 映射可能跟随越界符号链接，以及 HTML5 DOCTYPE 没有限制位置和唯一性；修复后分别由 Windows 符号链接回归和重复 DOCTYPE 负例覆盖。
+- 修复后 Standards 与 Spec 复核均无 blocking；Spec 无 non-blocking。Standards 仅保留 importer、`BookRoot` 与浏览器会话分别维护 section 路径和数量边界的重复判断；三处属于不同语言和信任边界，等待规则真实漂移后再考虑共享生成，不为本次兼容性引入跨层抽象。
 
 ## Evidence And Residual Risks
 
