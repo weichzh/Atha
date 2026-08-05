@@ -145,6 +145,7 @@
 - 完整消息后端 interface 集成测试 14/14 通过，覆盖迁移、事务、修订冲突、关系、FTS、快照资源、旧标注迁移和自包含导出；Svelte check 为 0 errors/0 warnings，production build 与 Tauri command seam 测试通过；
 - 消息实现后的四样本正式 runner、书架与 Tauri 产品回归均通过；基准 `1785859567155-20612` 的 P95 为冷启动 739.307ms、首稳 148.700ms、热开 27.300ms、翻页 31.900ms、字号重排 41.600ms，均低于既有门槛。本轮未做同时间旧代码对照，不能把差异归因于消息改动；
 - 普通 `--epub` 消息模式曾在 manifest 加载前读取 edition 而以 `invalid-manifest` 失败；初始化顺序修复后，真实 Tauri/WebView2 启动检查进入 `pass`，并作为 `scripts/check-tauri-reader.ps1` 固定回归。基准 `1785889633788-21736` 的 P95 为冷启动 724.373ms、首稳 133.500ms、热开 21.500ms、翻页 6.700ms、字号重排 41.700ms，均低于既有门槛；
+- Tauri 主窗口曾因 capability 未启用消息 permission，导致书架打开书籍后创建标注在 IPC 边界被拒绝；现以 `allow-message-commands` 授权全部消息接口，消息检查脚本固定校验 capability 与 command 清单。隔离应用数据下的真实 Tauri/WebView2 已完成“书架打开 → 鼠标选择 → 标注 → 笔记页显示 1 条记录”，未写入用户现有消息数据库；
 - 负向探针证明 clippy 失败时检查脚本非零退出并报告阶段；
 - Rust/C++ 10,000 次空 FFI 调用中位数均约 1.13 ns/次；
 - 系统 SQLite 3.53.4 上回滚、FTS 完整性、外键和数据库完整性检查通过；

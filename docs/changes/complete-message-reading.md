@@ -128,6 +128,8 @@ accepted
 
 2026-08-05 用户首次按普通 `--epub` 产品入口试用时发现 `invalid-manifest`。根因是消息模式在 `session.open()` 加载 manifest 前调用 `session.describe()`；原有 `--verify-import` 会禁用消息模式，因而未覆盖该顺序。消息会话现改为在阅读会话打开后创建，Tauri 验收同时增加普通 `--epub` 启动并断言阅读页进入 `pass`，不再只验证导入探针。
 
+同日，用户从书架打开书籍后首次创建标注时发现操作无反应，笔记页显示“标注保存失败”。Tauri 已注册消息 command，但主窗口 capability 没有启用对应 permission，请求在进入 Rust 后端前被拒绝。现以单个 `allow-message-commands` 权限组授权全部消息接口，并由消息检查脚本先校验 capability 与完整 command 清单，防止只验证后端和前端构建而漏掉产品 IPC 边界。
+
 ## Review
 
 - Blocking：两轮独立 Standards/Spec review 发现的 presentation 只存不读、CSS 网络函数/转义可绕过和显示端静默改写均已修复，最终 Standards 复核无 blocking。当前只剩规格本身要求的真实《数学及其历史》消息 UI 完整闭环与重启恢复验收，不能用本地接口和 build 证据替代。
@@ -139,6 +141,7 @@ accepted
 - Windows 本地：`scripts/check-message-reading.ps1` 通过 14 个消息 interface 集成测试、历史呈现参数单元检查、Svelte check/build 与 Tauri/host 测试；`scripts/check-backend.ps1` 的 fmt、clippy、workspace test 和 doc 全部通过。
 - Windows 真实 WebView2：`scripts/check-reader-samples.ps1` 四样本明暗、真实输入、持久化和跨 host 恢复通过；过长的单次 `agent-browser eval` 已拆成两个阶段，不再触发默认 25 秒超时或 daemon busy。
 - Windows 真实 Tauri/本地：`scripts/check-library-shelf.ps1` 与 `scripts/check-tauri-reader.ps1` 通过。书架原生就绪条件改为稳定根节点，不再错误假设用户书架为空；Tauri 检查现同时覆盖普通 `--epub` 消息模式启动和 `--verify-import`。
+- Windows 真实 Tauri/WebView2：使用隔离应用数据复制指定样书的书架缓存，完成“启动应用 → 从书架打开《数学及其历史》→ 真实鼠标选择 → 标注 → 打开笔记页”，页面显示 1 条标注且无失败状态；用户现有消息数据库未被写入。永久回归在 `scripts/check-message-reading.ps1` 固定验证主窗口 capability 和全部消息 command 权限。
 - 性能：基准 `1785859567155-20612` 的 cold start / first stable / hot open / page turn / font reflow P95 分别为 739.307 / 148.700 / 27.300 / 31.900 / 41.600ms，低于 2000 / 750 / 120 / 50 / 150ms 门槛；没有同时间旧代码对照，不能归因性能变化。
 - 修复后基准 `1785889633788-21736` 的上述 P95 分别为 724.373 / 133.500 / 21.500 / 6.700 / 41.700ms，仍低于固定门槛；该轮用于回归，不用于性能归因。
 - 残余：尚未由用户在真实 Tauri 消息 UI 完成“选择至导出”的全链路，也未验证关闭应用后的消息 UI 恢复；当前证据不能替代该真实目标验收。

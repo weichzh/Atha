@@ -12,3 +12,25 @@ commands.allow = [
   "open_library_book",
   "remove_library_book",
 ]
+
+[[permission]]
+identifier = "allow-message-commands"
+description = "允许主阅读窗口管理当前书籍的标注、笔记和引用。"
+commands.allow = [
+  "message_roots",
+  "message_edition_context",
+  "message_conversation",
+  "message_create_root",
+  "message_revise",
+  "message_reply",
+  "message_delete",
+  "message_search",
+  "message_relationships",
+  "message_revisions",
+  "message_source_captures",
+  "message_snapshot_resource",
+  "message_reselect",
+  "message_reanchor",
+  "message_import_legacy",
+  "message_export",
+]
