@@ -119,6 +119,9 @@ export function createConversations({
   let parentId = null;
   let editing = null;
   let reportTimer = null;
+  let sheetDrag = null;
+
+  const composer = () => window.athaMessageComposer;
 
   const action = (label, name, message) => {
     const button = document.createElement("button");
@@ -141,8 +144,16 @@ export function createConversations({
   }
 
   function close() {
+    composer()?.collapse();
     controls.overlay.hidden = true;
     returnFocus.focus({ preventScroll: true });
+  }
+
+  function setFullscreen(fullscreen) {
+    controls.overlay.dataset.fullscreen = String(fullscreen);
+    controls.fullscreen.setAttribute("aria-pressed", String(fullscreen));
+    controls.fullscreen.setAttribute("aria-label", fullscreen ? "退出全屏对话" : "全屏对话");
+    controls.fullscreen.title = fullscreen ? "退出全屏对话" : "全屏对话";
   }
 
   function messageLabel(message, index) {
@@ -172,7 +183,7 @@ export function createConversations({
 
   function resetComposer() {
     editing = null;
-    controls.text.value = "";
+    composer()?.clear();
     parentId = conversation?.messages.find((message) => !message.deleted)?.id || null;
     setComposerContext(conversation?.messages.find((message) => message.id === parentId));
   }
@@ -184,7 +195,7 @@ export function createConversations({
     controls.list.replaceChildren(
       ...messages.map((message, index) => {
         const card = document.createElement("article");
-        const body = document.createElement("p");
+        const body = document.createElement("div");
         const footer = document.createElement("footer");
         const time = document.createElement("time");
         const actions = document.createElement("div");
@@ -210,7 +221,8 @@ export function createConversations({
           card.append(quote);
         }
         body.className = "message-card-body";
-        body.textContent = messagePreview(message);
+        if (message.deleted) body.textContent = messagePreview(message);
+        else composer()?.render(body, message.contentJson, messagePreview(message));
         const createdAt = new Date(message.createdAt);
         time.dateTime = Number.isFinite(createdAt.valueOf()) ? createdAt.toISOString() : "";
         time.textContent = `${formatMessageTime(message.createdAt)}${message.updatedAt > message.createdAt ? " · 已编辑" : ""}`;
@@ -262,25 +274,34 @@ export function createConversations({
     renderConversation();
   }
 
-  async function open(conversationId, messageId = null) {
+  async function open(conversationId, messageId = null, edit = false) {
     try {
       conversation = await store.conversation(conversationId);
       parentId =
         conversation.messages.find((message) => message.id === messageId && !message.deleted)?.id ||
         conversation.messages.find((message) => !message.deleted)?.id ||
         null;
-      editing = null;
-      controls.text.value = "";
       const parent = conversation.messages.find((message) => message.id === parentId);
-      setComposerContext(parent);
+      editing = edit ? parent : null;
+      if (editing) {
+        composer()?.setValue(editing.contentJson, editing.text);
+        setComposerContext(editing, "edit");
+      } else {
+        composer()?.clear();
+        setComposerContext(parent);
+      }
       controls.overlay.hidden = false;
-      controls.overlay.dataset.collapsed = "false";
-      controls.collapse.textContent = "收起对话";
-      controls.collapse.setAttribute("aria-expanded", "true");
-      controls.content.hidden = false;
+      setFullscreen(false);
       renderConversation();
       closeTools();
-      controls.text.focus();
+      requestAnimationFrame(() => {
+        if (parentId) {
+          controls.list
+            .querySelector(`[data-message-id="${CSS.escape(parentId)}"]`)
+            ?.scrollIntoView({ block: "start" });
+        }
+        composer()?.focus();
+      });
     } catch {
       report("无法打开阅读对话", true);
     }
@@ -293,10 +314,10 @@ export function createConversations({
       ...revisions.map((revision) => {
         const article = document.createElement("article");
         const time = document.createElement("time");
-        const body = document.createElement("p");
+        const body = document.createElement("div");
         time.dateTime = new Date(revision.createdAt).toISOString();
         time.textContent = new Date(revision.createdAt).toLocaleString();
-        body.textContent = revision.text || "纯标注";
+        composer()?.render(body, revision.contentJson, revision.text || "纯标注");
         article.append(time, body);
         return article;
       }),
@@ -450,15 +471,15 @@ export function createConversations({
       case "reply":
         editing = null;
         parentId = message.id;
-        controls.text.value = "";
+        composer()?.clear();
         setComposerContext(message);
-        controls.text.focus();
+        composer()?.focus();
         break;
       case "edit":
         editing = message;
-        controls.text.value = message.text;
+        composer()?.setValue(message.contentJson, message.text);
         setComposerContext(message, "edit");
-        controls.text.focus();
+        composer()?.focus();
         break;
       case "delete":
         await store.deleteMessage(message.id, message.revisionId);
@@ -497,6 +518,35 @@ export function createConversations({
 
   function bind() {
     controls.close.addEventListener("click", close);
+    controls.fullscreen.addEventListener("click", () => {
+      setFullscreen(controls.overlay.dataset.fullscreen !== "true");
+    });
+    controls.handle.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      controls.handle.setPointerCapture(event.pointerId);
+      sheetDrag = {
+        pointerId: event.pointerId,
+        startY: event.clientY,
+        startHeight: controls.overlay.getBoundingClientRect().height,
+        moved: false,
+      };
+    });
+    controls.handle.addEventListener("pointermove", (event) => {
+      if (!sheetDrag || event.pointerId !== sheetDrag.pointerId) return;
+      const distance = sheetDrag.startY - event.clientY;
+      if (Math.abs(distance) < 4 && !sheetDrag.moved) return;
+      sheetDrag.moved = true;
+      setFullscreen(false);
+      const height = Math.max(280, Math.min(innerHeight, sheetDrag.startHeight + distance));
+      controls.overlay.style.setProperty("--message-sheet-height", `${height}px`);
+    });
+    const finishSheetDrag = (event) => {
+      if (!sheetDrag || event.pointerId !== sheetDrag.pointerId) return;
+      if (!sheetDrag.moved) setFullscreen(true);
+      sheetDrag = null;
+    };
+    controls.handle.addEventListener("pointerup", finishSheetDrag);
+    controls.handle.addEventListener("pointercancel", () => (sheetDrag = null));
     controls.sourceJump.addEventListener("click", async () => {
       const sourceMessage = conversation?.messages.find(
         (message) => message.source && !message.deleted,
@@ -513,22 +563,6 @@ export function createConversations({
       if (event.key === "Escape") close();
     });
     readingSurface.addEventListener("pointerdown", () => (controls.overlay.hidden = true));
-    controls.collapse.addEventListener("click", () => {
-      const collapsed = controls.overlay.dataset.collapsed !== "true";
-      controls.overlay.dataset.collapsed = String(collapsed);
-      controls.content.hidden = collapsed;
-      controls.collapse.textContent = collapsed ? "展开对话" : "收起对话";
-      controls.collapse.setAttribute("aria-expanded", String(!collapsed));
-      controls.collapse.closest("details").open = false;
-    });
-    controls.exportButton.addEventListener("click", async () => {
-      try {
-        if (await store.export(conversation.editionId, conversation.id)) report("已导出阅读对话");
-      } catch {
-        report("导出失败，请重试", true);
-      }
-      controls.exportButton.closest("details").open = false;
-    });
     controls.exportAllButton.addEventListener("click", async () => {
       try {
         if (!(await store.export(editionId, null))) return;
@@ -540,6 +574,10 @@ export function createConversations({
       }
     });
     controls.list.addEventListener("click", (event) => {
+      if (event.target.closest(".message-card-body a")) {
+        event.preventDefault();
+        return;
+      }
       const menuButton = event.target.closest("button[data-message-menu]");
       if (menuButton) {
         toggleMessageMenu(menuButton);
@@ -566,16 +604,19 @@ export function createConversations({
     controls.cancelEdit.addEventListener("click", resetComposer);
     controls.form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const text = controls.text.value.trim();
-      if (!text) return;
+      const value = composer()?.value();
+      if (!value?.text) return;
       try {
-        if (editing) await store.revise(editing.id, editing.revisionId, text);
+        if (editing) {
+          await store.revise(editing.id, editing.revisionId, value.text, value.richText);
+        }
         else {
           if (!parentId) throw new Error("missing-message-parent");
           await store.reply({
             conversationId: conversation.id,
             replyToMessageId: parentId,
-            text,
+            text: value.text,
+            richText: value.richText,
             referenceIds: [],
           });
         }

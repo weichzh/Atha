@@ -195,7 +195,7 @@ annotations = createAnnotations({
     reader.focus({ preventScroll: true });
   },
   onOpenConversation: messageMode
-    ? (conversationId, messageId) => conversations?.open(conversationId, messageId)
+    ? (conversationId, messageId, edit = false) => conversations?.open(conversationId, messageId, edit)
     : null,
   assert,
 });
@@ -381,16 +381,15 @@ async function start() {
         overlay: document.querySelector("#message-conversation"),
         source: document.querySelector("#message-conversation-source"),
         sourceJump: document.querySelector("#message-conversation-source-jump"),
+        handle: document.querySelector("#message-conversation-handle"),
         close: document.querySelector("#message-conversation-close"),
-        collapse: document.querySelector("#message-conversation-collapse"),
-        exportButton: document.querySelector("#message-conversation-export"),
+        fullscreen: document.querySelector("#message-conversation-fullscreen"),
         exportAllButton: document.querySelector("#message-export-all"),
         content: document.querySelector("#message-conversation-content"),
         list: document.querySelector("#message-conversation-list"),
         form: document.querySelector("#message-composer"),
         composerContext: document.querySelector("#message-composer-context"),
         composerContextText: document.querySelector("#message-composer-context-text"),
-        text: document.querySelector("#message-composer-text"),
         cancelEdit: document.querySelector("#message-composer-cancel"),
         status: document.querySelector("#message-conversation-status"),
         historyDialog: document.querySelector("#message-history-dialog"),

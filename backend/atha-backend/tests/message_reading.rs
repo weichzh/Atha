@@ -2,7 +2,8 @@ use std::{fs, path::PathBuf, time::SystemTime};
 
 use atha_backend::messages::{
     EditionInput, LegacyAnnotationInput, LegacyImport, MessageSearch, MessageStore, ReplyDraft,
-    ReselectDraft, RootMessageDraft, SnapshotResourceInput, SourceAnchorInput, SourceSnapshotInput,
+    ReselectDraft, RichTextInput, RootMessageDraft, SnapshotResourceInput, SourceAnchorInput,
+    SourceSnapshotInput,
 };
 use sha2::{Digest, Sha256};
 
@@ -198,6 +199,7 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
             conversation_id: second.conversation_id.clone(),
             reply_to_message_id: second.message_id.clone(),
             text: "带引用的笔记".into(),
+            rich_text: None,
             reference_ids: vec![third.message_id.clone()],
         })
         .expect("create nested reference");
@@ -207,6 +209,7 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
             conversation_id: first.conversation_id.clone(),
             reply_to_message_id: first.message_id.clone(),
             text: "把两处内容联系起来".into(),
+            rich_text: None,
             reference_ids: vec![second.message_id.clone(), nested.message_id.clone()],
         })
         .expect("create reply");
@@ -278,6 +281,7 @@ fn soft_delete_returns_a_tombstone_without_losing_history_or_relations() {
             conversation_id: source.conversation_id.clone(),
             reply_to_message_id: source.message_id.clone(),
             text: "保留回复".into(),
+            rich_text: None,
             reference_ids: Vec::new(),
         })
         .expect("create reply");
@@ -686,6 +690,7 @@ fn edition_export_is_self_contained_and_passes_public_inspection() {
             conversation_id: first.conversation_id.clone(),
             reply_to_message_id: first.message_id.clone(),
             text: "引用另一条标注".into(),
+            rich_text: None,
             reference_ids: vec![second.message_id],
         })
         .expect("create referenced reply");
@@ -759,6 +764,7 @@ fn edition_roots_are_a_single_section_filterable_projection() {
             conversation_id: first.conversation_id.clone(),
             reply_to_message_id: first.message_id.clone(),
             text: "回复不应成为根消息列表项".into(),
+            rich_text: None,
             reference_ids: Vec::new(),
         })
         .expect("create reply");
@@ -816,5 +822,68 @@ fn automatic_reanchor_updates_only_the_current_locator() {
             &anchor().canonical_locator,
         ),
         Err(atha_backend::messages::MessageError::RevisionConflict)
+    );
+}
+
+#[test]
+fn rich_text_is_validated_and_keeps_a_plain_projection() {
+    let root = TestRoot::new("message-rich-text");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let created = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: snapshot(),
+            text: None,
+        })
+        .expect("create root");
+    let document = serde_json::json!({
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [
+                {"type": "text", "marks": [{"type": "bold"}], "text": "第一行"}
+            ]},
+            {"type": "paragraph", "content": [
+                {"type": "text", "marks": [{"type": "link", "attrs": {
+                    "href": "https://example.com", "target": null,
+                    "rel": "noopener noreferrer", "class": null, "title": null
+                }}], "text": "第二行"}
+            ]}
+        ]
+    });
+
+    store
+        .revise_rich(
+            &created.message_id,
+            &created.revision_id,
+            RichTextInput {
+                schema: 1,
+                document,
+            },
+        )
+        .expect("revise with rich text");
+    let conversation = store
+        .conversation(&created.conversation_id)
+        .expect("read conversation");
+
+    assert_eq!(conversation.messages[0].text, "第一行\n第二行");
+    assert!(conversation.messages[0].content_json.contains("richText"));
+    assert_eq!(
+        store.revise_rich(
+            &created.message_id,
+            &conversation.messages[0].revision_id,
+            RichTextInput {
+                schema: 1,
+                document: serde_json::json!({
+                    "type": "doc",
+                    "content": [{"type": "paragraph", "content": [{
+                        "type": "text",
+                        "marks": [{"type": "link", "attrs": {"href": "javascript:alert(1)"}}],
+                        "text": "危险链接"
+                    }]}]
+                }),
+            },
+        ),
+        Err(atha_backend::messages::MessageError::InvalidInput)
     );
 }

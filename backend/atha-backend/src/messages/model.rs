@@ -2,6 +2,7 @@ use std::{collections::HashSet, error::Error, fmt};
 
 use dom_query::Document;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use super::util::decode_hex;
@@ -77,7 +78,16 @@ pub struct ReplyDraft {
     pub conversation_id: String,
     pub reply_to_message_id: String,
     pub text: String,
+    #[serde(default)]
+    pub rich_text: Option<RichTextInput>,
     pub reference_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RichTextInput {
+    pub schema: u8,
+    pub document: Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -168,6 +178,7 @@ pub struct RevisionView {
     pub id: String,
     pub kind: String,
     pub text: String,
+    pub content_json: String,
     pub created_at: i64,
 }
 
@@ -191,6 +202,7 @@ pub struct MessageView {
     pub revision_id: String,
     pub kind: String,
     pub text: String,
+    pub content_json: String,
     pub reply_to_message_id: Option<String>,
     pub reference_ids: Vec<String>,
     pub reference_previews: Vec<MessageReferencePreview>,
@@ -198,6 +210,11 @@ pub struct MessageView {
     pub deleted: bool,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+pub(crate) struct ValidatedMessageContent {
+    pub plain_text: String,
+    pub content_json: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -371,6 +388,237 @@ pub(crate) fn validate_root(draft: &RootMessageDraft) -> Result<(), MessageError
         return Err(MessageError::InvalidInput);
     }
     Ok(())
+}
+
+pub(crate) fn plain_message_content(
+    text: Option<&str>,
+) -> Result<ValidatedMessageContent, MessageError> {
+    let (kind, plain_text) = match text {
+        Some(value) if !value.trim().is_empty() && value.chars().count() <= 8_000 => {
+            ("text", value.trim())
+        }
+        None => ("source-only", ""),
+        _ => return Err(MessageError::InvalidInput),
+    };
+    Ok(ValidatedMessageContent {
+        plain_text: plain_text.to_owned(),
+        content_json: serde_json::json!({ "schema": 1, "kind": kind, "text": plain_text })
+            .to_string(),
+    })
+}
+
+pub(crate) fn rich_message_content(
+    rich_text: &RichTextInput,
+) -> Result<ValidatedMessageContent, MessageError> {
+    let serialized = serde_json::to_vec(rich_text).map_err(|_| MessageError::InvalidInput)?;
+    if rich_text.schema != 1 || serialized.len() > 65_536 {
+        return Err(MessageError::InvalidInput);
+    }
+    let mut state = RichTextState::default();
+    validate_rich_node(&rich_text.document, RichTextParent::Root, 0, &mut state)?;
+    let plain_text = state.plain_text.trim().to_owned();
+    if plain_text.is_empty() || plain_text.chars().count() > 8_000 {
+        return Err(MessageError::InvalidInput);
+    }
+    Ok(ValidatedMessageContent {
+        content_json: serde_json::json!({
+            "schema": 1,
+            "kind": "text",
+            "text": plain_text,
+            "richText": rich_text,
+        })
+        .to_string(),
+        plain_text,
+    })
+}
+
+#[derive(Clone, Copy)]
+enum RichTextParent {
+    Root,
+    Block,
+    Inline,
+    List,
+}
+
+#[derive(Default)]
+struct RichTextState {
+    nodes: usize,
+    plain_text: String,
+    text_blocks: usize,
+}
+
+fn validate_rich_node(
+    value: &Value,
+    parent: RichTextParent,
+    depth: usize,
+    state: &mut RichTextState,
+) -> Result<(), MessageError> {
+    state.nodes += 1;
+    if depth > 24 || state.nodes > 2_048 {
+        return Err(MessageError::InvalidInput);
+    }
+    let object = value.as_object().ok_or(MessageError::InvalidInput)?;
+    let kind = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or(MessageError::InvalidInput)?;
+    match kind {
+        "doc" if matches!(parent, RichTextParent::Root) => {
+            require_keys(object, &["type", "content"])?;
+            validate_children(object, RichTextParent::Block, depth, state)
+        }
+        "paragraph" if matches!(parent, RichTextParent::Block) => {
+            require_keys(object, &["type", "content"])?;
+            begin_text_block(state);
+            validate_optional_children(object, RichTextParent::Inline, depth, state)
+        }
+        "heading" if matches!(parent, RichTextParent::Block) => {
+            require_keys(object, &["type", "attrs", "content"])?;
+            let attrs = object
+                .get("attrs")
+                .and_then(Value::as_object)
+                .ok_or(MessageError::InvalidInput)?;
+            require_keys(attrs, &["level"])?;
+            if !matches!(attrs.get("level").and_then(Value::as_u64), Some(1..=3)) {
+                return Err(MessageError::InvalidInput);
+            }
+            begin_text_block(state);
+            validate_optional_children(object, RichTextParent::Inline, depth, state)
+        }
+        "blockquote" if matches!(parent, RichTextParent::Block) => {
+            require_keys(object, &["type", "content"])?;
+            validate_children(object, RichTextParent::Block, depth, state)
+        }
+        "listItem" if matches!(parent, RichTextParent::List) => {
+            require_keys(object, &["type", "content"])?;
+            validate_children(object, RichTextParent::Block, depth, state)
+        }
+        "bulletList" if matches!(parent, RichTextParent::Block) => {
+            require_keys(object, &["type", "content"])?;
+            validate_children(object, RichTextParent::List, depth, state)
+        }
+        "orderedList" if matches!(parent, RichTextParent::Block) => {
+            require_keys(object, &["type", "attrs", "content"])?;
+            let attrs = object
+                .get("attrs")
+                .and_then(Value::as_object)
+                .ok_or(MessageError::InvalidInput)?;
+            require_keys(attrs, &["start", "type"])?;
+            if !matches!(attrs.get("start").and_then(Value::as_u64), Some(1..=10_000))
+                || attrs.get("type").is_none_or(|value| !value.is_null())
+            {
+                return Err(MessageError::InvalidInput);
+            }
+            validate_children(object, RichTextParent::List, depth, state)
+        }
+        "text" if matches!(parent, RichTextParent::Inline) => {
+            require_keys(object, &["type", "text", "marks"])?;
+            let text = object
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .ok_or(MessageError::InvalidInput)?;
+            if let Some(marks) = object.get("marks") {
+                for mark in marks.as_array().ok_or(MessageError::InvalidInput)? {
+                    validate_rich_mark(mark)?;
+                }
+            }
+            state.plain_text.push_str(text);
+            Ok(())
+        }
+        "hardBreak" if matches!(parent, RichTextParent::Inline) => {
+            require_keys(object, &["type"])?;
+            state.plain_text.push('\n');
+            Ok(())
+        }
+        _ => Err(MessageError::InvalidInput),
+    }
+}
+
+fn validate_children(
+    object: &Map<String, Value>,
+    parent: RichTextParent,
+    depth: usize,
+    state: &mut RichTextState,
+) -> Result<(), MessageError> {
+    let children = object
+        .get("content")
+        .and_then(Value::as_array)
+        .filter(|children| !children.is_empty())
+        .ok_or(MessageError::InvalidInput)?;
+    for child in children {
+        validate_rich_node(child, parent, depth + 1, state)?;
+    }
+    Ok(())
+}
+
+fn validate_optional_children(
+    object: &Map<String, Value>,
+    parent: RichTextParent,
+    depth: usize,
+    state: &mut RichTextState,
+) -> Result<(), MessageError> {
+    match object.get("content") {
+        Some(Value::Array(children)) => {
+            for child in children {
+                validate_rich_node(child, parent, depth + 1, state)?;
+            }
+            Ok(())
+        }
+        None => Ok(()),
+        _ => Err(MessageError::InvalidInput),
+    }
+}
+
+fn begin_text_block(state: &mut RichTextState) {
+    if state.text_blocks > 0 {
+        state.plain_text.push('\n');
+    }
+    state.text_blocks += 1;
+}
+
+fn validate_rich_mark(value: &Value) -> Result<(), MessageError> {
+    let object = value.as_object().ok_or(MessageError::InvalidInput)?;
+    match object.get("type").and_then(Value::as_str) {
+        Some("bold" | "italic") => require_keys(object, &["type"]),
+        Some("link") => {
+            require_keys(object, &["type", "attrs"])?;
+            let attrs = object
+                .get("attrs")
+                .and_then(Value::as_object)
+                .ok_or(MessageError::InvalidInput)?;
+            require_keys(attrs, &["href", "target", "rel", "class", "title"])?;
+            let href = attrs
+                .get("href")
+                .and_then(Value::as_str)
+                .filter(|href| {
+                    href.len() <= 2_048
+                        && !href.chars().any(char::is_control)
+                        && (href.starts_with("https://") || href.starts_with("http://"))
+                })
+                .ok_or(MessageError::InvalidInput)?;
+            if href.contains(char::is_whitespace)
+                || attrs.get("target").is_some_and(|value| !value.is_null())
+                || attrs.get("rel").is_some_and(|value| {
+                    !value.is_null() && value.as_str() != Some("noopener noreferrer")
+                })
+                || attrs.get("class").is_some_and(|value| !value.is_null())
+                || attrs.get("title").is_some_and(|value| !value.is_null())
+            {
+                return Err(MessageError::InvalidInput);
+            }
+            Ok(())
+        }
+        _ => Err(MessageError::InvalidInput),
+    }
+}
+
+fn require_keys(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), MessageError> {
+    if object.keys().all(|key| allowed.contains(&key.as_str())) {
+        Ok(())
+    } else {
+        Err(MessageError::InvalidInput)
+    }
 }
 
 pub(crate) fn validate_edition(edition: &EditionInput) -> Result<(), MessageError> {

@@ -13,8 +13,8 @@ use atha_backend::{
     messages::{
         ConversationView, CreatedMessage, CreatedRevision, CreatedRoot, CreatedSource,
         EditionInput, LegacyImport, LegacyImportResult, MessageRelationships, MessageSearch,
-        MessageSearchHit, MessageStore, ReplyDraft, ReselectDraft, RevisionView, RootMessageDraft,
-        RootMessageView, SnapshotResourceData, SourceCaptureView,
+        MessageSearchHit, MessageStore, ReplyDraft, ReselectDraft, RevisionView, RichTextInput,
+        RootMessageDraft, RootMessageView, SnapshotResourceData, SourceCaptureView,
     },
     reader::{
         READER_PAGE,
@@ -300,12 +300,20 @@ async fn message_revise(
     message_id: String,
     expected_revision_id: String,
     text: Option<String>,
+    rich_text: Option<RichTextInput>,
 ) -> Result<CreatedRevision, String> {
     require_reader_window(&window)?;
-    runtime
-        .messages
-        .revise(&message_id, &expected_revision_id, text.as_deref())
-        .map_err(message_error)
+    match rich_text {
+        Some(rich_text) => {
+            runtime
+                .messages
+                .revise_rich(&message_id, &expected_revision_id, rich_text)
+        }
+        None => runtime
+            .messages
+            .revise(&message_id, &expected_revision_id, text.as_deref()),
+    }
+    .map_err(message_error)
 }
 
 #[tauri::command]

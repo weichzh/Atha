@@ -1,5 +1,16 @@
 <script lang="ts">
-  import { ArrowLeft, ChevronRight, Ellipsis, Send, X } from "@lucide/svelte";
+  import { ArrowLeft, ChevronRight, Maximize2, Minimize2, X } from "@lucide/svelte";
+  import { onMount } from "svelte";
+
+  let Composer = $state<typeof import("./MessageComposer.svelte").default>();
+
+  onMount(() => {
+    let mounted = true;
+    import("./MessageComposer.svelte").then((module) => {
+      if (mounted) Composer = module.default;
+    });
+    return () => (mounted = false);
+  });
 </script>
 
 <div
@@ -10,6 +21,13 @@
   aria-labelledby="message-conversation-title"
   hidden
 >
+  <button
+    id="message-conversation-handle"
+    class="message-conversation-handle"
+    type="button"
+    aria-label="拖动调整对话高度，轻点全屏"
+    title="拖动调整高度，轻点全屏"
+  ><span aria-hidden="true"></span></button>
   <header class="message-conversation-heading">
     <button
       id="message-conversation-close"
@@ -21,20 +39,17 @@
       <ArrowLeft aria-hidden="true" />
     </button>
     <h2 id="message-conversation-title">阅读对话</h2>
-    <details class="message-header-menu">
-      <summary class="message-icon-button" aria-label="更多操作" title="更多操作">
-        <Ellipsis aria-hidden="true" />
-      </summary>
-      <div class="message-menu" role="menu">
-        <button id="message-conversation-export" type="button" role="menuitem">导出对话</button>
-        <button
-          id="message-conversation-collapse"
-          type="button"
-          role="menuitem"
-          aria-expanded="true"
-        >收起对话</button>
-      </div>
-    </details>
+    <button
+      id="message-conversation-fullscreen"
+      class="message-icon-button"
+      type="button"
+      aria-label="全屏对话"
+      title="全屏对话"
+      aria-pressed="false"
+    >
+      <Maximize2 class="message-expand-icon" aria-hidden="true" />
+      <Minimize2 class="message-restore-icon" aria-hidden="true" />
+    </button>
   </header>
 
   <div class="message-source-context">
@@ -70,19 +85,7 @@
         </button>
       </div>
 
-      <label class="visually-hidden" for="message-composer-text">消息</label>
-      <div class="message-composer-row">
-        <textarea
-          id="message-composer-text"
-          rows="1"
-          maxlength="8000"
-          placeholder="写下想法…"
-          required
-        ></textarea>
-        <button class="message-send-button" type="submit" aria-label="发送" title="发送">
-          <Send aria-hidden="true" />
-        </button>
-      </div>
+      {#if Composer}<Composer />{/if}
       <output id="message-conversation-status" aria-live="polite"></output>
     </form>
   </div>

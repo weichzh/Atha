@@ -80,7 +80,7 @@ impl MessageStore {
             })?;
         let mut statement = connection
             .prepare(
-                "SELECT m.id, r.id, r.kind, r.plain_text, m.reply_to_message_id, a.id, a.original_locator_json, a.current_locator_json, a.section_id, a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, m.created_at_ms, m.updated_at_ms, m.deleted_at_ms
+                "SELECT m.id, r.id, r.kind, r.plain_text, r.content_json, m.reply_to_message_id, a.id, a.original_locator_json, a.current_locator_json, a.section_id, a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, m.created_at_ms, m.updated_at_ms, m.deleted_at_ms
                  FROM message m
                  JOIN message_revision r ON r.id = m.current_revision_id AND r.message_id = m.id
                  LEFT JOIN source_anchor a ON a.id = m.current_source_anchor_id AND a.message_id = m.id
@@ -92,10 +92,10 @@ impl MessageStore {
             .query_map(params![conversation_id], |row| {
                 let message_id: Vec<u8> = row.get(0)?;
                 let revision_id: Vec<u8> = row.get(1)?;
-                let reply_to: Option<Vec<u8>> = row.get(4)?;
-                let source_id: Option<Vec<u8>> = row.get(5)?;
-                let content_hash: Option<Vec<u8>> = row.get(12)?;
-                let deleted = row.get::<_, Option<i64>>(15)?.is_some();
+                let reply_to: Option<Vec<u8>> = row.get(5)?;
+                let source_id: Option<Vec<u8>> = row.get(6)?;
+                let content_hash: Option<Vec<u8>> = row.get(13)?;
+                let deleted = row.get::<_, Option<i64>>(16)?.is_some();
                 Ok(MessageView {
                     id: encode_hex(&message_id),
                     revision_id: encode_hex(&revision_id),
@@ -105,26 +105,27 @@ impl MessageStore {
                         row.get(2)?
                     },
                     text: if deleted { String::new() } else { row.get(3)? },
+                    content_json: if deleted { String::new() } else { row.get(4)? },
                     reply_to_message_id: reply_to.as_deref().map(encode_hex),
                     reference_ids: Vec::new(),
                     reference_previews: Vec::new(),
                     source: (!deleted).then_some(source_id).flatten().map(|source_id| {
                         MessageSourceView {
                             id: encode_hex(&source_id),
-                            original_locator: row.get(6).unwrap_or_default(),
-                            canonical_locator: row.get(7).unwrap_or_default(),
-                            section: row.get(8).unwrap_or_default(),
-                            selected_text: row.get(9).unwrap_or_default(),
-                            prefix_text: row.get(10).unwrap_or_default(),
-                            suffix_text: row.get(11).unwrap_or_default(),
+                            original_locator: row.get(7).unwrap_or_default(),
+                            canonical_locator: row.get(8).unwrap_or_default(),
+                            section: row.get(9).unwrap_or_default(),
+                            selected_text: row.get(10).unwrap_or_default(),
+                            prefix_text: row.get(11).unwrap_or_default(),
+                            suffix_text: row.get(12).unwrap_or_default(),
                             content_hash: content_hash
                                 .as_deref()
                                 .map_or_else(String::new, encode_hex),
                         }
                     }),
                     deleted,
-                    created_at: row.get(13)?,
-                    updated_at: row.get(14)?,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
                 })
             })
             .map_err(|_| MessageError::Database)?
@@ -231,7 +232,7 @@ impl MessageStore {
         }
         let mut statement = connection
             .prepare(
-                "SELECT id, kind, plain_text, created_at_ms FROM message_revision WHERE message_id = ?1 ORDER BY created_at_ms, id",
+                "SELECT id, kind, plain_text, content_json, created_at_ms FROM message_revision WHERE message_id = ?1 ORDER BY created_at_ms, id",
             )
             .map_err(|_| MessageError::Database)?;
         statement
@@ -241,7 +242,8 @@ impl MessageStore {
                     id: encode_hex(&id),
                     kind: row.get(1)?,
                     text: row.get(2)?,
-                    created_at: row.get(3)?,
+                    content_json: row.get(3)?,
+                    created_at: row.get(4)?,
                 })
             })
             .map_err(|_| MessageError::Database)?

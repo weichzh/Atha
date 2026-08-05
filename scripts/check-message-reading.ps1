@@ -41,6 +41,7 @@ try {
     Invoke-Checked $env:ATHA_NODE @('reader/web/conversations.test.mjs')
     Push-Location 'reader/app'
     try {
+        Invoke-Checked $env:ATHA_PNPM @('test:markdown')
         Invoke-Checked $env:ATHA_PNPM @('check')
         Invoke-Checked $env:ATHA_PNPM @('build')
     }

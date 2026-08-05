@@ -2,6 +2,7 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -27,6 +28,7 @@ enum EpubVariant {
 }
 
 struct TestRoot(PathBuf);
+static TEST_ROOT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 impl TestRoot {
     fn new() -> Self {
@@ -36,7 +38,11 @@ impl TestRoot {
             .as_nanos();
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../.tmp")
-            .join(format!("atha-epub-import-{}-{nonce}", std::process::id()));
+            .join(format!(
+                "atha-epub-import-{}-{nonce}-{}",
+                std::process::id(),
+                TEST_ROOT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
         fs::create_dir_all(&path).expect("create test root");
         Self(path)
     }

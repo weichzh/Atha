@@ -18,6 +18,14 @@
 - 最短检查：`pnpm --dir reader/app check` 与 `pnpm --dir reader/app build`。
 - 必须重查：runes、生命周期、事件、组件绑定、编译器警告和升级兼容性。
 
+## Tiptap 3
+
+- 版本事实：`reader/app/package.json` 与 `reader/app/pnpm-lock.yaml`。
+- 官方入口：[Svelte 集成](https://tiptap.dev/docs/editor/getting-started/install/svelte)、[StarterKit](https://tiptap.dev/docs/editor/extensions/functionality/starterkit)、[JSON 持久化](https://tiptap.dev/docs/guides/output-json-html)、[ProseMirror Markdown 示例](https://prosemirror.net/examples/markdown/)、[ProseMirror API](https://prosemirror.net/docs/ref/#markdown)。
+- 项目快速用法：消息输入器只启用 StarterKit 中已进入 Atha 消息正文契约的文字节点与标记；持久化始终使用 Tiptap JSON，`plainText` 只是搜索与无格式回退投影。原始 Markdown 是同一 JSON 文档的临时输入视图，使用稳定的 `prosemirror-markdown` 双向转换；官方 `@tiptap/markdown` 当前仍是 Beta，不进入产品路径。编辑器与 Markdown 转换分别按需加载。
+- 最短检查：`pnpm --dir reader/app test:markdown`、`pnpm --dir reader/app check` 与 `pnpm --dir reader/app build`。
+- 必须重查：扩展 schema、粘贴内容、链接协议、JSON 兼容性、编辑器生命周期和只读呈现。
+
 ## WebView2
 
 - 版本事实：Windows 目标机的 Evergreen WebView2 Runtime；产品入口由 Tauri 2 承载，`reader/atha-reader-host` 只保留为性能和安全基线。

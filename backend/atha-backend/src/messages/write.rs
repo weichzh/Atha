@@ -152,10 +152,11 @@ impl MessageStore {
     }
 
     pub fn reply(&self, draft: ReplyDraft) -> Result<CreatedMessage, MessageError> {
-        if draft.text.trim().is_empty()
-            || draft.text.chars().count() > 8_000
-            || draft.reference_ids.len() > 32
-        {
+        let content = match draft.rich_text.as_ref() {
+            Some(rich_text) => rich_message_content(rich_text)?,
+            None => plain_message_content(Some(&draft.text))?,
+        };
+        if draft.reference_ids.len() > 32 {
             return Err(MessageError::InvalidInput);
         }
         let conversation = decode_hex::<16>(&draft.conversation_id)?;
@@ -214,7 +215,6 @@ impl MessageStore {
         let revision = random_id(&transaction)?;
         let outbox = random_id(&transaction)?;
         let now = now_millis()?;
-        let text = draft.text.trim();
         let ordinal: i64 = transaction
             .query_row(
                 "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM message WHERE conversation_id = ?1",
@@ -234,8 +234,8 @@ impl MessageStore {
                 params![
                     revision,
                     message,
-                    serde_json::json!({ "schema": 1, "kind": "text", "text": text }).to_string(),
-                    text,
+                    content.content_json,
+                    content.plain_text,
                     now
                 ],
             )
@@ -490,14 +490,38 @@ impl MessageStore {
         expected_revision_id: &str,
         text: Option<&str>,
     ) -> Result<CreatedRevision, MessageError> {
+        self.revise_content(
+            message_id,
+            expected_revision_id,
+            plain_message_content(text)?,
+        )
+    }
+
+    pub fn revise_rich(
+        &self,
+        message_id: &str,
+        expected_revision_id: &str,
+        rich_text: RichTextInput,
+    ) -> Result<CreatedRevision, MessageError> {
+        self.revise_content(
+            message_id,
+            expected_revision_id,
+            rich_message_content(&rich_text)?,
+        )
+    }
+
+    fn revise_content(
+        &self,
+        message_id: &str,
+        expected_revision_id: &str,
+        content: ValidatedMessageContent,
+    ) -> Result<CreatedRevision, MessageError> {
         let message = decode_hex::<16>(message_id)?;
         let expected = decode_hex::<16>(expected_revision_id)?;
-        let (kind, plain_text) = match text {
-            Some(value) if !value.trim().is_empty() && value.chars().count() <= 8_000 => {
-                ("text", value.trim())
-            }
-            None => ("source-only", ""),
-            _ => return Err(MessageError::InvalidInput),
+        let kind = if content.plain_text.is_empty() {
+            "source-only"
+        } else {
+            "text"
         };
         let mut connection = self.connect()?;
         let transaction = connection
@@ -519,12 +543,10 @@ impl MessageStore {
         let revision = random_id(&transaction)?;
         let outbox = random_id(&transaction)?;
         let now = now_millis()?;
-        let content_json =
-            serde_json::json!({ "schema": 1, "kind": kind, "text": plain_text }).to_string();
         transaction
             .execute(
                 "INSERT INTO message_revision (id, message_id, schema_version, kind, content_json, plain_text, created_at_ms) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6)",
-                params![revision, message, kind, content_json, plain_text, now],
+                params![revision, message, kind, content.content_json, content.plain_text, now],
             )
             .map_err(|_| MessageError::Database)?;
         let changed = transaction

@@ -41,7 +41,13 @@ export interface ReplyDraft {
   conversationId: string;
   replyToMessageId: string;
   text: string;
+  richText: RichTextInput | null;
   referenceIds: string[];
+}
+
+export interface RichTextInput {
+  schema: 1;
+  document: Record<string, unknown>;
 }
 
 export interface ReselectDraft {
@@ -67,6 +73,7 @@ export interface MessageView {
   revisionId: string;
   kind: "source-only" | "text" | "deleted";
   text: string;
+  contentJson: string;
   replyToMessageId: string | null;
   referenceIds: string[];
   referencePreviews: MessageReferencePreview[];
@@ -110,6 +117,7 @@ export interface RevisionView {
   id: string;
   kind: "source-only" | "text";
   text: string;
+  contentJson: string;
   createdAt: number;
 }
 
@@ -155,11 +163,17 @@ export const messageClient = Object.freeze({
       "message_create_root",
       { draft },
     ),
-  revise: (messageId: string, expectedRevisionId: string, text: string | null) =>
+  revise: (
+    messageId: string,
+    expectedRevisionId: string,
+    text: string | null,
+    richText: RichTextInput | null = null,
+  ) =>
     invoke<{ messageId: string; revisionId: string }>("message_revise", {
       messageId,
       expectedRevisionId,
       text,
+      richText,
     }),
   reply: (draft: ReplyDraft) =>
     invoke<{ messageId: string; revisionId: string }>("message_reply", { draft }),

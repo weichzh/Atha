@@ -574,9 +574,19 @@ export function createAnnotations({
       if (!pendingSelection) return fail("annotation-selection");
       await updateRange(item.id, pendingSelection);
     });
-    controls.note.addEventListener("click", () => {
+    controls.note.addEventListener("click", async () => {
       const item = selectedItem();
       if (!item && !pendingSelection) return fail("annotation-selection");
+      if (onOpenConversation) {
+        const result = item
+          ? { ok: true, id: item.id, conversationId: item.conversationId }
+          : await addSelection("");
+        if (result?.ok) {
+          finishSelection();
+          await onOpenConversation(result.conversationId, result.id, true);
+        }
+        return;
+      }
       hideSelectionActions();
       openNoteDialog(item?.id || null);
     });
@@ -606,7 +616,12 @@ export function createAnnotations({
       const button = event.target.closest("button[data-annotation-id]");
       if (!button) return;
       if (button.dataset.annotationAction === "edit") {
-        openNoteDialog(button.dataset.annotationId);
+        const item = store.item(button.dataset.annotationId);
+        if (item && onOpenConversation) {
+          await onOpenConversation(item.conversationId, item.id, true);
+        } else {
+          openNoteDialog(button.dataset.annotationId);
+        }
       } else if (button.dataset.annotationAction === "delete") {
         await remove(button.dataset.annotationId);
       } else if (button.dataset.annotationAction === "conversation") {

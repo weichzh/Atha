@@ -6,12 +6,17 @@
   "scripts": {
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test:markdown": "node --test tests/message-markdown.test.ts",
     "dev": "vite",
     "tauri": "tauri"
   },
   "dependencies": {
     "@lucide/svelte": "1.28.0",
-    "@tauri-apps/api": "2.11.1"
+    "@tauri-apps/api": "2.11.1",
+    "@tiptap/core": "3.29.2",
+    "@tiptap/pm": "3.29.2",
+    "@tiptap/starter-kit": "3.29.2",
+    "prosemirror-markdown": "1.13.5"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.2.0",

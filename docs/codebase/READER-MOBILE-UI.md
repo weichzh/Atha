@@ -12,8 +12,10 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | --- | --- |
 | `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
 | `reader/app/src/components/ReaderCanvas.svelte` | 自适应书页、章节和进度 DOM |
-| `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条、纯文本笔记 dialog 与对话浮层的组合 |
-| `reader/app/src/components/ConversationOverlay.svelte` | Atha 默认对话界面、消息编辑器、修订/关系 dialog 与历史快照 dialog 的 DOM |
+| `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条、兼容笔记 dialog 与对话浮层的组合 |
+| `reader/app/src/components/ConversationOverlay.svelte` | Atha 默认对话界面、修订/关系 dialog 与历史快照 dialog 的 DOM |
+| `reader/app/src/components/MessageComposer.svelte` | 自增高/全屏消息输入、两层工具栏和可视/Markdown 输入模式 |
+| `reader/app/src/message-editor.ts`、`message-markdown.ts` | 受限 Tiptap 扩展、链接规则及按需加载的 Markdown 双向转换 |
 | `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部五图标 |
 | `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
 | `reader/app/src/shell.css` | 顶部和底部覆盖层、面板、图标及壳层明暗视觉 |
@@ -22,7 +24,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/web/interaction.mjs` | 正文左、中、右点击区和键盘、滚轮、触摸输入；中间点击开关工具层 |
 | `reader/web/bookmarks.mjs` | 右上角书签切换、目录中的书签列表和书签跳转 |
 | `reader/web/message-store.mjs` | 正式根 Message 到标注/笔记投影的适配，以及旧 localStorage 记录迁移 |
-| `reader/web/conversations.mjs` | 对话浮层、回复、引用、编辑、删除、修订、关系、历史快照、跳回和导出 |
+| `reader/web/conversations.mjs` | 对话浮层、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
 | `reader/web/navigation.mjs` | 章节标题、目录选择、全书近似进度和进度拖动 |
 | `reader/web/pagination.mjs` | 视口设备像素换算、分页、尺寸变化、进度和公式尺寸 |
 | `reader/assets/bookmark-24-regular.svg` | 右上角书签图标，来自 Microsoft Fluent System Icons |
@@ -85,6 +87,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 搜索 | `.search-panel`、`.search-actions` |
 | 选区动作与笔记 | `.selection-actions`、`#annotation-note-dialog`、`.notes-panel`、`.annotation-filters`、`.annotation-list`、`.annotation-item` |
 | 阅读对话 | `.message-conversation`、`.message-source-context`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
+| 消息输入 | `.message-editor`、`.message-editor-toolbar-primary`、`.message-editor-toolbar-secondary`、`.message-editor-mode-switch`、`.message-editor-markdown` |
 | 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
 | 进度 | `.progress-panel`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
 | 更多菜单 | `.preferences-panel`、`.settings-list`、`.settings-view` |
@@ -101,7 +104,8 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - `#density` 只调整行距；四边距固定为上 144、右 32、下 144、左 32 设备像素，没有对应设置或持久化字段，旧记录中的边距字段会被忽略。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
 - 原生正文选区在 `pointerup` 或键盘选择完成后的下一帧投影 `#selection-actions`；复制只触发浏览器 copy，标注和笔记在 Tauri 产品中写入同一根 Message。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存会追加 SourceAnchor/SourceSnapshot，笔记动作追加修订，删除写入墓碑。全屏 `#annotations` 支持章节和全文筛选；点击项目打开对话浮层，独立编辑和删除按钮不触发跳转。
-- `#message-conversation` 在移动竖屏占满应用视口，较宽窗口继续作为可调整大小的右侧浮层；两种形态都可收起或关闭。顶部固定显示原文短预览和跳回入口；消息按时间单列排列，被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记页导出本书消息，浮层导出当前对话。
+- `#message-conversation` 默认从底部占约半屏，拖动顶部把手可连续调高，轻点把手或标题栏全屏按钮可进入全屏；标题栏不提供收起、导出或共享。顶部固定显示原文短预览和跳回入口；消息按时间单列排列，被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记页仍可导出本书消息。
+- `.message-editor` 随内容增高，到达紧凑上限后出现全屏按钮。全屏编辑顶部使用两层工具栏：第一层切换可视/Markdown 输入并保留撤销、重做与返回紧凑输入，第二层显示标题、粗体、斜体、列表、引用和安全链接。Markdown 转换按需加载，切回可视模式或发送前必须通过同一正文 schema；不支持的格式保留原文并显示错误，不静默丢失。
 - `#tap-to-paginate` 和 `#swipe-to-paginate` 只控制对应指针输入；键盘和滚轮继续保持原行为。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
