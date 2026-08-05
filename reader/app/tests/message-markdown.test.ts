@@ -10,6 +10,21 @@ test("message markdown round-trips the supported rich-text subset", () => {
 
   const document = codec.parse(markdown);
   assert.match(codec.serialize(document), /^## 标题/m);
+  assert.deepEqual(codec.parse(codec.serialize(document)), document);
   assert.throws(() => codec.parse("#### 暂不支持的标题"), /unsupported-markdown/);
   assert.throws(() => codec.parse("```js\nalert(1)\n```"));
+  assert.throws(() => codec.parse("~~删除线~~"), /unsupported-markdown/);
+  assert.throws(() => codec.parse("| 名称 | 值 |\n| --- | --- |\n| A | 1 |"), /unsupported-markdown/);
+  assert.throws(
+    () =>
+      codec.serialize({
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "上" }] },
+          { type: "paragraph" },
+          { type: "paragraph", content: [{ type: "text", text: "下" }] },
+        ],
+      }),
+    /unsupported-markdown/,
+  );
 });

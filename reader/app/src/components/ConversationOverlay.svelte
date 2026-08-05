@@ -1,15 +1,23 @@
 <script lang="ts">
   import { ArrowLeft, ChevronRight, Maximize2, Minimize2, X } from "@lucide/svelte";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   let Composer = $state<typeof import("./MessageComposer.svelte").default>();
 
   onMount(() => {
     let mounted = true;
-    import("./MessageComposer.svelte").then((module) => {
-      if (mounted) Composer = module.default;
-    });
-    return () => (mounted = false);
+    window.athaEnsureMessageComposer = async () => {
+      if (!Composer) {
+        const module = await import("./MessageComposer.svelte");
+        if (!mounted) return;
+        Composer = module.default;
+        await tick();
+      }
+    };
+    return () => {
+      mounted = false;
+      delete window.athaEnsureMessageComposer;
+    };
   });
 </script>
 

@@ -4,12 +4,12 @@
 
 - 选定概念图：本任务对话中由用户确认的概念 1；原始图片属于本机临时设计证据，不登记为项目事实。
 - 后续产品约束：回复与更多位于消息下方；被回复消息位于正文上方；不显示“回复了一条笔记”等标签，只保留大引号与摘要；允许多个直接引用，但不展开被引笔记自身的回复或引用；当前默认使用 Atha 样式，微信、Telegram、QQ 与自定义主题暂缓。
-- 富文本输入参考图：`C:\Users\nick\AppData\Local\Temp\codex-clipboard-a2acd7ae-4996-4997-9bd7-bbcc055fd58b.png`。参考其顶部快捷工具栏、自增高输入与全屏输入层级，不复制尚未批准的 AI、图片、表格、公式、表情或删除功能。
+- 富文本输入参考图：用户在本任务对话中提供的全屏编辑器截图。参考其顶部快捷工具栏、自增高输入与全屏输入层级，不复制尚未批准的 AI、图片、表格、公式、表情或删除功能。
 
 ## Implementation Evidence
 
 - 浅色、深色、更多菜单和同图对照均在真实 Tauri/WebView2 中生成；图片保存在 Git 忽略的本机验收目录，不把用户目录或临时文件登记为项目事实。
-- 半屏对话：`E:\Code\Atha\.tmp\rich-editor-half-final.png`；两层可视工具栏：`E:\Code\Atha\.tmp\rich-editor-layered-visual.png`；Markdown 输入：`E:\Code\Atha\.tmp\rich-editor-layered-markdown-final.png`。
+- 半屏对话、两层可视工具栏和 Markdown 输入截图保存在 Git 忽略的项目本地验收目录 `.tmp/`，不作为长期项目事实。
 
 ## Viewport And Normalization
 

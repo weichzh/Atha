@@ -276,6 +276,7 @@ export function createConversations({
 
   async function open(conversationId, messageId = null, edit = false) {
     try {
+      await window.athaEnsureMessageComposer?.();
       conversation = await store.conversation(conversationId);
       parentId =
         conversation.messages.find((message) => message.id === messageId && !message.deleted)?.id ||
@@ -547,6 +548,11 @@ export function createConversations({
     };
     controls.handle.addEventListener("pointerup", finishSheetDrag);
     controls.handle.addEventListener("pointercancel", () => (sheetDrag = null));
+    controls.handle.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      setFullscreen(true);
+    });
     controls.sourceJump.addEventListener("click", async () => {
       const sourceMessage = conversation?.messages.find(
         (message) => message.source && !message.deleted,

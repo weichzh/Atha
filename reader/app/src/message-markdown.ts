@@ -54,12 +54,40 @@ export function createMessageMarkdownCodec(schema: Schema) {
     return document;
   }
 
+  function validateSerializable(document: ReturnType<typeof parser.parse>) {
+    if (
+      document.childCount === 1 &&
+      document.firstChild?.type.name === "paragraph" &&
+      document.firstChild.content.size === 0
+    ) {
+      return document;
+    }
+    document.descendants((node) => {
+      if (node.type.name === "paragraph" && node.content.size === 0) {
+        throw new Error("unsupported-markdown");
+      }
+    });
+    return document;
+  }
+
+  function rejectUnsupportedSource(markdown: string) {
+    if (/(^|[^\\])~~(?=\S)/m.test(markdown)) throw new Error("unsupported-markdown");
+    if (
+      /^\s*\|?.+\|.+\|?\s*\r?\n\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/m.test(
+        markdown,
+      )
+    ) {
+      throw new Error("unsupported-markdown");
+    }
+  }
+
   return Object.freeze({
     parse(markdown: string): JSONContent {
+      rejectUnsupportedSource(markdown);
       return validate(parser.parse(markdown)).toJSON();
     },
     serialize(document: JSONContent): string {
-      return serializer.serialize(validate(schema.nodeFromJSON(document)));
+      return serializer.serialize(validateSerializable(validate(schema.nodeFromJSON(document))));
     },
   });
 }

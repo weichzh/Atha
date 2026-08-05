@@ -56,6 +56,7 @@
 
   function refresh(editor: Editor) {
     editorState = { editor };
+    if (mode === "visual") markdownError = "";
     const text = editor.getText({ blockSeparator: "\n" }).trim();
     empty = !text;
     tooLong = [...text].length > 8_000;
@@ -77,13 +78,19 @@
 
   async function showMarkdown() {
     if (mode === "markdown") return;
+    expanded = true;
     const editor = editorState.editor;
     if (!editor) return;
     if (!markdownCodec) {
       const { createMessageMarkdownCodec } = await import("../message-markdown");
       markdownCodec = createMessageMarkdownCodec(editor.schema);
     }
-    markdown = markdownCodec.serialize(editor.getJSON());
+    try {
+      markdown = markdownCodec.serialize(editor.getJSON());
+    } catch {
+      markdownError = "当前内容含有 Markdown 无法表示的格式";
+      return;
+    }
     mode = "markdown";
     refreshMarkdown();
     requestAnimationFrame(() => markdownElement.focus());
@@ -158,10 +165,6 @@
         mode = "visual";
         markdownError = "";
         expanded = false;
-      },
-      expand() {
-        expanded = true;
-        requestAnimationFrame(() => editor.commands.focus("end"));
       },
       focus() {
         requestAnimationFrame(() =>
@@ -242,16 +245,17 @@
             <button
               type="button"
               class:active={editorState.editor.isActive("heading")}
+              aria-pressed={editorState.editor.isActive("heading")}
               aria-label="标题"
               title="标题"
               onclick={() => editorState.editor?.chain().focus().toggleHeading({ level: 2 }).run()}
             >Aa</button>
-            <button type="button" class:active={editorState.editor.isActive("bold")} aria-label="粗体" title="粗体" onclick={() => editorState.editor?.chain().focus().toggleBold().run()}><BoldIcon aria-hidden="true" /></button>
-            <button type="button" class:active={editorState.editor.isActive("italic")} aria-label="斜体" title="斜体" onclick={() => editorState.editor?.chain().focus().toggleItalic().run()}><ItalicIcon aria-hidden="true" /></button>
-            <button type="button" class:active={editorState.editor.isActive("bulletList")} aria-label="项目列表" title="项目列表" onclick={() => editorState.editor?.chain().focus().toggleBulletList().run()}><List aria-hidden="true" /></button>
-            <button type="button" class:active={editorState.editor.isActive("orderedList")} aria-label="编号列表" title="编号列表" onclick={() => editorState.editor?.chain().focus().toggleOrderedList().run()}><ListOrdered aria-hidden="true" /></button>
-            <button type="button" class:active={editorState.editor.isActive("blockquote")} aria-label="引用" title="引用" onclick={() => editorState.editor?.chain().focus().toggleBlockquote().run()}><Quote aria-hidden="true" /></button>
-            <button type="button" class:active={editorState.editor.isActive("link")} aria-label="链接" title="链接" onclick={toggleLink}><Link2 aria-hidden="true" /></button>
+            <button type="button" class:active={editorState.editor.isActive("bold")} aria-pressed={editorState.editor.isActive("bold")} aria-label="粗体" title="粗体" onclick={() => editorState.editor?.chain().focus().toggleBold().run()}><BoldIcon aria-hidden="true" /></button>
+            <button type="button" class:active={editorState.editor.isActive("italic")} aria-pressed={editorState.editor.isActive("italic")} aria-label="斜体" title="斜体" onclick={() => editorState.editor?.chain().focus().toggleItalic().run()}><ItalicIcon aria-hidden="true" /></button>
+            <button type="button" class:active={editorState.editor.isActive("bulletList")} aria-pressed={editorState.editor.isActive("bulletList")} aria-label="项目列表" title="项目列表" onclick={() => editorState.editor?.chain().focus().toggleBulletList().run()}><List aria-hidden="true" /></button>
+            <button type="button" class:active={editorState.editor.isActive("orderedList")} aria-pressed={editorState.editor.isActive("orderedList")} aria-label="编号列表" title="编号列表" onclick={() => editorState.editor?.chain().focus().toggleOrderedList().run()}><ListOrdered aria-hidden="true" /></button>
+            <button type="button" class:active={editorState.editor.isActive("blockquote")} aria-pressed={editorState.editor.isActive("blockquote")} aria-label="引用" title="引用" onclick={() => editorState.editor?.chain().focus().toggleBlockquote().run()}><Quote aria-hidden="true" /></button>
+            <button type="button" class:active={editorState.editor.isActive("link")} aria-pressed={editorState.editor.isActive("link")} aria-label="链接" title="链接" onclick={toggleLink}><Link2 aria-hidden="true" /></button>
           </div>
         </div>
       {/if}
@@ -274,12 +278,17 @@
   </div>
 
   <div class="message-editor-actions">
+    {#if !expanded}
+      <button class="message-editor-expand" type="button" aria-label="使用 Markdown" title="使用 Markdown" onclick={showMarkdown}>
+        <FileText aria-hidden="true" />
+      </button>
+    {/if}
     {#if tall && !expanded}
       <button class="message-editor-expand" type="button" aria-label="全屏编辑" title="全屏编辑" onclick={() => (expanded = true)}>
         <Maximize2 aria-hidden="true" />
       </button>
     {/if}
-    <button class="message-send-button" type="submit" aria-label="发送" title={tooLong ? "消息最多 8000 个字符" : "发送"} disabled={empty || tooLong || Boolean(markdownError)}>
+    <button class="message-send-button" type="submit" aria-label="发送" title={tooLong ? "消息最多 8000 个字符" : "发送"} disabled={empty || tooLong || (mode === "markdown" && Boolean(markdownError))}>
       <Send aria-hidden="true" />
     </button>
   </div>

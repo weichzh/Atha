@@ -74,7 +74,7 @@ R6 只提供不区分大小写的字面量搜索。查询最长 128 个 UTF-16 c
 
 Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，只把当前 section 的未删除根 Message 投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。有效新选区附近显示复制、标注和笔记；点击已有标注则恢复其 Range，并显示复制、重选、笔记和删除。重选使用浏览器原生选区分两步创建新的 Anchor 与 Snapshot，保持 Message 身份与笔记修订；重叠命中选择最近更新的一条。
 
-笔记继续使用最长 2000 字符的纯文本 dialog，同一个入口负责新建、为 source-only Message 添加笔记和预填编辑。全屏笔记页投影所有未删除根 Message，并提供章节/全文筛选、本书导出和对话入口；对话浮层负责回复、引用、修订、关系、快照和跳回。删除写入 Message 墓碑并立即撤销正文投影。标注颜色、notebook、同步和 tombstone 压缩留待后续真实需求。
+笔记入口负责新建、为 source-only Message 添加正文和预填编辑，并打开定位根消息的半屏对话。消息输入器使用最长 8000 字符的受限 Tiptap JSON，由后端派生纯文本；可视编辑与原始 Markdown 共用同一耐久事实，Markdown 无法表示的结构会保留原内容并拒绝切换。全屏笔记页投影所有未删除根 Message，并提供章节/全文筛选、本书导出和对话入口；对话浮层负责回复、引用、修订、关系、快照和跳回。删除写入 Message 墓碑并立即撤销正文投影。标注颜色、notebook、同步和 tombstone 压缩留待后续真实需求。
 
 ### 翻页输入
 

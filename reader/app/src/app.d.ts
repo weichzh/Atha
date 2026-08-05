@@ -5,11 +5,11 @@ interface Window {
   athaReaderIpc?: {
     postMessage(message: string): void;
   };
+  athaEnsureMessageComposer?: () => Promise<void>;
   athaMessages?: import("./messages").MessageClient;
   athaMessageComposer?: {
     clear(): void;
     collapse(): void;
-    expand(): void;
     focus(): void;
     render(target: HTMLElement, contentJson: string, fallback: string): void;
     setValue(contentJson: string, fallback: string): void;
