@@ -6,7 +6,7 @@ description: 修复纯图片页书签无法识别当前位置并在重复点击�
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -58,7 +58,8 @@ accepted
 
 ## Review
 
-待实现后独立复核。
+- 首轮 Standards review 无 blocking 或 non-blocking；Spec review 指出新增断言只覆盖 helper，没有固定真实 `visibleBookmark → toggle → state/UI` 调用链，判定为 blocking。
+- 增加隔离 WebView2 UDF 的真实 Tauri 封面书签切换后，更新的 Standards 与 Spec 双轴复核均无 blocking、non-blocking 或 out-of-scope。
 
 ## Evidence And Residual Risks
 
