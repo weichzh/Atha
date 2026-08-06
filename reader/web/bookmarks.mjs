@@ -24,16 +24,22 @@ export function createBookmarks({ state, navigation, pagination, session, locato
   }
 
   function visibleBookmark() {
-    const section = session.snapshot().currentSection;
+    const current = navigation.current().start;
     return state.snapshot().bookmarks.find((bookmark) => {
       if (!bookmark.currentVersion) return false;
       try {
         const point = locator.parse(session.describe(), bookmark.locator).start;
-        return point.section === section && pagination.isOffsetVisible(point.offset);
+        return onCurrentPage(point, current, pagination.isOffsetVisible(point.offset));
       } catch {
         return false;
       }
     });
+  }
+
+  function onCurrentPage(point, current, offsetVisible) {
+    return (
+      point.section === current.section && (point.offset === current.offset || offsetVisible)
+    );
   }
 
   function syncCurrent() {
@@ -140,6 +146,14 @@ export function createBookmarks({ state, navigation, pagination, session, locato
   }
 
   async function verify() {
+    assert(
+      onCurrentPage(
+        { section: "image-only", offset: 2 },
+        { section: "image-only", offset: 2 },
+        false,
+      ),
+      "sample-boundary",
+    );
     const before = navigation.current();
     controls.add.click();
     await pending;
