@@ -1,4 +1,4 @@
-export function createContent({ host, readerStyleSource, fail }) {
+export function createContent({ host, reader, readerStyleSource, fail }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const bookStyle = document.createElement("style");
   const readerStyle = document.createElement("style");
@@ -10,15 +10,24 @@ export function createContent({ host, readerStyleSource, fail }) {
   let bookUrl;
   let bookOrigin;
   let declaredResources;
-  let cachedXhtml;
+  let cachedBody;
   let cachedCss;
   let sourceStyles = true;
   let userStylesEnabled = true;
   let userStylesheet = "";
   let inlineStyles = [];
   const validatedCss = new Map();
+  const validatedSvg = new Map();
+  const readySvg = new Set();
+  const pendingImages = new Map();
   let silentFailure = false;
   let selfChecked = false;
+  let deferredImageCount = 0;
+  let eagerSvgCount = 0;
+  let lastVisibleLoadCount = 0;
+  let renderGeneration = 0;
+  let warmPromise;
+  let warmDurationMs = null;
 
   function reject(code) {
     if (silentFailure) throw new Error(code);
@@ -172,6 +181,20 @@ export function createContent({ host, readerStyleSource, fail }) {
     element.setAttribute("aria-label", caption ? `查看表格：${caption.slice(0, 160)}` : table ? "查看表格" : "查看代码");
   }
 
+  function deferredFormula(image) {
+    const source = image.getAttribute("src");
+    const width = Number(image.getAttribute("width"));
+    const height = Number(image.getAttribute("height"));
+    return (
+      image.matches(".math-inline, .math-display") &&
+      source?.toLowerCase().endsWith(".svg") &&
+      Number.isFinite(width) &&
+      width > 0 &&
+      Number.isFinite(height) &&
+      height > 0
+    );
+  }
+
   function validateMarkup(documentNode) {
     ensure(!documentNode.querySelector("parsererror") && !documentNode.doctype, "invalid-xhtml");
     ensure(
@@ -182,9 +205,14 @@ export function createContent({ host, readerStyleSource, fail }) {
     );
 
     for (const element of documentNode.querySelectorAll("*")) {
+      element.classList.remove("atha-resource-pending");
       const name = element.localName.toLowerCase();
-      for (const attribute of element.attributes) {
+      for (const attribute of [...element.attributes]) {
         const attributeName = attribute.name.toLowerCase();
+        if (attributeName === "data-atha-resource") {
+          element.removeAttribute(attribute.name);
+          continue;
+        }
         ensure(!attributeName.startsWith("on"), "event-handler");
         if (attributeName === "style") validateCss(attribute.value, true);
         if (["srcset", "poster", "action", "formaction", "ping"].includes(attributeName)) {
@@ -254,6 +282,120 @@ export function createContent({ host, readerStyleSource, fail }) {
     parseSvg(await response.text());
   }
 
+  function validateSvgOnce(url) {
+    if (!validatedSvg.has(url)) validatedSvg.set(url, validateSvg(url));
+    return validatedSvg.get(url);
+  }
+
+  function loadBounds(includeNextPage) {
+    const viewport = reader.getBoundingClientRect();
+    const style = getComputedStyle(book);
+    const scale = viewport.width / reader.clientWidth;
+    const pageStep = (parseFloat(style.width) + parseFloat(style.columnGap)) * scale;
+    return {
+      top: viewport.top,
+      right: viewport.right + (includeNextPage ? pageStep : 0),
+      bottom: viewport.bottom,
+      left: viewport.left,
+    };
+  }
+
+  function pendingWithin(bounds) {
+    return [...pendingImages.keys()].filter((image) => {
+      const rect = image.getBoundingClientRect();
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.right > bounds.left &&
+        rect.left < bounds.right &&
+        rect.bottom > bounds.top &&
+        rect.top < bounds.bottom
+      );
+    });
+  }
+
+  async function loadImages(images, generation) {
+    await Promise.all(
+      images.map(async (image) => {
+        const url = pendingImages.get(image);
+        if (!url) return;
+        try {
+          await validateSvgOnce(url);
+        } catch (error) {
+          if (generation !== renderGeneration) return;
+          throw error;
+        }
+        if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
+        image.src = url;
+        try {
+          await image.decode();
+        } catch {
+          if (generation !== renderGeneration) return;
+          reject("image-load");
+        }
+        if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
+        readySvg.add(url);
+        image.classList.remove("atha-resource-pending");
+        image.removeAttribute("aria-busy");
+        delete image.dataset.athaResource;
+        pendingImages.delete(image);
+      }),
+    );
+  }
+
+  async function loadVisible(includeNextPage = false) {
+    const generation = renderGeneration;
+    let loaded = 0;
+    for (let pass = 0; pass < 4; pass += 1) {
+      const images = pendingWithin(loadBounds(includeNextPage));
+      if (images.length === 0) break;
+      loaded += images.length;
+      await loadImages(images, generation);
+    }
+    lastVisibleLoadCount = loaded;
+    return loaded;
+  }
+
+  function idleTurn() {
+    return new Promise((resolve) => {
+      if (globalThis.requestIdleCallback) globalThis.requestIdleCallback(resolve, { timeout: 50 });
+      else setTimeout(resolve, 0);
+    });
+  }
+
+  function warmRemaining() {
+    if (warmPromise) return warmPromise;
+    const generation = renderGeneration;
+    warmPromise = (async () => {
+      const started = performance.now();
+      while (generation === renderGeneration && pendingImages.size > 0) {
+        await idleTurn();
+        if (generation !== renderGeneration) break;
+        // ponytail: fixed small batches yield between formula groups; make adaptive only if traces show jank.
+        await loadImages([...pendingImages.keys()].slice(0, 16), generation);
+      }
+      if (generation === renderGeneration) {
+        warmDurationMs = performance.now() - started;
+      }
+      return warmDurationMs;
+    })();
+    return warmPromise;
+  }
+
+  function resourceSnapshot() {
+    return Object.freeze({
+      pending: pendingImages.size,
+      currentPending: pendingWithin(loadBounds(false)).length,
+      currentOrNextPending: pendingWithin(loadBounds(true)).length,
+      deferred: deferredImageCount,
+      eagerSvg: eagerSvgCount,
+      lastVisible: lastVisibleLoadCount,
+      validatedSvg: validatedSvg.size,
+      warming: Boolean(warmPromise) && pendingImages.size > 0,
+      warmDurationMs,
+    });
+  }
+
   function rejected(action) {
     silentFailure = true;
     try {
@@ -266,7 +408,7 @@ export function createContent({ host, readerStyleSource, fail }) {
     }
   }
 
-  function validatorSelfCheck() {
+  async function validatorSelfCheck() {
     for (const markup of [
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><script>1</script></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><p onclick='x()'>x</p></body></html>",
@@ -306,12 +448,13 @@ export function createContent({ host, readerStyleSource, fail }) {
     const [standaloneImage, formulaImage, linkedImage] = imageMarkup.querySelectorAll("img");
     for (const image of imageMarkup.querySelectorAll("img")) setImageInteraction(image);
     ensure(
-        standaloneImage.getAttribute("role") === "button" &&
+      standaloneImage.getAttribute("role") === "button" &&
         standaloneImage.getAttribute("tabindex") === "0" &&
         standaloneImage.getAttribute("aria-label") === "查看图片：插图" &&
         !standaloneImage.hasAttribute("aria-hidden") &&
         !standaloneImage.hasAttribute("aria-disabled") &&
         formulaImage.getAttribute("aria-label") === "查看公式：x + y" &&
+        !deferredFormula(formulaImage) &&
         !linkedImage.hasAttribute("role") &&
         !linkedImage.hasAttribute("tabindex"),
       "active-content",
@@ -360,6 +503,20 @@ export function createContent({ host, readerStyleSource, fail }) {
     ]) {
       ensure(rejected(() => parseSvg(svg)), "invalid-svg");
     }
+    const deferredProbe = document.createElement("img");
+    const deferredProbeUrl = "https://atha-book.localhost/invalid-probe.svg";
+    pendingImages.set(deferredProbe, deferredProbeUrl);
+    validatedSvg.set(deferredProbeUrl, Promise.reject(new Error("invalid-svg")));
+    let deferredRejected = false;
+    try {
+      await loadImages([deferredProbe], renderGeneration);
+    } catch (error) {
+      deferredRejected = error instanceof Error && error.message === "invalid-svg";
+    } finally {
+      pendingImages.delete(deferredProbe);
+      validatedSvg.delete(deferredProbeUrl);
+    }
+    ensure(deferredRejected && !deferredProbe.hasAttribute("src"), "invalid-svg");
   }
 
   async function initialize() {
@@ -373,13 +530,12 @@ export function createContent({ host, readerStyleSource, fail }) {
     bookOrigin = url.origin;
     declaredResources = resources;
     if (!selfChecked) {
-      validatorSelfCheck();
+      await validatorSelfCheck();
       selfChecked = true;
     }
     const response = await fetch(bookUrl);
     ensure(response.ok, loadError);
-    cachedXhtml = await response.text();
-    const source = new DOMParser().parseFromString(cachedXhtml, "application/xhtml+xml");
+    const source = new DOMParser().parseFromString(await response.text(), "application/xhtml+xml");
     validateMarkup(source);
     const styleSources = detachSourceStyles(source);
     const stylesheets = await Promise.all(
@@ -394,19 +550,48 @@ export function createContent({ host, readerStyleSource, fail }) {
     validateCss(cachedCss);
 
     const svgUrls = [
-      ...new Set([...source.querySelectorAll("img[src$='.svg']")].map((image) => image.src)),
+      ...new Set(
+        [...source.querySelectorAll("img[src$='.svg']")]
+          .filter((image) => !deferredFormula(image))
+          .map((image) => image.src),
+      ),
     ];
-    await Promise.all(svgUrls.map(validateSvg));
+    eagerSvgCount = svgUrls.length;
+    await Promise.all(svgUrls.map(validateSvgOnce));
+    for (const image of source.querySelectorAll("img")) {
+      if (!deferredFormula(image)) continue;
+      image.dataset.athaResource = image.src;
+      image.removeAttribute("src");
+      image.classList.add("atha-resource-pending");
+      image.setAttribute("aria-busy", "true");
+    }
+    cachedBody = source.body;
   }
 
   async function renderCached() {
-    const source = new DOMParser().parseFromString(cachedXhtml, "application/xhtml+xml");
-    validateMarkup(source);
-    detachSourceStyles(source);
-    validateCss(cachedCss);
+    ensure(cachedBody, "section-load");
+    renderGeneration += 1;
+    warmPromise = undefined;
+    warmDurationMs = null;
     bookStyle.textContent = sourceStyles ? cachedCss : "";
     userStyle.textContent = userStylesEnabled ? userStylesheet : "";
-    const imported = document.importNode(source.body, true);
+    const imported = document.importNode(cachedBody, true);
+    pendingImages.clear();
+    const deferredImages = imported.querySelectorAll(
+      "img.atha-resource-pending[data-atha-resource]",
+    );
+    deferredImageCount = deferredImages.length;
+    for (const image of deferredImages) {
+      const url = image.dataset.athaResource;
+      if (readySvg.has(url)) {
+        image.src = url;
+        image.classList.remove("atha-resource-pending");
+        image.removeAttribute("aria-busy");
+        delete image.dataset.athaResource;
+        continue;
+      }
+      pendingImages.set(image, url);
+    }
     book.replaceChildren(...imported.childNodes);
     inlineStyles = [...book.querySelectorAll("[style]")].map((element) => [
       element,
@@ -414,28 +599,39 @@ export function createContent({ host, readerStyleSource, fail }) {
     ]);
     setStyles({ sourceStyles, userStylesEnabled, userStylesheet });
     await Promise.all(
-      [...book.querySelectorAll("img")].map(async (image) => {
-        try {
-          await image.decode();
-        } catch {
-          reject("image-load");
-        }
-      }),
+      [...book.querySelectorAll("img")]
+        .filter((image) => !pendingImages.has(image))
+        .map(async (image) => {
+          try {
+            await image.decode();
+          } catch {
+            reject("image-load");
+          }
+        }),
     );
     await document.fonts.ready;
   }
 
   function close() {
+    renderGeneration += 1;
     book.replaceChildren();
     bookStyle.textContent = "";
     userStyle.textContent = "";
     bookUrl = undefined;
     bookOrigin = undefined;
     declaredResources = undefined;
-    cachedXhtml = undefined;
+    cachedBody = undefined;
     cachedCss = undefined;
     inlineStyles = [];
+    deferredImageCount = 0;
+    eagerSvgCount = 0;
+    lastVisibleLoadCount = 0;
+    warmPromise = undefined;
+    warmDurationMs = null;
+    pendingImages.clear();
     validatedCss.clear();
+    validatedSvg.clear();
+    readySvg.clear();
   }
 
   function styleSnapshot() {
@@ -517,9 +713,12 @@ export function createContent({ host, readerStyleSource, fail }) {
     close,
     initialize,
     loadSection,
+    loadVisible,
     renderCached,
+    resourceSnapshot,
     describeLink,
     setStyles,
     styleSnapshot,
+    warmRemaining,
   });
 }

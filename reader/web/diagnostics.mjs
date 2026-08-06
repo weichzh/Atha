@@ -166,7 +166,7 @@ export function createDiagnostics({
     const ordinary = content.book.querySelector("img:not(.math-inline):not(.math-display)");
     if (formula) assert(getComputedStyle(formula).filter !== "none", "sample-boundary");
     if (ordinary) assert(getComputedStyle(ordinary).filter === "none", "sample-boundary");
-    assert(pagination.countCutRects() === 0, "layout-cut");
+    assert(pagination.countCutRects(true) === 0, "layout-cut");
 
     const comfortableAnchor = await navigation.setPreferences("application", {
       theme: "light",
@@ -184,7 +184,7 @@ export function createDiagnostics({
     assert(Math.abs(parseFloat(comfortableStyle.lineHeight) - 72) < 0.1, "sample-boundary");
     if (formula) assert(getComputedStyle(formula).filter === "none", "sample-boundary");
     if (ordinary) assert(getComputedStyle(ordinary).filter === "none", "sample-boundary");
-    assert(pagination.countCutRects() === 0, "layout-cut");
+    assert(pagination.countCutRects(true) === 0, "layout-cut");
 
     const bookAnchor = await navigation.setPreferences("book", { sourceStyles: false });
     assert(pagination.isOffsetVisible(bookAnchor.start.offset), "sample-boundary");
@@ -517,6 +517,8 @@ export function createDiagnostics({
   }
 
   async function benchmark() {
+    await content.warmRemaining();
+    await pagination.resizeViewport(pagination.captureOffset());
     for (let sample = 1; sample <= BENCHMARK_SAMPLES; sample += 1) {
       const started = performance.now();
       await renderCachedSource();
@@ -594,6 +596,7 @@ export function createDiagnostics({
         ...structuredActions.snapshot(),
         selectionLength: contentActions.selectionLength(),
       },
+      resources: content.resourceSnapshot(),
       readerState: { ...readerState.snapshot(), ...stateEvidence },
       bookmarks: { items: bookmarks.snapshot(), ...bookmarkEvidence },
       search: { ...search.snapshot(), ...searchEvidence },
@@ -783,18 +786,21 @@ export function createDiagnostics({
     );
   }
 
-  function complete() {
+  function complete(fullLayout = false) {
     verifyHostPolicy();
     const book = content.book;
     const state = pagination.snapshot();
+    const resources = content.resourceSnapshot();
+    assert(resources.currentOrNextPending === 0, "image-load");
     const inline = book.querySelectorAll("img.math-inline").length;
     const display = book.querySelectorAll("img.math-display").length;
-    const cuts = pagination.countCutRects();
+    const cuts = pagination.countCutRects(!fullLayout);
     document.documentElement.dataset.status = "pass";
     document.documentElement.dataset.pages = String(state.pages);
     document.documentElement.dataset.inlineFormulas = String(inline);
     document.documentElement.dataset.displayFormulas = String(display);
     document.documentElement.dataset.cuts = String(cuts);
+    document.documentElement.dataset.pendingResources = String(resources.pending);
     emit(`ready|${state.pages}|${inline}|${display}|${cuts}`);
   }
 

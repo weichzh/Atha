@@ -2,6 +2,6 @@
 
 本文件只登记当前可执行工作的路由；范围、证据和下一步由所指向的所有者维护。
 
-- `change`：当前无活动 change；真实阅读稳定化发现的纯图片页书签切换已完成
-- `roadmap`：M2 阅读器 V1、M3 EPUB、M4 本地书架与完整消息式阅读均已完成；下一里程碑尚未定义 → `docs/roadmap/ROADMAP.md`
-- `Context Bundle`：无
+- `change`：公式密集章节加载性能（implemented，review 完成）→ `docs/changes/reader-formula-loading-performance.md`
+- `roadmap`：M2 阅读器 V1、M3 EPUB、M4 产品主循环和公式密集章节性能优化已完成；下一产品切片尚未 claim → `docs/roadmap/ROADMAP.md`
+- `Context Bundle`：`docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`

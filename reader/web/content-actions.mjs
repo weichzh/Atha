@@ -242,6 +242,8 @@ export function createContentActions({
       return filter;
     };
     await session.open(0);
+    await content.warmRemaining();
+    await pagination.resizeViewport(pagination.captureOffset());
     await pagination.show(0);
     const walker = document.createTreeWalker(content.book, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) =>

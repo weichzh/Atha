@@ -5,7 +5,10 @@ param(
     [string]$BookRoot,
     [string]$Entry = 'EPUB/text/ch012.xhtml',
     [string]$HostPackage = 'atha-reader-host',
-    [string]$HostPath
+    [string]$HostPath,
+    [switch]$BenchmarkOnly,
+    [ValidateSet('default', 'formula-heavy')]
+    [string]$BenchmarkProfile = 'default'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +37,10 @@ $p95Limits = @{
     hot_open = 120
     page_turn = 50
     font_reflow = 150
+}
+if ($BenchmarkProfile -eq 'formula-heavy') {
+    $p95Limits.cold_start = 1500
+    $p95Limits.hot_open = 200
 }
 
 function Invoke-ReaderHost {
@@ -85,14 +92,16 @@ function Get-PercentileSummary {
 
 Push-Location $repoRoot
 try {
-    & $cargoPath fmt --manifest-path $manifestPath --all --check
-    if ($LASTEXITCODE -ne 0) { throw 'Reader formatting check failed.' }
+    if (-not $BenchmarkOnly) {
+        & $cargoPath fmt --manifest-path $manifestPath --all --check
+        if ($LASTEXITCODE -ne 0) { throw 'Reader formatting check failed.' }
 
-    & $cargoPath clippy --manifest-path $manifestPath --workspace --all-targets --locked -- -D warnings
-    if ($LASTEXITCODE -ne 0) { throw 'Reader clippy check failed.' }
+        & $cargoPath clippy --manifest-path $manifestPath --workspace --all-targets --locked -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw 'Reader clippy check failed.' }
 
-    & $cargoPath test --manifest-path $manifestPath --workspace --all-targets --locked
-    if ($LASTEXITCODE -ne 0) { throw 'Reader Rust tests failed.' }
+        & $cargoPath test --manifest-path $manifestPath --workspace --all-targets --locked
+        if ($LASTEXITCODE -ne 0) { throw 'Reader Rust tests failed.' }
+    }
 
     & $cargoPath build --manifest-path $manifestPath --package $HostPackage --locked
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {

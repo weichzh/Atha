@@ -2,6 +2,16 @@ const params = new URLSearchParams(location.search);
 const root = document.documentElement;
 const reader = document.querySelector(".reader");
 const errorBox = document.querySelector("#error");
+const errorDetails = Object.freeze({
+  "locator-offset": "恢复阅读位置失败：文字偏移量没有对应的可见内容",
+  "layout-cut": "分页布局失败：正文或图片越过页面边界",
+  "unstable-layout": "分页布局失败：页面尺寸持续变化",
+});
+const sessionStages = Object.freeze({
+  opening: "打开书籍",
+  "content-loaded": "章节载入后的分页定位",
+  "layout-stable": "阅读状态恢复",
+});
 
 document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
 
@@ -21,17 +31,23 @@ function emit(message) {
   if (bridge?.postMessage) bridge.postMessage(message);
 }
 
-function fail(code) {
+function fail(code, operationStage = null) {
   document.documentElement.dataset.status = "fail";
   document.documentElement.dataset.error = code;
+  const detail = errorDetails[code] || "处理书籍内容时发生错误";
+  const stage =
+    operationStage ||
+    sessionStages[document.documentElement.dataset.sessionState] ||
+    "阅读器初始化";
+  errorBox.textContent = `${detail}（错误代码：${code}；阶段：${stage}）。`;
   errorBox.hidden = false;
   emit(`error|${code}`);
   console.error(`Atha reader failed: ${code}`);
   throw new Error(code);
 }
 
-function assert(condition, code) {
-  if (!condition) fail(code);
+function assert(condition, code, operationStage = null) {
+  if (!condition) fail(code, operationStage);
 }
 
 function durableStorage() {
@@ -45,6 +61,7 @@ function durableStorage() {
 
 const content = createContent({
   host: document.querySelector("#book-host"),
+  reader,
   readerStyleSource: document.querySelector("#reader-style-source"),
   fail,
 });
@@ -79,6 +96,7 @@ const pagination = createPagination({
   previous: document.querySelector("#previous"),
   next: document.querySelector("#next"),
   fontSizeControl: document.querySelector("#font-size"),
+  onPageShown: (includeNextPage) => content.loadVisible(includeNextPage),
   assert,
   fail,
 });
@@ -90,6 +108,11 @@ async function renderCachedSource() {
   await content.renderCached();
   await pagination.renderFromStart();
   await annotations?.redraw();
+}
+
+async function warmForVerification() {
+  await content.warmRemaining();
+  await pagination.resizeViewport(pagination.captureOffset());
 }
 
 const session = createReadingSession({
@@ -422,15 +445,29 @@ async function start() {
 
   const stateProbe = params.get("state-probe");
   const benchmarkMode = params.get("benchmark");
+  let fullLayoutCheck = false;
   if (stateProbe) {
     await readerState.verifyPersistence(stateProbe);
     await annotations.verifyPersistence(stateProbe);
+    await warmForVerification();
+    fullLayoutCheck = true;
   }
-  else if (params.has("verify-import")) await diagnostics.verifyImport();
-  else if (params.has("verify") && !benchmarkMode) await diagnostics.verify();
-  if (benchmarkMode === "hot") await diagnostics.benchmark();
+  else if (params.has("verify-import")) {
+    await diagnostics.verifyImport();
+    await warmForVerification();
+    fullLayoutCheck = true;
+  }
+  else if (params.has("verify") && !benchmarkMode) {
+    await diagnostics.verify();
+    await warmForVerification();
+    fullLayoutCheck = true;
+  }
+  if (benchmarkMode === "hot") {
+    await diagnostics.benchmark();
+    fullLayoutCheck = true;
+  }
 
-  diagnostics.complete();
+  diagnostics.complete(fullLayoutCheck);
 }
 
 start().catch((error) => {

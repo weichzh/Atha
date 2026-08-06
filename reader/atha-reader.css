@@ -967,6 +967,10 @@ textarea:focus-visible,
   overflow: visible;
 }
 
+.book img.atha-resource-pending {
+  visibility: hidden !important;
+}
+
 .book[data-font-family="serif"] {
   font-family: Georgia, "Noto Serif CJK SC", "Songti SC", serif;
 }

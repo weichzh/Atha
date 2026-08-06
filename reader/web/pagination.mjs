@@ -10,6 +10,7 @@ export function createPagination({
   previous,
   next,
   fontSizeControl,
+  onPageShown,
   assert,
   fail,
 }) {
@@ -88,11 +89,26 @@ export function createPagination({
     return withoutTranslation(() => {
       const point = pointForOffset(offset);
       if (!point.exact || !point.node) return { exact: point.exact, page: 0 };
-      const range = document.createRange();
-      range.setStart(point.node, point.offset);
-      range.setEnd(point.node, Math.min(point.node.textContent.length, point.offset + 1));
-      const rect = [...range.getClientRects()].find((item) => item.width);
-      if (!rect) return { exact: false, page: 0 };
+      const nodes = textNodes().filter((node) => (node.textContent || "").length > 0);
+      const start = nodes.indexOf(point.node);
+      const visibleRect = (node, from, to, last = false) => {
+        if (from >= to) return null;
+        const range = document.createRange();
+        range.setStart(node, from);
+        range.setEnd(node, to);
+        const rects = [...range.getClientRects()].filter((item) => item.width && item.height);
+        return last ? rects.at(-1) : rects[0];
+      };
+      let rect = visibleRect(point.node, point.offset, point.offset + 1);
+      for (let index = start; !rect && index < nodes.length; index += 1) {
+        const node = nodes[index];
+        rect = visibleRect(node, index === start ? point.offset : 0, node.textContent.length);
+      }
+      for (let index = start; !rect && index >= 0; index -= 1) {
+        const node = nodes[index];
+        rect = visibleRect(node, 0, index === start ? point.offset : node.textContent.length, true);
+      }
+      if (!rect) return { exact: true, page: Math.min(state.page, state.pages - 1) };
       const style = getComputedStyle(book);
       const step = parseFloat(style.width) + parseFloat(style.columnGap);
       const scale = reader.getBoundingClientRect().width / reader.clientWidth;
@@ -214,10 +230,19 @@ export function createPagination({
     showPage();
   }
 
-  function countCutRects() {
+  function countCutRects(visibleOnly = false) {
     const savedPage = state.page;
     book.style.transform = "none";
     const pageRect = page.getBoundingClientRect();
+    const bookRect = book.getBoundingClientRect();
+    const style = getComputedStyle(book);
+    const step = parseFloat(style.width) + parseFloat(style.columnGap);
+    const scale = pageRect.width / page.clientWidth;
+    const relevant = (rect) => {
+      if (!visibleOnly) return true;
+      const column = columnForRect(rect, bookRect.left, step, scale);
+      return column >= state.page && column <= state.page + 1;
+    };
     const tolerance = 0.75;
     let cuts = 0;
     const walker = document.createTreeWalker(book, NodeFilter.SHOW_TEXT);
@@ -227,6 +252,7 @@ export function createPagination({
       range.selectNodeContents(walker.currentNode);
       for (const rect of range.getClientRects()) {
         if (
+          relevant(rect) &&
           rect.height &&
           (rect.top < pageRect.top - tolerance || rect.bottom > pageRect.bottom + tolerance)
         ) {
@@ -237,6 +263,7 @@ export function createPagination({
     for (const atomic of book.querySelectorAll("img, table, pre, figure")) {
       const rect = atomic.getBoundingClientRect();
       if (
+        relevant(rect) &&
         rect.height &&
         (rect.top < pageRect.top - tolerance || rect.bottom > pageRect.bottom + tolerance)
       ) {
@@ -263,7 +290,7 @@ export function createPagination({
     return new Promise((resolve) => requestAnimationFrame(resolve));
   }
 
-  async function waitForStableLayout() {
+  async function waitForStableLayout(operationStage) {
     let previousSignature = "";
     let equalFrames = 0;
     for (let frame = 0; frame < 20; frame += 1) {
@@ -273,14 +300,29 @@ export function createPagination({
       if (equalFrames >= 2) return;
       previousSignature = signature;
     }
-    fail("unstable-layout");
+    fail("unstable-layout", operationStage);
+  }
+
+  async function relayoutAtOffset(anchor, operationStage) {
+    await document.fonts.ready;
+    layout();
+    await waitForStableLayout(operationStage);
+    const target = pageForOffset(anchor);
+    assert(target.exact, "locator-offset", operationStage);
+    state.page = target.page;
+    showPage();
+    await nextFrame();
   }
 
   async function renderFromStart() {
     state.page = 0;
     layout();
-    await waitForStableLayout();
-    assert(countCutRects() === 0, "layout-cut");
+    await waitForStableLayout("初次分页");
+    if ((await onPageShown(true)) > 0) {
+      await waitForStableLayout("初次分页");
+      await relayoutAtOffset(0, "初次分页");
+    }
+    assert(countCutRects(true) === 0, "layout-cut", "初次分页");
   }
 
   function verifyFormulaLayout() {
@@ -369,18 +411,23 @@ export function createPagination({
     state.fontSize = Number(value);
     await document.fonts.ready;
     layout();
-    await waitForStableLayout();
-    await showOffset(anchor);
-    assert(countCutRects() === 0, "layout-cut");
+    await waitForStableLayout("字号与布局重排");
+    assert(
+      await showOffset(anchor, "字号与布局重排"),
+      "locator-offset",
+      "字号与布局重排",
+    );
+    assert(countCutRects(true) === 0, "layout-cut", "字号与布局重排");
   }
 
   async function resizeViewport(anchor) {
     syncViewportDeviceSize();
-    await document.fonts.ready;
-    layout();
-    await waitForStableLayout();
-    assert(await showOffset(anchor), "locator-offset");
-    assert(countCutRects() === 0, "layout-cut");
+    await relayoutAtOffset(anchor, "窗口尺寸重排");
+    if ((await onPageShown(true)) > 0) {
+      await waitForStableLayout("窗口尺寸重排");
+      await relayoutAtOffset(anchor, "窗口尺寸重排");
+    }
+    assert(countCutRects(true) === 0, "layout-cut", "窗口尺寸重排");
   }
 
   async function verifySizes() {
@@ -392,16 +439,22 @@ export function createPagination({
     fontSizeControl.value = "32";
   }
 
-  async function show(index) {
+  async function show(index, anchor, operationStage = "翻页与公式加载") {
     state.page = Math.max(0, Math.min(index, state.pages - 1));
     showPage();
     await nextFrame();
+    const restoreOffset = anchor ?? captureOffset();
+    if ((await onPageShown(true)) > 0) {
+      await waitForStableLayout(operationStage);
+      await relayoutAtOffset(restoreOffset, operationStage);
+      assert(countCutRects(true) === 0, "layout-cut", operationStage);
+    }
   }
 
-  async function showOffset(offset) {
+  async function showOffset(offset, operationStage) {
     const target = pageForOffset(offset);
     if (!target.exact) return false;
-    await show(target.page);
+    await show(target.page, offset, operationStage);
     return true;
   }
 
