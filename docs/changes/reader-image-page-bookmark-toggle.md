@@ -43,7 +43,7 @@ accepted
 
 - `pwsh -NoProfile -File scripts/check-reader-samples.ps1`
 - `pwsh -NoProfile -File scripts/check-tauri-reader.ps1`
-- `pwsh -NoProfile -File scripts/check-tauri-reader.ps1 -Epub 'fixtures/local/唯物主义 (2023).epub' -ExpectedTitle '唯物主义'`
+- `pwsh -NoProfile -File scripts/check-tauri-reader.ps1 -Epub 'fixtures/local/唯物主义 (2023).epub' -ExpectedTitle '唯物主义' -VerifyImagePageBookmarkToggle`
 - `pwsh -NoProfile -File scripts/Invoke-Atha.ps1 check docs -Activity validation -Scope project-workflow`
 - `autocorrect --fix` 与 `autocorrect --lint` 仅处理本次中文 Markdown
 - `git diff --check`

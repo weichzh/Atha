@@ -5,7 +5,8 @@ param(
     [string]$Epub = 'fixtures/local/数学及其历史 (2026).epub',
     [string]$BookRoot = 'fixtures/local/math-history-r8',
     [string]$Entry = 'EPUB/text/ch012.xhtml',
-    [string]$ExpectedTitle = '数学及其历史 (2026)'
+    [string]$ExpectedTitle = '数学及其历史 (2026)',
+    [switch]$VerifyImagePageBookmarkToggle
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,9 +52,13 @@ function Get-FreePort {
 function Invoke-TauriInteractiveOpen {
     $port = Get-FreePort
     $session = "atha-reader-open-$PID"
+    $webView2Root = Join-Path $repoRoot ".tmp/tauri-reader-$PID-WebView2"
     $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
     $startInfo.UseShellExecute = $false
     $startInfo.Environment['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = "--remote-debugging-port=$port"
+    if ($VerifyImagePageBookmarkToggle) {
+        $startInfo.Environment['WEBVIEW2_USER_DATA_FOLDER'] = $webView2Root
+    }
     foreach ($argument in @('--epub', $epubPath)) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
@@ -82,12 +87,48 @@ function Invoke-TauriInteractiveOpen {
         if ($result.edition.title -ne $ExpectedTitle) {
             throw "Unexpected direct EPUB edition title: $($result.edition.title)"
         }
+        if ($VerifyImagePageBookmarkToggle) {
+            $storageLength = @(& agent-browser --session $session --cdp $port eval 'localStorage.length') -join "`n"
+            if ($LASTEXITCODE -ne 0 -or [int]$storageLength -ne 0) {
+                throw "WebView2 bookmark profile was not isolated: $storageLength"
+            }
+            Invoke-Checked 'agent-browser' @(
+                '--session', $session, '--cdp', $port,
+                'eval', "document.documentElement.setAttribute('data-reader-tools',''); true"
+            )
+            Invoke-Checked 'agent-browser' @('--session', $session, '--cdp', $port, 'click', '#add-bookmark')
+            Invoke-Checked 'agent-browser' @(
+                '--session', $session, '--cdp', $port,
+                'wait', '--fn',
+                "document.querySelectorAll('#toc option[data-bookmark-id]').length === 1 && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'true'"
+            )
+            Invoke-Checked 'agent-browser' @('--session', $session, '--cdp', $port, 'click', '#add-bookmark')
+            Invoke-Checked 'agent-browser' @(
+                '--session', $session, '--cdp', $port,
+                'wait', '--fn',
+                "document.querySelectorAll('#toc option[data-bookmark-id]').length === 0 && document.querySelector('#add-bookmark').getAttribute('aria-pressed') === 'false' && document.documentElement.dataset.status === 'pass'"
+            )
+        }
     }
     finally {
         & agent-browser --session $session close 2>$null | Out-Null
         if (-not $process.HasExited) {
             $process.Kill($true)
             $process.WaitForExit()
+        }
+        if ($VerifyImagePageBookmarkToggle -and (Test-Path -LiteralPath $webView2Root)) {
+            $deadline = [DateTime]::UtcNow.AddSeconds(15)
+            do {
+                try {
+                    [IO.Directory]::Delete($webView2Root, $true)
+                }
+                catch [IO.IOException] {
+                    Start-Sleep -Milliseconds 100
+                }
+            } while ((Test-Path -LiteralPath $webView2Root) -and [DateTime]::UtcNow -lt $deadline)
+            if (Test-Path -LiteralPath $webView2Root) {
+                throw "Could not remove isolated WebView2 profile: $webView2Root"
+            }
         }
     }
 }
