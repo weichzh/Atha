@@ -66,7 +66,7 @@ Atha 已有一个 Windows 产品部署单元、一个 Tauri / WebView2 产品入
 
 - 实施：`reader/app/src-tauri/src/message_commands.rs`、`reader/app/src-tauri/src/lib.rs`。
 - 信任边界检查：`scripts/check-message-reading.ps1`、`reader/app/src-tauri/permissions/reader.toml`、`reader/app/src-tauri/capabilities/main.json`。
-- 结构与状态：`docs/architecture/OVERVIEW.md`、`docs/codebase/MAP.md`、`docs/changes/atha-modular-monolith-boundaries.md`。
+- 结构与状态：`docs/architecture/OVERVIEW.md`、`docs/codebase/MAP.md`。
 
 ## 回滚与替代
 
@@ -88,4 +88,3 @@ Atha 已有一个 Windows 产品部署单元、一个 Tauri / WebView2 产品入
 - 架构规范：`docs/architecture/DESIGN-GUIDE.md`
 - 系统总览：`docs/architecture/OVERVIEW.md`
 - 消息语义：`docs/architecture/MESSAGE-READING.md`
-- 当前变更：`docs/changes/atha-modular-monolith-boundaries.md`

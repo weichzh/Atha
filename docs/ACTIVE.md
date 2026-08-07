@@ -1,7 +1,7 @@
-# 当前工作流
+# 当前工作
 
-本文件只登记当前可执行工作的路由；范围、证据和下一步由所指向的所有者维护。
+本文件只登记当前可执行工作的路由，不保存完成摘要、验收流水或候选需求。
 
-- `change`：消息存储完整备份与恢复（implemented，review 完成）→ `docs/changes/message-store-backup-restore.md`
-- `roadmap`：M2 阅读器 V1、M3 EPUB、M4 产品主循环和公式密集章节性能优化已完成；下一产品切片尚未 claim → `docs/roadmap/ROADMAP.md`
-- `Context Bundle`：`docs/architecture/DESIGN-GUIDE.md`、`docs/architecture/OVERVIEW.md`、`docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md`、`docs/decisions/ADR-0006-message-store-backup-restore.md`
+- `change`：无。需要进入 `change` 路径时，按 `docs/workflow/PROTOCOL.md` 创建 `accepted` 记录并更新本指针。
+- `now`：执行一次有停止条件的日常阅读闭环验收，从真实使用中选出一个阻塞主循环的问题 → `docs/roadmap/ROADMAP.md#now日常阅读闭环验收`
+- `Context Bundle`：`docs/product/OVERVIEW.md`、`docs/roadmap/ROADMAP.md`、`docs/codebase/MAP.md`；只有问题触及系统边界时再读 `docs/architecture/OVERVIEW.md`。

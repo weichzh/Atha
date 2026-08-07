@@ -84,7 +84,6 @@ Rust 标准库文档确认 `create_new` 是避免 TOCTOU 的原子独占创建�
 
 ## 相关文档
 
-- 当前 change：`docs/changes/message-snapshot-asset-recovery.md`
 - 系统架构：`docs/architecture/OVERVIEW.md`
 - 消息架构：`docs/architecture/MESSAGE-READING.md`
 - 数据库事实：`docs/codebase/DATABASE.md`

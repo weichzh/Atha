@@ -91,7 +91,6 @@ SQLite 官方文档保证成功 backup sequence 产生源数据库一致 snapsho
 
 ## 相关文档
 
-- 当前 change：`docs/changes/message-store-backup-restore.md`
 - 资产恢复：`docs/decisions/ADR-0005-message-snapshot-asset-recovery.md`
 - 消息架构：`docs/architecture/MESSAGE-READING.md`
 - 数据库事实：`docs/codebase/DATABASE.md`

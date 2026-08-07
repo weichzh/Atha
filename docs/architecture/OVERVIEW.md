@@ -65,18 +65,17 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 
 新增 interface 只有在存在第二个真实实现，或必须隔离平台、信任、事务、性能或测试边界时才成立。单纯为缩短文件、模拟未来替换或追求图形对称而增加间接层不成立。
 
-## 风险与迁移顺序
+## 开放架构风险
 
-| 顺序 | 风险 / 证据 | 处理 |
-| --- | --- | --- |
-| 1 | 消息 command、来源校验、错误映射与大量领域 DTO 曾集中在 Tauri composition root；历史上出现过 capability 漏授权，审计时 gate 还会漏读 handler 列表最后一个无尾逗号命令 | 本切片已提取单一 message adapter module，并让注册集合与 permission 集合双向精确相等；后续持续执行消息 gate |
-| 2 | 快照资产曾直接写最终哈希文件，数据库失败或进程中止会留下截断 / 孤儿文件 | 已在 SQLite writer lock 内使用临时文件、`sync_all` 和 rename 发布，并在 `open` 清理未引用资产；已引用损坏由读取和 `health` 明确报告 |
-| 3 | 完整 MessageStore 曾没有一致备份 / 恢复，普通复制 WAL 数据库会丢失事实 | 已采用 Online Backup API、严格单文件制品与 shared / exclusive 维护锁；加密、checkpoint、同步和全应用备份没有获批场景时不预建 |
-| 4 | Tauri 产品入口仍依赖保留的 Wry/Tao host crate，共享启动与诊断，同时维护两份 runtime 交付清单 | 在 Tauri 安全、困难样本与 benchmark 完全覆盖旧 host 独有证据后，再以独立 ADR 决定删除或重命名；此前旧 host 不加产品能力 |
-| 5 | reader runtime 通过固定顺序拼成单 bundle，依赖在源码中不是显式 import | production build、语法检查和同一源码多入口仍能及时失败；只有出现真实顺序错误、独立加载或调试瓶颈时才改为显式模块图 |
-| 6 | 内容安全与引用保真是最高影响边界 | 保持既有多层校验和真实 WebView2 gate，不用结构重排换取未经证明的“整洁” |
+消息 IPC 边界、快照资产中止恢复和完整 MessageStore 备份已分别由 ADR-0004、ADR-0005 与 ADR-0006 固化，并进入正式检查。下表只保留仍开放的结构风险。
 
-每个迁移切片必须保持行为与依赖不变、更新 as-built 地图、运行所属 Module 的最小检查，再运行 required gate。不得以“项目早期”为由一次性重写。
+| 风险 | 当前控制与触发条件 |
+| --- | --- |
+| Tauri 产品入口仍依赖保留的 Wry / Tao host crate，并维护两份 runtime 交付清单 | 旧 host 不增加产品能力；当 Tauri gate 覆盖其全部独有证据时，再用独立 ADR 决定删除或重命名 |
+| reader runtime 通过固定顺序拼成单 bundle，依赖不是显式 import | production build、语法检查和多入口继续防止顺序漂移；只有出现真实加载、调试或顺序故障时才改为显式模块图 |
+| 内容安全和引用保真具有最高影响 | 保持多层校验与真实 WebView2 gate；不以结构整洁为由削弱边界或批量重写 |
+
+本表不是产品 backlog。只有风险阻塞路线图中的获批场景，或重复证据达到处理阈值时，才创建架构 change；产品方向由 `docs/roadmap/ROADMAP.md` 决定。每个迁移切片必须保持行为与依赖不变、更新 as-built 地图、运行所属 Module 的最小检查，再运行 required gate。
 
 ## 相关文档
 

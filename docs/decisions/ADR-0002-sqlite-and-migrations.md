@@ -51,7 +51,6 @@ P0 使用系统 SQLite CLI 验证了 schema、FTS5 和事务 Outbox，但正式 
 
 ## 相关文档
 
-- 规格：`docs/specs/SPEC-0001-windows-backend-foundation.md`
-- 计划：`docs/plans/PLAN-0001-windows-backend-foundation.md`
 - 数据库基线：`docs/codebase/DATABASE.md`
+- 系统架构：`docs/architecture/OVERVIEW.md`
 - P0 schema：`p0/sqlite/schema.sql`

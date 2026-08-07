@@ -45,7 +45,6 @@ accepted
 
 ## 相关文档
 
-- 里程碑：`docs/milestones/M2-html-reader-core-foundation.md`
-- 规格：`docs/specs/SPEC-0002-html-paged-reader-slice.md`
-- 计划：`docs/plans/PLAN-0002-html-paged-reader-slice.md`
 - 架构：`docs/architecture/READER-CORE.md`
+- 系统总览：`docs/architecture/OVERVIEW.md`
+- 代码现状：`docs/codebase/MAP.md`
