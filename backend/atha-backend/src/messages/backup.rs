@@ -740,7 +740,7 @@ fn validate_outbox_content(
             row.map_err(|_| error)?;
         if aggregate_type != "message"
             || created < 0
-            || !(0..=1_000).contains(&attempts)
+            || attempts < 0
             || next.is_some_and(|next| next < created)
             || !record_exists(
                 connection,
