@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -30,7 +30,7 @@ Atha 已有产品、阅读内核、消息与数据边界，但缺少一套统一
 - [x] 规范把通用方法映射到 Atha 当前约束，提供可逐项核验的架构审查清单；
 - [x] 关键结论可追溯到书名、章节和 PDF 页码或 EPUB 章节；
 - [x] `docs/architecture/OVERVIEW.md`、`docs/INDEX.md` 与 `docs/ACTIVE.md` 指向新规范；
-- [ ] 中文 Markdown 排版、仓库文档 gate 和独立 review 通过。
+- [x] 中文 Markdown 排版、仓库文档 gate 和独立 review 通过。
 
 ## Files And Steps
 
@@ -58,16 +58,17 @@ Atha 已有产品、阅读内核、消息与数据边界，但缺少一套统一
 
 ## Result
 
-- 新增 `docs/architecture/DESIGN-GUIDE.md`，以 316 行覆盖架构驱动因素、质量场景、ADD 循环、决策与接口、质量战术、模式、视图、ADR、评估、债务、完成定义和反模式；
+- 新增 `docs/architecture/DESIGN-GUIDE.md`，覆盖架构驱动因素、质量场景、ADD 循环、决策与接口、质量战术、模式、视图、ADR、评估、债务、完成定义和反模式；
 - 将原书综合规则与 Atha 适配明确分层，并给出本地优先、WebView2、不可信书源、引用保真和单一事实源的项目基线与审查清单；
 - 在架构总览、文档索引和活动 Context Bundle 登记统一入口；
 - 本 change 不包含现有架构审计、重构、依赖、代码、数据或外部系统变更。
 
 ## Review
 
-- Blocking: 待 review。
-- Non-blocking: 待 review。
-- Out-of-scope: 待 review。
+- Blocking: Standards 初审发现事实所有者清单不完整且重复摘录当前事实，已改为通过 `CONTEXT.md` 所有权表和 `ACTIVE` Context Bundle 取数；复审发现 Result 记录易漂移的行数，已删除。Spec 初审只发现验收与状态尚未闭环，本次已同步；
+- Non-blocking: 无；
+- Out-of-scope: 现有 Atha 架构审计、重构或重写建议，以及具体质量属性门槛；
+- Review evidence: 独立 Standards 与 Spec 审阅均以任务基线 `fe1e5acf` 为固定点，修复后再次复核最终 diff。
 
 ## Evidence And Residual Risks
 
