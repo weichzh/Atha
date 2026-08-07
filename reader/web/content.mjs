@@ -38,6 +38,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   let declaredResources;
   let cachedBody;
   let cachedCss;
+  let cachedCbzPage = false;
   let sourceStyles = true;
   let userStylesEnabled = true;
   let userStylesheet = "";
@@ -205,6 +206,35 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     element.removeAttribute("aria-disabled");
     element.setAttribute("tabindex", "0");
     element.setAttribute("aria-label", caption ? `查看表格：${caption.slice(0, 160)}` : table ? "查看表格" : "查看代码");
+  }
+
+  function isControlledCbzSection(documentNode, url = bookUrl) {
+    const page = documentNode?.body?.firstElementChild;
+    return (
+      /^\/\.atha-cbz\/page-\d{4}\.xhtml$/u.test(url?.pathname || "") &&
+      documentNode.body.children.length === 1 &&
+      page?.matches("main.atha-cbz-page") &&
+      page.children.length === 1 &&
+      page.firstElementChild?.matches("img[src]") &&
+      page.textContent.trim() === ""
+    );
+  }
+
+  function replaceFailedCbzImage(image) {
+    const page = image.parentElement;
+    if (
+      !book.classList.contains("atha-cbz-section") ||
+      !page?.matches("main.atha-cbz-page") ||
+      page.parentElement !== book
+    ) {
+      return false;
+    }
+    const placeholder = document.createElement("div");
+    placeholder.className = "atha-cbz-page-error";
+    placeholder.setAttribute("role", "img");
+    placeholder.setAttribute("aria-label", "图片无法显示");
+    image.replaceWith(placeholder);
+    return true;
   }
 
   function deferredFormula(image) {
@@ -507,6 +537,35 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         !linkedCode.hasAttribute("tabindex"),
       "active-content",
     );
+    const cbzPage = document.createElement("main");
+    cbzPage.className = "atha-cbz-page";
+    const cbzImage = document.createElement("img");
+    cbzPage.append(cbzImage);
+    book.append(cbzPage);
+    ensure(
+      isControlledCbzSection(
+        new DOMParser().parseFromString(
+          "<html xmlns='http://www.w3.org/1999/xhtml'><body><main class='atha-cbz-page'><img src='images/page-0001.png'/></main></body></html>",
+          "application/xhtml+xml",
+        ),
+        new URL("https://atha-book.localhost/.atha-cbz/page-0001.xhtml"),
+      ),
+      "image-load",
+    );
+    book.classList.add("atha-cbz-section");
+    ensure(replaceFailedCbzImage(cbzImage), "image-load");
+    const cbzPlaceholder = cbzPage.firstElementChild;
+    ensure(
+      cbzPlaceholder?.classList.contains("atha-cbz-page-error") &&
+        cbzPlaceholder.getAttribute("role") === "img" &&
+        cbzPlaceholder.getAttribute("aria-label") === "图片无法显示" &&
+        cbzPlaceholder.textContent === "",
+      "image-load",
+    );
+    cbzPage.remove();
+    book.classList.remove("atha-cbz-section");
+    const ordinaryImage = document.createElement("img");
+    ensure(!replaceFailedCbzImage(ordinaryImage), "image-load");
     for (const css of [
       "@import 'x.css';",
       "p{background:url(x)}",
@@ -568,6 +627,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     const markup = await response.text();
     const source = parseSafeXhtml(markup);
     validateMarkup(source);
+    cachedCbzPage = isControlledCbzSection(source);
     const styleSources = detachSourceStyles(source);
     const stylesheets = await Promise.all(
       styleSources.map(async ({ css, url }) => {
@@ -606,6 +666,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     warmDurationMs = null;
     bookStyle.textContent = sourceStyles ? cachedCss : "";
     userStyle.textContent = userStylesEnabled ? userStylesheet : "";
+    book.classList.toggle("atha-cbz-section", cachedCbzPage);
     const imported = document.importNode(cachedBody, true);
     pendingImages.clear();
     const deferredImages = imported.querySelectorAll(
@@ -636,7 +697,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
           try {
             await image.decode();
           } catch {
-            reject("image-load");
+            if (!replaceFailedCbzImage(image)) reject("image-load");
           }
         }),
     );
@@ -653,6 +714,8 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     declaredResources = undefined;
     cachedBody = undefined;
     cachedCss = undefined;
+    cachedCbzPage = false;
+    book.classList.remove("atha-cbz-section");
     inlineStyles = [];
     deferredImageCount = 0;
     eagerSvgCount = 0;

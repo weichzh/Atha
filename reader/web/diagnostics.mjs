@@ -494,6 +494,42 @@ export function createDiagnostics({
 
   async function verifyImport() {
     await verifySections();
+    const description = session.describe();
+    const controlledCbzSection = () => {
+      const current = session.snapshot();
+      return (
+        content.book.classList.contains("atha-cbz-section") &&
+        /^\.atha-cbz\/page-\d{4}\.xhtml$/u.test(
+          description.sections[current.currentIndex]?.href || "",
+        )
+      );
+    };
+    const verifyCbzImage = async () => {
+      const image = content.book.querySelector("main.atha-cbz-page > img");
+      assert(image, "image-load");
+      const response = await fetch(image.src);
+      const contentType = response.headers.get("content-type");
+      await response.arrayBuffer();
+      assert(response.ok && contentType === "image/png", "image-load");
+    };
+    if (controlledCbzSection()) {
+      assert(description.sections.length === 4, "sample-boundary");
+      await verifyCbzImage();
+      for (let index = 1; index < description.sections.length; index += 1) {
+        assert(await navigation.next(), "sample-boundary");
+        assert(session.snapshot().currentIndex === index && controlledCbzSection(), "sample-boundary");
+        if (index === 2) {
+          assert(
+            content.book.querySelector(
+              ".atha-cbz-page-error[role='img'][aria-label='图片无法显示']",
+            ),
+            "image-load",
+          );
+        } else {
+          await verifyCbzImage();
+        }
+      }
+    }
     await securityProbe();
   }
 

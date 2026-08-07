@@ -1,5 +1,8 @@
 //! Security boundaries shared by the reader host.
 
+mod archive;
+pub use archive::MAX_SOURCE_BYTES;
+pub mod cbz;
 pub mod epub;
 pub mod library;
 pub mod resources;

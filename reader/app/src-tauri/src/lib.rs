@@ -12,8 +12,8 @@ use std::{env, fs, process};
 use atha_backend::{
     messages::{EditionInput, MessageStore},
     reader::{
-        READER_PAGE,
-        epub::{ImportError, MAX_SOURCE_BYTES, READER_MANIFEST},
+        MAX_SOURCE_BYTES, READER_PAGE,
+        epub::READER_MANIFEST,
         library::{LibraryBook, LibraryError, LocalLibrary},
         resources::{BookRoot, Resource, ResourceError},
         telemetry::{MetricStage, ReaderEvent, parse_reader_event, safe_event},
@@ -215,7 +215,7 @@ async fn import_library_books(
     let Some(paths) = app
         .dialog()
         .file()
-        .add_filter("EPUB", &["epub"])
+        .add_filter("EPUB / CBZ", &["epub", "cbz"])
         .blocking_pick_files()
     else {
         return Ok(None);
@@ -236,19 +236,19 @@ async fn import_library_books(
             let name = selected
                 .clone()
                 .into_path()
-                .map_or_else(|_| "EPUB".into(), |path| display_name(&path));
+                .map_or_else(|_| "书籍".into(), |path| display_name(&path));
             let input =
-                match platform_file::PickerInput::open(&app, selected, "epub", MAX_SOURCE_BYTES) {
+                match platform_file::PickerInput::open(&app, selected, "book", MAX_SOURCE_BYTES) {
                     Ok(input) => input,
                     Err(_) => {
                         log::warn!(
                             target: "atha::library",
                             "operation=import stage=picker-input outcome=failed code={}",
-                            ImportError::InvalidSource.code()
+                            "invalid-library-source"
                         );
                         failures.push(ImportFailure {
                             name,
-                            code: ImportError::InvalidSource.code(),
+                            code: "invalid-library-source",
                         });
                         continue;
                     }
@@ -809,7 +809,7 @@ fn display_name(path: &Path) -> String {
     path.file_name()
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
-        .unwrap_or("EPUB")
+        .unwrap_or("书籍")
         .chars()
         .take(256)
         .collect()

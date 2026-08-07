@@ -7,20 +7,19 @@ use std::{
     error::Error,
     fmt, fs,
     fs::File,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
 
+use crate::reader::archive::{ArchiveError, MAX_SOURCE_BYTES};
+
 pub const READER_MANIFEST: &str = ".atha-reader.json";
-pub const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 
 const IMPORT_MARKER: &str = ".atha-epub-import";
 const BOOK_METADATA: &str = ".atha-book.json";
-const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_MEMBER_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_ENTRIES: usize = 10_000;
+use crate::reader::archive::MAX_ENTRIES;
 const MAX_SECTIONS: usize = 1_000;
 const MAX_TOC_ITEMS: usize = 2_000;
 
@@ -88,6 +87,36 @@ impl fmt::Display for ImportError {
 
 impl Error for ImportError {}
 
+impl From<ArchiveError> for ImportError {
+    fn from(error: ArchiveError) -> Self {
+        match error {
+            ArchiveError::InvalidSource => Self::InvalidSource,
+            ArchiveError::SourceTooLarge => Self::SourceTooLarge,
+            ArchiveError::InvalidArchive => Self::InvalidArchive,
+            ArchiveError::ArchiveTooLarge => Self::ArchiveTooLarge,
+            ArchiveError::UnsafePath => Self::UnsafePath,
+            ArchiveError::Encrypted => Self::Encrypted,
+            ArchiveError::WriteFailed => Self::WriteFailed,
+        }
+    }
+}
+
+pub(crate) fn recognizes(source: &Path) -> bool {
+    let Ok(mut source) = File::open(source) else {
+        return false;
+    };
+    let mut prefix = [0_u8; 58];
+    source.read_exact(&mut prefix).is_ok()
+        && prefix[..4] == *b"PK\x03\x04"
+        && prefix[8..10] == [0, 0]
+        && prefix[18..22] == [20, 0, 0, 0]
+        && prefix[22..26] == [20, 0, 0, 0]
+        && prefix[26..28] == [8, 0]
+        && prefix[28..30] == [0, 0]
+        && prefix[30..38] == *b"mimetype"
+        && prefix[38..] == *b"application/epub+zip"
+}
+
 pub fn import_epub(
     source: impl AsRef<Path>,
     cache_root: impl AsRef<Path>,
@@ -101,7 +130,7 @@ pub fn import_epub(
         return Err(ImportError::SourceTooLarge);
     }
 
-    let content_version = archive::hash_file(&source)?;
+    let (content_version, source_file) = archive::fingerprint(&source)?;
     let cache_root = cache_root.as_ref();
     fs::create_dir_all(cache_root).map_err(|_| ImportError::WriteFailed)?;
     let target = cache_root.join(&content_version);
@@ -115,7 +144,7 @@ pub fn import_epub(
     }
     fs::create_dir(&staging).map_err(|_| ImportError::WriteFailed)?;
 
-    let result = build_import(&source, &staging, &content_version)
+    let result = build_import(source_file, &source, &staging, &content_version)
         .and_then(|()| publish(&staging, &target, &content_version));
     if result.is_err() {
         let _ = fs::remove_dir_all(&staging);
@@ -124,8 +153,13 @@ pub fn import_epub(
     imported_book(target, content_version)
 }
 
-fn build_import(source: &Path, staging: &Path, content_version: &str) -> Result<(), ImportError> {
-    let mut epub = archive::open(source)?;
+fn build_import(
+    source_file: File,
+    source_path: &Path,
+    staging: &Path,
+    content_version: &str,
+) -> Result<(), ImportError> {
+    let mut epub = archive::open(source_file)?;
     let index = archive::inspect(&mut epub)?;
     archive::verify_mimetype(&mut epub, &index)?;
     if index.contains("META-INF/encryption.xml") {
@@ -174,7 +208,7 @@ fn build_import(source: &Path, staging: &Path, content_version: &str) -> Result<
         format!("atha-epub-import-v2\n{content_version}\n"),
     )
     .map_err(|_| ImportError::WriteFailed)?;
-    if archive::hash_file(source)? != content_version {
+    if archive::hash_file(source_path)? != content_version {
         return Err(ImportError::SourceChanged);
     }
     Ok(())

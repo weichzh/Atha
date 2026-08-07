@@ -3,9 +3,11 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
-    [string]$EpubPath,
+    [Alias('EpubPath')]
+    [string]$BookPath,
     [switch]$CleanAppData,
-    [switch]$VerifyEpub2NcxFixture
+    [switch]$VerifyEpub2NcxFixture,
+    [switch]$VerifyCbzFixture
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,29 +19,52 @@ $avdName = 'Atha_API_35_16K'
 $package = 'com.atha.reader'
 $documentsPackage = 'com.google.android.documentsui'
 $epub2NcxFixtureSha256 = '6991bfb8edd895a44cb5b0e9066805ee6cea030f47856f3607e8ee2cf4be5887'
-$resolvedEpub = $null
-$epubSha256 = $null
+$cbzFixtureSha256 = '5957e1a0daed2ed0a3a8b1439585cb7651d5478fe5cd51cde0401c7878eb30ed'
+$cbzFixtureTitle = 'Atha CBZ Gate 71c9'
+$cbzFixtureWriter = 'Gate Writer 71c9'
+$cbzFixtureImageToken = 'Atha CBZ Image 71c9'
+$resolvedBook = $null
+$bookSha256 = $null
+$bookExtension = $null
+$bookFormat = $null
 
-if ($CleanAppData -and [string]::IsNullOrWhiteSpace($EpubPath)) {
-    throw '-CleanAppData requires -EpubPath so a clean reader slice is verified immediately.'
+if ($CleanAppData -and [string]::IsNullOrWhiteSpace($BookPath)) {
+    throw '-CleanAppData requires -BookPath so a clean reader slice is verified immediately.'
 }
-if ($VerifyEpub2NcxFixture -and [string]::IsNullOrWhiteSpace($EpubPath)) {
-    throw '-VerifyEpub2NcxFixture requires -EpubPath.'
+if (($VerifyEpub2NcxFixture -or $VerifyCbzFixture) -and [string]::IsNullOrWhiteSpace($BookPath)) {
+    throw 'Fixture verification requires -BookPath.'
 }
-if (-not [string]::IsNullOrWhiteSpace($EpubPath)) {
-    $resolvedEpub = (Resolve-Path -LiteralPath $EpubPath).Path
-    if (-not (Test-Path -LiteralPath $resolvedEpub -PathType Leaf)) {
-        throw 'EpubPath must name a local file.'
+if ($VerifyEpub2NcxFixture -and $VerifyCbzFixture) {
+    throw 'EPUB2 and CBZ fixture verification are mutually exclusive.'
+}
+if ($VerifyCbzFixture -and -not $CleanAppData) {
+    throw 'VerifyCbzFixture requires -CleanAppData on the dedicated gate AVD.'
+}
+if (-not [string]::IsNullOrWhiteSpace($BookPath)) {
+    $resolvedBook = (Resolve-Path -LiteralPath $BookPath).Path
+    if (-not (Test-Path -LiteralPath $resolvedBook -PathType Leaf)) {
+        throw 'BookPath must name a local file.'
     }
-    if ([IO.Path]::GetExtension($resolvedEpub) -ine '.epub') {
-        throw 'EpubPath must have an .epub extension.'
+    $bookExtension = [IO.Path]::GetExtension($resolvedBook).ToLowerInvariant()
+    if ($bookExtension -notin @('.epub', '.cbz')) {
+        throw 'BookPath must have an .epub or .cbz extension.'
     }
-    if ((Get-Item -LiteralPath $resolvedEpub).Length -eq 0) {
-        throw 'EpubPath must not be empty.'
+    if ((Get-Item -LiteralPath $resolvedBook).Length -eq 0) {
+        throw 'BookPath must not be empty.'
     }
-    $epubSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedEpub).Hash.ToLowerInvariant()
-    if ($VerifyEpub2NcxFixture -and $epubSha256 -ne $epub2NcxFixtureSha256) {
+    $bookFormat = if ($bookExtension -eq '.epub') { 'epub' } else { 'cbz' }
+    $bookSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedBook).Hash.ToLowerInvariant()
+    if ($VerifyEpub2NcxFixture -and $bookExtension -ne '.epub') {
+        throw 'VerifyEpub2NcxFixture requires an EPUB file.'
+    }
+    if ($VerifyCbzFixture -and $bookExtension -ne '.cbz') {
+        throw 'VerifyCbzFixture requires a CBZ file.'
+    }
+    if ($VerifyEpub2NcxFixture -and $bookSha256 -ne $epub2NcxFixtureSha256) {
         throw 'VerifyEpub2NcxFixture requires the generated and EPUBCheck-verified fixture.'
+    }
+    if ($VerifyCbzFixture -and $bookSha256 -ne $cbzFixtureSha256) {
+        throw 'VerifyCbzFixture requires the generated deterministic fixture.'
     }
 }
 
@@ -118,9 +143,13 @@ function Assert-AppHealthy {
     if (
         $allLogs -match "(?im)Fatal signal \d+ .*\bpid $escapedProcessId\b" -or
         $allLogs -match '(?is)FATAL EXCEPTION:.*?Process:\s*com\.atha\.reader\b' -or
-        $allLogs -match '(?im)ANR in com\.atha\.reader\b'
+        $allLogs -match '(?im)ANR in com\.atha\.reader\b' -or
+        $allLogs -match '(?im)OutOfMemoryError.*com\.atha\.reader\b' -or
+        $allLogs -match '(?im)lmkd.*com\.atha\.reader\b' -or
+        $allLogs -match '(?im)(?:com\.atha\.reader.*(?:render process gone|renderer.*crash)|(?:render process gone|renderer.*crash).*com\.atha\.reader)' -or
+        $allLogs -match '(?im)atha::reader.*event=reader_failure'
     ) {
-        throw 'Android reader emitted a native fatal signal, uncaught exception, or ANR.'
+        throw 'Android reader emitted a fatal signal, uncaught exception, ANR, OOM, LMK, or terminal reader failure.'
     }
 }
 
@@ -235,6 +264,24 @@ function Wait-ReaderViewportState {
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Timed out waiting for the requested Android reader location.'
+}
+
+function Invoke-ReaderNextPage {
+    Invoke-Adb shell input keyevent 93 | Out-Null
+}
+
+function Get-AppPssKiB {
+    param([Parameter(Mandatory)][string]$ProcessId)
+
+    $memory = (Invoke-Adb shell dumpsys meminfo $ProcessId | Out-String)
+    $summary = [regex]::Match($memory, '(?m)^\s*TOTAL PSS:\s*(\d+)\b')
+    if (-not $summary.Success) {
+        $summary = [regex]::Match($memory, '(?m)^\s*TOTAL\s+(\d+)\b')
+    }
+    if (-not $summary.Success) {
+        throw 'Android meminfo did not expose app process TOTAL PSS.'
+    }
+    [long]$summary.Groups[1].Value
 }
 
 function Start-AthaReader {
@@ -370,16 +417,18 @@ if ($CleanAppData) {
 
 $firstLaunch = Start-AthaReader
 
-if ($null -ne $resolvedEpub) {
-    $remoteFixture = '/sdcard/Download/Atha-validation.epub'
-    $null = & $adb -s $serial push $resolvedEpub $remoteFixture 2>&1
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the local EPUB fixture to the Android gate AVD.' }
+if ($null -ne $resolvedBook) {
+    $remoteName = "Atha-validation$bookExtension"
+    $remoteFixture = "/sdcard/Download/$remoteName"
+    $null = & $adb -s $serial push $resolvedBook $remoteFixture 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the local book fixture to the Android gate AVD.' }
     Invoke-Adb shell touch $remoteFixture | Out-Null
     Invoke-Adb shell am broadcast '-a' 'android.intent.action.MEDIA_SCANNER_SCAN_FILE' '-d' "file://$remoteFixture" | Out-Null
 
     $importXPath = "//node[@package='$package' and @class='android.widget.Button' and @text='导入']"
-    $fileXPath = "//node[@package='$documentsPackage' and @resource-id='android:id/title' and @text='Atha-validation.epub']/.."
+    $fileXPath = "//node[@package='$documentsPackage' and @resource-id='android:id/title' and @text='$remoteName']/.."
     $bookXPath = "//node[@package='$package' and @text='书籍']//node[@class='android.widget.Button' and @clickable='true' and not(starts-with(@text,'从书架移除'))][1]"
+    $shelfPssKiB = if ($bookFormat -eq 'cbz') { Get-AppPssKiB -ProcessId $firstLaunch.ProcessId } else { $null }
 
     Invoke-UiNode -XPath $importXPath
     Wait-UiNode -XPath "//node[@package='$documentsPackage']" | Out-Null
@@ -398,6 +447,14 @@ if ($null -ne $resolvedEpub) {
     $importMs = Wait-AppLog -ProcessId $firstLaunch.ProcessId -Pattern 'atha::library.*operation=import outcome=ok count=1 failure_count=0'
     Wait-UiNode -XPath $bookXPath | Out-Null
     Assert-AppHealthy -ExpectedProcessId $firstLaunch.ProcessId
+    $shelfCoverResult = 'not-requested'
+    if ($VerifyCbzFixture) {
+        $shelfCoverXPath = "$bookXPath[starts-with(@text,'书籍封面 ')]"
+        Wait-UiNode -XPath $shelfCoverXPath | Out-Null
+        Start-Sleep -Milliseconds 500
+        Wait-UiNode -XPath $shelfCoverXPath | Out-Null
+        $shelfCoverResult = 'passed'
+    }
     Invoke-UiNode -XPath $bookXPath
     $openMs = Wait-AppLog -ProcessId $firstLaunch.ProcessId -Pattern 'atha::library.*operation=open outcome=ok'
     $firstStableMs = Wait-AppLog -ProcessId $firstLaunch.ProcessId -Pattern 'atha::reader.*event=reader_metric stage=first_stable'
@@ -407,6 +464,11 @@ if ($null -ne $resolvedEpub) {
     $afterDirectoryJump = $null
     $directoryJumpResult = 'not-requested'
     $restartLocatorResult = 'not-requested'
+    $pageTurnWaitMs = @()
+    $firstPagePssKiB = $null
+    $lastPagePssKiB = $null
+    $lastLocation = $null
+    $corruptPagePlaceholderResult = 'not-requested'
     if ($VerifyEpub2NcxFixture) {
         $beforeDirectoryJump = Get-ReaderViewportState
         if ($beforeDirectoryJump.Section -ne 1 -or $beforeDirectoryJump.Sections -ne 2) {
@@ -432,13 +494,41 @@ if ($null -ne $resolvedEpub) {
         $directoryJumpResult = 'passed'
         Assert-AppHealthy -ExpectedProcessId $firstLaunch.ProcessId
     }
+    elseif ($VerifyCbzFixture) {
+        $firstLocation = Get-ReaderViewportState
+        if (
+            $firstLocation.Section -ne 1 -or
+            $firstLocation.Sections -ne 4 -or
+            $firstLocation.Page -ne 1 -or
+            $firstLocation.Pages -ne 1
+        ) {
+            throw 'The Android CBZ fixture must open at section 1 of 4 on its only page.'
+        }
+        $firstPagePssKiB = Get-AppPssKiB -ProcessId $firstLaunch.ProcessId
+        for ($section = 2; $section -le $firstLocation.Sections; $section++) {
+            $turn = [Diagnostics.Stopwatch]::StartNew()
+            Invoke-ReaderNextPage
+            $lastLocation = Wait-ReaderViewportState -Section $section -Page 1
+            if ($section -eq 3) {
+                Wait-UiNode -XPath "//node[@package='$package' and (@text='图片无法显示' or @content-desc='图片无法显示')]" | Out-Null
+                $corruptPagePlaceholderResult = 'passed'
+            }
+            $pageTurnWaitMs += [long]$turn.ElapsedMilliseconds
+            Assert-AppHealthy -ExpectedProcessId $firstLaunch.ProcessId
+        }
+        $lastPagePssKiB = Get-AppPssKiB -ProcessId $firstLaunch.ProcessId
+        $restartLocatorResult = 'pending'
+    }
 
     $pickerCache = (Invoke-Adb shell run-as $package ls '-A' 'cache/Picker' | Out-String).Trim()
-    if ($pickerCache.Length -ne 0) { throw 'Android picker cache was not cleaned after EPUB import.' }
+    if ($pickerCache.Length -ne 0) { throw 'Android picker cache was not cleaned after book import.' }
     $athaLogs = (Invoke-Adb logcat '-d' "--pid=$($firstLaunch.ProcessId)" '-v' 'brief' | Out-String)
-    $privateLogPattern = '(?i)content://|/sdcard/|Atha-validation\.epub'
+    $privateLogPattern = "(?i)content://|/sdcard/|$([regex]::Escape($remoteName))"
     if ($VerifyEpub2NcxFixture) {
         $privateLogPattern += '|Example EPUB2|Legacy Author|Part One|Nested Two|fixture-body-(?:one|two)-7cb4'
+    }
+    elseif ($VerifyCbzFixture) {
+        $privateLogPattern += "|ComicInfo|pages[/\\](?:1|2|3|10)\.(?:png|jpe?g)|$([regex]::Escape($cbzFixtureTitle))|$([regex]::Escape($cbzFixtureWriter))|$([regex]::Escape($cbzFixtureImageToken))"
     }
     if ($athaLogs -match $privateLogPattern) {
         throw 'Android application logs exposed picker or book content details.'
@@ -455,7 +545,12 @@ if ($null -ne $resolvedEpub) {
         $null = Wait-ReaderViewportState -Section 2 -Page $afterDirectoryJump.Page
         $restartLocatorResult = 'passed'
     }
+    elseif ($VerifyCbzFixture) {
+        $null = Wait-ReaderViewportState -Section $lastLocation.Section -Page $lastLocation.Page
+        $restartLocatorResult = 'passed'
+    }
     Assert-AppHealthy -ExpectedProcessId $secondLaunch.ProcessId
+    $restoredPssKiB = if ($bookFormat -eq 'cbz') { Get-AppPssKiB -ProcessId $secondLaunch.ProcessId } else { $null }
     $secondAthaLogs = (Invoke-Adb logcat '-d' "--pid=$($secondLaunch.ProcessId)" '-v' 'brief' | Out-String)
     if ($secondAthaLogs -match $privateLogPattern) {
         throw 'Restarted Android application logs exposed picker or book content details.'
@@ -464,7 +559,7 @@ if ($null -ne $resolvedEpub) {
     $evidenceDirectory = Join-Path $repoRoot 'artifacts\local\android'
     New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
     $evidence = [ordered]@{
-        schema = 'atha.android-reader-gate.v1'
+        schema = 'atha.android-reader-gate.v2'
         recorded_at_utc = [DateTime]::UtcNow.ToString('o')
         evidence_level = 'android-emulator'
         target = [ordered]@{
@@ -482,13 +577,19 @@ if ($null -ne $resolvedEpub) {
             x86_64_library_count = $nativeEntries.Count
             zipaligned_16k = $true
         }
+        gate = [ordered]@{
+            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash.ToLowerInvariant()
+        }
         installation = [ordered]@{
             clean_app_data = [bool]$CleanAppData
             cold_start_ready = $true
             startup_wait_ms = [long]$firstLaunch.StartupMs
         }
-        epub = [ordered]@{
-            fixture_sha256 = if ($VerifyEpub2NcxFixture) { $epubSha256 } else { 'not-requested' }
+        privacy = 'passed'
+        health = 'passed'
+        book = [ordered]@{
+            format = $bookFormat
+            fixture_sha256 = if ($VerifyEpub2NcxFixture -or $VerifyCbzFixture) { $bookSha256 } else { 'not-requested' }
             system_picker = 'passed'
             import = 'passed'
             import_wait_ms = [long]$importMs
@@ -499,6 +600,10 @@ if ($null -ne $resolvedEpub) {
             reader_ready = 'passed'
             reader_ready_wait_ms = [long]$readyMs
             directory_second_item_jump = $directoryJumpResult
+            page_turns = if ($VerifyCbzFixture) { 'passed' } else { 'not-requested' }
+            page_turn_wait_ms = @($pageTurnWaitMs)
+            corrupt_page_placeholder = $corruptPagePlaceholderResult
+            shelf_cover = $shelfCoverResult
             restart_shelf_persistence = 'passed'
             restart_locator_persistence = $restartLocatorResult
             reopen = 'passed'
@@ -507,6 +612,19 @@ if ($null -ne $resolvedEpub) {
             restart_reader_ready_wait_ms = [long]$secondReadyMs
             picker_cache_clean = $true
         }
+        memory = [ordered]@{
+            unit = 'KiB'
+            app_process = [ordered]@{
+                shelf_pss = $shelfPssKiB
+                first_page_pss = $firstPagePssKiB
+                last_page_pss = $lastPagePssKiB
+                restored_pss = $restoredPssKiB
+            }
+            webview_renderer = [ordered]@{
+                pss = $null
+                reason = 'renderer-process-not-uniquely-attributable'
+            }
+        }
         # Message SAF stays a separate opt-in round-trip: restore replaces the store and export needs an opened edition.
         message_saf = [ordered]@{
             backup = 'separate-opt-in'
@@ -514,12 +632,16 @@ if ($null -ne $resolvedEpub) {
             export = 'separate-opt-in'
         }
     }
-    $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceDirectory 'reader-gate-epub.json') -Encoding utf8NoBOM
+    $evidencePath = Join-Path $evidenceDirectory "reader-gate-$bookFormat.json"
+    $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $evidencePath -Encoding utf8NoBOM
     if ($VerifyEpub2NcxFixture) {
         Write-Host 'Android EPUB picker, open, directory jump, reader-ready, restart, and location persistence slice passed; structured evidence recorded.'
     }
+    elseif ($VerifyCbzFixture) {
+        Write-Host 'Android CBZ picker, first page, all page turns, restart, and final location persistence slice passed; structured evidence recorded.'
+    }
     else {
-        Write-Host 'Android EPUB picker, open, reader-ready, restart, and shelf persistence slice passed; structured evidence recorded.'
+        Write-Host 'Android book picker, open, reader-ready, restart, and shelf persistence slice passed; structured evidence recorded.'
     }
 }
 

@@ -174,8 +174,19 @@ impl Arguments {
                 );
             }
         };
-        if import_probe && !matches!(&input, BookInput::Epub(_)) {
-            return Err("import verification requires --epub".into());
+        if import_probe
+            && !matches!(
+                &input,
+                BookInput::Epub(_)
+                    | BookInput::Prepared {
+                        source: BookSource::Manifest(_),
+                        ..
+                    }
+            )
+        {
+            return Err(
+                "import verification requires --epub or --book-root with --manifest".into(),
+            );
         }
         if verify_sample && import_probe {
             return Err("verification modes are mutually exclusive".into());
@@ -409,6 +420,16 @@ mod tests {
             Arguments::parse_values(values(&[
                 "--book-root",
                 "book",
+                "--manifest",
+                ".atha-reader.json",
+                "--verify-import",
+            ]))
+            .is_ok()
+        );
+        assert!(
+            Arguments::parse_values(values(&[
+                "--book-root",
+                "book",
                 "--entry",
                 "a.xhtml",
                 "--verify-sample",
@@ -444,8 +465,8 @@ mod tests {
             vec![
                 "--book-root",
                 "book",
-                "--manifest",
-                ".atha-reader.json",
+                "--entry",
+                "a.xhtml",
                 "--verify-import",
             ],
             vec![

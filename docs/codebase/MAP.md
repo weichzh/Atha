@@ -2,7 +2,7 @@
 
 ## 仓库状态
 
-当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3 与 EPUB2 / NCX 子集导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核；Windows WebView2 是稳定基线，Android 已有同一产品壳与 reader runtime 的 EPUB 功能纵切，EPUB2 的系统 picker、目录跳转与位置恢复已通过正式模拟器入口，直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
+当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集与 CBZ JPEG / PNG 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核；Windows WebView2 是稳定基线，Android 已有同一产品壳与 reader runtime 的 EPUB / CBZ 功能纵切，EPUB2 的系统 picker、目录跳转与位置恢复及 CBZ 的逐页、坏页继续和强停恢复均已通过正式模拟器入口；直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
 
 ## 顶层结构
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
-| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 与 EPUB2 / NCX 子集导入、本地书架、消息数据库与阅读遥测校验 | 已验证 |
+| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3、EPUB2 / NCX 子集与 CBZ JPEG / PNG 导入、本地书架、消息数据库与阅读遥测校验 | 本地已验证 |
 | `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry、固定字段平台日志与 protocol adapter | 已验证 |
 | `reader/app/src-tauri/src/platform_file.rs` | 普通路径与 Android SAF content URI 共用的流式 Picker cache bridge；RAII / 启动清理和输入大小边界 | Android 模拟器已验证 |
@@ -38,6 +38,7 @@
 | `scripts/check-android-reader.ps1` | 固定 16 KiB x86_64 AVD 的 APK 构建、badging / permission、ZIP / ELF 对齐、安装、冷启动，以及 opt-in 的干净数据 picker 导入 / 打开 / 重启持久检查 | 模拟器 EPUB 纵切已通过 |
 | `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build、Tauri/host 测试及 command / permission 映射 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
+| `scripts/check-cbz-source.ps1` | 动态原创 CBZ、workspace Rust 检查、导入形状与 Windows WebView2 import probe | Windows 已通过 |
 | `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 无参数启动与移动书架 UI | M4 已通过 |
 | `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
 | `scripts/Measure-Workflow.ps1` | schema v1/v2 本机流程日志、兼容汇总与自检 | 本地已验证 |
@@ -50,7 +51,7 @@
 
 - workspace 包含 `atha-backend`、`atha-reader-host` 与 `atha-reader-app`，并显式排除 P0 Rust crate；产品 app 依赖 backend 与 host 的共享 Windows 启动 / 诊断代码，host 只依赖 backend；
 - 版本 `0.1.0`、edition 2024、Rust `1.97.1`、第一方许可证 `AGPL-3.0-or-later` 和禁止 unsafe 的 lint 由 workspace 统一；独立 P0 crate 与前端 package 显式投影同一许可证；
-- 后端 crate 使用 `zip`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB，并用 `dom_query`、锁定的 `rusqlite 0.40.1` bundled SQLite 与 `fs2 0.4.3` 实现严格快照校验、消息事实和跨 Windows / Android 维护锁；`fs2` 许可为 `MIT/Apache-2.0`，没有 repository trait、锁服务或多格式工厂；
+- 后端 crate 使用共享 `zip 8.6`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB / CBZ，CBZ 只新增运行时 `imagesize 0.15.0` 的 `jpeg` / `png` feature；动态原创 fixture writer 使用 dev-only `png 0.18.1`。`dom_query`、锁定的 `rusqlite 0.40.1` bundled SQLite 与 `fs2 0.4.3` 实现严格快照校验、消息事实和跨 Windows / Android 维护锁；`fs2` 许可为 `MIT/Apache-2.0`，没有 repository trait、锁服务或多格式工厂；
 - 根锁文件包含正式后端导入、消息数据库、`fs2 0.4.3`、Tauri 官方日志 / 文件系统插件与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
 - `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移、自包含交换导出及 schema 1 完整备份 / 恢复；维护锁通过 `fs2::FileExt` 实现，因为 Rust 1.97.1 的标准库 Unix 文件锁在 Android 返回 `Unsupported`。
 
@@ -58,8 +59,10 @@
 
 - `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；reader manifest 已声明的 section 以 XHTML 返回，因此不依赖源文件扩展名，也不把未声明的无扩展名文件当作 XHTML；
 - schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--epub` 与 `--book-root` 输入互斥，后者再从 `--manifest` 与兼容 `--entry` 二选一；
-- `reader::epub` 的公开 interface 只有 `import_epub`：`mod` 编排内容哈希与原子缓存，`archive` 拥有 ZIP/路径/大小边界，`package` 拥有 container、OPF2 / OPF3 spine、navigation 和 schema 1 计划；OPF2 只从 `spine@toc` 找到有界 NCX，把嵌套 `navPoint` 按前序拍平成现有 TOC，OPF3 继续使用唯一 XHTML nav；XHTML 由 OPF media type 判定，同一源字节跨路径得到相同缓存根和状态键；
-- `reader::library::LocalLibrary` 复用 EPUB importer，以内容哈希为身份，用每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`；移除记录不删除导入缓存或阅读状态；
+- `reader::archive` 为 EPUB / CBZ 共享 crate-private `zip 8.6` 打开、路径、重复 / 重叠、加密、symlink、成员和声明解压总量边界；写入成员与 CBZ 页面另按实际读取量累计，少量 EPUB metadata 读取只受单成员上限约束。`zip 8.6` 没有 pre-allocation `max_entries` API，因此打开前只以标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，打开后再校验条目数；fallback / ZIP64 在 post-open 检查前的最坏预分配是受 512 MiB 源文件上限约束的残余风险；
+- `reader::epub` 的公开 interface 是 `import_epub`：`mod` 编排内容哈希与原子缓存，`package` 拥有 container、OPF2 / OPF3 spine、navigation 和 schema 1 计划；OPF2 只从 `spine@toc` 找到有界 NCX，把嵌套 `navPoint` 按前序拍平成现有 TOC，OPF3 继续使用唯一 XHTML nav；XHTML 由 OPF media type 判定，同一源字节跨路径得到相同缓存根和状态键；
+- `reader::cbz::import_cbz` 只接受 JPEG / PNG，按路径分段自然序生成一图一 XHTML section 与声明资源；`ComicInfo.xml` 只投影 `Title`、`Writer` 与唯一有效 `FrontCover`，`imagesize` 校验类型和像素预算，WebView decode 失败时显示可导航坏页；
+- `reader::library::LocalLibrary` 以已知扩展名严格分派 EPUB / CBZ，不透明 URI 副本则以严格 EPUB marker / container 与严格 CBZ 做内容分派；它以内容哈希为身份，用每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`；移除记录不删除导入缓存或阅读状态；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
 - 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式执行当前页优先校验、解码和章节内短期复用；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
@@ -83,6 +86,7 @@
 - Android app storage 实测 hard link 返回 `PermissionDenied`。非 Android 备份继续用 hard link 提供 no-replace 发布；Android 只在 Tauri adapter 新建的独占 Picker cache 目录内使用相邻 rename。`rename` 本身不保证 no-replace，当前正确性依赖该独占目录前置条件；只有后续出现其他 Android backend 调用方或实测竞态，才研究 `renameat2` 等替代；
 - Android `ACTION_CREATE_DOCUMENT` 会先创建 provider 文档；完整 cache 制品向 content URI 复制时若失败，provider 可能留下不完整目标。Atha 会报告失败并清空自身 cache，但不能对所有 provider 承诺删除外部残留；
 - 当前最高证据是 x86_64 模拟器功能链路，不覆盖 ARM 真机的内存、I/O、WebView 或词典性能，也不是签名发布证据。
+- CBZ 共用同一 Android picker、私有数据根、reader runtime 和 Locator 恢复链路；`-VerifyCbzFixture` 已验证逐页、坏页继续、日志隐私与 app PSS，并在 renderer 不能唯一归因时明确不生成数值。
 
 ## 已实现能力
 
@@ -122,6 +126,7 @@
 | 消息与数据 | `scripts/check-message-reading.ps1`、`scripts/check-tauri-reader.ps1` | 真实 Windows Tauri / WebView2 消息闭环，以及本地集成测试、前端构建、Tauri seam 与权限检查 |
 | Android EPUB 纵切 | `scripts/check-android-reader.ps1`；活动 change 记录的消息 SAF opt-in 链路 | API 35 x86_64 16 KiB 模拟器上的构建、安装、冷启动、系统 picker 导入 / 打开 / 重启持久，以及消息 export / backup / restore；不是 ARM 真机性能证据 |
 | EPUB2 / NCX 子集 | `cargo test -p atha-backend --test epub_import`、EPUBCheck 5.3.0、`scripts/check-android-reader.ps1 -VerifyEpub2NcxFixture` | 动态原创 fixture 通过规范 oracle；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证目录跳转和强停后同一 section / page 恢复 |
+| CBZ JPEG / PNG | `cargo test --locked -p atha-backend --test cbz_import`、`scripts/check-cbz-source.ps1`、`scripts/check-android-reader.ps1 -VerifyCbzFixture` | 动态原创 fixture 的 importer、安全矩阵和 reader 坏页自检已通过；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证逐页、坏页继续和强停恢复 |
 | 公式性能 | `scripts/check-reader-formula-performance.ps1` | 固定真实 EPUB 章节的十样本本地 benchmark |
 
 这些结果不是 CI、安装包、生产环境或跨设备证据。源码、依赖、配置或样本变化后，应重新运行受影响的最小入口；只有最终候选才扩展到 required gate。
@@ -132,7 +137,7 @@
 | 类别 | 当前缺口 |
 | --- | --- |
 | 产品回流 | 书架没有文件关联、拖放、分组、排序设置或最近阅读；尚未用日常使用验收确认哪些真的阻塞主循环 |
-| 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；未完成 UTF-16、DTBook、完整 fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移 |
+| 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；CBZ 首版只有 JPEG / PNG，不含 RTL / spread / 区域标注；未完成 UTF-16、DTBook、完整 fallback、其他格式来源、跨内容版本 Locator 重锚定或富文本迁移 |
 | 数据与设备 | 没有加密、checkpoint、全应用备份或跨设备同步 |
 | 交付 | 没有 CI、Windows 安装包或签名 Android 发布包；Android 当前只验证 x86_64 debug APK 与模拟器 |
 | 工程结构 | 旧 Wry / Tao host 尚未删除；reader runtime 仍由固定顺序组成单 bundle |

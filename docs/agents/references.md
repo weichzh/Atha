@@ -79,6 +79,14 @@
 - 项目快速用法：导入与不可信内容处理留在 backend；正式行为由 `backend/atha-backend/tests/epub_import.rs` 和阅读器样本检查覆盖。
 - 必须重查：容器、OPF、spine、资源、导航、媒体类型、URL 解析和安全要求。
 
+## CBZ、ComicInfo 与 `imagesize`
+
+- 版本事实：`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 中的 `zip 8.6`、`quick-xml 0.41`、`imagesize 0.15.0`。
+- 官方入口：[`imagesize 0.15.0`](https://docs.rs/crate/imagesize/0.15.0)、[`ImageType`](https://docs.rs/imagesize/0.15.0/imagesize/enum.ImageType.html)、[`blob_size`](https://docs.rs/imagesize/0.15.0/imagesize/fn.blob_size.html)、[ComicInfo schema](https://github.com/anansi-project/comicinfo)、[PKWARE APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)、[`HTMLImageElement.decode()`](https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-decode-dev)。
+- 项目快速用法：`reader::archive` 为 EPUB / CBZ 共享 crate-private ZIP 信任边界；`reader::cbz` 只接受 JPEG / PNG，以 `imagesize` 校验魔数、非零尺寸、8192 单边和 20000000 像素预算，再生成 schema 1 ReaderManifest 与一图一 XHTML section。`imagesize` 不验证完整压缩流，最终损坏由 WebView `img.decode()` 显示受控坏页。ComicInfo 只消费有界的 Title、Writer 与唯一有效 FrontCover。
+- 最短检查：`cargo test --locked -p atha-backend --test cbz_import`、`pwsh -NoProfile -File scripts/check-cbz-source.ps1`，再用 `pwsh -NoProfile -File scripts/check-android-reader.ps1 -BookPath .\.tmp\cbz-gate.cbz -CleanAppData -VerifyCbzFixture` 验证系统 picker、逐页阅读、强停恢复和 PSS 证据。
+- 必须重查：新增图片格式、RTL / spread、ComicInfo 字段、ZIP feature、`imagesize` 类型 / 尺寸行为、完整 decoder 需求、Android GPU / renderer 内存与 ARM 真机门槛。
+
 ## SQLite 与 FTS5
 
 - 版本事实：`backend/atha-backend/Cargo.toml`、`Cargo.lock` 与 `docs/codebase/DATABASE.md`。

@@ -57,17 +57,40 @@ export function coverUrl(id: string): string {
 
 export function importFailureMessage(code: string): string {
   switch (code) {
+    case "invalid-library-source":
+      return "无法读取所选文件";
     case "epub-source-too-large":
     case "epub-archive-too-large":
+    case "cbz-source-too-large":
+    case "cbz-archive-too-large":
       return "文件过大";
     case "encrypted-epub":
       return "暂不支持受保护的 EPUB";
+    case "encrypted-cbz":
+      return "暂不支持受保护的 CBZ";
     case "unsupported-epub":
       return "暂不支持这本 EPUB 的结构";
+    case "unsupported-cbz":
+      return "CBZ 中没有可读取的 JPEG 或 PNG 页面";
+    case "too-many-cbz-pages":
+      return "CBZ 页数过多";
+    case "invalid-cbz-image":
+      return "CBZ 中包含无效或尺寸过大的图片";
     case "invalid-epub-source":
     case "invalid-epub-archive":
     case "invalid-epub-xml":
+    case "unsafe-epub-path":
       return "不是可读取的 EPUB 文件";
+    case "invalid-cbz-source":
+    case "invalid-cbz-archive":
+    case "unsafe-cbz-path":
+      return "不是可读取的 CBZ 文件";
+    case "epub-source-changed":
+    case "cbz-source-changed":
+      return "文件在导入时发生了变化，请重试";
+    case "epub-import-write-failed":
+    case "cbz-import-write-failed":
+      return "无法保存导入的书籍";
     default:
       return "导入失败";
   }

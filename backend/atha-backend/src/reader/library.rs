@@ -12,7 +12,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    epub::{ImportError, READER_MANIFEST, import_epub},
+    cbz,
+    epub::{self, ImportError, READER_MANIFEST, import_epub},
     resources::{BookRoot, Resource, ResourceError},
 };
 
@@ -64,6 +65,7 @@ pub enum LibraryError {
     ReadFailed,
     WriteFailed,
     Import(ImportError),
+    Cbz(cbz::ImportError),
     Resource(ResourceError),
 }
 
@@ -99,20 +101,49 @@ impl LocalLibrary {
 
     pub fn import(&self, source: impl AsRef<Path>) -> Result<LibraryBook, LibraryError> {
         let source = source.as_ref();
-        if source
+        let extension = source
             .extension()
             .and_then(|value| value.to_str())
-            .is_none_or(|value| !value.eq_ignore_ascii_case("epub"))
-        {
-            return Err(LibraryError::Import(ImportError::InvalidSource));
-        }
-        let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
-        let path = self.record_path(&imported.content_version)?;
+            .unwrap_or_default();
+        let (content_version, title, authors, cover_path) =
+            if extension.eq_ignore_ascii_case("epub") {
+                let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
+                (
+                    imported.content_version,
+                    imported.title,
+                    imported.authors,
+                    imported.cover_path,
+                )
+            } else if extension.eq_ignore_ascii_case("cbz") {
+                let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
+                (
+                    imported.content_version,
+                    imported.title,
+                    imported.authors,
+                    imported.cover_path,
+                )
+            } else if epub::recognizes(source) {
+                let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
+                (
+                    imported.content_version,
+                    imported.title,
+                    imported.authors,
+                    imported.cover_path,
+                )
+            } else {
+                let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
+                (
+                    imported.content_version,
+                    imported.title,
+                    imported.authors,
+                    imported.cover_path,
+                )
+            };
+        let path = self.record_path(&content_version)?;
         if path.exists() {
             return Ok(read_record(&path)?.public());
         }
-        let title = imported
-            .title
+        let title = title
             .as_deref()
             .map(normalize_text)
             .filter(|value| !value.is_empty())
@@ -126,16 +157,15 @@ impl LocalLibrary {
             .unwrap_or_else(|| "未命名书籍".into());
         let record = StoredBook {
             schema: LIBRARY_SCHEMA,
-            id: imported.content_version,
+            id: content_version,
             title: truncate(&title, MAX_TITLE_CHARS),
-            authors: imported
-                .authors
+            authors: authors
                 .iter()
                 .map(|value| truncate(&normalize_text(value), MAX_AUTHOR_CHARS))
                 .filter(|value| !value.is_empty())
                 .take(MAX_AUTHORS)
                 .collect(),
-            cover_path: imported.cover_path,
+            cover_path,
             imported_at: now_millis()?,
         };
         validate_record(&record)?;
@@ -206,6 +236,7 @@ impl LibraryError {
             Self::ReadFailed => "library-read-failed",
             Self::WriteFailed => "library-write-failed",
             Self::Import(error) => error.code(),
+            Self::Cbz(error) => error.code(),
             Self::Resource(error) => error.code(),
         }
     }
