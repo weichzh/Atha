@@ -10,6 +10,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+pub use atha_backend::reader::telemetry::safe_event;
 use atha_backend::reader::telemetry::{Metric, MetricStage, Ready};
 
 use super::launch::{Benchmark, BenchmarkMode};
@@ -268,17 +269,6 @@ impl Recorder {
             )?;
         }
         Ok(())
-    }
-}
-
-pub fn safe_event(value: &str) -> &str {
-    if value
-        .bytes()
-        .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
-    {
-        value
-    } else {
-        "invalid-event"
     }
 }
 

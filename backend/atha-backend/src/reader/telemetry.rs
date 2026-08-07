@@ -117,6 +117,17 @@ pub fn parse_reader_event(origin: &str, message: &str) -> Result<ReaderEvent, Te
     }
 }
 
+pub fn safe_event(value: &str) -> &str {
+    if value
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+    {
+        value
+    } else {
+        "invalid-event"
+    }
+}
+
 impl FailureStage {
     pub const fn as_str(self) -> &'static str {
         match self {

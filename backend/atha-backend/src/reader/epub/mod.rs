@@ -14,10 +14,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 pub const READER_MANIFEST: &str = ".atha-reader.json";
+pub const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 
 const IMPORT_MARKER: &str = ".atha-epub-import";
 const BOOK_METADATA: &str = ".atha-book.json";
-const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MEMBER_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;

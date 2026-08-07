@@ -2,7 +2,7 @@
 
 ## 仓库状态
 
-当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3 导入、本地书架、正式消息数据库、Tauri 2 / WebView2 host、Svelte 5 应用壳和无框架阅读内核；直接 Wry / Tao host 暂留为回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
+当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核；Windows WebView2 是稳定基线，Android 已有同一产品壳与 reader runtime 的 EPUB 功能纵切，直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
 
 ## 顶层结构
 
@@ -13,6 +13,9 @@
 | `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 导入、本地书架、消息数据库与阅读遥测校验 | 已实现 |
 | `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry、固定字段平台日志与 protocol adapter | 已验证 |
+| `reader/app/src-tauri/src/platform_file.rs` | 普通路径与 Android SAF content URI 共用的流式 Picker cache bridge；RAII / 启动清理和输入大小边界 | Android 模拟器已验证 |
+| `reader/app/src-tauri/src/runtime_diagnostics.rs` | Windows Recorder 与移动端交互诊断的目标平台选择；固定事件 token 由 backend 统一校验 | Windows / Android 已验证 |
+| `reader/app/src-tauri/gen/android/`、`tauri.android.conf.json` | Tauri 官方 Android 工程、min SDK 26、compile / target SDK 36、manifest 与应用图标 | x86_64 debug 已验证 |
 | `reader/app/src-tauri/src/message_commands.rs` | 消息 IPC adapter；统一阅读路由校验、DTO 转发、稳定错误和原生导出 dialog | 已验证 |
 | `reader/app/src-tauri/src/message_maintenance.rs` | 全库消息维护 IPC adapter；统一资料库根路由、备份 / 恢复 dialog 与 blocking worker | 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
@@ -32,6 +35,7 @@
 | `scripts/check-reader-wheel.ps1` | 真实浏览器媒体滚轮、连续离散输入接受率与输入到稳定页 P95 快速检查 | 已通过 |
 | `scripts/check-reader-gate.ps1` | 组合四样本、大书搜索、进程树内存、强杀恢复和固定 P95 性能门槛 | M2 R8 已通过 |
 | `scripts/check-tauri-reader.ps1` | Svelte production build、workspace Rust 检查、Tauri build、普通 EPUB 消息模式启动、导入探针与性能门槛 | 已通过 |
+| `scripts/check-android-reader.ps1` | 固定 16 KiB x86_64 AVD 的 APK 构建、badging / permission、ZIP / ELF 对齐、安装、冷启动，以及 opt-in 的干净数据 picker 导入 / 打开 / 重启持久检查 | 模拟器 EPUB 纵切已通过 |
 | `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build、Tauri/host 测试及 command / permission 映射 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 无参数启动与移动书架 UI | M4 已通过 |
@@ -46,9 +50,9 @@
 
 - workspace 包含 `atha-backend`、`atha-reader-host` 与 `atha-reader-app`，并显式排除 P0 Rust crate；产品 app 依赖 backend 与 host 的共享 Windows 启动 / 诊断代码，host 只依赖 backend；
 - 版本 `0.1.0`、edition 2024、Rust `1.97.1`、第一方许可证 `AGPL-3.0-or-later` 和禁止 unsafe 的 lint 由 workspace 统一；独立 P0 crate 与前端 package 显式投影同一许可证；
-- 后端 crate 使用 `zip`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB，并用 `dom_query` 与锁定的 `rusqlite 0.40.1` bundled SQLite 实现严格快照校验和消息事实；没有 repository trait 或多格式工厂；
-- 根锁文件包含正式后端导入、消息数据库、Tauri 官方日志插件与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
-- `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移、自包含交换导出及 schema 1 完整备份 / 恢复。
+- 后端 crate 使用 `zip`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB，并用 `dom_query`、锁定的 `rusqlite 0.40.1` bundled SQLite 与 `fs2 0.4.3` 实现严格快照校验、消息事实和跨 Windows / Android 维护锁；`fs2` 许可为 `MIT/Apache-2.0`，没有 repository trait、锁服务或多格式工厂；
+- 根锁文件包含正式后端导入、消息数据库、`fs2 0.4.3`、Tauri 官方日志 / 文件系统插件与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
+- `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移、自包含交换导出及 schema 1 完整备份 / 恢复；维护锁通过 `fs2::FileExt` 实现，因为 Rust 1.97.1 的标准库 Unix 文件锁在 Android 返回 `Unsupported`。
 
 ### HTML 阅读切片
 
@@ -69,6 +73,16 @@
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
 - Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，Vite 直接拼接十八份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
 - Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle、固定字段平台日志与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目，不返回源路径或内容；`message_commands` adapter 统一校验当前阅读窗口并转发受限 DTO，`message_maintenance` adapter 只接受资料库根路由并在 blocking worker 执行全库备份 / 恢复；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测复用后端白名单解析和共享 diagnostics，reader failure 额外携带固定阶段；官方日志插件只持久化 `atha::` target 的启动、导入 / 打开、reader 首稳 / ready / failure 和 protocol 5xx 数值事件，1 MiB 轮转并保留三份，不记录书籍或消息内容；消息专项检查精确核对 handler 注册与 permission；
+
+### Android EPUB 纵切
+
+- Tauri mobile crate output、mobile entry point 与 target-gated Windows host 已接通；Windows 仍使用 `%LOCALAPPDATA%\Atha`，Android 使用 Tauri `app_local_data_dir`，两端共用 LocalLibrary、MessageStore 与 reader kernel；
+- Android 工程固定 min SDK 26、compile / target SDK 36；本机 gate 固定 Node 24.1.0、JDK 21、NDK 28.2.13676358，并运行 `Atha_API_35_16K`（API 35、x86_64、16,384-byte page）AVD；APK 通过 16 KiB ZIP alignment 与全部 x86_64 ELF `LOAD 0x4000` 检查；
+- `platform_file::PickerInput` / `PickerOutput` 对普通路径零复制，对 SAF content URI 使用锁文件已有的官方 `tauri-plugin-fs` 流式复制到应用 `cache/Picker`；导入仍限制单次 32 本和单本 512 MiB，恢复仍限制 8 GiB，消息导出和备份仍由 backend 限制为 512 MiB 与 8 GiB；每个 cache 目录独占创建，Drop 与启动均清理；
+- 系统 picker 链路已在模拟器手工验证 EPUB 导入 / 打开 / 重启恢复、消息导出及全库备份 / 恢复，完成后 Picker cache 为空；manifest 不请求宽泛存储权限，设置 `allowBackup=false` 并以 API 31+ `dataExtractionRules` 排除 cloud backup 与 device transfer；
+- Android app storage 实测 hard link 返回 `PermissionDenied`。非 Android 备份继续用 hard link 提供 no-replace 发布；Android 只在 Tauri adapter 新建的独占 Picker cache 目录内使用相邻 rename。`rename` 本身不保证 no-replace，当前正确性依赖该独占目录前置条件；只有后续出现其他 Android backend 调用方或实测竞态，才研究 `renameat2` 等替代；
+- Android `ACTION_CREATE_DOCUMENT` 会先创建 provider 文档；完整 cache 制品向 content URI 复制时若失败，provider 可能留下不完整目标。Atha 会报告失败并清空自身 cache，但不能对所有 provider 承诺删除外部残留；
+- 当前最高证据是 x86_64 模拟器功能链路，不覆盖 ARM 真机的内存、I/O、WebView 或词典性能，也不是签名发布证据。
 
 ## 已实现能力
 
@@ -106,6 +120,7 @@
 | 阅读内核 | `scripts/check-reader-samples.ps1`、`scripts/check-reader-gate.ps1` | 真实 Windows WebView2 困难样本、恢复、内存与性能门槛 |
 | 产品入口 | `scripts/check-tauri-reader.ps1`、`scripts/check-library-shelf.ps1` | 真实 Windows Tauri / WebView2 本地链路 |
 | 消息与数据 | `scripts/check-message-reading.ps1`、`scripts/check-tauri-reader.ps1` | 真实 Windows Tauri / WebView2 消息闭环，以及本地集成测试、前端构建、Tauri seam 与权限检查 |
+| Android EPUB 纵切 | `scripts/check-android-reader.ps1`；活动 change 记录的消息 SAF opt-in 链路 | API 35 x86_64 16 KiB 模拟器上的构建、安装、冷启动、系统 picker 导入 / 打开 / 重启持久，以及消息 export / backup / restore；不是 ARM 真机性能证据 |
 | 公式性能 | `scripts/check-reader-formula-performance.ps1` | 固定真实 EPUB 章节的十样本本地 benchmark |
 
 这些结果不是 CI、安装包、生产环境或跨设备证据。源码、依赖、配置或样本变化后，应重新运行受影响的最小入口；只有最终候选才扩展到 required gate。
@@ -118,9 +133,9 @@
 | 产品回流 | 书架没有文件关联、拖放、分组、排序设置或最近阅读；尚未用日常使用验收确认哪些真的阻塞主循环 |
 | 格式与引用 | 只支持本地 EPUB3；没有 EPUB2 / NCX fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移 |
 | 数据与设备 | 没有加密、checkpoint、全应用备份或跨设备同步 |
-| 交付 | 没有 CI 或 Windows 安装包；Tauri 当前只验证 debug build |
+| 交付 | 没有 CI、Windows 安装包或签名 Android 发布包；Android 当前只验证 x86_64 debug APK 与模拟器 |
 | 工程结构 | 旧 Wry / Tao host 尚未删除；reader runtime 仍由固定顺序组成单 bundle |
-| 性能证据 | 基准没有设备指纹，也没有跨日期重复运行统计 |
+| 性能证据 | 基准没有设备指纹，也没有跨日期重复运行统计；Android 尚无 ARM 真机内存、I/O、WebView 或词典 benchmark |
 
 ## 正式代码约定
 

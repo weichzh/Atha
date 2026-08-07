@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
     time::SystemTime,
@@ -197,6 +197,31 @@ fn forge_backup_database(
     drop(connection);
     let database = fs::read(staged_database).expect("read forged database");
     replace_backup_database(source, target, &database);
+}
+
+#[test]
+fn backup_uses_shared_maintenance_lock() {
+    let root = TestRoot::new("message-backup-maintenance-lock");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let maintenance_path = root.0.join("Messages/Assets/.atha-maintenance.lock");
+    let maintenance = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(maintenance_path)
+        .expect("open maintenance lock");
+
+    fs2::FileExt::try_lock_shared(&maintenance).expect("hold shared maintenance lock");
+    store
+        .create_backup(root.0.join("shared.atha-backup"))
+        .expect("create backup while another reader holds the lock");
+    fs2::FileExt::unlock(&maintenance).expect("release shared maintenance lock");
+
+    fs2::FileExt::try_lock_exclusive(&maintenance).expect("hold exclusive maintenance lock");
+    assert_eq!(
+        store.create_backup(root.0.join("exclusive.atha-backup")),
+        Err(atha_backend::messages::MessageError::Backup)
+    );
+    assert!(!root.0.join("exclusive.atha-backup").exists());
 }
 
 #[test]

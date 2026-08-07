@@ -1,7 +1,13 @@
+use std::time::Instant;
+
+use atha_backend::messages::MAX_BACKUP_BYTES;
 use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::ReaderRuntime;
+use crate::{
+    ReaderRuntime,
+    platform_file::{PickerInput, PickerOutput},
+};
 
 #[tauri::command]
 pub(crate) async fn backup_message_store(
@@ -19,12 +25,24 @@ pub(crate) async fn backup_message_store(
     else {
         return Ok(false);
     };
-    let path = selected.into_path().map_err(|_| "message-backup")?;
+    let started = Instant::now();
     let messages = runtime.messages.clone();
-    tauri::async_runtime::spawn_blocking(move || messages.create_backup(path))
+    let result: Result<(), (&'static str, String)> =
+        tauri::async_runtime::spawn_blocking(move || {
+            let output = PickerOutput::new(&app, selected, "atha-backup")
+                .map_err(|_| ("picker-prepare", "message-backup".to_owned()))?;
+            messages
+                .create_backup(output.path())
+                .map_err(|error| ("backend", error.code().to_owned()))?;
+            output
+                .commit()
+                .map_err(|_| ("picker-commit", "message-backup".to_owned()))
+        })
         .await
-        .map_err(|_| "message-backup-task".to_owned())?
-        .map_err(|error| error.code().to_owned())?;
+        .map_err(|_| ("task", "message-backup-task".to_owned()))
+        .and_then(|result| result);
+    log_maintenance("backup", &result, started);
+    result.map_err(|(_, code)| code)?;
     Ok(true)
 }
 
@@ -43,13 +61,38 @@ pub(crate) async fn restore_message_store(
     else {
         return Ok(false);
     };
-    let path = selected.into_path().map_err(|_| "message-restore")?;
+    let started = Instant::now();
     let messages = runtime.messages.clone();
-    tauri::async_runtime::spawn_blocking(move || messages.restore_backup(path))
+    let result: Result<(), (&'static str, String)> =
+        tauri::async_runtime::spawn_blocking(move || {
+            let input = PickerInput::open(&app, selected, "atha-backup", MAX_BACKUP_BYTES)
+                .map_err(|_| ("picker-prepare", "message-restore".to_owned()))?;
+            messages
+                .restore_backup(input.path())
+                .map_err(|error| ("backend", error.code().to_owned()))
+        })
         .await
-        .map_err(|_| "message-restore-task".to_owned())?
-        .map_err(|error| error.code().to_owned())?;
+        .map_err(|_| ("task", "message-restore-task".to_owned()))
+        .and_then(|result| result);
+    log_maintenance("restore", &result, started);
+    result.map_err(|(_, code)| code)?;
     Ok(true)
+}
+
+fn log_maintenance(operation: &str, result: &Result<(), (&'static str, String)>, started: Instant) {
+    match result {
+        Ok(()) => log::info!(
+            target: "atha::messages",
+            "operation={operation} outcome=success duration_ms={}",
+            started.elapsed().as_millis()
+        ),
+        Err((stage, code)) => log::warn!(
+            target: "atha::messages",
+            "operation={operation} stage={stage} outcome=failed code={} duration_ms={}",
+            code,
+            started.elapsed().as_millis()
+        ),
+    }
 }
 
 pub(crate) fn is_library_url(url: &str) -> bool {

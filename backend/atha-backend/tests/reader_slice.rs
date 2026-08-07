@@ -9,6 +9,7 @@ use atha_backend::reader::{
     resources::{BookRoot, ResourceError},
     telemetry::{
         FailureStage, MetricStage, ReaderEvent, ReaderFailure, TelemetryError, parse_reader_event,
+        safe_event,
     },
 };
 
@@ -131,6 +132,8 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
             stage: FailureStage::LayoutStable,
         }))
     );
+    assert_eq!(safe_event("state-persistence"), "state-persistence");
+    assert_eq!(safe_event("E:/private/book.xhtml"), "invalid-event");
 
     for (origin, message, expected) in [
         (

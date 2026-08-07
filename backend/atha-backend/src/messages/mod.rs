@@ -10,5 +10,6 @@ mod store;
 mod util;
 mod write;
 
+pub use backup::MAX_BACKUP_BYTES;
 pub use model::*;
 pub use store::MessageStore;

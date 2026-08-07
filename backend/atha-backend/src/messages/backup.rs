@@ -36,7 +36,7 @@ const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BACKUP_ASSETS: usize = 65_536;
 // ponytail: 8 GiB local-backup ceiling; make configurable only when real stores approach it.
-const MAX_BACKUP_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+pub const MAX_BACKUP_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -63,29 +63,45 @@ struct BackupAsset {
 
 impl MessageStore {
     pub fn create_backup(&self, target: impl AsRef<Path>) -> Result<(), MessageError> {
-        let maintenance = self.maintenance_file().map_err(|_| MessageError::Backup)?;
-        maintenance
-            .try_lock_shared()
-            .map_err(|_| MessageError::Backup)?;
+        let maintenance = self.maintenance_file().map_err(|_| {
+            log_message_failure("backup", "maintenance-file", MessageError::Backup);
+            MessageError::Backup
+        })?;
+        fs2::FileExt::try_lock_shared(&maintenance).map_err(|_| {
+            log_message_failure("backup", "maintenance-lock", MessageError::Backup);
+            MessageError::Backup
+        })?;
         self.create_backup_locked(target.as_ref())
     }
 
     pub fn restore_backup(&self, source: impl AsRef<Path>) -> Result<(), MessageError> {
-        let maintenance = self.maintenance_file().map_err(|_| MessageError::Restore)?;
-        maintenance.try_lock().map_err(|_| MessageError::Restore)?;
+        let maintenance = self.maintenance_file().map_err(|_| {
+            log_message_failure("restore", "maintenance-file", MessageError::Restore);
+            MessageError::Restore
+        })?;
+        fs2::FileExt::try_lock_exclusive(&maintenance).map_err(|_| {
+            log_message_failure("restore", "maintenance-lock", MessageError::Restore);
+            MessageError::Restore
+        })?;
         self.restore_backup_locked(source.as_ref())
     }
 
     fn create_backup_locked(&self, target: &Path) -> Result<(), MessageError> {
         match fs::symlink_metadata(target) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            _ => return Err(MessageError::Backup),
+            _ => {
+                log_message_failure("backup", "target-prepare", MessageError::Backup);
+                return Err(MessageError::Backup);
+            }
         }
         let suffix = temp_suffix();
         let database_temp = self
             .assets
             .join(format!(".atha-asset-backup-{suffix}.sqlite3.tmp"));
-        let archive_temp = adjacent_temp(target, &suffix)?;
+        let archive_temp = adjacent_temp(target, &suffix).inspect_err(|&error| {
+            log_message_failure("backup", "target-prepare", error);
+        })?;
+        let mut stage = "database-snapshot";
         let result = (|| {
             OpenOptions::new()
                 .write(true)
@@ -96,6 +112,7 @@ impl MessageStore {
             let mut snapshot =
                 Connection::open(&database_temp).map_err(|_| MessageError::Backup)?;
             copy_database(&source, &mut snapshot, MessageError::Backup)?;
+            stage = "content-verify";
             let assets = validate_database(&snapshot, MessageError::CorruptData)?;
             validate_message_content(
                 &snapshot,
@@ -105,6 +122,7 @@ impl MessageStore {
                 },
                 MessageError::CorruptData,
             )?;
+            stage = "archive-write";
             drop(snapshot);
             drop(source);
 
@@ -118,24 +136,39 @@ impl MessageStore {
                 assets,
             };
             write_backup(self, &archive_temp, &database_temp, &manifest)?;
+            stage = "archive-verify";
             let inspected = inspect_backup(&archive_temp).map_err(|_| MessageError::Backup)?;
             if inspected != manifest {
                 return Err(MessageError::Backup);
             }
-            fs::hard_link(&archive_temp, target).map_err(|_| MessageError::Backup)
+
+            stage = "publish";
+            // Android app storage denies hard links; the adjacent rename stays atomic.
+            #[cfg(target_os = "android")]
+            fs::rename(&archive_temp, target).map_err(|_| MessageError::Backup)?;
+            #[cfg(not(target_os = "android"))]
+            fs::hard_link(&archive_temp, target).map_err(|_| MessageError::Backup)?;
+            Ok(())
         })();
         let _ = fs::remove_file(&database_temp);
         let _ = fs::remove_file(&archive_temp);
+        if let Err(error) = result {
+            log_message_failure("backup", stage, error);
+        }
         result
     }
 
     fn restore_backup_locked(&self, source: &Path) -> Result<(), MessageError> {
-        let manifest = inspect_backup(source)?;
+        let manifest = inspect_backup(source).inspect_err(|&error| {
+            log_message_failure("restore", "archive-open", error);
+        })?;
         let database_temp = self
             .assets
             .join(format!(".atha-asset-restore-{}.sqlite3.tmp", temp_suffix()));
+        let mut stage = "database-extract";
         let result = (|| {
             extract_database(source, &database_temp, &manifest.database)?;
+            stage = "database-verify";
             let staged = Connection::open_with_flags(
                 &database_temp,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -145,6 +178,7 @@ impl MessageStore {
             if database_assets != manifest.assets {
                 return Err(MessageError::InvalidBackup);
             }
+            stage = "content-verify";
             let mut content_archive = open_archive(source)?;
             validate_message_content(
                 &staged,
@@ -160,6 +194,7 @@ impl MessageStore {
                 MessageError::InvalidBackup,
             )?;
 
+            stage = "asset-restore";
             if !manifest.assets.is_empty() {
                 let mut connection = self.connect().map_err(|_| MessageError::Restore)?;
                 let transaction = connection
@@ -176,6 +211,7 @@ impl MessageStore {
                 transaction.commit().map_err(|_| MessageError::Restore)?;
             }
 
+            stage = "database-restore";
             let mut destination =
                 Connection::open(&self.database).map_err(|_| MessageError::Restore)?;
             destination
@@ -184,8 +220,19 @@ impl MessageStore {
             copy_database(&staged, &mut destination, MessageError::Restore)
         })();
         let _ = fs::remove_file(&database_temp);
+        if let Err(error) = result {
+            log_message_failure("restore", stage, error);
+        }
         result
     }
+}
+
+fn log_message_failure(operation: &'static str, stage: &'static str, error: MessageError) {
+    log::warn!(
+        target: "atha::messages",
+        "operation={operation} stage={stage} outcome=failed code={}",
+        error.code()
+    );
 }
 
 fn write_backup(

@@ -2,6 +2,13 @@
 
 Atha 包含以下第三方资产。它们保留各自的版权与许可证，不因 Atha 采用 AGPL-3.0-or-later 而被重新许可。
 
+## Gradle Wrapper 8.14.3
+
+- 本地文件：`reader/app/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar`
+- 上游源码：[`gradle/gradle` v8.14.3 wrapper-main](https://github.com/gradle/gradle/tree/v8.14.3/platforms/core-runtime/wrapper-main)
+- 许可证：Apache-2.0；全文见 `LICENSES/Apache-2.0.txt`
+- 本地修改：无；由 Tauri Android 工程生成器写入
+
 ## Microsoft Fluent System Icons
 
 - 本地文件：`reader/assets/bookmark-24-regular.svg`

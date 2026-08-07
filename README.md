@@ -2,7 +2,7 @@
 
 Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系统。
 
-当前只推进 Windows，并遵循“后端先于前端”。Tauri 2、Svelte 5 与 WebView2 应用已包含本地书架、应用内 EPUB3 导入、阅读器和本地消息式阅读；移动平台尚未开始。现有 `p0/` 只用于 FFI 与 SQLite 技术验证，不属于正式后端。
+当前以 Windows 为稳定基线，并遵循“后端先于前端”。Tauri 2 与 Svelte 5 应用已包含本地书架、应用内 EPUB3 导入、阅读器和本地消息式阅读；Windows 使用 WebView2，Android 已用系统 WebView 建立同一产品壳和 reader runtime 的 EPUB 功能纵切。当前 Android 证据限于 x86_64 16 KiB 模拟器，不代表 ARM 真机性能或发布包。现有 `p0/` 只用于 FFI 与 SQLite 技术验证，不属于正式后端。
 
 ## 工程入口
 
@@ -37,15 +37,23 @@ pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 report
 .\target\debug\atha-reader-app.exe --epub 'E:\Books\book.epub'
 ```
 
-当前入口只支持符合既定安全与资源边界的 EPUB3。书架记录位于 `%LOCALAPPDATA%\Atha\Library`，导入缓存位于 `%LOCALAPPDATA%\Atha\ImportedBooks`；同一内容从不同路径导入只产生一个书架项，并复用同一阅读状态。
+当前入口只支持符合既定安全与资源边界的 EPUB3。Windows 书架记录位于 `%LOCALAPPDATA%\Atha\Library`，导入缓存位于 `%LOCALAPPDATA%\Atha\ImportedBooks`；Android 使用应用私有的 `app_local_data_dir`，不会改变 Windows 既有数据根。Android 系统 picker 通过 SAF content URI 与应用 cache 之间的流式桥接复用同一 backend，应用不请求宽泛存储权限。同一内容从不同路径导入只产生一个书架项，并复用同一阅读状态。
 
-标注、笔记、回复、引用和历史快照统一保存在 `%LOCALAPPDATA%\Atha\Messages`。书架移除不会删除这些记录；阅读页的笔记面板可导出本书消息。
+标注、笔记、回复、引用和历史快照统一保存在平台数据根下的 `Messages`；Windows 对应 `%LOCALAPPDATA%\Atha\Messages`，Android 对应应用私有数据目录。书架移除不会删除这些记录；阅读页的笔记面板可导出本书消息。
 
 ## 本地开发环境
 
-每台电脑在开始开发前复制 `env/example.ps1` 为 `env/local.ps1`，并填写本机的 `cargo`、`cmake`、`ctest`、`node`、`pnpm` 和 `sqlite3` 路径。`env/local.ps1` 已被 Git 忽略；检查脚本统一加载它，不依赖当前 Shell 的 `PATH`。
+每台电脑在开始开发前复制 `env/example.ps1` 为 `env/local.ps1`，并填写本机的 `cargo`、`cmake`、`ctest`、`node`、`pnpm` 和 `sqlite3` 路径。Android 开发还需填写 JDK、Android SDK 与 NDK 路径。`env/local.ps1` 已被 Git 忽略；检查脚本统一加载它，不依赖当前 Shell 的 `PATH`。
 
 Tauri 阅读器的完整本地检查入口是 `pwsh -NoProfile -File .\scripts\check-tauri-reader.ps1`。旧 `atha-reader-host` 暂时保留为 Wry/Tao 性能与安全基线，不是新的产品界面入口。
+
+Android 本地门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36 与 min SDK 26。启动 API 35、x86_64、16 KiB 页面的 `Atha_API_35_16K` AVD 后运行：
+
+```powershell
+pwsh -NoProfile -File .\scripts\check-android-reader.ps1 -EpubPath 'C:\path\to\book.epub' -CleanAppData
+```
+
+该入口检查 APK 构建、安装、冷启动、固定字段日志、16 KiB ZIP / ELF 对齐和宽泛存储权限，并在专用 AVD 上从干净应用数据自动完成系统 picker 导入、打开、reader ready、强停重启与书架持久性。省略 `-EpubPath` 时只运行构建和启动门槛；消息导出、全库备份 / 恢复仍是独立 opt-in 验收，避免默认替换开发中的 MessageStore。
 
 ## 项目入口
 

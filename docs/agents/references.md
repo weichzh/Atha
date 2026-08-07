@@ -18,6 +18,22 @@
 - 最短检查：运行 `scripts/check-tauri-reader.ps1` 后检查平台 AppLog 同时包含启动、打开和 reader 固定阶段事件，并确认不含 fixture 路径或内容。
 - 必须重查：插件 release line、Android 日志目录 / logcat 行为、target filter、轮转语义和敏感字段。
 
+## Tauri Android、SAF 与平台文件
+
+- 版本事实：`reader/app/package.json`、`reader/app/src-tauri/Cargo.toml`、`Cargo.lock`、`reader/app/src-tauri/tauri.android.conf.json` 与 `reader/app/src-tauri/gen/android/`；本项目 Android 门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36、min SDK 26，并在 API 35 x86_64 16 KiB AVD 验证。
+- 官方入口：[Tauri Android 前置条件](https://v2.tauri.app/start/prerequisites/#android)、[Tauri Dialog](https://v2.tauri.app/plugin/dialog/)、[`FilePath` Rust API](https://docs.rs/tauri-plugin-dialog/latest/tauri_plugin_dialog/enum.FilePath.html)、[Tauri File System](https://v2.tauri.app/plugin/file-system/)、[`FsExt` Rust API](https://docs.rs/tauri-plugin-fs/latest/tauri_plugin_fs/trait.FsExt.html)、[Android 16 KiB page size](https://developer.android.com/guide/practices/page-sizes)、[Android Auto Backup](https://developer.android.com/identity/data/autobackup)。
+- 项目快速用法：`tauri-plugin-dialog` 只选择文件；`platform_file::PickerInput` / `PickerOutput` 对普通路径直接转发，对 Android content URI 使用官方 fs plugin 流式复制到应用 `cache/Picker`。输入复用领域上限：单次至多 32 本书、EPUB 源文件至多 512 MiB、恢复制品至多 8 GiB；消息导出和备份仍分别受 backend 的 512 MiB 与 8 GiB 边界约束。临时目录独占创建并由 RAII 与启动清理回收，路径、URI 和内容不得进入日志。
+- 最短检查：`pwsh -NoProfile -File scripts/check-android-reader.ps1 -EpubPath <local.epub> -CleanAppData`；它只允许在运行中的 `Atha_API_35_16K` 清理应用数据，并验证 APK badging、无宽泛存储权限、16 KiB ZIP / ELF 对齐、安装、冷启动、系统 picker 导入、打开、reader ready、强停重启、书架持久与固定日志。消息导出、全库备份 / 恢复仍按活动 change 独立 opt-in，不把模拟器结果称为 ARM 真机性能证据。
+- 必须重查：Tauri mobile / plugin release line、Android Gradle Plugin 与 SDK / NDK 兼容、SAF provider 的 open / truncate / failure 语义、release 签名、实体 ARM 设备的 I/O / 内存 / WebView 性能，以及 API 31+ `dataExtractionRules` 与设备厂商的备份 / 迁移行为。
+
+## Rust 文件锁与 `fs2`
+
+- 版本事实：`rust-toolchain.toml` 固定 Rust 1.97.1，`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `fs2 = 0.4.3`。
+- 官方入口：[Rust 1.97.1 Unix `std::fs` 源码](https://github.com/rust-lang/rust/blob/1.97.1/library/std/src/sys/fs/unix.rs#L1353-L1550)、[`fs2::FileExt`](https://docs.rs/fs2/0.4.3/fs2/trait.FileExt.html)、[`fs2` 0.4.3 package metadata](https://docs.rs/crate/fs2/0.4.3/source/Cargo.toml.orig)。
+- 项目快速用法：Rust 1.97.1 的 Unix 文件锁实现没有把 Android 列入 `flock` 支持集合，Android 会得到 `Unsupported`；MessageStore 维护锁只在 `store.rs` 与 `backup.rs` 通过 `fs2::FileExt` 使用 shared / exclusive try-lock。`fs2` 0.4.3 的许可为 `MIT/Apache-2.0`，不扩展为通用锁 abstraction。
+- 最短检查：`cargo test -p atha-backend`，再在 Android 冷启动日志中确认 MessageStore setup 不再返回 `message-database`。
+- 必须重查：Rust 升级后标准库是否原生支持 Android、网络文件系统 / 厂商内核的 advisory lock 语义、维护锁协议变化与依赖许可变化；标准库实测覆盖 Android 前不移除 `fs2`。
+
 ## 项目与依赖许可证
 
 - 版本事实：根 `LICENSE`、根 / member Cargo manifest、独立 P0 manifest 与 `reader/app/package.json` 中的精确 SPDX。

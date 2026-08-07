@@ -1,5 +1,8 @@
 # Description: Copy this file to env/local.ps1 and set local tool paths.
 $env:ATHA_CARGO = 'C:\path\to\cargo.exe'
+$env:ATHA_JAVA_HOME = 'C:\path\to\jdk'
+$env:ATHA_ANDROID_HOME = 'C:\path\to\Android\Sdk'
+$env:ATHA_NDK_HOME = 'C:\path\to\Android\Sdk\ndk\28.2.13676358'
 $env:ATHA_CMAKE = 'C:\path\to\cmake.exe'
 $env:ATHA_CTEST = 'C:\path\to\ctest.exe'
 $env:ATHA_NODE = 'C:\path\to\node.exe'

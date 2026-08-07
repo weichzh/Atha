@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use atha_backend::messages::{
     ConversationView, CreatedMessage, CreatedRevision, CreatedRoot, CreatedSource, EditionInput,
     LegacyImport, LegacyImportResult, MessageError, MessageRelationships, MessageSearch,
@@ -7,7 +9,7 @@ use atha_backend::messages::{
 use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::{ReaderRuntime, is_reader_url};
+use crate::{ReaderRuntime, is_reader_url, platform_file::PickerOutput};
 
 #[tauri::command]
 pub(crate) async fn message_roots(
@@ -245,12 +247,38 @@ pub(crate) async fn message_export(
     else {
         return Ok(false);
     };
-    let path = selected.into_path().map_err(|_| "message-export")?;
-    match conversation_id {
-        Some(conversation) => runtime.messages.export_conversation(&conversation, path),
-        None => runtime.messages.export_edition(&edition_id, path),
+    let started = Instant::now();
+    let messages = runtime.messages.clone();
+    let result: Result<(), (&'static str, String)> =
+        tauri::async_runtime::spawn_blocking(move || {
+            let output = PickerOutput::new(&app, selected, "zip")
+                .map_err(|_| ("picker-prepare", "message-export".to_owned()))?;
+            match conversation_id {
+                Some(conversation) => messages.export_conversation(&conversation, output.path()),
+                None => messages.export_edition(&edition_id, output.path()),
+            }
+            .map_err(|error| ("backend", message_error(error)))?;
+            output
+                .commit()
+                .map_err(|_| ("picker-commit", "message-export".to_owned()))
+        })
+        .await
+        .map_err(|_| ("task", "message-export".to_owned()))
+        .and_then(|result| result);
+    match &result {
+        Ok(()) => log::info!(
+            target: "atha::messages",
+            "operation=export outcome=success duration_ms={}",
+            started.elapsed().as_millis()
+        ),
+        Err((stage, code)) => log::warn!(
+            target: "atha::messages",
+            "operation=export stage={stage} outcome=failed code={} duration_ms={}",
+            code,
+            started.elapsed().as_millis()
+        ),
     }
-    .map_err(message_error)?;
+    result.map_err(|(_, code)| code)?;
     Ok(true)
 }
 

@@ -37,7 +37,7 @@ impl MessageStore {
         };
         store.ensure_assets_directory()?;
         let maintenance = store.maintenance_file()?;
-        maintenance.try_lock().map_err(|_| MessageError::Database)?;
+        fs2::FileExt::try_lock_exclusive(&maintenance).map_err(|_| MessageError::Database)?;
         store.migrate()?;
         store.recover_assets()?;
         Ok(store)

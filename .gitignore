@@ -4,7 +4,7 @@ build/
 target/
 reader/app/dist/
 reader/app/node_modules/
-reader/app/src-tauri/gen/
+reader/app/src-tauri/gen/schemas/
 env/local.ps1
 fixtures/local/
 artifacts/local/
