@@ -8,9 +8,9 @@ const errorDetails = Object.freeze({
   "unstable-layout": "分页布局失败：页面尺寸持续变化",
 });
 const sessionStages = Object.freeze({
-  opening: "打开书籍",
-  "content-loaded": "章节载入后的分页定位",
-  "layout-stable": "阅读状态恢复",
+  opening: Object.freeze({ label: "打开书籍", token: "opening" }),
+  "content-loaded": Object.freeze({ label: "章节载入后的分页定位", token: "content-loaded" }),
+  "layout-stable": Object.freeze({ label: "阅读状态恢复", token: "layout-stable" }),
 });
 
 document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
@@ -35,13 +35,14 @@ function fail(code, operationStage = null) {
   document.documentElement.dataset.status = "fail";
   document.documentElement.dataset.error = code;
   const detail = errorDetails[code] || "处理书籍内容时发生错误";
-  const stage =
-    operationStage ||
-    sessionStages[document.documentElement.dataset.sessionState] ||
-    "阅读器初始化";
+  const sessionStage = sessionStages[document.documentElement.dataset.sessionState];
+  const stage = operationStage || sessionStage?.label || "阅读器初始化";
+  const diagnosticStage = operationStage
+    ? "layout"
+    : sessionStage?.token || "initialization";
   errorBox.textContent = `${detail}（错误代码：${code}；阶段：${stage}）。`;
   errorBox.hidden = false;
-  emit(`error|${code}`);
+  emit(`error|${code}|${diagnosticStage}`);
   console.error(`Atha reader failed: ${code}`);
   throw new Error(code);
 }

@@ -33,11 +33,26 @@ pub struct Ready {
     pub cuts: u16,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FailureStage {
+    Initialization,
+    Opening,
+    ContentLoaded,
+    LayoutStable,
+    Layout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReaderFailure {
+    pub code: &'static str,
+    pub stage: FailureStage,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ReaderEvent {
     Metric(Metric),
     Ready(Ready),
-    Error(&'static str),
+    Error(ReaderFailure),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -94,10 +109,34 @@ pub fn parse_reader_event(origin: &str, message: &str) -> Result<ReaderEvent, Te
             display_formulas: parse_range(display, 0_u16, 10_000)?,
             cuts: parse_range(cuts, 0_u16, 10_000)?,
         })),
-        ["error", code] => allowed_error(code)
-            .map(ReaderEvent::Error)
-            .ok_or(TelemetryError::InvalidMessage),
+        ["error", code, stage] => match (allowed_error(code), FailureStage::parse(stage)) {
+            (Some(code), Some(stage)) => Ok(ReaderEvent::Error(ReaderFailure { code, stage })),
+            _ => Err(TelemetryError::InvalidMessage),
+        },
         _ => Err(TelemetryError::InvalidMessage),
+    }
+}
+
+impl FailureStage {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Initialization => "initialization",
+            Self::Opening => "opening",
+            Self::ContentLoaded => "content-loaded",
+            Self::LayoutStable => "layout-stable",
+            Self::Layout => "layout",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "initialization" => Some(Self::Initialization),
+            "opening" => Some(Self::Opening),
+            "content-loaded" => Some(Self::ContentLoaded),
+            "layout-stable" => Some(Self::LayoutStable),
+            "layout" => Some(Self::Layout),
+            _ => None,
+        }
     }
 }
 

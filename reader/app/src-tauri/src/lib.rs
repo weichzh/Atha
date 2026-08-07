@@ -16,7 +16,7 @@ use atha_backend::{
         epub::{ImportError, READER_MANIFEST},
         library::{LibraryBook, LibraryError, LocalLibrary},
         resources::{BookRoot, Resource, ResourceError},
-        telemetry::{ReaderEvent, parse_reader_event},
+        telemetry::{MetricStage, ReaderEvent, parse_reader_event},
     },
 };
 use atha_reader_host::{
@@ -91,36 +91,86 @@ async fn reader_event(
     }
 
     let event = parse_reader_event(READER_PAGE, &message).map_err(|error| error.code())?;
-    let mut diagnostics = runtime.diagnostics.lock().map_err(|_| "reader-state")?;
-    let diagnostics = diagnostics.as_mut().ok_or("reader-state")?;
+    let diagnostic_state_error = || {
+        log::error!(
+            target: "atha::reader",
+            "event=reader_failure stage=diagnostics code=reader-state"
+        );
+        "reader-state"
+    };
+    let mut diagnostics = runtime
+        .diagnostics
+        .lock()
+        .map_err(|_| diagnostic_state_error())?;
+    let diagnostics = diagnostics.as_mut().ok_or_else(diagnostic_state_error)?;
     match event {
-        ReaderEvent::Metric(metric) => diagnostics
-            .record_metric(metric)
-            .map_err(|error| handle_diagnostic_error(diagnostics, &window, error))?,
-        ReaderEvent::Ready(ready) => match diagnostics.record_ready(ready) {
-            Ok(ReadyDisposition::VerificationComplete) if runtime.hold_after_verify => {
-                let _ = window.set_title("Atha Reader Verification Complete");
+        ReaderEvent::Metric(metric) => {
+            diagnostics
+                .record_metric(metric)
+                .map_err(|error| handle_diagnostic_error(diagnostics, &window, error))?;
+            if metric.stage == MetricStage::FirstStable {
+                log::info!(
+                    target: "atha::reader",
+                    "event=reader_metric stage={} duration_ms={:.3} pages={} page_width={} page_height={} font_size={}",
+                    metric.stage.as_str(),
+                    metric.duration_ms,
+                    metric.pages,
+                    metric.page_width,
+                    metric.page_height,
+                    metric.font_size
+                );
             }
-            Ok(ReadyDisposition::VerificationComplete) => app.exit(0),
-            Ok(ReadyDisposition::Interactive) => {
-                let _ = window.set_title("Atha Reader");
+        }
+        ReaderEvent::Ready(ready) => match diagnostics.record_ready(ready) {
+            Ok(disposition) => {
+                log::info!(
+                    target: "atha::reader",
+                    "event=reader_ready pages={} inline_formulas={} display_formulas={} cuts={}",
+                    ready.pages,
+                    ready.inline_formulas,
+                    ready.display_formulas,
+                    ready.cuts
+                );
+                match disposition {
+                    ReadyDisposition::VerificationComplete if runtime.hold_after_verify => {
+                        let _ = window.set_title("Atha Reader Verification Complete");
+                    }
+                    ReadyDisposition::VerificationComplete => app.exit(0),
+                    ReadyDisposition::Interactive => {
+                        let _ = window.set_title("Atha Reader");
+                    }
+                }
             }
             Err(error) => {
                 let code = handle_diagnostic_error(diagnostics, &window, error);
                 if runtime.verify_sample {
-                    eprintln!("reader self-check failed: {code}");
+                    log::error!(
+                        target: "atha::reader",
+                        "event=reader_verification outcome=failed code={}",
+                        safe_event(code)
+                    );
                     app.exit(1);
                 }
                 return Err(code.into());
             }
         },
-        ReaderEvent::Error(code) => {
-            fail_run(diagnostics, &window, code);
+        ReaderEvent::Error(failure) => {
+            log::error!(
+                target: "atha::reader",
+                "event=reader_failure stage={} code={}",
+                failure.stage.as_str(),
+                failure.code
+            );
+            fail_run(diagnostics, &window, failure.code);
             if runtime.verify_sample {
-                eprintln!("reader self-check failed: {}", safe_event(code));
+                log::error!(
+                    target: "atha::reader",
+                    "event=reader_verification outcome=failed code={}",
+                    safe_event(failure.code)
+                );
                 app.exit(1);
             }
-            return Err(code.into());
+            return Err(failure.code.into());
         }
     }
     Ok(())
@@ -154,6 +204,8 @@ async fn import_library_books(
     if paths.len() > MAX_IMPORT_FILES {
         return Err("invalid-library-import".into());
     }
+    let selected_count = paths.len();
+    let started = Instant::now();
     let library = runtime.library.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut failures = Vec::new();
@@ -161,6 +213,11 @@ async fn import_library_books(
             let path = match selected.into_path() {
                 Ok(path) => path,
                 Err(_) => {
+                    log::warn!(
+                        target: "atha::library",
+                        "operation=import outcome=failed code={}",
+                        ImportError::InvalidSource.code()
+                    );
                     failures.push(ImportFailure {
                         name: "EPUB".into(),
                         code: ImportError::InvalidSource.code(),
@@ -169,19 +226,45 @@ async fn import_library_books(
                 }
             };
             if let Err(error) = library.import(&path) {
+                log::warn!(
+                    target: "atha::library",
+                    "operation=import outcome=failed code={}",
+                    error.code()
+                );
                 failures.push(ImportFailure {
                     name: display_name(&path),
                     code: error.code(),
                 });
             }
         }
-        Ok(Some(ImportReport {
-            books: library.list().map_err(|error| error.code().to_owned())?,
-            failures,
-        }))
+        let books = library.list().map_err(|error| {
+            log::error!(
+                target: "atha::library",
+                "operation=import outcome=failed code={} duration_ms={}",
+                error.code(),
+                started.elapsed().as_millis()
+            );
+            error.code().to_owned()
+        })?;
+        log::info!(
+            target: "atha::library",
+            "operation=import outcome={} count={} failure_count={} duration_ms={}",
+            if failures.is_empty() { "ok" } else { "partial" },
+            selected_count - failures.len(),
+            failures.len(),
+            started.elapsed().as_millis()
+        );
+        Ok(Some(ImportReport { books, failures }))
     })
     .await
-    .map_err(|_| "library-import-task".to_owned())?
+    .map_err(|_| {
+        log::error!(
+            target: "atha::library",
+            "operation=import outcome=failed code=library-import-task duration_ms={}",
+            started.elapsed().as_millis()
+        );
+        "library-import-task".to_owned()
+    })?
 }
 
 #[tauri::command]
@@ -190,28 +273,44 @@ fn open_library_book(
     runtime: State<'_, ReaderRuntime>,
     id: String,
 ) -> Result<ReaderLaunch, String> {
-    let opened = runtime
-        .library
-        .open_book(&id)
-        .map_err(|error| error.code().to_owned())?;
-    let diagnostics = Diagnostics::new(Instant::now(), false, None)
-        .map_err(|_| "reader-diagnostics".to_owned())?;
-    *runtime
-        .current_book
-        .write()
-        .map_err(|_| "reader-state".to_owned())? = Some(opened.root);
-    *runtime
-        .current_edition
-        .write()
-        .map_err(|_| "reader-state".to_owned())? = Some(EditionInput {
+    let started = Instant::now();
+    let opened = runtime.library.open_book(&id).map_err(|error| {
+        log::error!(
+            target: "atha::library",
+            "operation=open outcome=failed code={} duration_ms={}",
+            error.code(),
+            started.elapsed().as_millis()
+        );
+        error.code().to_owned()
+    })?;
+    let diagnostics = Diagnostics::new(Instant::now(), false, None).map_err(|_| {
+        log::error!(
+            target: "atha::library",
+            "operation=open outcome=failed code=reader-diagnostics duration_ms={}",
+            started.elapsed().as_millis()
+        );
+        "reader-diagnostics".to_owned()
+    })?;
+    let state_error = || {
+        log::error!(
+            target: "atha::library",
+            "operation=open outcome=failed code=reader-state duration_ms={}",
+            started.elapsed().as_millis()
+        );
+        "reader-state".to_owned()
+    };
+    *runtime.current_book.write().map_err(|_| state_error())? = Some(opened.root);
+    *runtime.current_edition.write().map_err(|_| state_error())? = Some(EditionInput {
         content_version: opened.book.id.clone(),
         title: opened.book.title.clone(),
         authors: opened.book.authors.clone(),
     });
-    *runtime
-        .diagnostics
-        .lock()
-        .map_err(|_| "reader-state".to_owned())? = Some(diagnostics);
+    *runtime.diagnostics.lock().map_err(|_| state_error())? = Some(diagnostics);
+    log::info!(
+        target: "atha::library",
+        "operation=open outcome=ok duration_ms={}",
+        started.elapsed().as_millis()
+    );
     let _ = window.set_title(&format!("{} — Atha", opened.book.title));
     Ok(ReaderLaunch {
         href: format!(
@@ -247,10 +346,6 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         .as_ref()
         .map(|arguments| prepare_reader(arguments, startup))
         .transpose()?;
-    let data_root =
-        PathBuf::from(env::var_os("LOCALAPPDATA").ok_or("missing LOCALAPPDATA")?).join("Atha");
-    let library = LocalLibrary::open(&data_root)?;
-    let messages = MessageStore::open(&data_root)?;
     let current_book = Arc::new(RwLock::new(
         prepared.as_ref().map(|reader| reader.root.clone()),
     ));
@@ -262,6 +357,11 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     } else {
         "Atha"
     };
+    let launch_mode = if prepared.is_some() {
+        "reader"
+    } else {
+        "library"
+    };
     let verify_sample = arguments
         .as_ref()
         .is_some_and(|arguments| arguments.verify_sample);
@@ -270,25 +370,24 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         .is_some_and(|arguments| arguments.hold_after_verify);
     let current_edition = prepared.as_ref().and_then(|reader| reader.edition.clone());
     let diagnostics = prepared.map(|reader| reader.diagnostics);
-    let protocol_book = Arc::clone(&current_book);
-    let cover_library = library.clone();
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .filter(|metadata| metadata.target().starts_with("atha::"))
+                .max_file_size(1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(2))
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
-        .manage(ReaderRuntime {
-            diagnostics: Mutex::new(diagnostics),
-            verify_sample,
-            hold_after_verify,
-            current_book,
-            current_edition: RwLock::new(current_edition),
-            library,
-            messages,
+        .register_uri_scheme_protocol("atha-book", |context, request| {
+            let runtime = context.app_handle().state::<ReaderRuntime>();
+            book_response(&runtime.current_book, request)
         })
-        .register_uri_scheme_protocol("atha-book", move |_context, request| {
-            book_response(&protocol_book, request)
-        })
-        .register_uri_scheme_protocol("atha-cover", move |_context, request| {
-            cover_response(&cover_library, request)
+        .register_uri_scheme_protocol("atha-cover", |context, request| {
+            let runtime = context.app_handle().state::<ReaderRuntime>();
+            cover_response(&runtime.library, request)
         })
         .invoke_handler(tauri::generate_handler![
             reader_event,
@@ -317,44 +416,105 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             message_commands::message_export
         ])
         .setup(move |app| {
-            let size = app
-                .primary_monitor()?
-                .map(|monitor| {
-                    let scale = monitor.scale_factor();
-                    let physical = monitor.size();
-                    let screen = tao::dpi::LogicalSize::new(
-                        f64::from(physical.width) / scale,
-                        f64::from(physical.height) / scale,
+            log::info!(
+                target: "atha::startup",
+                "event=application_start stage=setup mode={launch_mode}"
+            );
+            let setup = (|| -> Result<(), Box<dyn Error>> {
+                let data_root = PathBuf::from(env::var_os("LOCALAPPDATA").ok_or_else(|| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=state outcome=failed code=missing-local-data"
                     );
-                    initial_window_size(screen)
-                })
-                .unwrap_or_else(|| tao::dpi::LogicalSize::new(900.0, 900.0));
-            let data_directory = app.path().app_local_data_dir()?.join("WebView2");
+                    "missing LOCALAPPDATA"
+                })?)
+                .join("Atha");
+                let library = LocalLibrary::open(&data_root).inspect_err(|error| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=state outcome=failed code={}",
+                        error.code()
+                    );
+                })?;
+                let messages = MessageStore::open(&data_root).inspect_err(|error| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=state outcome=failed code={}",
+                        error.code()
+                    );
+                })?;
+                app.manage(ReaderRuntime {
+                    diagnostics: Mutex::new(diagnostics),
+                    verify_sample,
+                    hold_after_verify,
+                    current_book,
+                    current_edition: RwLock::new(current_edition),
+                    library,
+                    messages,
+                });
 
-            let window =
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::App(app_path.clone().into()))
-                    .title(window_title)
-                    .inner_size(size.width, size.height)
-                    .min_inner_size(MIN_WINDOW_WIDTH_LOGICAL, MIN_WINDOW_HEIGHT_LOGICAL)
-                    .resizable(true)
-                    .maximizable(true)
-                    .data_directory(data_directory)
-                    .devtools(false)
-                    .general_autofill_enabled(false)
-                    .zoom_hotkeys_enabled(false)
-                    .use_https_scheme(true)
-                    .on_web_resource_request(|_, response| {
-                        response.headers_mut().insert(
-                            header::HeaderName::from_static("permissions-policy"),
-                            header::HeaderValue::from_static(PERMISSIONS_POLICY),
+                let size = app
+                    .primary_monitor()?
+                    .map(|monitor| {
+                        let scale = monitor.scale_factor();
+                        let physical = monitor.size();
+                        let screen = tao::dpi::LogicalSize::new(
+                            f64::from(physical.width) / scale,
+                            f64::from(physical.height) / scale,
                         );
+                        initial_window_size(screen)
                     })
-                    .on_navigation(|url| is_app_navigation_url(url.as_str()))
-                    .on_new_window(|_, _| NewWindowResponse::Deny)
-                    .on_download(|_, _| false)
-                    .prevent_overflow();
-            window.build()?;
-            Ok(())
+                    .unwrap_or_else(|| tao::dpi::LogicalSize::new(900.0, 900.0));
+                let data_directory = app.path().app_local_data_dir()?.join("WebView2");
+
+                let window = WebviewWindowBuilder::new(
+                    app,
+                    "main",
+                    WebviewUrl::App(app_path.clone().into()),
+                )
+                .title(window_title)
+                .inner_size(size.width, size.height)
+                .min_inner_size(MIN_WINDOW_WIDTH_LOGICAL, MIN_WINDOW_HEIGHT_LOGICAL)
+                .resizable(true)
+                .maximizable(true)
+                .data_directory(data_directory)
+                .devtools(false)
+                .general_autofill_enabled(false)
+                .zoom_hotkeys_enabled(false)
+                .use_https_scheme(true)
+                .on_web_resource_request(|_, response| {
+                    response.headers_mut().insert(
+                        header::HeaderName::from_static("permissions-policy"),
+                        header::HeaderValue::from_static(PERMISSIONS_POLICY),
+                    );
+                })
+                .on_navigation(|url| is_app_navigation_url(url.as_str()))
+                .on_new_window(|_, _| NewWindowResponse::Deny)
+                .on_download(|_, _| false)
+                .prevent_overflow();
+                window.build()?;
+                Ok(())
+            })();
+
+            match setup {
+                Ok(()) => {
+                    log::info!(
+                        target: "atha::startup",
+                        "event=application_start stage=ready mode={} duration_ms={}",
+                        launch_mode,
+                        startup.elapsed().as_millis()
+                    );
+                    Ok(())
+                }
+                Err(error) => {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=setup outcome=failed code=startup-setup duration_ms={}",
+                        startup.elapsed().as_millis()
+                    );
+                    Err(error)
+                }
+            }
         })
         .build(tauri::generate_context!())?
         .run(move |app, event| {
@@ -434,11 +594,19 @@ fn handle_diagnostic_error(
 ) -> &'static str {
     match error {
         DiagnosticError::Reader(code) => {
+            log::error!(
+                target: "atha::reader",
+                "event=reader_failure stage=diagnostics code={}",
+                safe_event(code)
+            );
             fail_run(diagnostics, window, code);
             code
         }
-        DiagnosticError::Recorder(message, error) => {
-            eprintln!("{message}: {error}");
+        DiagnosticError::Recorder(_, _) => {
+            log::error!(
+                target: "atha::reader",
+                "event=diagnostic_recorder outcome=failed code=write-failed"
+            );
             process::exit(1);
         }
     }
@@ -458,14 +626,29 @@ fn book_response(
     }
     let root = match current.read() {
         Ok(value) => value.clone(),
-        Err(_) => return empty_response(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(_) => {
+            log::error!(
+                target: "atha::protocol",
+                "operation=book_resource outcome=failed code=reader-state"
+            );
+            return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
+        }
     };
     let Some(root) = root else {
         return empty_response(StatusCode::NOT_FOUND);
     };
     match root.read(request.uri().path()) {
         Ok(resource) => resource_response(resource, "no-store", true),
-        Err(error) => empty_response(resource_status(error)),
+        Err(error) => {
+            if is_internal_resource_error(error) {
+                log::error!(
+                    target: "atha::protocol",
+                    "operation=book_resource outcome=failed code={}",
+                    error.code()
+                );
+            }
+            empty_response(resource_status(error))
+        }
     }
 }
 
@@ -486,8 +669,24 @@ fn cover_response(
         Err(LibraryError::UnknownBook | LibraryError::MissingCover) => {
             empty_response(StatusCode::NOT_FOUND)
         }
-        Err(LibraryError::Resource(error)) => empty_response(resource_status(error)),
-        Err(_) => empty_response(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(LibraryError::Resource(error)) => {
+            if is_internal_resource_error(error) {
+                log::error!(
+                    target: "atha::protocol",
+                    "operation=cover_resource outcome=failed code={}",
+                    error.code()
+                );
+            }
+            empty_response(resource_status(error))
+        }
+        Err(error) => {
+            log::error!(
+                target: "atha::protocol",
+                "operation=cover_resource outcome=failed code={}",
+                error.code()
+            );
+            empty_response(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -540,6 +739,13 @@ const fn resource_status(error: ResourceError) -> StatusCode {
     }
 }
 
+const fn is_internal_resource_error(error: ResourceError) -> bool {
+    matches!(
+        error,
+        ResourceError::InvalidRoot | ResourceError::ReadFailed
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,5 +780,13 @@ mod tests {
         ] {
             assert!(PERMISSIONS_POLICY.contains(feature));
         }
+    }
+
+    #[test]
+    fn only_internal_resource_failures_are_log_worthy() {
+        assert!(is_internal_resource_error(ResourceError::InvalidRoot));
+        assert!(is_internal_resource_error(ResourceError::ReadFailed));
+        assert!(!is_internal_resource_error(ResourceError::InvalidPath));
+        assert!(!is_internal_resource_error(ResourceError::NotFound));
     }
 }

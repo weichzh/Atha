@@ -33,7 +33,7 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 | --- | --- | --- | --- |
 | Svelte 产品壳 `reader/app/src/` | 书架、工具栏、面板、dialog 与受信任用户操作 | `library.ts`、`messages.ts` 的受限 Tauri client | 不拥有书籍 DOM、分页热状态、SQL 或消息事实 |
 | 浏览器阅读内核 `reader/web/` | 内容校验、会话、Locator、分页、导航、偏好、状态、搜索、标注 / 消息投影与诊断 | 各 `create*` 返回的冻结小对象；`app.mjs` 只组合 | 不访问文件系统、SQLite 或任意宿主 API；书内文档没有 command interface |
-| Tauri 平台 adapter `reader/app/src-tauri/` | Windows 启动、窗口、受控协议、dialog、capability 与 IPC DTO 映射；阅读消息与全库消息维护分别由 `message_commands`、`message_maintenance` 集中，library / telemetry / protocol adapter 暂仍与 composition root 同文件 | 已注册的 Tauri command 与 `atha-book` / `atha-cover` | 不实现消息、EPUB、Locator 或分页不变量；新增规则不再进入 `lib.rs` |
+| Tauri 平台 adapter `reader/app/src-tauri/` | 平台启动、窗口、受控协议、dialog、capability、固定字段本地日志与 IPC DTO 映射；阅读消息与全库消息维护分别由 `message_commands`、`message_maintenance` 集中，library / telemetry / protocol adapter 暂仍与 composition root 同文件 | 已注册的 Tauri command 与 `atha-book` / `atha-cover` | 不实现消息、EPUB、Locator 或分页不变量；新增规则不再进入 `lib.rs` |
 | 阅读应用模块 `backend::reader` | EPUB 导入、受控书根、本地书架和遥测输入校验 | `import_epub`、`LocalLibrary`、`BookRoot`、`parse_reader_event` | 不依赖 Tauri、Svelte 或 WebView 对象 |
 | 消息事实模块 `backend::messages` | schema、迁移、事务、查询、修订、引用、快照资产恢复、Outbox、交换导出与全库备份 / 恢复 | concrete `MessageStore` 及领域 DTO / 稳定错误 | 唯一 SQLite / 快照资产所有者；调用方不得复制消息事实或拼接 SQL |
 | Windows 验证 host `reader/atha-reader-host` | 两个 host 共用的启动、窗口尺寸和诊断；保留直接 Wry/Tao 回归 adapter | `launch`、`diagnostics` 与旧 `run` | 不接受新产品能力；Tauri 达到等价覆盖后单独评估删除 |
@@ -46,6 +46,8 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 ## 运行时、数据与信任边界
 
 当前 as-built 运行拓扑由一个原生 Tauri host 进程和 WebView2 管理的浏览器、renderer 等子进程组成；R8 本地基线最多观测到 8 个进程。Svelte 壳与 reader kernel 在 WebView2 renderer 中运行，Tauri command 和自定义 protocol 跨 WebView2 / 原生 host IPC 边界；backend module、SQLite 与本地资产访问位于原生 host 一侧。直接 Wry/Tao host 是单独启动的迁移期验证程序，不与产品 host 组成分布式服务。
+
+产品 host 使用 Tauri 官方日志插件把同一组 Rust 事件写入 stdout 与平台 AppLog。插件只接受 `atha::` target，Info 以上按 1 MiB 单文件有限轮转；adapter 只记录固定 operation / event、mode、stage、稳定 code、耗时与计数。reader failure 的 code 与 stage 都先经 backend 白名单验证；预期 protocol 4xx 不写盘，书名、路径、正文、笔记、查询、提示词和内容哈希不得进入日志。Windows benchmark Recorder 继续独立拥有正式性能制品，普通日志不替代 benchmark。
 
 1. **导入**：可信用户选择文件 → Tauri library command → `LocalLibrary` → `reader::epub` 校验 ZIP / OPF / 路径 / 大小 → 内容哈希书根与受限书目记录。
 2. **阅读**：Svelte 路由装载唯一 reader runtime → `atha-book` protocol → `BookRoot` 再校验路径、MIME 与大小 → `session` 校验 manifest → `content` 校验 XHTML / CSS / SVG 后导入 closed Shadow DOM。
@@ -61,7 +63,7 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 - `LocalLibrary` 是本地书架的 deep module；Tauri library commands 是文件 dialog 和 UI DTO Adapter。
 - `MessageStore` 是消息事实 Interface；Tauri `message_commands` 与 `message_maintenance` 分别是阅读消息和全库维护 IPC Adapter；`messages.ts` / `library.ts` 是受信任壳 client；reader `message-store.mjs` 是标注 / 笔记投影 Adapter。它们不形成第二份事实。
 - reader 各 `create*` factory 是浏览器内现有 Module Interface，不因只有一个实现再包 trait、registry 或 service locator。
-- `parse_reader_event` 是不可信 telemetry 输入的 Interface；Tauri 与旧 host 只负责把通过校验的事件交给 diagnostics。
+- `parse_reader_event` 是不可信 telemetry 输入的 Interface；Tauri 与旧 host 都只消费通过校验的事件。Tauri 产品 adapter 把 failure code / stage 和安全数值投影到平台 AppLog；旧验证 host 继续只把 code 交给既有 Recorder，不把平台日志反向带入基线 host。
 
 新增 interface 只有在存在第二个真实实现，或必须隔离平台、信任、事务、性能或测试边界时才成立。单纯为缩短文件、模拟未来替换或追求图形对称而增加间接层不成立。
 
@@ -86,6 +88,7 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 - 模块化单体决策：`docs/decisions/ADR-0004-modular-monolith-adapters.md`
 - 快照资产恢复决策：`docs/decisions/ADR-0005-message-snapshot-asset-recovery.md`
 - 完整消息备份 / 恢复决策：`docs/decisions/ADR-0006-message-store-backup-restore.md`
+- Android 开发前的本地诊断日志决策：`docs/decisions/ADR-0007-android-observability.md`
 - 当前状态：`docs/ACTIVE.md`
 - 代码现状：`docs/codebase/MAP.md`
 - 数据库基线：`docs/codebase/DATABASE.md`

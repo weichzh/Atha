@@ -7,7 +7,9 @@ use std::{
 use atha_backend::reader::{
     READER_PAGE,
     resources::{BookRoot, ResourceError},
-    telemetry::{MetricStage, ReaderEvent, TelemetryError, parse_reader_event},
+    telemetry::{
+        FailureStage, MetricStage, ReaderEvent, ReaderFailure, TelemetryError, parse_reader_event,
+    },
 };
 
 struct TestTree(PathBuf);
@@ -123,8 +125,11 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
     assert_eq!(metric.duration_ms, 1.25);
     assert_eq!((metric.page_width, metric.page_height), (860, 1640));
     assert_eq!(
-        parse_reader_event(READER_PAGE, "error|state-persistence"),
-        Ok(ReaderEvent::Error("state-persistence"))
+        parse_reader_event(READER_PAGE, "error|state-persistence|layout-stable"),
+        Ok(ReaderEvent::Error(ReaderFailure {
+            code: "state-persistence",
+            stage: FailureStage::LayoutStable,
+        }))
     );
 
     for (origin, message, expected) in [
@@ -151,6 +156,16 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
         (
             READER_PAGE,
             "error|E:/private/book.xhtml",
+            TelemetryError::InvalidMessage,
+        ),
+        (
+            READER_PAGE,
+            "error|state-persistence",
+            TelemetryError::InvalidMessage,
+        ),
+        (
+            READER_PAGE,
+            "error|book-load|E:/private/book.xhtml",
             TelemetryError::InvalidMessage,
         ),
     ] {

@@ -10,6 +10,14 @@
 - 最短检查：`pnpm --dir reader/app check`、`pnpm --dir reader/app build`、`cargo test -p atha-reader-app`。
 - 必须重查：command 参数映射、async 或主线程行为、state、window/webview、IPC 权限和插件 API。
 
+## Tauri Logging
+
+- 版本事实：`reader/app/src-tauri/Cargo.toml` 与 `Cargo.lock` 中的 `tauri-plugin-log` / `log`。
+- 官方入口：[Tauri Logging](https://v2.tauri.app/plugin/logging/)、[`tauri-plugin-log` Rust API](https://docs.rs/tauri-plugin-log/latest/tauri_plugin_log/)。
+- 项目快速用法：产品 Rust 日志只使用 `atha::` target 和固定 operation / event、stage、code、耗时与计数；Info 以上写 stdout 与平台 AppLog，单文件 1 MiB，保留当前文件和最近两个归档。不得记录书名、路径、正文、笔记、查询、提示词或内容哈希。
+- 最短检查：运行 `scripts/check-tauri-reader.ps1` 后检查平台 AppLog 同时包含启动、打开和 reader 固定阶段事件，并确认不含 fixture 路径或内容。
+- 必须重查：插件 release line、Android 日志目录 / logcat 行为、target filter、轮转语义和敏感字段。
+
 ## Svelte 5
 
 - 版本事实：`reader/app/package.json` 与 `reader/app/pnpm-lock.yaml`。

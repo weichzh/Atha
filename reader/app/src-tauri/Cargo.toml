@@ -14,10 +14,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 atha-backend = { path = "../../../backend/atha-backend" }
 atha-reader-host = { path = "../../atha-reader-host" }
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 tao = { version = "=0.36.0", default-features = false, features = ["rwh_06"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
 
 [lints]
 workspace = true

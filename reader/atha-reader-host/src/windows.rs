@@ -129,8 +129,13 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     ),
                 }
             }
-            Event::UserEvent(UserEvent::Reader(Ok(ReaderEvent::Error(code)))) => {
-                fail_run(&mut diagnostics, &window, code, arguments.verify_sample);
+            Event::UserEvent(UserEvent::Reader(Ok(ReaderEvent::Error(failure)))) => {
+                fail_run(
+                    &mut diagnostics,
+                    &window,
+                    failure.code,
+                    arguments.verify_sample,
+                );
             }
             Event::UserEvent(UserEvent::Reader(Err(error))) => {
                 fail_run(
