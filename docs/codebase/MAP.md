@@ -147,7 +147,7 @@
 - M4 本地书架检查在 Windows 本地通过：Agent Browser 经 WebView2 调试端口确认无参数 Tauri 的规范应用根和真实书架 DOM，避免窗口标题对 `about:blank` 的假阳性；390 × 840 和 960 × 720 书架无横向溢出，后端验证内容哈希去重、耐久重开、受限封面、移除保留缓存与损坏记录拒绝；六本演示书架仅用于布局检查；
 - M4 完整困难样本回归与 Tauri 产品检查通过；书架启动修复后基准 `1785803101324-25568` 的 P95 为冷启动 749.057ms、首稳 157.500ms、热开 21.000ms、翻页 6.700ms、字号重排 48.600ms，均低于既有门槛；
 - 选中文字切片的四样本正式回归通过：真实鼠标与浏览器自检覆盖复制、标注、笔记、触摸/键盘入口、失效选区撤销、重排/重载恢复和列表跳转；Tauri 基准 `1785818772540-28968` 的 P95 为冷启动 559.453ms、首稳 142.400ms、热开 20.900ms、翻页 10.000ms、字号重排 48.500ms，均低于既有门槛；
-- 完整消息后端 interface 集成测试 19/19 通过，覆盖迁移、事务、富文本 allowlist 与纯文本投影、修订冲突、关系、FTS、快照资源、资产中止恢复与链接边界、旧标注迁移、自包含导出、WAL 完整备份、资产修复、伪造 schema / 活动快照内容拒绝、损坏 / busy 恢复回滚及同一 Edition 重开恢复；Markdown 双向转换测试、Svelte check、production build、Tauri 资料库路由与 command permission seam 测试通过；
+- 完整消息后端 interface 集成测试 19/19 通过，覆盖迁移、事务、富文本 allowlist 与纯文本投影、修订冲突、关系、FTS、快照资源、资产中止恢复与链接边界、旧标注迁移及备份往返、自包含导出、WAL 完整备份、资产修复、伪造 schema / 活动快照 / FTS `NULL` / 未知 Outbox / 迁移计数不一致拒绝、损坏 / busy 恢复回滚及同一 Edition 重开恢复；Markdown 双向转换测试、Svelte check、production build、Tauri 资料库路由与 command permission seam 测试通过；
 - 消息实现后的四样本正式 runner、书架与 Tauri 产品回归均通过；基准 `1785859567155-20612` 的 P95 为冷启动 739.307ms、首稳 148.700ms、热开 27.300ms、翻页 31.900ms、字号重排 41.600ms，均低于既有门槛。本轮未做同时间旧代码对照，不能把差异归因于消息改动；
 - 普通 `--epub` 消息模式曾在 manifest 加载前读取 edition 而以 `invalid-manifest` 失败；初始化顺序修复后，真实 Tauri/WebView2 启动检查进入 `pass`，并作为 `scripts/check-tauri-reader.ps1` 固定回归。基准 `1785889633788-21736` 的 P95 为冷启动 724.373ms、首稳 133.500ms、热开 21.500ms、翻页 6.700ms、字号重排 41.700ms，均低于既有门槛；
 - Tauri 主窗口曾因 capability 未启用消息 permission，导致书架打开书籍后创建标注在 IPC 边界被拒绝；现以 `allow-message-commands` 授权全部消息接口，消息检查脚本固定校验 capability 与 command 清单。隔离应用数据下的真实 Tauri/WebView2 已完成“书架打开 → 鼠标选择 → 标注 → 笔记页显示 1 条记录”，未写入用户现有消息数据库；

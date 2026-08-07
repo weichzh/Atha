@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -75,7 +75,7 @@ present
 - [x] 损坏备份和 SQLite busy 失败注入证明原消息事实不变，暂存 / 孤儿可在重开恢复；
 - [x] 书架页只通过受限 Tauri command 选择文件并在 blocking worker 调用 backend；取消、确认、忙碌和错误状态可见；
 - [x] 不改变 schema，不备份书籍 / 阅读状态，不增加 crate、trait 或通用 archive abstraction；
-- [ ] 中文 Markdown、目标检查、required gate、diff 检查和独立 Standards / Spec review 通过。
+- [x] 中文 Markdown、目标检查、required gate、diff 检查和独立 Standards / Spec review 通过。
 
 ## Files And Steps
 
@@ -106,21 +106,28 @@ present
 
 ## Result
 
-已形成实施候选：`MessageStore` 增加 schema 1 `.atha-backup` 创建 / 恢复，数据库双向 copy 只使用 SQLite Online Backup API；严格 ZIP / manifest / database schema / 领域内容 / FTS / asset 验证位于 backend，维护锁与既有资产原子发布共同保护暂存生命周期，最终备份用 hard link 原子 no-replace 发布。书架页通过独立 `message_maintenance` Adapter 提供备份 / 恢复、覆盖确认和忙碌 / 取消 / 错误状态；交换导出语义未改变。
+- `MessageStore` 增加 schema 1 `.atha-backup` 创建 / 恢复，数据库双向 copy 只使用 SQLite Online Backup API；
+- backend 在恢复前严格验证 ZIP / manifest、database 精确 schema、领域内容与关系、FTS NULL-safe 精确投影、Outbox、旧迁移凭据和 asset；
+- 维护锁与既有资产原子发布共同保护暂存生命周期，最终备份用 hard link 原子 no-replace 发布，SQLite 失败保留当前数据库事实；
+- 书架页通过独立 `message_maintenance` Adapter 提供备份 / 恢复、替换确认和忙碌 / 取消 / 错误状态；交换导出语义未改变；
+- 未改变 message schema，未增加 crate、trait、通用 archive abstraction 或范围外产品能力。
 
 ## Review
 
-- Blocking：待独立 Standards / Spec review。
-- Non-blocking：待独立 Standards / Spec review。
-- Out-of-scope：待独立 Standards / Spec review。
+- Blocking：Standards / Spec 首轮发现完整 DB 信任边界遗漏 Outbox 与旧迁移凭据、FTS `NULL` 可绕过等值校验、取消文件选择 / 恢复确认时没有可见状态；补齐具体 SQL / JSON 语义校验、NULL-safe 投影比较、伪造备份回归和取消状态后，两路最终复核均无剩余 Blocking。
+- Non-blocking：Standards 指出恢复器曾加入 schema 没有规定的 Outbox 重试次数上限；已删除推测阈值，只保留 schema 的非负约束，最终复核无剩余 Non-blocking。
+- Out-of-scope：真实原生 dialog 用户数据操作、进程强杀、磁盘 / 文件系统故障、hard link 不支持文件系统和 maintenance lock 并发压力仍按 Non-Goals / 证据边界保留。
 
 ## Evidence And Residual Risks
 
 - 审计静态证据：现有按书 / 会话导出没有恢复入口，也不包含完整 DB 状态；正式数据库使用 WAL，资产位于事务之外；
 - 官方语义证据：SQLite Online Backup API 对活动源生成一致 snapshot，在 copy 未完成时回滚 destination write transaction；Rust 1.97 标准库 `File` 提供 Windows / Unix 文件 shared / exclusive lock；
-- Windows 本地证据：后端 `cargo fmt`、warnings-as-errors clippy 与消息 interface 集成测试 19/19 通过；测试覆盖 WAL 快照、目标零覆盖、完整恢复、损坏资产修复、重开孤儿清理、损坏制品、伪造 schema、活动快照内容拒绝和 SQLite busy 回滚；
+- 交付提交：`7ad322c` 固定协议与 ADR，`4b78e5a` 实现完整备份 / 恢复，`d98b6a5` 关闭双轴 review 的信任边界与取消状态问题，`e860a98` 删除无契约来源的重试上限；
+- Windows 本地证据：后端 `cargo fmt`、warnings-as-errors clippy 与消息 interface 集成测试 19/19 通过；测试覆盖 WAL 快照、目标零覆盖、完整恢复、损坏资产修复、重开孤儿清理、合法旧迁移状态往返、损坏制品、伪造 schema、活动快照、FTS `NULL`、未知 Outbox、迁移计数不一致拒绝和 SQLite busy 回滚；
 - Windows 本地证据：正式 `scripts/check-message-reading.ps1` 通过，包含 command / permission 精确映射、Markdown 测试、Svelte check、production build、Tauri app / host 测试；
-- 证据边界：尚未通过真实原生 dialog 执行用户数据备份 / 恢复，也未执行进程强杀、磁盘故障或生产等价验收；不会把 backend 测试和前端 build 称为真实 Tauri / WebView2 恢复验收；
+- Windows 本地证据：正式 backend workspace 检查通过 fmt、全 workspace clippy `-D warnings`、全部测试和 rustdoc；书架检查通过真实 Tauri `https://tauri.localhost/` 根路由、390 × 840 无横向溢出与最小控件尺寸，并产出移动书架截图；
+- 独立 review：最终 Standards 与 Spec 均通过，无剩余 Blocking 或 Non-blocking；
+- 证据边界：尚未通过真实原生 dialog 对用户数据执行备份 / 恢复，也未执行进程强杀、磁盘故障或生产等价验收；真实 Tauri 路由与浏览器布局不等同于恢复链路验收；
 - 并发边界：维护锁只协调遵循 Atha 协议的 open / backup / restore；已有正常写连接继续由 SQLite destination transaction 排他，外部程序绕过协议不受保证；
 - 制品边界：本地备份未加密、未认证且只含消息事实；用户应按敏感数据保存，书籍与阅读状态另行恢复；
 - 容量边界：V1 对 entry 数与总解压字节设固定上限；真实数据接近门槛时以测量驱动流式分卷或可配置上限，不预建框架。

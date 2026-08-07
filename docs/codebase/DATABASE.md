@@ -40,7 +40,7 @@
 
 `MessageStore` 直接提供根消息、对话、搜索、关系、修订、历史捕获与资源查询，以及创建根消息、回复、修订、删除、重选、重锚、旧标注导入、自包含交换导出和完整备份 / 恢复。它是唯一 SQLite 实现，不存在 repository trait 或 UI 数据副本。
 
-schema 1 `.atha-backup` 是严格单文件 ZIP，只允许 `manifest.json`、`Messages.sqlite3` 与 `assets/<sha256>`。备份通过 SQLite Online Backup API 取得 WAL 活动库的一致快照，写同目录临时 ZIP，`sync_all` 并重开自检后以 hard link 原子且不覆盖地发布。恢复在正式写入前检查唯一 entry、重叠、manifest、数据库 / 资产哈希与长度、当前 schema 精确签名、`integrity_check`、外键、领域关系、Edition / 修订 / Locator / Snapshot 内容、FTS 精确投影和数据库引用的资产集合；资产原子发布后再以 Online Backup API 写入活动库，未完成 copy 保留原数据库事实。
+schema 1 `.atha-backup` 是严格单文件 ZIP，只允许 `manifest.json`、`Messages.sqlite3` 与 `assets/<sha256>`。备份通过 SQLite Online Backup API 取得 WAL 活动库的一致快照，写同目录临时 ZIP，`sync_all` 并重开自检后以 hard link 原子且不覆盖地发布。恢复在正式写入前检查唯一 entry、重叠、manifest、数据库 / 资产哈希与长度、当前 schema 精确签名、`integrity_check`、外键、领域关系、Edition / 修订 / Locator / Snapshot 内容、Outbox 事件、旧迁移凭据、FTS NULL-safe 精确投影和数据库引用的资产集合；资产原子发布后再以 Online Backup API 写入活动库，未完成 copy 保留原数据库事实。
 
 V1 上限是 16 MiB manifest、单资产 16 MiB、65,536 个资产及 8 GiB 总展开字节；只有真实数据接近门槛时才配置化。最终发布要求目标目录支持 hard link，不支持时返回 `message-backup`，不以有覆盖竞态的 rename 降级。稳定错误区分 `message-backup`、`invalid-message-backup` 与 `message-restore`。制品不加密、不认证，也不包含 EPUB、书架或阅读状态。
 
@@ -52,4 +52,4 @@ Tauri 阅读消息 command 只暴露受限 DTO，并校验调用窗口仍位于�
 pwsh -NoProfile -File .\scripts\check-message-reading.ps1
 ```
 
-该检查覆盖正式迁移、重复打开、未来版本拒绝、外键、FTS5、数据库 / 已引用资产完整性、`Assets` junction 拒绝、symlink 读取 / 导出拒绝、事务回滚后的截断孤儿和临时文件恢复、并发修订、墓碑、重锚、资源、旧标注迁移、关系、搜索、自包含导出、WAL 完整备份、伪造 schema / 活动内容拒绝、损坏 / busy 恢复回滚与历史呈现参数解析，并编译 Tauri 前端、维护路由和 command permission seam。证据等级为 Windows 本地；没有把编译与 backend 测试称为真实文件 dialog / WebView2 恢复验收。
+该检查覆盖正式迁移、重复打开、未来版本拒绝、外键、FTS5、数据库 / 已引用资产完整性、`Assets` junction 拒绝、symlink 读取 / 导出拒绝、事务回滚后的截断孤儿和临时文件恢复、并发修订、墓碑、重锚、资源、旧标注迁移、关系、搜索、自包含导出、WAL 完整备份、伪造 schema / 活动内容 / FTS `NULL` / 未知 Outbox / 迁移计数不一致拒绝、损坏 / busy 恢复回滚与历史呈现参数解析，并编译 Tauri 前端、维护路由和 command permission seam。证据等级为 Windows 本地；没有把编译与 backend 测试称为真实文件 dialog / WebView2 恢复验收。

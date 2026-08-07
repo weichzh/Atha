@@ -33,7 +33,7 @@ accepted
 1. `MessageStore::create_backup` 使用 SQLite Online Backup API 把活动 main database 复制到暂存数据库；不复制活动 DB、`-wal` 或 `-shm` 文件。
 2. schema 1 `.atha-backup` 是 ZIP：`manifest.json` 记录数据库哈希 / 长度及排序后的资产哈希 / 长度，`Messages.sqlite3` 是一致 snapshot，`assets/<sha256>` 是该 snapshot 引用的完整资产集合。
 3. 备份写到目标同目录独占临时文件；ZIP 完成、`sync_all` 并重新读取校验后，才以标准库 hard link 原子创建不存在的最终路径并删除临时名。hard link 在目标已存在时失败，消除“先检查、后 rename”覆盖竞态；进程中止最多留下显式 `.tmp` 或完整最终制品，不会发布半成品。
-4. `restore_backup` 先验证 archive 唯一 / 已知 entry、容量边界、manifest、数据库 / 资产哈希与长度，再打开暂存数据库验证当前 schema 精确签名、`integrity_check`、`foreign_key_check`、消息关系、Edition / 修订 / Locator / Snapshot 内容、FTS 精确投影和资产引用集合；任何正式写入都发生在完整验证之后。
+4. `restore_backup` 先验证 archive 唯一 / 已知 entry、容量边界、manifest、数据库 / 资产哈希与长度，再打开暂存数据库验证当前 schema 精确签名、`integrity_check`、`foreign_key_check`、消息关系、Edition / 修订 / Locator / Snapshot 内容、Outbox、旧迁移凭据、FTS NULL-safe 精确投影和资产引用集合；任何正式写入都发生在完整验证之后。
 5. 恢复先在 SQLite `IMMEDIATE` writer lock 下复用既有原子资产发布，再通过 Online Backup API 把暂存数据库复制到活动数据库。SQLite 在 backup sequence 未完成时回滚 destination write transaction；已提前发布但未引用的资产由下次 open 清理。
 6. `Assets/.atha-maintenance.lock` 是具体生命周期协调文件：open / recovery 持 exclusive lock，备份持 shared lock，恢复持 exclusive lock。启动恢复会删除 Atha 暂存文件，因此必须与备份 / 恢复互斥；并发备份可以共享锁。它不发展为通用锁服务。
 7. 书架 Tauri Adapter 负责 save / open dialog、书架路由校验与 blocking worker；backend 独占 archive、SQLite、资产和恢复语义。恢复前 UI 明确确认“替换全部消息事实”。

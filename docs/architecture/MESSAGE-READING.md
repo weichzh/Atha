@@ -48,7 +48,7 @@ SQLite 与本地内容寻址资产是消息事实源。产品界面只通过应�
 
 - 按 Edition 或单 Conversation 导出的 `.zip` 是自包含交换制品，只覆盖所选业务范围，不包含完整数据库状态，也没有恢复语义；
 - `.atha-backup` 是 schema 1 的完整 MessageStore 恢复制品，只包含 Online Backup API 生成的一致 `Messages.sqlite3`、严格 manifest 和该快照引用的全部且仅有内容寻址资产；
-- 恢复是全量替换，不做 merge。backend 在正式写入前校验 entry 集合与容量、哈希、当前 database schema 精确签名、SQLite / 外键完整性、消息关系、Edition / 修订 / Locator / Snapshot 内容、FTS 投影和资产引用集合；未完成的数据库 copy 由 SQLite 回滚；
+- 恢复是全量替换，不做 merge。backend 在正式写入前校验 entry 集合与容量、哈希、当前 database schema 精确签名、SQLite / 外键完整性、消息关系、Edition / 修订 / Locator / Snapshot 内容、Outbox、旧迁移凭据、FTS NULL-safe 精确投影和资产引用集合；未完成的数据库 copy 由 SQLite 回滚；
 - 资料库页只负责选择文件、显示忙碌 / 取消 / 错误状态并确认替换全部消息事实；Tauri `message_maintenance` 只接受主窗口资料库根路由，制品与事务规则不进入前端。
 
 ## 关联语义
