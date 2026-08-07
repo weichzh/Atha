@@ -441,6 +441,22 @@ fn source_snapshot_resources_are_content_addressed_and_retrievable() {
     assert_eq!(captures[0].snapshot.resources[0].content_hash.len(), 64);
     assert_eq!(resource.media_type, "image/png");
     assert_eq!(resource.bytes, b"safe local image");
+
+    let source_id = captures[0].source.id.clone();
+    let asset = root
+        .0
+        .join("Messages/Assets")
+        .join(&captures[0].snapshot.resources[0].content_hash);
+    fs::write(&asset, b"corrupt referenced asset").expect("corrupt referenced asset");
+    assert!(!store.health().expect("corrupt health").integrity);
+    drop(store);
+
+    let reopened = MessageStore::open(&root.0).expect("reopen corrupt store");
+    assert!(asset.is_file());
+    assert_eq!(
+        reopened.read_snapshot_resource(&source_id, "images/formula.png"),
+        Err(atha_backend::messages::MessageError::CorruptData)
+    );
 }
 
 #[test]
@@ -718,7 +734,7 @@ fn database_migrations_and_required_capabilities_are_verified_on_open() {
 }
 
 #[test]
-fn outbox_failure_rolls_back_the_message_fact() {
+fn outbox_failure_recovers_snapshot_assets_on_reopen() {
     let root = TestRoot::new("message-outbox-rollback");
     let store = MessageStore::open(&root.0).expect("open store");
     let database = root.0.join("Messages/Messages.sqlite3");
@@ -732,20 +748,45 @@ fn outbox_failure_rolls_back_the_message_fact() {
     drop(connection);
     let mut failed_anchor = anchor();
     set_anchor_text(&mut failed_anchor, "事务回滚原文");
+    let resource_bytes = b"orphaned snapshot resource".to_vec();
+    let asset_name = text_hash("orphaned snapshot resource");
+    let assets = root.0.join("Messages/Assets");
+    let asset = assets.join(&asset_name);
+    let temporary = assets.join(".atha-asset-interrupted.tmp");
+    let unknown = assets.join("leave-me-alone");
+    let mut failed_snapshot = snapshot_for("事务回滚原文");
+    failed_snapshot.fragment_html =
+        "<p>事务回滚原文<img src=\"images/interrupted.png\"></p>".into();
+    failed_snapshot.resources.push(SnapshotResourceInput {
+        path: "images/interrupted.png".into(),
+        media_type: "image/png".into(),
+        bytes: resource_bytes.clone(),
+    });
 
     assert_eq!(
         store.create_root(RootMessageDraft {
             edition: edition(),
-            anchor: failed_anchor,
-            snapshot: snapshot_for("事务回滚原文"),
+            anchor: failed_anchor.clone(),
+            snapshot: failed_snapshot,
             text: Some("不能留下来的笔记".into()),
         }),
         Err(atha_backend::messages::MessageError::Database)
     );
+    assert!(asset.is_file());
+    fs::write(&asset, b"truncated").expect("simulate interrupted final asset");
+    fs::write(&temporary, b"partial").expect("simulate interrupted temporary asset");
+    fs::write(&unknown, b"not managed by Atha").expect("write unknown asset file");
+    drop(store);
+
+    let store = MessageStore::open(&root.0).expect("recover store");
+    assert!(!asset.exists());
+    assert!(!temporary.exists());
+    assert!(unknown.is_file());
     let connection = rusqlite::Connection::open(database).expect("reopen fault injector");
     connection
         .execute_batch("DROP TRIGGER fail_message_outbox;")
         .expect("remove outbox fault");
+    drop(connection);
     let matches = store
         .search(MessageSearch {
             edition_id: edition().content_version,
@@ -755,6 +796,39 @@ fn outbox_failure_rolls_back_the_message_fact() {
         .expect("search rolled back fact");
 
     assert!(matches.is_empty());
+
+    let mut recovered_snapshot = snapshot_for("事务回滚原文");
+    recovered_snapshot.fragment_html =
+        "<p>事务回滚原文<img src=\"images/interrupted.png\"></p>".into();
+    recovered_snapshot.resources.push(SnapshotResourceInput {
+        path: "images/interrupted.png".into(),
+        media_type: "image/png".into(),
+        bytes: resource_bytes.clone(),
+    });
+    let created = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: failed_anchor,
+            snapshot: recovered_snapshot,
+            text: Some("重试后的笔记".into()),
+        })
+        .expect("retry recovered snapshot");
+    let captures = store
+        .source_captures(&created.message_id)
+        .expect("load recovered capture");
+    assert_eq!(
+        store
+            .read_snapshot_resource(&captures[0].source.id, "images/interrupted.png")
+            .expect("read recovered resource")
+            .bytes,
+        resource_bytes
+    );
+    assert!(store.health().expect("recovered health").integrity);
+    drop(store);
+
+    let reopened = MessageStore::open(&root.0).expect("reopen recovered store");
+    assert!(unknown.is_file());
+    assert!(reopened.health().expect("reopened health").integrity);
 }
 
 #[test]

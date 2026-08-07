@@ -37,7 +37,7 @@ SQLite 与本地内容寻址资产是消息事实源。产品界面只通过应�
 
 ## 当前实现
 
-- `backend::messages::MessageStore` 隐藏 schema v2 迁移、WAL、外键、FTS5、事务 Outbox、快照资产、旧标注迁移和自包含导出；
+- `backend::messages::MessageStore` 隐藏 schema v2 迁移、WAL、外键、FTS5、事务 Outbox、快照资产恢复、旧标注迁移和自包含导出；资源在 SQLite writer lock 内通过同目录临时文件、`sync_all` 和 rename 发布，重开会清理 Atha 临时文件与数据库未引用的规范哈希资产；
 - 阅读内核从已验证 Range 捕获一份候选 Anchor、选区 HTML、生效 CSS、呈现参数和实际引用资源，Tauri command 在写入前再次执行信任边界校验；
 - 首次打开会把旧 localStorage 标注原子、幂等地导入 Message Store；成功后阅读页只从正式根 Message 投影高亮和笔记，不继续双写；
 - 全屏笔记页支持全文与章节筛选、进入对话和导出本书消息；新增或编辑笔记直接打开定位到根消息的半屏底部对话浮层，浮层可拖动调高或进入全屏，并支持回复、编辑、删除、修订、关系回顾、历史快照和跳回；

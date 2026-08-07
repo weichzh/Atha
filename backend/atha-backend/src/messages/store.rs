@@ -1,11 +1,12 @@
 use std::{
+    collections::HashSet,
     fs,
     fs::OpenOptions,
     io::Write,
     path::{Path, PathBuf},
 };
 
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -16,6 +17,7 @@ use super::{
 
 const DATABASE_VERSION: i64 = 2;
 const DATABASE_NAME: &str = "Messages.sqlite3";
+const ASSET_TEMP_PREFIX: &str = ".atha-asset-";
 
 #[derive(Clone, Debug)]
 pub struct MessageStore {
@@ -33,6 +35,7 @@ impl MessageStore {
             assets,
         };
         store.migrate()?;
+        store.recover_assets()?;
         Ok(store)
     }
 
@@ -64,17 +67,20 @@ impl MessageStore {
             .query([])
             .and_then(|mut rows| rows.next().map(|row| row.is_some()))
             .map_err(|_| MessageError::Database)?;
+        drop(foreign_key_check);
+        let assets_integrity = self.assets_integrity(&connection)?;
         Ok(StoreHealth {
             schema_version,
             sqlite_version,
             foreign_keys,
             fts5,
-            integrity: integrity == "ok" && !foreign_key_violation,
+            integrity: integrity == "ok" && !foreign_key_violation && assets_integrity,
         })
     }
 
     pub(crate) fn prepare_resources(
         &self,
+        _write_lock: &Transaction<'_>,
         inputs: &[SnapshotResourceInput],
     ) -> Result<Vec<PreparedResource>, MessageError> {
         inputs
@@ -83,20 +89,11 @@ impl MessageStore {
                 let hash = Sha256::digest(&input.bytes);
                 let asset_name = encode_hex(&hash);
                 let asset_path = self.assets.join(&asset_name);
-                match OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&asset_path)
-                {
-                    Ok(mut file) => file
-                        .write_all(&input.bytes)
-                        .map_err(|_| MessageError::InvalidRoot)?,
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                        let existing =
-                            fs::read(&asset_path).map_err(|_| MessageError::CorruptData)?;
-                        if Sha256::digest(&existing).as_slice() != hash.as_slice() {
-                            return Err(MessageError::CorruptData);
-                        }
+                match fs::symlink_metadata(&asset_path) {
+                    Ok(_) if asset_file_matches(&asset_path, &hash, input.bytes.len() as i64) => {}
+                    Ok(_) => return Err(MessageError::CorruptData),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        self.publish_asset(&asset_name, &hash, &input.bytes)?;
                     }
                     Err(_) => return Err(MessageError::InvalidRoot),
                 }
@@ -109,6 +106,104 @@ impl MessageStore {
                 })
             })
             .collect()
+    }
+
+    fn publish_asset(
+        &self,
+        asset_name: &str,
+        expected_hash: &[u8],
+        bytes: &[u8],
+    ) -> Result<(), MessageError> {
+        let asset_path = self.assets.join(asset_name);
+        let temporary = self.assets.join(format!(
+            "{ASSET_TEMP_PREFIX}{asset_name}-{}.tmp",
+            std::process::id()
+        ));
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .map_err(|_| MessageError::InvalidRoot)?;
+            file.write_all(bytes)
+                .and_then(|_| file.sync_all())
+                .map_err(|_| MessageError::InvalidRoot)?;
+            drop(file);
+            if fs::rename(&temporary, &asset_path).is_err() {
+                if !asset_file_matches(&asset_path, expected_hash, bytes.len() as i64) {
+                    return Err(MessageError::InvalidRoot);
+                }
+                fs::remove_file(&temporary).map_err(|_| MessageError::InvalidRoot)?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    fn recover_assets(&self) -> Result<(), MessageError> {
+        let mut connection = self.connect()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| MessageError::Database)?;
+        let mut statement = transaction
+            .prepare("SELECT DISTINCT asset_name FROM snapshot_resource")
+            .map_err(|_| MessageError::Database)?;
+        let referenced = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|_| MessageError::Database)?
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(|_| MessageError::Database)?;
+        drop(statement);
+        if referenced.iter().any(|name| !is_asset_name(name)) {
+            return Err(MessageError::CorruptData);
+        }
+
+        for entry in fs::read_dir(&self.assets).map_err(|_| MessageError::InvalidRoot)? {
+            let entry = entry.map_err(|_| MessageError::InvalidRoot)?;
+            let file_type = entry.file_type().map_err(|_| MessageError::InvalidRoot)?;
+            if !file_type.is_file() && !file_type.is_symlink() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let temporary = name.starts_with(ASSET_TEMP_PREFIX) && name.ends_with(".tmp");
+            let orphan = is_asset_name(&name) && !referenced.contains(&name);
+            if temporary || orphan {
+                fs::remove_file(entry.path()).map_err(|_| MessageError::InvalidRoot)?;
+            }
+        }
+        transaction.commit().map_err(|_| MessageError::Database)
+    }
+
+    fn assets_integrity(&self, connection: &Connection) -> Result<bool, MessageError> {
+        let mut statement = connection
+            .prepare("SELECT DISTINCT asset_name, content_hash, byte_length FROM snapshot_resource")
+            .map_err(|_| MessageError::Database)?;
+        let resources = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|_| MessageError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| MessageError::Database)?;
+        for (name, hash, byte_length) in resources {
+            if !is_asset_name(&name)
+                || hash.len() != 32
+                || encode_hex(&hash) != name
+                || !asset_file_matches(&self.assets.join(name), &hash, byte_length)
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn migrate(&self) -> Result<(), MessageError> {
@@ -148,4 +243,21 @@ impl MessageStore {
             .map_err(|_| MessageError::Database)?;
         Ok(connection)
     }
+}
+
+fn is_asset_name(name: &str) -> bool {
+    name.len() == 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn asset_file_matches(path: &Path, expected_hash: &[u8], byte_length: i64) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.file_type().is_file() || byte_length < 0 || metadata.len() != byte_length as u64 {
+        return false;
+    }
+    fs::read(path).is_ok_and(|bytes| Sha256::digest(bytes).as_slice() == expected_hash)
 }

@@ -11,7 +11,7 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 | ID | 优先级 | 质量属性 | 场景与成功标准 |
 | --- | --- | --- | --- |
 | ASR-SEC-01 | P0 | 内容安全 | 不可信 EPUB 提交脚本、事件属性、外部资源、越界路径或未声明资源时，在进入书籍 Shadow DOM 或发出外部网络 / 宿主 command 请求前明确拒绝；正式安全探针保持零外联。 |
-| ASR-DATA-01 | P0 | 数据完整性 | 消息、修订、引用、快照与 Outbox 任一步失败或进程中止时，不留下部分消息事实；重开后外键、schema 与完整性检查通过。快照资产的 crash-safe 发布 / 孤儿清理和完整备份 / 恢复尚未闭合，是独立高优先风险。 |
+| ASR-DATA-01 | P0 | 数据完整性 | 消息、修订、引用、快照与 Outbox 任一步失败或进程中止时，不留下部分消息事实；重开后外键、schema、已引用资产与完整性检查通过。快照资产已具备进程中止安全发布和孤儿清理；完整备份 / 恢复尚未闭合，是下一项独立高优先风险。 |
 | ASR-REF-01 | P0 | 引用保真 | 同一内容版本重开、重排或重新导入后，`SourceAnchor` 能回到原文，`SourceSnapshot` 保留当时呈现；无法唯一恢复时显式回落，不静默改写历史。 |
 | ASR-PERF-01 | P1 | 性能 | 正式困难样本的冷启动、首个稳定页、热打开、翻页与字号重排 P95 继续低于阅读内核规定的固定门槛；没有测量证据时不增加缓存、worker 或虚拟化。 |
 | ASR-MOD-01 | P1 | 可修改性 | 新用例修改拥有规则的 deep module 及一个真实边界 adapter；composition root 只增加装配或注册，不复制验证、数据或阅读算法。 |
@@ -35,7 +35,7 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 | 浏览器阅读内核 `reader/web/` | 内容校验、会话、Locator、分页、导航、偏好、状态、搜索、标注 / 消息投影与诊断 | 各 `create*` 返回的冻结小对象；`app.mjs` 只组合 | 不访问文件系统、SQLite 或任意宿主 API；书内文档没有 command interface |
 | Tauri 平台 adapter `reader/app/src-tauri/` | Windows 启动、窗口、受控协议、dialog、capability 与 IPC DTO 映射；首个切片已把消息 command 集中到 `message_commands`，library / telemetry / protocol adapter 暂仍与 composition root 同文件 | 已注册的 Tauri command 与 `atha-book` / `atha-cover` | 不实现消息、EPUB、Locator 或分页不变量；新增规则不再进入 `lib.rs` |
 | 阅读应用模块 `backend::reader` | EPUB 导入、受控书根、本地书架和遥测输入校验 | `import_epub`、`LocalLibrary`、`BookRoot`、`parse_reader_event` | 不依赖 Tauri、Svelte 或 WebView 对象 |
-| 消息事实模块 `backend::messages` | schema、迁移、事务、查询、修订、引用、快照、Outbox 与导出 | concrete `MessageStore` 及领域 DTO / 稳定错误 | 唯一 SQLite 所有者；调用方不得复制消息事实或拼接 SQL |
+| 消息事实模块 `backend::messages` | schema、迁移、事务、查询、修订、引用、快照资产恢复、Outbox 与导出 | concrete `MessageStore` 及领域 DTO / 稳定错误 | 唯一 SQLite / 快照资产所有者；调用方不得复制消息事实或拼接 SQL |
 | Windows 验证 host `reader/atha-reader-host` | 两个 host 共用的启动、窗口尺寸和诊断；保留直接 Wry/Tao 回归 adapter | `launch`、`diagnostics` 与旧 `run` | 不接受新产品能力；Tauri 达到等价覆盖后单独评估删除 |
 | 数据 `Messages.sqlite3`、`Assets/`、`Library/`、`ImportedBooks/` | 消息事实、内容寻址快照资源、书目记录与导入缓存 | 只经所属 backend Module 访问 | UI、reader kernel 与平台 adapter 不直接读写 |
 
@@ -69,10 +69,11 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 | 顺序 | 风险 / 证据 | 处理 |
 | --- | --- | --- |
 | 1 | 消息 command、来源校验、错误映射与大量领域 DTO 曾集中在 Tauri composition root；历史上出现过 capability 漏授权，审计时 gate 还会漏读 handler 列表最后一个无尾逗号命令 | 本切片已提取单一 message adapter module，并让注册集合与 permission 集合双向精确相等；后续持续执行消息 gate |
-| 2 | 消息数据库已有事务、WAL、导出与完整性检查，但快照资产尚无 crash-safe 临时发布 / 孤儿清理，系统也没有完整备份 / 恢复、加密或 checkpoint 策略 | 以进程中止与用户恢复场景建立独立 change；不先建 storage trait |
-| 3 | Tauri 产品入口仍依赖保留的 Wry/Tao host crate，共享启动与诊断，同时维护两份 runtime 交付清单 | 在 Tauri 安全、困难样本与 benchmark 完全覆盖旧 host 独有证据后，再以独立 ADR 决定删除或重命名；此前旧 host 不加产品能力 |
-| 4 | reader runtime 通过固定顺序拼成单 bundle，依赖在源码中不是显式 import | production build、语法检查和同一源码多入口仍能及时失败；只有出现真实顺序错误、独立加载或调试瓶颈时才改为显式模块图 |
-| 5 | 内容安全与引用保真是最高影响边界 | 保持既有多层校验和真实 WebView2 gate，不用结构重排换取未经证明的“整洁” |
+| 2 | 快照资产曾直接写最终哈希文件，数据库失败或进程中止会留下截断 / 孤儿文件 | 已在 SQLite writer lock 内使用临时文件、`sync_all` 和 rename 发布，并在 `open` 清理未引用资产；已引用损坏由读取和 `health` 明确报告 |
+| 3 | 系统仍没有完整备份 / 恢复、加密或 checkpoint 策略 | 下一轮先设计用户恢复场景和离线替换协议；不先建 storage trait |
+| 4 | Tauri 产品入口仍依赖保留的 Wry/Tao host crate，共享启动与诊断，同时维护两份 runtime 交付清单 | 在 Tauri 安全、困难样本与 benchmark 完全覆盖旧 host 独有证据后，再以独立 ADR 决定删除或重命名；此前旧 host 不加产品能力 |
+| 5 | reader runtime 通过固定顺序拼成单 bundle，依赖在源码中不是显式 import | production build、语法检查和同一源码多入口仍能及时失败；只有出现真实顺序错误、独立加载或调试瓶颈时才改为显式模块图 |
+| 6 | 内容安全与引用保真是最高影响边界 | 保持既有多层校验和真实 WebView2 gate，不用结构重排换取未经证明的“整洁” |
 
 每个迁移切片必须保持行为与依赖不变、更新 as-built 地图、运行所属 Module 的最小检查，再运行 required gate。不得以“项目早期”为由一次性重写。
 
@@ -83,6 +84,7 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 - 阅读内核：`docs/architecture/READER-CORE.md`
 - 消息与共读：`docs/architecture/MESSAGE-READING.md`
 - 模块化单体决策：`docs/decisions/ADR-0004-modular-monolith-adapters.md`
+- 快照资产恢复决策：`docs/decisions/ADR-0005-message-snapshot-asset-recovery.md`
 - 当前状态：`docs/ACTIVE.md`
 - 代码现状：`docs/codebase/MAP.md`
 - 数据库基线：`docs/codebase/DATABASE.md`

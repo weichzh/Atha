@@ -9,7 +9,6 @@ use super::{
 impl MessageStore {
     pub fn create_root(&self, draft: RootMessageDraft) -> Result<CreatedRoot, MessageError> {
         validate_root(&draft)?;
-        let resources = self.prepare_resources(&draft.snapshot.resources)?;
         let edition_id = decode_hex::<32>(&draft.edition.content_version)?;
         let content_hash = decode_hex::<32>(&draft.anchor.content_hash)?;
         let now = now_millis()?;
@@ -17,6 +16,7 @@ impl MessageStore {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| MessageError::Database)?;
+        let resources = self.prepare_resources(&transaction, &draft.snapshot.resources)?;
         let conversation_id = random_id(&transaction)?;
         let message_id = random_id(&transaction)?;
         let revision_id = random_id(&transaction)?;
@@ -301,7 +301,7 @@ impl MessageStore {
         if current.as_deref() != Some(expected.as_slice()) {
             return Err(MessageError::RevisionConflict);
         }
-        let resources = self.prepare_resources(&draft.snapshot.resources)?;
+        let resources = self.prepare_resources(&transaction, &draft.snapshot.resources)?;
         let source = random_id(&transaction)?;
         let snapshot = random_id(&transaction)?;
         let outbox = random_id(&transaction)?;
