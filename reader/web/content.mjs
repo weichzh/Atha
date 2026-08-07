@@ -1,3 +1,29 @@
+const XHTML_DOCTYPES = new Set([
+  "<!DOCTYPE html>",
+  '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
+  '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">',
+]);
+
+export function parseSafeXhtml(source) {
+  const declarations = [...source.matchAll(/<!DOCTYPE\b/gu)];
+  if (declarations.length === 0) {
+    return new DOMParser().parseFromString(source, "application/xhtml+xml");
+  }
+  if (declarations.length !== 1) return null;
+  const start = declarations[0].index;
+  const end = source.indexOf(">", start);
+  if (end < 0) return null;
+  const declaration = source.slice(start, end + 1);
+  const normalized = declaration.replace(/\s+/gu, " ").replace(/\s+>/u, ">");
+  if (declaration.includes("[") || !XHTML_DOCTYPES.has(normalized)) {
+    return null;
+  }
+  return new DOMParser().parseFromString(
+    `${source.slice(0, start)}${source.slice(end + 1)}`,
+    "application/xhtml+xml",
+  );
+}
+
 export function createContent({ host, reader, readerStyleSource, fail }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const bookStyle = document.createElement("style");
@@ -196,7 +222,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   }
 
   function validateMarkup(documentNode) {
-    ensure(!documentNode.querySelector("parsererror") && !documentNode.doctype, "invalid-xhtml");
+    ensure(documentNode && !documentNode.querySelector("parsererror") && !documentNode.doctype, "invalid-xhtml");
     ensure(
       !documentNode.querySelector(
         "script, iframe, frame, object, embed, form, input, button, select, textarea, video, audio, source, track, base, meta[http-equiv], foreignObject",
@@ -429,6 +455,10 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         "active-content",
       );
     }
+    const xhtml11 = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><body>safe</body></html>`;
+    validateMarkup(parseSafeXhtml(xhtml11));
+    const internalEntity = `<!DOCTYPE html [<!ENTITY unsafe "expanded">]><html xmlns="http://www.w3.org/1999/xhtml"><body>&unsafe;</body></html>`;
+    ensure(rejected(() => validateMarkup(parseSafeXhtml(internalEntity))), "active-content");
     const samePage = new DOMParser().parseFromString(
       `<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='${bookUrl.pathname}#x'>x</a></body></html>`,
       "application/xhtml+xml",
@@ -535,7 +565,8 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     }
     const response = await fetch(bookUrl);
     ensure(response.ok, loadError);
-    const source = new DOMParser().parseFromString(await response.text(), "application/xhtml+xml");
+    const markup = await response.text();
+    const source = parseSafeXhtml(markup);
     validateMarkup(source);
     const styleSources = detachSourceStyles(source);
     const stylesheets = await Promise.all(

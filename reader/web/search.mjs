@@ -21,8 +21,9 @@ export function createSearch({ session, navigation, pagination, locator, control
 
   function sectionText(source) {
     if (source.length > MAX_SECTION_LENGTH) throw new Error("search-section-size");
-    const documentNode = new DOMParser().parseFromString(source, "application/xhtml+xml");
+    const documentNode = parseSafeXhtml(source);
     if (
+      !documentNode ||
       documentNode.querySelector("parsererror") ||
       documentNode.doctype ||
       !documentNode.body ||
@@ -222,6 +223,12 @@ export function createSearch({ session, navigation, pagination, locator, control
     assert(
       sectionText("<html xmlns='http://www.w3.org/1999/xhtml'><body>safe</body></html>") ===
         "safe",
+      "sample-boundary",
+    );
+    assert(
+      sectionText(
+        `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><body>legacy</body></html>`,
+      ) === "legacy",
       "sample-boundary",
     );
     const hiddenText = sectionText(

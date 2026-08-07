@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use quick_xml::{
     Decoder, NsReader, XmlVersion,
-    events::{BytesStart, Event},
+    events::{BytesRef, BytesStart, Event},
     name::ResolveResult,
 };
 use serde::Serialize;
@@ -14,6 +14,12 @@ const OPF_NS: &[u8] = b"http://www.idpf.org/2007/opf";
 const DC_NS: &[u8] = b"http://purl.org/dc/elements/1.1/";
 const XHTML_NS: &[u8] = b"http://www.w3.org/1999/xhtml";
 const EPUB_NS: &[u8] = b"http://www.idpf.org/2007/ops";
+const NCX_NS: &[u8] = b"http://www.daisy.org/z3986/2005/ncx/";
+const NCX_MEDIA_TYPE: &str = "application/x-dtbncx+xml";
+const NCX_DOCTYPE: &[u8] =
+    br#"ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd""#;
+const MAX_XML_DEPTH: usize = 256;
+const MAX_TOC_LABEL_BYTES: usize = 1024;
 pub(super) const MAX_METADATA_TEXT: usize = 512;
 pub(super) const MAX_AUTHORS: usize = 16;
 
@@ -29,10 +35,22 @@ struct PackageItem {
 pub(super) struct Package {
     items: HashMap<String, PackageItem>,
     spine: Vec<String>,
-    nav_path: String,
+    navigation: Navigation,
     title: Option<String>,
     authors: Vec<String>,
     cover_path: Option<String>,
+}
+
+#[derive(Debug)]
+enum Navigation {
+    Xhtml(String),
+    Ncx(String),
+}
+
+#[derive(Clone, Copy)]
+enum PackageVersion {
+    Epub2,
+    Epub3,
 }
 
 #[derive(Debug, Serialize)]
@@ -65,6 +83,15 @@ pub(super) struct ImportPlan {
     pub(super) cover_path: Option<String>,
 }
 
+impl ImportPlan {
+    pub(super) fn section_paths(&self) -> impl Iterator<Item = &str> {
+        self.manifest
+            .sections
+            .iter()
+            .map(|section| section.href.as_str())
+    }
+}
+
 #[derive(Clone, Copy)]
 enum MetadataField {
     Title,
@@ -85,7 +112,7 @@ pub(super) fn parse_container(xml: &[u8]) -> Result<String, ImportError> {
             .map_err(|_| ImportError::InvalidXml)?;
         match event {
             Event::Start(event) => {
-                depth += 1;
+                depth = next_xml_depth(depth)?;
                 let name = event.local_name();
                 match name.as_ref() {
                     b"container" if depth == 1 && !container_seen => {
@@ -118,6 +145,7 @@ pub(super) fn parse_container(xml: &[u8]) -> Result<String, ImportError> {
                 }
             }
             Event::Empty(event) => {
+                next_xml_depth(depth)?;
                 let name = event.local_name();
                 match name.as_ref() {
                     b"rootfiles" => {
@@ -186,6 +214,8 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
     let mut paths = HashSet::new();
     let mut spine = Vec::new();
     let mut nav_path = None;
+    let mut spine_toc = None;
+    let mut cover_id = None;
     let mut title = None;
     let mut authors = Vec::new();
     let mut metadata_depth = None;
@@ -200,7 +230,7 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
             .map_err(|_| ImportError::InvalidXml)?;
         match event {
             Event::Start(event) => {
-                depth += 1;
+                depth = next_xml_depth(depth)?;
                 let name = event.local_name();
                 match name.as_ref() {
                     b"package" if depth == 1 && !package_seen => {
@@ -229,6 +259,12 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
                         }
                         metadata_field = Some((MetadataField::Creator, depth, String::new()));
                     }
+                    b"meta" if metadata_depth == Some(depth - 1) => {
+                        require_namespace(&namespace, OPF_NS)?;
+                        if version.as_deref() == Some("2.0") {
+                            capture_cover_meta(reader.decoder(), &event, &mut cover_id)?;
+                        }
+                    }
                     b"manifest" => {
                         require_namespace(&namespace, OPF_NS)?;
                         if depth != 2 || manifest_depth.is_some() {
@@ -243,6 +279,7 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
                             return Err(ImportError::InvalidXml);
                         }
                         spine_count = spine_count.saturating_add(1);
+                        capture_spine_toc(reader.decoder(), &event, &mut spine_toc)?;
                         spine_depth = Some(depth);
                     }
                     b"item" => {
@@ -272,6 +309,7 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
                 }
             }
             Event::Empty(event) => {
+                next_xml_depth(depth)?;
                 let name = event.local_name();
                 match name.as_ref() {
                     b"manifest" => {
@@ -287,6 +325,16 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
                             return Err(ImportError::InvalidXml);
                         }
                         spine_count = spine_count.saturating_add(1);
+                        capture_spine_toc(reader.decoder(), &event, &mut spine_toc)?;
+                    }
+                    b"meta" => {
+                        require_namespace(&namespace, OPF_NS)?;
+                        if metadata_depth != Some(depth) {
+                            return Err(ImportError::InvalidXml);
+                        }
+                        if version.as_deref() == Some("2.0") {
+                            capture_cover_meta(reader.decoder(), &event, &mut cover_id)?;
+                        }
                     }
                     b"item" => {
                         require_namespace(&namespace, OPF_NS)?;
@@ -353,6 +401,10 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
                 }
                 target.push_str(&value);
             }
+            Event::GeneralRef(value) if metadata_field.is_some() => {
+                let target = &mut metadata_field.as_mut().expect("metadata field").2;
+                push_xml_reference(target, &value, MAX_METADATA_TEXT)?;
+            }
             Event::DocType(_) => return Err(ImportError::InvalidXml),
             Event::Text(text) if depth == 0 && !xml_whitespace(text.as_ref()) => {
                 return Err(ImportError::InvalidXml);
@@ -371,8 +423,12 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
             _ => {}
         }
     }
+    let version = match version.as_deref() {
+        Some("2.0") => PackageVersion::Epub2,
+        Some("3.0") => PackageVersion::Epub3,
+        _ => return Err(ImportError::UnsupportedEpub),
+    };
     if !package_seen
-        || version.as_deref() != Some("3.0")
         || manifest_count != 1
         || spine_count != 1
         || items.is_empty()
@@ -380,18 +436,46 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
     {
         return Err(ImportError::UnsupportedEpub);
     }
-    let mut cover_paths = items
-        .values()
-        .filter(|item| {
-            item.properties
-                .split_ascii_whitespace()
-                .any(|value| value == "cover-image")
-        })
-        .map(|item| item.path.clone());
-    let cover_path = cover_paths.next();
-    if cover_paths.next().is_some() {
-        return Err(ImportError::InvalidXml);
-    }
+    let navigation = match version {
+        PackageVersion::Epub2 => {
+            let toc = spine_toc.ok_or(ImportError::UnsupportedEpub)?;
+            let item = items.get(&toc).ok_or(ImportError::UnsupportedEpub)?;
+            if item.media_type != NCX_MEDIA_TYPE {
+                return Err(ImportError::UnsupportedEpub);
+            }
+            Navigation::Ncx(item.path.clone())
+        }
+        PackageVersion::Epub3 => Navigation::Xhtml(nav_path.ok_or(ImportError::UnsupportedEpub)?),
+    };
+    let cover_path = match version {
+        PackageVersion::Epub2 => match cover_id {
+            Some(id) => {
+                let item = items.get(&id).ok_or(ImportError::InvalidXml)?;
+                if !item.media_type.starts_with("image/")
+                    || !resource_type(&item.media_type, &item.path)
+                {
+                    return Err(ImportError::InvalidXml);
+                }
+                Some(item.path.clone())
+            }
+            None => None,
+        },
+        PackageVersion::Epub3 => {
+            let mut paths = items
+                .values()
+                .filter(|item| {
+                    item.properties
+                        .split_ascii_whitespace()
+                        .any(|value| value == "cover-image")
+                })
+                .map(|item| item.path.clone());
+            let path = paths.next();
+            if paths.next().is_some() {
+                return Err(ImportError::InvalidXml);
+            }
+            path
+        }
+    };
     let cover_path = cover_path.filter(|path| {
         items
             .values()
@@ -401,7 +485,7 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
     Ok(Package {
         items,
         spine,
-        nav_path: nav_path.ok_or(ImportError::UnsupportedEpub)?,
+        navigation,
         title,
         authors,
         cover_path,
@@ -423,6 +507,35 @@ fn package_item(
         media_type,
         properties,
     })
+}
+
+fn capture_cover_meta(
+    decoder: Decoder,
+    event: &BytesStart<'_>,
+    cover_id: &mut Option<String>,
+) -> Result<(), ImportError> {
+    if attribute(decoder, event, b"name")?.as_deref() != Some("cover") {
+        return Ok(());
+    }
+    let id = attribute(decoder, event, b"content")?.ok_or(ImportError::InvalidXml)?;
+    if id.is_empty() || cover_id.replace(id).is_some() {
+        return Err(ImportError::InvalidXml);
+    }
+    Ok(())
+}
+
+fn capture_spine_toc(
+    decoder: Decoder,
+    event: &BytesStart<'_>,
+    spine_toc: &mut Option<String>,
+) -> Result<(), ImportError> {
+    let Some(id) = attribute(decoder, event, b"toc")? else {
+        return Ok(());
+    };
+    if id.is_empty() || spine_toc.replace(id).is_some() {
+        return Err(ImportError::InvalidXml);
+    }
+    Ok(())
 }
 
 fn insert_item(
@@ -473,12 +586,21 @@ pub(super) fn plan_import(
     let title = package.title.clone();
     let authors = package.authors.clone();
     let cover_path = package.cover_path.clone();
+    let (nav_path, ncx) = match &package.navigation {
+        Navigation::Xhtml(path) => (path, false),
+        Navigation::Ncx(path) => (path, true),
+    };
     let nav_item = package
         .items
         .values()
-        .find(|item| item.path == package.nav_path)
+        .find(|item| item.path == *nav_path)
         .ok_or(ImportError::InvalidXml)?;
-    if nav_item.media_type != "application/xhtml+xml" {
+    let expected_media_type = if ncx {
+        NCX_MEDIA_TYPE
+    } else {
+        "application/xhtml+xml"
+    };
+    if nav_item.media_type != expected_media_type {
         return Err(ImportError::UnsupportedEpub);
     }
     let mut sections = Vec::with_capacity(package.spine.len());
@@ -498,8 +620,12 @@ pub(super) fn plan_import(
         });
     }
 
-    let nav = archive::read(archive, index, &package.nav_path)?;
-    let toc = parse_navigation(&nav, &package.nav_path, &section_paths)?;
+    let nav = archive::read(archive, index, nav_path)?;
+    let toc = if ncx {
+        parse_ncx(&nav, nav_path, &section_paths)?
+    } else {
+        parse_navigation(&nav, nav_path, &section_paths)?
+    };
     let mut resources = package
         .items
         .values()
@@ -561,7 +687,7 @@ fn parse_navigation(
             .map_err(|_| ImportError::InvalidXml)?;
         match event {
             Event::Start(event) => {
-                depth += 1;
+                depth = next_xml_depth(depth)?;
                 let name = event.local_name();
                 if depth == 1 {
                     if name.as_ref() != b"html" || html_seen {
@@ -596,11 +722,18 @@ fn parse_navigation(
                 let decoded = text.decode().map_err(|_| ImportError::InvalidXml)?;
                 let value =
                     quick_xml::escape::unescape(&decoded).map_err(|_| ImportError::InvalidXml)?;
-                link.as_mut().expect("checked link").2.push_str(&value);
+                push_ncx_label(&mut link.as_mut().expect("checked link").2, &value)?;
             }
             Event::CData(text) if link.is_some() => {
                 let value = text.decode().map_err(|_| ImportError::InvalidXml)?;
-                link.as_mut().expect("checked link").2.push_str(&value);
+                push_ncx_label(&mut link.as_mut().expect("checked link").2, &value)?;
+            }
+            Event::GeneralRef(value) if link.is_some() => {
+                push_xml_reference(
+                    &mut link.as_mut().expect("checked link").2,
+                    &value,
+                    MAX_TOC_LABEL_BYTES,
+                )?;
             }
             Event::End(event) => {
                 let name = event.local_name();
@@ -636,8 +769,11 @@ fn parse_navigation(
                 }
                 depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
             }
-            Event::Empty(_) if depth == 0 => return Err(ImportError::UnsupportedEpub),
-            Event::Empty(_) => {}
+            Event::Empty(_) => {
+                if next_xml_depth(depth)? == 1 {
+                    return Err(ImportError::UnsupportedEpub);
+                }
+            }
             Event::DocType(value) => {
                 let value: &[u8] = value.as_ref();
                 if depth != 0 || html_seen || doctype_seen || value != b"html" {
@@ -662,6 +798,422 @@ fn parse_navigation(
         return Err(ImportError::UnsupportedEpub);
     }
     Ok(result)
+}
+
+struct NcxPoint {
+    depth: usize,
+    slot: usize,
+    label_depth: Option<usize>,
+    text_depth: Option<usize>,
+    content_depth: Option<usize>,
+    text_seen: bool,
+    label: Option<String>,
+    label_candidate: String,
+    source: Option<String>,
+}
+
+fn parse_ncx(
+    xml: &[u8],
+    nav_path: &str,
+    sections: &HashSet<String>,
+) -> Result<Vec<TocItem>, ImportError> {
+    let mut reader = NsReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut depth = 0_usize;
+    let mut ncx_seen = false;
+    let mut doctype_seen = false;
+    let mut head_seen = false;
+    let mut doc_title_seen = false;
+    let mut doc_author_seen = false;
+    let mut nav_map_depth = None;
+    let mut ignored_depth = None;
+    let mut nav_map_count = 0_u8;
+    let mut page_list_seen = false;
+    let mut nav_list_seen = false;
+    let mut points = Vec::<NcxPoint>::new();
+    let mut point_ids = HashSet::new();
+    let mut play_orders = HashSet::new();
+    let mut hrefs = HashSet::new();
+    let mut result = Vec::new();
+    loop {
+        let (namespace, event) = reader
+            .read_resolved_event()
+            .map_err(|_| ImportError::InvalidXml)?;
+        match event {
+            Event::Start(event) => {
+                depth = next_xml_depth(depth)?;
+                let name = event.local_name();
+                if matches!(name.as_ref(), b"audio" | b"img") {
+                    return Err(ImportError::InvalidXml);
+                }
+                if ignored_depth.is_some() {
+                    continue;
+                }
+                if depth == 1 {
+                    if name.as_ref() != b"ncx" || ncx_seen {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    require_namespace(&namespace, NCX_NS)?;
+                    if attribute(reader.decoder(), &event, b"version")?.as_deref() != Some("2005-1")
+                    {
+                        return Err(ImportError::UnsupportedEpub);
+                    }
+                    ncx_seen = true;
+                } else if depth == 2 {
+                    require_namespace(&namespace, NCX_NS)?;
+                    match name.as_ref() {
+                        b"head" => {
+                            if head_seen || doc_title_seen || nav_map_count != 0 {
+                                return Err(ImportError::InvalidXml);
+                            }
+                            head_seen = true;
+                            ignored_depth = Some(depth);
+                        }
+                        b"docTitle" => {
+                            if !head_seen || doc_title_seen || nav_map_count != 0 {
+                                return Err(ImportError::InvalidXml);
+                            }
+                            doc_title_seen = true;
+                            ignored_depth = Some(depth);
+                        }
+                        b"docAuthor" => {
+                            if !head_seen
+                                || !doc_title_seen
+                                || doc_author_seen
+                                || nav_map_count != 0
+                            {
+                                return Err(ImportError::InvalidXml);
+                            }
+                            doc_author_seen = true;
+                            ignored_depth = Some(depth);
+                        }
+                        b"navMap" => {
+                            if !head_seen || !doc_title_seen || nav_map_count != 0 {
+                                return Err(ImportError::InvalidXml);
+                            }
+                            nav_map_count = 1;
+                            nav_map_depth = Some(depth);
+                        }
+                        b"pageList" => {
+                            if nav_map_count != 1
+                                || nav_map_depth.is_some()
+                                || page_list_seen
+                                || nav_list_seen
+                            {
+                                return Err(ImportError::InvalidXml);
+                            }
+                            page_list_seen = true;
+                            ignored_depth = Some(depth);
+                        }
+                        b"navList" => {
+                            if nav_map_count != 1 || nav_map_depth.is_some() {
+                                return Err(ImportError::InvalidXml);
+                            }
+                            nav_list_seen = true;
+                            ignored_depth = Some(depth);
+                        }
+                        _ => return Err(ImportError::InvalidXml),
+                    }
+                } else if namespace_is(&namespace, NCX_NS) && name.as_ref() == b"navPoint" {
+                    let expected_depth = points.last().map_or_else(
+                        || nav_map_depth.map(|value| value + 1),
+                        |point| Some(point.depth + 1),
+                    );
+                    if expected_depth != Some(depth)
+                        || points.last().is_some_and(|point| {
+                            point.label_depth.is_some()
+                                || point.content_depth.is_some()
+                                || point.source.is_none()
+                        })
+                    {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    if result.len() >= MAX_TOC_ITEMS {
+                        return Err(ImportError::TooManyTocItems);
+                    }
+                    let id = attribute(reader.decoder(), &event, b"id")?
+                        .ok_or(ImportError::InvalidXml)?;
+                    if id.is_empty()
+                        || id.len() > 512
+                        || id.chars().any(char::is_control)
+                        || !point_ids.insert(id)
+                    {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    match attribute(reader.decoder(), &event, b"playOrder")? {
+                        Some(value) => {
+                            let play_order =
+                                value.parse::<u32>().map_err(|_| ImportError::InvalidXml)?;
+                            if play_order == 0 || !play_orders.insert(play_order) {
+                                return Err(ImportError::InvalidXml);
+                            }
+                        }
+                        None if doctype_seen => return Err(ImportError::InvalidXml),
+                        None => {}
+                    }
+                    let slot = result.len();
+                    result.push(TocItem {
+                        label: String::new(),
+                        href: String::new(),
+                    });
+                    points.push(NcxPoint {
+                        depth,
+                        slot,
+                        label_depth: None,
+                        text_depth: None,
+                        content_depth: None,
+                        text_seen: false,
+                        label: None,
+                        label_candidate: String::new(),
+                        source: None,
+                    });
+                } else if namespace_is(&namespace, NCX_NS)
+                    && matches!(name.as_ref(), b"navInfo" | b"navLabel")
+                    && nav_map_depth == Some(depth - 1)
+                    && points.is_empty()
+                    && result.is_empty()
+                {
+                    ignored_depth = Some(depth);
+                } else if namespace_is(&namespace, NCX_NS)
+                    && name.as_ref() == b"navLabel"
+                    && nav_map_depth.is_some()
+                {
+                    let point = points.last_mut().ok_or(ImportError::InvalidXml)?;
+                    if depth != point.depth + 1
+                        || point.label_depth.is_some()
+                        || point.content_depth.is_some()
+                        || point.source.is_some()
+                    {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    if point.label.is_some() {
+                        ignored_depth = Some(depth);
+                    } else {
+                        point.label_depth = Some(depth);
+                        point.text_seen = false;
+                        point.label_candidate.clear();
+                    }
+                } else if namespace_is(&namespace, NCX_NS)
+                    && name.as_ref() == b"text"
+                    && nav_map_depth.is_some()
+                {
+                    let point = points.last_mut().ok_or(ImportError::InvalidXml)?;
+                    if point.label_depth != Some(depth - 1) || point.text_seen {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    point.text_seen = true;
+                    point.text_depth = Some(depth);
+                } else if namespace_is(&namespace, NCX_NS)
+                    && name.as_ref() == b"content"
+                    && nav_map_depth.is_some()
+                {
+                    let point = points.last_mut().ok_or(ImportError::InvalidXml)?;
+                    if depth != point.depth + 1
+                        || point.label_depth.is_some()
+                        || point.label.is_none()
+                    {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    set_ncx_source(reader.decoder(), &event, point)?;
+                    point.content_depth = Some(depth);
+                } else if nav_map_depth.is_some() {
+                    return Err(ImportError::InvalidXml);
+                }
+            }
+            Event::Empty(event) => {
+                let event_depth = next_xml_depth(depth)?;
+                let name = event.local_name();
+                if matches!(name.as_ref(), b"audio" | b"img") {
+                    return Err(ImportError::InvalidXml);
+                }
+                if ignored_depth.is_some() {
+                    continue;
+                }
+                if namespace_is(&namespace, NCX_NS) && name.as_ref() == b"content" {
+                    let point = points.last_mut().ok_or(ImportError::InvalidXml)?;
+                    if event_depth != point.depth + 1
+                        || point.label_depth.is_some()
+                        || point.label.is_none()
+                    {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    set_ncx_source(reader.decoder(), &event, point)?;
+                } else if event_depth == 1 && name.as_ref() == b"ncx" {
+                    return Err(ImportError::UnsupportedEpub);
+                } else if event_depth == 2 {
+                    require_namespace(&namespace, NCX_NS)?;
+                    return Err(ImportError::InvalidXml);
+                } else if nav_map_depth.is_some() {
+                    return Err(ImportError::InvalidXml);
+                }
+            }
+            Event::Text(text)
+                if points
+                    .last()
+                    .is_some_and(|point| point.text_depth.is_some()) =>
+            {
+                let value = text.decode().map_err(|_| ImportError::InvalidXml)?;
+                push_ncx_label(
+                    &mut points.last_mut().expect("checked point").label_candidate,
+                    &value,
+                )?;
+            }
+            Event::CData(text)
+                if points
+                    .last()
+                    .is_some_and(|point| point.text_depth.is_some()) =>
+            {
+                let value = text.decode().map_err(|_| ImportError::InvalidXml)?;
+                push_ncx_label(
+                    &mut points.last_mut().expect("checked point").label_candidate,
+                    &value,
+                )?;
+            }
+            Event::GeneralRef(value) => {
+                if let Some(point) = points.last_mut().filter(|point| point.text_depth.is_some()) {
+                    push_xml_reference(&mut point.label_candidate, &value, MAX_TOC_LABEL_BYTES)?;
+                } else {
+                    xml_reference(&value)?;
+                }
+            }
+            Event::End(event) => {
+                if let Some(ignored) = ignored_depth {
+                    if ignored == depth {
+                        ignored_depth = None;
+                    }
+                    depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
+                    continue;
+                }
+                let name = event.local_name();
+                let ncx = namespace_is(&namespace, NCX_NS);
+                if ncx && name.as_ref() == b"text" && nav_map_depth.is_some() {
+                    let point = points.last_mut().ok_or(ImportError::InvalidXml)?;
+                    if point.text_depth != Some(depth) {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    point.text_depth = None;
+                } else if ncx && name.as_ref() == b"navLabel" && nav_map_depth.is_some() {
+                    let point = points.last_mut().ok_or(ImportError::InvalidXml)?;
+                    if point.label_depth != Some(depth) || point.text_depth.is_some() {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    point.label_depth = None;
+                    let label = normalize_metadata(&point.label_candidate);
+                    if !label.is_empty() {
+                        if label.encode_utf16().count() > 256 {
+                            return Err(ImportError::InvalidXml);
+                        }
+                        point.label = Some(label);
+                    }
+                    point.label_candidate.clear();
+                } else if ncx && name.as_ref() == b"content" && nav_map_depth.is_some() {
+                    let point = points.last_mut().ok_or(ImportError::InvalidXml)?;
+                    if point.content_depth != Some(depth) {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    point.content_depth = None;
+                } else if ncx && name.as_ref() == b"navPoint" {
+                    let point = points.pop().ok_or(ImportError::InvalidXml)?;
+                    if point.depth != depth
+                        || point.label_depth.is_some()
+                        || point.text_depth.is_some()
+                        || point.content_depth.is_some()
+                    {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    let label = point.label.ok_or(ImportError::InvalidXml)?;
+                    let raw_href = point.source.ok_or(ImportError::InvalidXml)?;
+                    let (path, fragment) = archive::resolve_reference(nav_path, &raw_href)?;
+                    if !sections.contains(&path) {
+                        return Err(ImportError::UnsupportedEpub);
+                    }
+                    let href =
+                        fragment.map_or_else(|| path.clone(), |value| format!("{path}#{value}"));
+                    if !hrefs.insert(href.clone()) {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    result[point.slot] = TocItem { label, href };
+                } else if ncx && name.as_ref() == b"navMap" {
+                    if nav_map_depth != Some(depth) || !points.is_empty() {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    nav_map_depth = None;
+                }
+                depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
+            }
+            Event::DocType(value) => {
+                let value: &[u8] = value.as_ref();
+                if depth != 0 || ncx_seen || doctype_seen || value != NCX_DOCTYPE {
+                    return Err(ImportError::InvalidXml);
+                }
+                doctype_seen = true;
+            }
+            Event::Text(text) if depth == 0 && !xml_whitespace(text.as_ref()) => {
+                return Err(ImportError::InvalidXml);
+            }
+            Event::CData(_) if depth == 0 => return Err(ImportError::InvalidXml),
+            Event::Eof
+                if depth == 0
+                    && nav_map_depth.is_none()
+                    && ignored_depth.is_none()
+                    && points.is_empty() =>
+            {
+                break;
+            }
+            Event::Eof => return Err(ImportError::InvalidXml),
+            _ => {}
+        }
+    }
+    if !ncx_seen || nav_map_count != 1 || result.is_empty() {
+        return Err(ImportError::UnsupportedEpub);
+    }
+    Ok(result)
+}
+
+fn set_ncx_source(
+    decoder: Decoder,
+    event: &BytesStart<'_>,
+    point: &mut NcxPoint,
+) -> Result<(), ImportError> {
+    let source = attribute(decoder, event, b"src")?.ok_or(ImportError::InvalidXml)?;
+    if point.source.replace(source).is_some() {
+        return Err(ImportError::InvalidXml);
+    }
+    Ok(())
+}
+
+fn push_ncx_label(target: &mut String, value: &str) -> Result<(), ImportError> {
+    if target.len().saturating_add(value.len()) > MAX_TOC_LABEL_BYTES {
+        return Err(ImportError::InvalidXml);
+    }
+    target.push_str(value);
+    Ok(())
+}
+
+fn xml_reference(value: &BytesRef<'_>) -> Result<String, ImportError> {
+    if let Some(value) = value
+        .resolve_char_ref()
+        .map_err(|_| ImportError::InvalidXml)?
+    {
+        return Ok(value.to_string());
+    }
+    let name = value.decode().map_err(|_| ImportError::InvalidXml)?;
+    quick_xml::escape::resolve_predefined_entity(&name)
+        .map(str::to_owned)
+        .ok_or(ImportError::InvalidXml)
+}
+
+fn push_xml_reference(
+    target: &mut String,
+    value: &BytesRef<'_>,
+    limit: usize,
+) -> Result<(), ImportError> {
+    let value = xml_reference(value)?;
+    if target.len().saturating_add(value.len()) > limit {
+        return Err(ImportError::InvalidXml);
+    }
+    target.push_str(&value);
+    Ok(())
 }
 
 fn is_toc_nav(reader: &NsReader<&[u8]>, event: &BytesStart<'_>) -> Result<bool, ImportError> {
@@ -737,6 +1289,14 @@ fn xml_whitespace(value: &[u8]) -> bool {
     value
         .iter()
         .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+}
+
+fn next_xml_depth(depth: usize) -> Result<usize, ImportError> {
+    let depth = depth.checked_add(1).ok_or(ImportError::InvalidXml)?;
+    if depth > MAX_XML_DEPTH {
+        return Err(ImportError::InvalidXml);
+    }
+    Ok(depth)
 }
 
 fn resource_type(media_type: &str, path: &str) -> bool {

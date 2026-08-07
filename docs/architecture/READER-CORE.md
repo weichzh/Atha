@@ -34,15 +34,15 @@ Tauri 复用后端书根、EPUB 导入、共享 CLI、窗口尺寸和诊断逻�
 
 Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；它复用 `reader::epub`，以完整源文件 SHA-256 作为书籍身份，在 `%LOCALAPPDATA%/Atha/Library` 为每书保存一份受限 JSON，在既有 `%LOCALAPPDATA%/Atha/ImportedBooks/<sha256>` 保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
 
-EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性和导入时间，不接收源路径、缓存路径或书籍内容。打开书籍后，宿主把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
+EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；EPUB2 的 `meta name="cover"` 与 EPUB3 的 `cover-image` 最终投影为同一封面字段，无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性和导入时间，不接收源路径、缓存路径或书籍内容。打开书籍后，宿主把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
 
 ## 书籍输入与阅读会话
 
 阅读页的运行时书籍输入始终是受控书根内的 schema 1 manifest。manifest 以书籍内容哈希标识版本，声明有序且唯一的 section、可访问资源和可选 TOC；未知字段、重复项、超量输入、编码绕过、绝对路径、查询和书根越界均拒绝。单 XHTML `entry` 只作为现有样本的兼容入口。
 
-Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `reader::epub` module 读取一个 EPUB3 rendition 的 OCF、OPF manifest、spine 和 navigation document，把 spine XHTML 与当前支持的 CSS、SVG、PNG、JPEG、GIF、WebP 原子写入 `%LOCALAPPDATA%/Atha/ImportedBooks/<source-sha256>`，再交回既有 `BookRoot` 与 `ReadingSession`。XHTML 身份以 OPF manifest 的 `application/xhtml+xml` 为准，不依赖文件扩展名；`BookRoot` 只对 reader manifest 已声明的 section 返回 XHTML MIME。缓存目录和 `contentVersion` 都使用完整源文件 SHA-256，因此相同内容跨路径复用身份，内容改变则形成新身份；导入器不解释 Locator、分页或阅读状态。
+Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `reader::epub` module 读取单个 EPUB2 或 EPUB3 rendition 的 OCF、OPF manifest、spine 和 navigation document，把 spine XHTML 与当前支持的 CSS、SVG、PNG、JPEG、GIF、WebP 原子写入 `%LOCALAPPDATA%/Atha/ImportedBooks/<source-sha256>`，再交回既有 `BookRoot` 与 `ReadingSession`。EPUB2 只按 OPF `spine@toc` 解析对应的 `application/x-dtbncx+xml` NCX，把 `navMap` 的嵌套 `navPoint` 按前序拍平成现有 `ReaderManifest.toc`；EPUB3 继续只使用唯一 XHTML nav。两条路径共享相同的 section、资源、路径、大小和 XML 深度边界，不建立第二套 importer。XHTML 身份以 OPF manifest 的 `application/xhtml+xml` 为准，不依赖文件扩展名；`BookRoot` 只对 reader manifest 已声明的 section 返回 XHTML MIME。缓存目录和 `contentVersion` 都使用完整源文件 SHA-256，因此相同内容跨路径复用身份，内容改变则形成新身份；导入器不解释 Locator、分页或阅读状态。
 
-首版只支持 UTF-8 XML 的 EPUB3、单 package、XHTML spine 和 EPUB3 TOC。navigation document 可包含精确的 HTML5 `<!DOCTYPE html>`；container、OPF 和其他 DOCTYPE 继续拒绝。章节可以没有书源样式表，此时只应用阅读器样式。源文件和解压总量上限为 512MiB，成员数上限 10000，单成员上限 16MiB；加密、外部 URL、重叠/重复/Windows 歧义路径、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。EPUB2/NCX fallback、多 rendition、远程资源、字体、混淆、修复和多格式工厂不属于当前契约。
+首版兼容边界是 UTF-8 XML、单 package、XHTML spine，以及 EPUB3 XHTML nav 或 EPUB2 NCX `navMap`。NCX 可无 DOCTYPE，或只包含精确 canonical NCX 声明；带声明时要求合法且唯一的 `playOrder`，不加载外部 DTD 或通用实体。正文和搜索在 `DOMParser` 前只白名单精确的 HTML5、XHTML 1.1 与兼容扩展 XHTML 1.0 Strict 声明，并先剥离声明；未知、重复或带 internal subset 的声明继续拒绝，脚本、事件处理器、表单和其他主动内容仍由既有边界拒绝。container 与 OPF 的 DOCTYPE 继续拒绝。章节可以没有书源样式表，此时只应用阅读器样式。源文件和解压总量上限为 512MiB，成员数上限 10000，单成员上限 16MiB；加密、外部 URL、重叠/重复/Windows 歧义路径、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。UTF-16 XML、DTBook、OEBPS 文档、fallback 链、完整 EPUB2 Reading System、多 rendition、远程资源、字体、混淆、修复和多格式工厂尚未完成。
 
 `Section` 是一次只加载一份的顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 前必须释放上一 section 的 DOM、书源样式和缓存；关闭后不保留书籍 DOM。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
 
@@ -62,7 +62,7 @@ Windows host 使用持久 WebView2 profile，并从规范入口路径计算只�
 
 ### 书内搜索
 
-Search 按 manifest section 顺序只读获取 XHTML，以 `DOMParser` 拒绝解析错误、doctype 和 active content，移除样式节点后扫描与渲染 DOM 相同顺序的正文文本；明确隐藏的文本以不可匹配的等长哨兵保留 offset。它不加载书籍资源、不替换当前内容 DOM，也不改变 reading session；命中项使用原文本 UTF-16 偏移生成 schema 1 range Locator，再由 Navigation 跳转并验证目标起点。可定位结果必须在当前页可见，其他需完整渲染才能确定的候选明确报告失效。
+Search 按 manifest section 顺序只读获取 XHTML，与正文共享精确 DOCTYPE 白名单和剥离逻辑，再以 `DOMParser` 拒绝解析错误、残留 doctype 和 active content，移除样式节点后扫描与渲染 DOM 相同顺序的正文文本；明确隐藏的文本以不可匹配的等长哨兵保留 offset。它不加载书籍资源、不替换当前内容 DOM，也不改变 reading session；命中项使用原文本 UTF-16 偏移生成 schema 1 range Locator，再由 Navigation 跳转并验证目标起点。可定位结果必须在当前页可见，其他需完整渲染才能确定的候选明确报告失效。
 
 R6 只提供不区分大小写的字面量搜索。查询最长 128 个 UTF-16 code unit，单次最多保留 2000 条结果并明确报告截断；新查询和显式取消都通过 `AbortController` 终止旧扫描，旧扫描不得回写新状态。结果、错误和进度只存在于当前页面，任一章节失败不会让阅读会话失效。worker、持久缓存、搜索索引、历史和高级匹配只在真实大书证明需要时增加。
 
@@ -124,6 +124,8 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 `scripts/check-epub-source.ps1` 是单格式真实输入验收入口。它运行锁定的 Rust 检查，使用固定 SHA-256 的《数学及其历史 (2026)》通过 `--epub --verify-import` 启动真实 Windows WebView2 host，并核对导入结果为 173 个 spine section、2527 个受支持资源和 197 条 EPUB3 TOC。import probe 只验证前三个真实 spine section 的加载、旧 DOM 释放、重开和网络安全探针；内容特定的排版、交互、搜索、标注、恢复、内存与性能继续由 M2 gate 拥有。
 
+EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶意变体，核对 metadata、legacy cover、嵌套目录前序、DOCTYPE / 实体与路径边界；正向制品由固定 EPUBCheck 5.3.0 作为开发期规范 oracle，不进入运行时或 APK。正式 Android 证据复用同一忽略制品与 `scripts/check-android-reader.ps1 -VerifyEpub2NcxFixture`，已覆盖系统 picker、嵌套 fragment 目录跳转、强停重开和同一 section / page 恢复；该证据来自 API 35 x86_64 16 KiB 模拟器，不替代 ARM 真机性能验收。
+
 ## 性能策略
 
 - 使用内容已知尺寸或缓存测量结果为重内容预留空间，减少重排。
@@ -141,7 +143,7 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 ## 非责任
 
-- 阅读页不定义书籍格式 parser；EPUB3 导入细节只属于后端 `reader::epub` module；
+- 阅读页不定义书籍格式 parser；EPUB2 / EPUB3 导入细节只属于后端 `reader::epub` module；
 - 阅读内核只捕获与投影消息，不拥有 SQLite、AI 或同步协议；
 - 不替用户修复损坏书源；
 - 不预设跨机器性能数值，后续规格基于困难书籍样本决定。

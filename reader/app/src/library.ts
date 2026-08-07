@@ -67,7 +67,7 @@ export function importFailureMessage(code: string): string {
     case "invalid-epub-source":
     case "invalid-epub-archive":
     case "invalid-epub-xml":
-      return "不是可读取的 EPUB3 文件";
+      return "不是可读取的 EPUB 文件";
     default:
       return "导入失败";
   }

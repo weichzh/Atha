@@ -214,6 +214,7 @@ export function createReadingSession({ params, content, render, onState, assert,
 
   function release(nextState) {
     content.close();
+    delete document.documentElement.dataset.sectionPosition;
     currentIndex = -1;
     state = nextState;
     onState(state);
@@ -232,6 +233,7 @@ export function createReadingSession({ params, content, render, onState, assert,
         fail("section-index");
       }
       const section = book.sections[index];
+      document.documentElement.dataset.sectionPosition = `${index + 1} / ${book.sections.length}`;
       await content.loadSection(
         section.url,
         book.strictResources ? book.resources : null,

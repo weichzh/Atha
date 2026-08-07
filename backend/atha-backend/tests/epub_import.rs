@@ -13,6 +13,14 @@ use atha_backend::reader::{
 };
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
+const PNG_1X1: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xb5, 0x1c, 0x0c,
+    0x02, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x64, 0xf8, 0x0f, 0x00,
+    0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xe3, 0x66, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+    0xae, 0x42, 0x60, 0x82,
+];
+
 #[derive(Clone, Copy)]
 enum EpubVariant {
     Valid,
@@ -29,6 +37,43 @@ enum EpubVariant {
     ExtensionlessXhtml,
     InvalidNavigationDoctype,
     DuplicateNavigationDoctype,
+    ContainerDepthOverflow,
+    PackageDepthOverflow,
+    NavigationDepthOverflow,
+    Epub2Ncx,
+    Epub2NcxWithoutDoctype,
+    Epub2NcxExternalReference,
+    Epub2NcxExternalLabelMedia,
+    Epub2NcxTrailingExternalLabelMedia,
+    Epub2NcxNavMapExternalLabelMedia,
+    Epub2NcxTraversal,
+    Epub2MissingSpineToc,
+    Epub2TruncatedNcx,
+    Epub2UnknownNcxDoctype,
+    Epub2NcxEntity,
+    Epub2NcxOutOfOrder,
+    Epub2NcxDepthLimit,
+    Epub2NcxDepthOverflow,
+    Epub2NcxIgnoredRootContent,
+    Epub2NcxAlternateLabel,
+    Epub2NcxMissingHead,
+    Epub2NcxDuplicateHead,
+    Epub2NcxMissingDocTitle,
+    Epub2NcxDuplicateDocTitle,
+    Epub2NcxRootOutOfOrder,
+    Epub2NcxUnknownRoot,
+    Epub2MissingCoverItem,
+    Epub2UnsupportedCover,
+    Epub2Utf16Xhtml,
+    Epub2NcxDuplicateId,
+    Epub2NcxDuplicateHref,
+    Epub2NcxDuplicatePlayOrder,
+    Epub2NcxEmptyLabel,
+    Epub2NcxOversizeLabel,
+    Epub2NcxWrongNamespace,
+    Epub2NcxWrongVersion,
+    Epub2NcxTocLimit,
+    Epub2NcxTocOverflow,
 }
 
 #[test]
@@ -57,6 +102,292 @@ fn imports_extensionless_xhtml_with_html5_navigation_doctype() {
         book.read("/OEBPS/text/undeclared"),
         Err(ResourceError::UnsupportedMediaType)
     );
+}
+
+#[test]
+fn imports_epub2_ncx_into_existing_reader_contract() {
+    let root = TestRoot::new();
+    let source = root.0.join("epub2-ncx.epub");
+    write_epub(&source, EpubVariant::Epub2Ncx);
+
+    let imported = import_epub(&source, root.0.join("cache")).expect("import EPUB2 with NCX");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+
+    assert_eq!(manifest["sections"].as_array().expect("sections").len(), 2);
+    assert_eq!(manifest["sections"][0]["href"], "OEBPS/text/one.xhtml");
+    assert_eq!(manifest["sections"][1]["href"], "OEBPS/text/two.xhtml");
+    assert_eq!(
+        manifest["toc"],
+        serde_json::json!([
+            { "label": "Part One", "href": "OEBPS/text/one.xhtml" },
+            { "label": "Nested Two", "href": "OEBPS/text/two.xhtml#start" }
+        ])
+    );
+    assert_eq!(imported.title.as_deref(), Some("Example EPUB2"));
+    assert_eq!(imported.authors, ["Legacy Author"]);
+    assert_eq!(
+        imported.cover_path.as_deref(),
+        Some("OEBPS/images/cover.png")
+    );
+
+    let book = BookRoot::new(&imported.root).expect("open imported root");
+    let section = book
+        .read("/OEBPS/text/one.xhtml")
+        .expect("read XHTML 1.1 section");
+    let xhtml = std::str::from_utf8(&section.bytes).expect("XHTML is UTF-8");
+    assert!(xhtml.contains(
+        r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">"#
+    ));
+
+    let no_doctype = root.0.join("epub2-ncx-no-doctype.epub");
+    write_epub(&no_doctype, EpubVariant::Epub2NcxWithoutDoctype);
+    import_epub(&no_doctype, root.0.join("no-doctype-cache"))
+        .expect("import NCX without DTD or playOrder");
+}
+
+#[test]
+fn rejects_unsafe_or_invalid_epub2_ncx() {
+    let root = TestRoot::new();
+    let cache = root.0.join("cache");
+
+    for (name, variant, expected) in [
+        (
+            "epub2-ncx-external.epub",
+            EpubVariant::Epub2NcxExternalReference,
+            ImportError::UnsafePath,
+        ),
+        (
+            "epub2-ncx-external-label-media.epub",
+            EpubVariant::Epub2NcxExternalLabelMedia,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-trailing-external-label-media.epub",
+            EpubVariant::Epub2NcxTrailingExternalLabelMedia,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-nav-map-external-label-media.epub",
+            EpubVariant::Epub2NcxNavMapExternalLabelMedia,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-traversal.epub",
+            EpubVariant::Epub2NcxTraversal,
+            ImportError::UnsafePath,
+        ),
+        (
+            "epub2-missing-spine-toc.epub",
+            EpubVariant::Epub2MissingSpineToc,
+            ImportError::UnsupportedEpub,
+        ),
+        (
+            "epub2-truncated-ncx.epub",
+            EpubVariant::Epub2TruncatedNcx,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-unknown-ncx-doctype.epub",
+            EpubVariant::Epub2UnknownNcxDoctype,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-entity.epub",
+            EpubVariant::Epub2NcxEntity,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-out-of-order.epub",
+            EpubVariant::Epub2NcxOutOfOrder,
+            ImportError::InvalidXml,
+        ),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        assert_eq!(import_epub(&source, &cache), Err(expected), "{name}");
+    }
+}
+
+#[test]
+fn enforces_one_xml_depth_limit_for_every_epub_document() {
+    let root = TestRoot::new();
+    let cache = root.0.join("cache");
+
+    let at_limit = root.0.join("epub2-ncx-depth-limit.epub");
+    write_epub(&at_limit, EpubVariant::Epub2NcxDepthLimit);
+    import_epub(&at_limit, &cache).expect("import NCX at the XML depth limit");
+
+    for (name, variant) in [
+        (
+            "container-depth-overflow.epub",
+            EpubVariant::ContainerDepthOverflow,
+        ),
+        (
+            "package-depth-overflow.epub",
+            EpubVariant::PackageDepthOverflow,
+        ),
+        (
+            "navigation-depth-overflow.epub",
+            EpubVariant::NavigationDepthOverflow,
+        ),
+        (
+            "epub2-ncx-depth-overflow.epub",
+            EpubVariant::Epub2NcxDepthOverflow,
+        ),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        assert_eq!(import_epub(&source, &cache), Err(ImportError::InvalidXml));
+    }
+}
+
+#[test]
+fn accepts_only_ordered_ncx_root_structure_and_first_usable_label() {
+    let root = TestRoot::new();
+
+    let ignored = root.0.join("epub2-ncx-ignored-root-content.epub");
+    write_epub(&ignored, EpubVariant::Epub2NcxIgnoredRootContent);
+    import_epub(&ignored, root.0.join("ignored-cache"))
+        .expect("ignore bounded NCX docAuthor, pageList, and navList");
+
+    let alternate = root.0.join("epub2-ncx-alternate-label.epub");
+    write_epub(&alternate, EpubVariant::Epub2NcxAlternateLabel);
+    let imported = import_epub(&alternate, root.0.join("alternate-cache"))
+        .expect("use the first NCX navLabel with text");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(manifest["toc"][0]["label"], "Part One");
+}
+
+#[test]
+fn rejects_invalid_ncx_structure_labels_identifiers_and_legacy_covers() {
+    let root = TestRoot::new();
+    let cache = root.0.join("cache");
+
+    for (name, variant, expected) in [
+        (
+            "epub2-ncx-missing-head.epub",
+            EpubVariant::Epub2NcxMissingHead,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-duplicate-head.epub",
+            EpubVariant::Epub2NcxDuplicateHead,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-missing-title.epub",
+            EpubVariant::Epub2NcxMissingDocTitle,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-duplicate-title.epub",
+            EpubVariant::Epub2NcxDuplicateDocTitle,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-root-out-of-order.epub",
+            EpubVariant::Epub2NcxRootOutOfOrder,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-unknown-root.epub",
+            EpubVariant::Epub2NcxUnknownRoot,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-missing-cover-item.epub",
+            EpubVariant::Epub2MissingCoverItem,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-unsupported-cover.epub",
+            EpubVariant::Epub2UnsupportedCover,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-utf16-xhtml.epub",
+            EpubVariant::Epub2Utf16Xhtml,
+            ImportError::UnsupportedEpub,
+        ),
+        (
+            "epub2-ncx-duplicate-id.epub",
+            EpubVariant::Epub2NcxDuplicateId,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-duplicate-href.epub",
+            EpubVariant::Epub2NcxDuplicateHref,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-duplicate-play-order.epub",
+            EpubVariant::Epub2NcxDuplicatePlayOrder,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-empty-label.epub",
+            EpubVariant::Epub2NcxEmptyLabel,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-oversize-label.epub",
+            EpubVariant::Epub2NcxOversizeLabel,
+            ImportError::InvalidXml,
+        ),
+        (
+            "epub2-ncx-wrong-namespace.epub",
+            EpubVariant::Epub2NcxWrongNamespace,
+            ImportError::UnsupportedEpub,
+        ),
+        (
+            "epub2-ncx-wrong-version.epub",
+            EpubVariant::Epub2NcxWrongVersion,
+            ImportError::UnsupportedEpub,
+        ),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        assert_eq!(import_epub(&source, &cache), Err(expected), "{name}");
+    }
+}
+
+#[test]
+fn enforces_ncx_toc_item_limit() {
+    let root = TestRoot::new();
+
+    let at_limit = root.0.join("epub2-ncx-toc-limit.epub");
+    write_epub(&at_limit, EpubVariant::Epub2NcxTocLimit);
+    let imported = import_epub(&at_limit, root.0.join("limit-cache"))
+        .expect("import NCX at the TOC item limit");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(manifest["toc"].as_array().expect("toc").len(), 2_000);
+
+    let overflow = root.0.join("epub2-ncx-toc-overflow.epub");
+    write_epub(&overflow, EpubVariant::Epub2NcxTocOverflow);
+    assert_eq!(
+        import_epub(&overflow, root.0.join("overflow-cache")),
+        Err(ImportError::TooManyTocItems)
+    );
+}
+
+#[test]
+#[ignore = "writes the synthetic EPUB2 artifact used by target-platform gates"]
+fn writes_epub2_gate_fixture() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.tmp")
+        .join("epub2-ncx-gate.epub");
+    fs::create_dir_all(path.parent().expect("fixture parent")).expect("create fixture parent");
+    write_epub(&path, EpubVariant::Epub2Ncx);
+    assert!(path.metadata().is_ok_and(|metadata| metadata.len() > 0));
 }
 
 struct TestRoot(PathBuf);
@@ -290,33 +621,146 @@ fn write_epub(path: &Path, variant: EpubVariant) {
             .expect("write encryption marker");
     }
     let container = match variant {
-        EpubVariant::Doctype => br#"<?xml version="1.0"?><!DOCTYPE container><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.as_slice(),
-        EpubVariant::ExtraContainerRoot => br#"<?xml version="1.0"?><extra/><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.as_slice(),
-        EpubVariant::MultipleRootfiles => br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/><rootfile full-path="OEBPS/other.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.as_slice(),
-        _ => br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.as_slice(),
+        EpubVariant::Doctype => br#"<?xml version="1.0"?><!DOCTYPE container><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
+        EpubVariant::ExtraContainerRoot => br#"<?xml version="1.0"?><extra/><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
+        EpubVariant::MultipleRootfiles => br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/><rootfile full-path="OEBPS/other.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
+        EpubVariant::ContainerDepthOverflow => format!(
+            r#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles>{}</container>"#,
+            nested_elements(255, true)
+        )
+        .into_bytes(),
+        _ => br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
     };
-    let package = if matches!(variant, EpubVariant::ExternalReference) {
-        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="https://example.com/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.as_slice()
+    let epub2 = matches!(
+        variant,
+        EpubVariant::Epub2Ncx
+            | EpubVariant::Epub2NcxWithoutDoctype
+            | EpubVariant::Epub2NcxExternalReference
+            | EpubVariant::Epub2NcxExternalLabelMedia
+            | EpubVariant::Epub2NcxTrailingExternalLabelMedia
+            | EpubVariant::Epub2NcxNavMapExternalLabelMedia
+            | EpubVariant::Epub2NcxTraversal
+            | EpubVariant::Epub2MissingSpineToc
+            | EpubVariant::Epub2TruncatedNcx
+            | EpubVariant::Epub2UnknownNcxDoctype
+            | EpubVariant::Epub2NcxEntity
+            | EpubVariant::Epub2NcxOutOfOrder
+            | EpubVariant::Epub2NcxDepthLimit
+            | EpubVariant::Epub2NcxDepthOverflow
+            | EpubVariant::Epub2NcxIgnoredRootContent
+            | EpubVariant::Epub2NcxAlternateLabel
+            | EpubVariant::Epub2NcxMissingHead
+            | EpubVariant::Epub2NcxDuplicateHead
+            | EpubVariant::Epub2NcxMissingDocTitle
+            | EpubVariant::Epub2NcxDuplicateDocTitle
+            | EpubVariant::Epub2NcxRootOutOfOrder
+            | EpubVariant::Epub2NcxUnknownRoot
+            | EpubVariant::Epub2MissingCoverItem
+            | EpubVariant::Epub2UnsupportedCover
+            | EpubVariant::Epub2Utf16Xhtml
+            | EpubVariant::Epub2NcxDuplicateId
+            | EpubVariant::Epub2NcxDuplicateHref
+            | EpubVariant::Epub2NcxDuplicatePlayOrder
+            | EpubVariant::Epub2NcxEmptyLabel
+            | EpubVariant::Epub2NcxOversizeLabel
+            | EpubVariant::Epub2NcxWrongNamespace
+            | EpubVariant::Epub2NcxWrongVersion
+            | EpubVariant::Epub2NcxTocLimit
+            | EpubVariant::Epub2NcxTocOverflow
+    );
+    let package = if epub2 {
+        epub2_package(variant)
+    } else if matches!(variant, EpubVariant::PackageDepthOverflow) {
+        format!(
+            r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine>{}</package>"#,
+            nested_elements(255, true)
+        )
+        .into_bytes()
+    } else if matches!(variant, EpubVariant::ExternalReference) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="https://example.com/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.to_vec()
     } else if matches!(variant, EpubVariant::ExtraPackageRoot) {
-        br#"<?xml version="1.0"?><extra/><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.as_slice()
+        br#"<?xml version="1.0"?><extra/><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.to_vec()
     } else if matches!(variant, EpubVariant::ExtensionlessXhtml) {
-        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title>Example Book</dc:title></metadata><manifest><item id="nav" href="nav" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one" media-type="application/xhtml+xml"/><item id="two" href="text/two" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.as_slice()
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title>Example Book</dc:title></metadata><manifest><item id="nav" href="nav" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one" media-type="application/xhtml+xml"/><item id="two" href="text/two" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
     } else {
-        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title> Example   Book </dc:title><dc:creator>Example Author</dc:creator></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"></item><item id="css" href="styles/book.css" media-type="text/css"/><item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"></itemref></spine></package>"#.as_slice()
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title> Example   Book </dc:title><dc:creator>Example Author</dc:creator></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"></item><item id="css" href="styles/book.css" media-type="text/css"/><item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"></itemref></spine></package>"#.to_vec()
     };
-    let navigation = if matches!(variant, EpubVariant::TruncatedNavigation) {
-        br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One"#.as_slice()
+    let navigation = if matches!(variant, EpubVariant::Epub2NcxWithoutDoctype) {
+        br#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navPoint id="one"><navLabel><text>One</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxExternalReference) {
+        br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="1"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navPoint id="one" playOrder="1"><navLabel><text>One</text></navLabel><content src="https://example.com/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxExternalLabelMedia) {
+        br#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="fixture"/></head><docTitle><text>Fixture</text></docTitle><navMap><navPoint id="one"><navLabel><audio src="https://example.com/label.mp3"/></navLabel><navLabel><text>One</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxTrailingExternalLabelMedia) {
+        br#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="fixture"/></head><docTitle><text>Fixture</text></docTitle><navMap><navPoint id="one"><navLabel><text>One</text></navLabel><navLabel><img src="https://example.com/label.png"/></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxNavMapExternalLabelMedia) {
+        br#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="fixture"/></head><docTitle><text>Fixture</text></docTitle><navMap><navLabel><audio src="https://example.com/map.mp3"/></navLabel><navPoint id="one"><navLabel><text>One</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxTraversal) {
+        br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="1"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navPoint id="one" playOrder="1"><navLabel><text>One</text></navLabel><content src="../../escape.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2TruncatedNcx) {
+        br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="1"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navPoint id="one" playOrder="1"><navLabel><text>One"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2UnknownNcxDoctype) {
+        br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//UNKNOWN//DTD NCX 1.0//EN" "https://example.com/unknown.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="1"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navPoint id="one" playOrder="1"><navLabel><text>One</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxEntity) {
+        br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd" [<!ENTITY injected "Injected label">]><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="1"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navPoint id="one" playOrder="1"><navLabel><text>&injected;</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxOutOfOrder) {
+        br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><navMap><navPoint id="one" playOrder="1"><content src="text/one.xhtml"/><navLabel><text>One</text></navLabel></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2NcxDepthLimit) {
+        format!(
+            r#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="fixture"/></head><docTitle><text>Fixture</text></docTitle><docAuthor>{}</docAuthor><navMap><navPoint id="one"><navLabel><text>One</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#,
+            nested_elements(253, true)
+        )
+        .into_bytes()
+    } else if matches!(variant, EpubVariant::Epub2NcxDepthOverflow) {
+        format!(
+            r#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="fixture"/></head><docTitle><text>Fixture</text></docTitle><docAuthor>{}</docAuthor><navMap><navPoint id="one"><navLabel><text>One</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#,
+            nested_elements(254, true)
+        )
+        .into_bytes()
+    } else if matches!(
+        variant,
+        EpubVariant::Epub2NcxIgnoredRootContent
+            | EpubVariant::Epub2NcxAlternateLabel
+            | EpubVariant::Epub2NcxMissingHead
+            | EpubVariant::Epub2NcxDuplicateHead
+            | EpubVariant::Epub2NcxMissingDocTitle
+            | EpubVariant::Epub2NcxDuplicateDocTitle
+            | EpubVariant::Epub2NcxRootOutOfOrder
+            | EpubVariant::Epub2NcxUnknownRoot
+            | EpubVariant::Epub2NcxDuplicateId
+            | EpubVariant::Epub2NcxDuplicateHref
+            | EpubVariant::Epub2NcxDuplicatePlayOrder
+            | EpubVariant::Epub2NcxEmptyLabel
+            | EpubVariant::Epub2NcxOversizeLabel
+            | EpubVariant::Epub2NcxWrongNamespace
+            | EpubVariant::Epub2NcxWrongVersion
+            | EpubVariant::Epub2NcxTocLimit
+            | EpubVariant::Epub2NcxTocOverflow
+    ) {
+        epub2_navigation_case(variant)
+    } else if epub2 {
+        br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="2"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navInfo><text>Navigation information</text></navInfo><navLabel><text>Table of Contents</text></navLabel><navPoint id="one" playOrder="1"><navLabel xml:lang="en"><text> Part One </text></navLabel><navLabel xml:lang="zh"><text>Ignored alternate</text></navLabel><content src="text/one.xhtml"/><navPoint id="two" playOrder="2"><navLabel><text>Nested Two</text></navLabel><content src="text/two.xhtml#start"/></navPoint></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::NavigationDepthOverflow) {
+        format!(
+            r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li></ol></nav>{}</body></html>"#,
+            nested_elements(254, true)
+        )
+        .into_bytes()
+    } else if matches!(variant, EpubVariant::TruncatedNavigation) {
+        br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One"#.to_vec()
     } else if matches!(variant, EpubVariant::InvalidNavigationDoctype) {
-        br#"<?xml version="1.0"?><!DOCTYPE svg><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li></ol></nav></body></html>"#.as_slice()
+        br#"<?xml version="1.0"?><!DOCTYPE svg><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li></ol></nav></body></html>"#.to_vec()
     } else if matches!(variant, EpubVariant::DuplicateNavigationDoctype) {
-        br#"<?xml version="1.0"?><!DOCTYPE html><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li></ol></nav></body></html>"#.as_slice()
+        br#"<?xml version="1.0"?><!DOCTYPE html><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li></ol></nav></body></html>"#.to_vec()
     } else if matches!(variant, EpubVariant::ExtensionlessXhtml) {
-        br#"<?xml version="1.0"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one">One</a></li><li><a href="text/two#start">Two</a></li></ol></nav></body></html>"#.as_slice()
+        br#"<?xml version="1.0"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one">One</a></li><li><a href="text/two#start">Two</a></li></ol></nav></body></html>"#.to_vec()
     } else {
-        br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li><li><a href="text/two.xhtml#start"><span>Two</span></a></li></ol></nav></body></html>"#.as_slice()
+        br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li><li><a href="text/two.xhtml#start"><span>Two</span></a></li></ol></nav></body></html>"#.to_vec()
     };
     let extensionless = matches!(variant, EpubVariant::ExtensionlessXhtml);
-    let nav_path = if extensionless {
+    let nav_path = if epub2 {
+        "OEBPS/toc.ncx"
+    } else if extensionless {
         "OEBPS/nav"
     } else {
         "OEBPS/nav.xhtml"
@@ -331,24 +775,33 @@ fn write_epub(path: &Path, variant: EpubVariant) {
     } else {
         "OEBPS/text/two.xhtml"
     };
+    let one = if matches!(variant, EpubVariant::Epub2Utf16Xhtml) {
+        let mut bytes = vec![0xff, 0xfe];
+        for unit in r#"<?xml version="1.0" encoding="UTF-16"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>unsupported</p></body></html>"#.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        bytes
+    } else if epub2 {
+        br#"<?xml version="1.0"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title><link rel="stylesheet" type="text/css" href="../styles/book.css"/></head><body><p>fixture-body-one-7cb4</p></body></html>"#.to_vec()
+    } else {
+        br#"<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>"#.to_vec()
+    };
+    let two = if epub2 {
+        br#"<?xml version="1.0"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head><body><p id="start">fixture-body-two-7cb4</p></body></html>"#.to_vec()
+    } else {
+        br#"<html xmlns="http://www.w3.org/1999/xhtml"><body id="start">Two</body></html>"#.to_vec()
+    };
     for (name, bytes) in [
-        ("META-INF/container.xml", container),
-        ("OEBPS/book.opf", package),
-        (nav_path, navigation),
-        (
-            one_path,
-            br#"<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>"#.as_slice(),
-        ),
-        (
-            two_path,
-            br#"<html xmlns="http://www.w3.org/1999/xhtml"><body id="start">Two</body></html>"#
-                .as_slice(),
-        ),
+        ("META-INF/container.xml", container.as_slice()),
+        ("OEBPS/book.opf", package.as_slice()),
+        (nav_path, navigation.as_slice()),
+        (one_path, one.as_slice()),
+        (two_path, two.as_slice()),
         (
             "OEBPS/styles/book.css",
             b"body { color: black; }".as_slice(),
         ),
-        ("OEBPS/images/cover.png", b"test-png".as_slice()),
+        ("OEBPS/images/cover.png", PNG_1X1),
     ] {
         archive.start_file(name, stored).expect("start epub member");
         archive.write_all(bytes).expect("write epub member");
@@ -360,4 +813,123 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         archive.write_all(b"changed").expect("write changed member");
     }
     archive.finish().expect("finish epub");
+}
+
+fn epub2_package(variant: EpubVariant) -> Vec<u8> {
+    let mut package = r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="book-id" version="2.0"><metadata><dc:title> Example   EPUB2 </dc:title><dc:creator>Legacy Author</dc:creator><dc:identifier id="book-id">urn:uuid:00000000-0000-0000-0000-000000000002</dc:identifier><dc:language>en</dc:language><meta name="cover" content="cover"/></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/><item id="cover" href="images/cover.png" media-type="image/png"/></manifest><spine toc="ncx"><itemref idref="one"/><itemref idref="two"/></spine><guide><reference type="text" title="Start" href="text/one.xhtml"/></guide></package>"#.to_owned();
+    match variant {
+        EpubVariant::Epub2MissingSpineToc => {
+            package = package.replace("<spine toc=\"ncx\">", "<spine>");
+        }
+        EpubVariant::Epub2MissingCoverItem => {
+            package = package.replace("content=\"cover\"", "content=\"missing\"");
+        }
+        EpubVariant::Epub2UnsupportedCover => {
+            package = package.replace("content=\"cover\"", "content=\"css\"");
+        }
+        _ => {}
+    }
+    package.into_bytes()
+}
+
+fn epub2_navigation_case(variant: EpubVariant) -> Vec<u8> {
+    if matches!(
+        variant,
+        EpubVariant::Epub2NcxTocLimit | EpubVariant::Epub2NcxTocOverflow
+    ) {
+        let count = if matches!(variant, EpubVariant::Epub2NcxTocLimit) {
+            2_000
+        } else {
+            2_001
+        };
+        let mut points = String::new();
+        for index in 1..=count {
+            points.push_str(&format!(
+                r#"<navPoint id="point-{index}" playOrder="{index}"><navLabel><text>Point {index}</text></navLabel><content src="text/one.xhtml#point-{index}"/></navPoint>"#
+            ));
+        }
+        return format!(
+            r#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="fixture"/></head><docTitle><text>Fixture</text></docTitle><navMap>{points}</navMap></ncx>"#
+        )
+        .into_bytes();
+    }
+
+    const HEAD: &str = r#"<head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="2"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head>"#;
+    const TITLE: &str = "<docTitle><text>Example EPUB2</text></docTitle>";
+    const LABELS: &str = r#"<navLabel xml:lang="en"><text> Part One </text></navLabel><navLabel xml:lang="zh"><text>Ignored alternate</text></navLabel>"#;
+    let mut navigation = format!(
+        r#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">{HEAD}{TITLE}<navMap><navPoint id="one" playOrder="1">{LABELS}<content src="text/one.xhtml"/><navPoint id="two" playOrder="2"><navLabel><text>Nested Two</text></navLabel><content src="text/two.xhtml#start"/></navPoint></navPoint></navMap></ncx>"#
+    );
+    match variant {
+        EpubVariant::Epub2NcxIgnoredRootContent => {
+            navigation = navigation
+                .replace(
+                    TITLE,
+                    &format!("{TITLE}<docAuthor><text>Ignored author</text></docAuthor>"),
+                )
+                .replace(
+                    "</navMap>",
+                    r#"</navMap><pageList><navLabel><text>Pages</text></navLabel><pageTarget id="page-1" value="1" type="normal" playOrder="3"><navLabel><text>1</text></navLabel><content src="text/one.xhtml"/></pageTarget></pageList><navList class="other"><navLabel><text>Other</text></navLabel><navTarget id="other-1" playOrder="4"><navLabel><text>Other</text></navLabel><content src="text/two.xhtml"/></navTarget></navList>"#,
+                );
+        }
+        EpubVariant::Epub2NcxAlternateLabel => {
+            navigation = navigation.replace(
+                LABELS,
+                r#"<navLabel><text> </text></navLabel><navLabel><text>Part One</text></navLabel>"#,
+            );
+        }
+        EpubVariant::Epub2NcxMissingHead => navigation = navigation.replace(HEAD, ""),
+        EpubVariant::Epub2NcxDuplicateHead => {
+            navigation = navigation.replace(HEAD, &format!("{HEAD}{HEAD}"));
+        }
+        EpubVariant::Epub2NcxMissingDocTitle => navigation = navigation.replace(TITLE, ""),
+        EpubVariant::Epub2NcxDuplicateDocTitle => {
+            navigation = navigation.replace(TITLE, &format!("{TITLE}{TITLE}"));
+        }
+        EpubVariant::Epub2NcxRootOutOfOrder => {
+            navigation = navigation
+                .replace(TITLE, "")
+                .replace("</navMap>", &format!("</navMap>{TITLE}"));
+        }
+        EpubVariant::Epub2NcxUnknownRoot => {
+            navigation = navigation.replace(TITLE, &format!("{TITLE}<unknown/>"));
+        }
+        EpubVariant::Epub2NcxDuplicateId => {
+            navigation = navigation.replace("id=\"two\"", "id=\"one\"");
+        }
+        EpubVariant::Epub2NcxDuplicateHref => {
+            navigation =
+                navigation.replace("src=\"text/two.xhtml#start\"", "src=\"text/one.xhtml\"");
+        }
+        EpubVariant::Epub2NcxDuplicatePlayOrder => {
+            navigation = navigation.replace("playOrder=\"2\"", "playOrder=\"1\"");
+        }
+        EpubVariant::Epub2NcxEmptyLabel => {
+            navigation = navigation.replace(LABELS, "<navLabel><text>   </text></navLabel>");
+        }
+        EpubVariant::Epub2NcxOversizeLabel => {
+            navigation = navigation.replace(
+                LABELS,
+                &format!("<navLabel><text>{}</text></navLabel>", "x".repeat(257)),
+            );
+        }
+        EpubVariant::Epub2NcxWrongNamespace => {
+            navigation =
+                navigation.replace("http://www.daisy.org/z3986/2005/ncx/", "urn:invalid:ncx");
+        }
+        EpubVariant::Epub2NcxWrongVersion => {
+            navigation = navigation.replace("version=\"2005-1\"", "version=\"2005-2\"");
+        }
+        _ => unreachable!("EPUB2 navigation case"),
+    }
+    navigation.into_bytes()
+}
+
+fn nested_elements(count: usize, empty_leaf: bool) -> String {
+    let mut xml = "<x>".repeat(count);
+    if empty_leaf {
+        xml.push_str("<x/>");
+    }
+    xml.push_str(&"</x>".repeat(count));
+    xml
 }

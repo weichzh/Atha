@@ -4,7 +4,8 @@
 param(
     [switch]$SkipBuild,
     [string]$EpubPath,
-    [switch]$CleanAppData
+    [switch]$CleanAppData,
+    [switch]$VerifyEpub2NcxFixture
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,10 +16,15 @@ $serial = 'emulator-5554'
 $avdName = 'Atha_API_35_16K'
 $package = 'com.atha.reader'
 $documentsPackage = 'com.google.android.documentsui'
+$epub2NcxFixtureSha256 = '6991bfb8edd895a44cb5b0e9066805ee6cea030f47856f3607e8ee2cf4be5887'
 $resolvedEpub = $null
+$epubSha256 = $null
 
 if ($CleanAppData -and [string]::IsNullOrWhiteSpace($EpubPath)) {
     throw '-CleanAppData requires -EpubPath so a clean reader slice is verified immediately.'
+}
+if ($VerifyEpub2NcxFixture -and [string]::IsNullOrWhiteSpace($EpubPath)) {
+    throw '-VerifyEpub2NcxFixture requires -EpubPath.'
 }
 if (-not [string]::IsNullOrWhiteSpace($EpubPath)) {
     $resolvedEpub = (Resolve-Path -LiteralPath $EpubPath).Path
@@ -30,6 +36,10 @@ if (-not [string]::IsNullOrWhiteSpace($EpubPath)) {
     }
     if ((Get-Item -LiteralPath $resolvedEpub).Length -eq 0) {
         throw 'EpubPath must not be empty.'
+    }
+    $epubSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedEpub).Hash.ToLowerInvariant()
+    if ($VerifyEpub2NcxFixture -and $epubSha256 -ne $epub2NcxFixtureSha256) {
+        throw 'VerifyEpub2NcxFixture requires the generated and EPUBCheck-verified fixture.'
     }
 }
 
@@ -179,6 +189,52 @@ function Invoke-UiNode {
     $x = ([int]$bounds.Groups[1].Value + [int]$bounds.Groups[3].Value) / 2
     $y = ([int]$bounds.Groups[2].Value + [int]$bounds.Groups[4].Value) / 2
     Invoke-Adb shell input tap ([int]$x) ([int]$y) | Out-Null
+}
+
+function Get-ReaderViewportState {
+    $hierarchy = Get-UiHierarchy
+    $webviews = @(
+        $hierarchy.SelectNodes("//node[@package='$package' and @class='android.webkit.WebView']") |
+            Where-Object { [string]$_.text -match '^Atha Reader — section \d+ / \d+ — page \d+ / \d+$' }
+    )
+    if ($webviews.Count -ne 1) { throw 'Android reader WebView is not uniquely observable.' }
+    $position = [regex]::Match(
+        [string]$webviews[0].text,
+        '^Atha Reader — section (\d+) / (\d+) — page (\d+) / (\d+)$'
+    )
+    if (-not $position.Success) { throw 'Android reader position is not observable.' }
+    [pscustomobject]@{
+        Section = [int]$position.Groups[1].Value
+        Sections = [int]$position.Groups[2].Value
+        Page = [int]$position.Groups[3].Value
+        Pages = [int]$position.Groups[4].Value
+    }
+}
+
+function Wait-ReaderViewportState {
+    param(
+        [Parameter(Mandatory)][int]$Section,
+        [int]$Page = 0,
+        [ValidateRange(1, 120)][int]$TimeoutSeconds = 20
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            $state = Get-ReaderViewportState
+            if (
+                $state.Section -eq $Section -and
+                ($Page -eq 0 -or $state.Page -eq $Page)
+            ) {
+                return $state
+            }
+        }
+        catch {
+            # UIAutomator can return a transient partial WebView tree during section layout.
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Timed out waiting for the requested Android reader location.'
 }
 
 function Start-AthaReader {
@@ -348,11 +404,44 @@ if ($null -ne $resolvedEpub) {
     $readyMs = Wait-AppLog -ProcessId $firstLaunch.ProcessId -Pattern 'atha::reader.*event=reader_ready'
     Assert-AppHealthy -ExpectedProcessId $firstLaunch.ProcessId
 
+    $afterDirectoryJump = $null
+    $directoryJumpResult = 'not-requested'
+    $restartLocatorResult = 'not-requested'
+    if ($VerifyEpub2NcxFixture) {
+        $beforeDirectoryJump = Get-ReaderViewportState
+        if ($beforeDirectoryJump.Section -ne 1 -or $beforeDirectoryJump.Sections -ne 2) {
+            throw 'The Android EPUB2 fixture must open at section 1 of 2.'
+        }
+        $readerPageXPath = "//node[@package='$package' and @text='阅读页']"
+        $directoryXPath = "//node[@package='$package' and @text='目录' and @clickable='true']"
+        $firstDirectoryItemXPath = "(//node[@package='$package' and @class='android.widget.Button' and @clickable='true' and ancestor::node[@text='章节和书签']])[1]"
+        $secondDirectoryItemXPath = "(//node[@package='$package' and @class='android.widget.Button' and @clickable='true' and ancestor::node[@text='章节和书签']])[2]"
+        Invoke-UiNode -XPath $readerPageXPath
+        Invoke-UiNode -XPath $directoryXPath
+        $firstDirectoryItem = Wait-UiNode -XPath $firstDirectoryItemXPath
+        $secondDirectoryItem = Wait-UiNode -XPath $secondDirectoryItemXPath
+        $targetChapter = ([string]$secondDirectoryItem.text).Trim()
+        if (
+            [string]::IsNullOrWhiteSpace($targetChapter) -or
+            $targetChapter -eq ([string]$firstDirectoryItem.text).Trim()
+        ) {
+            throw 'The Android EPUB2 fixture must expose a distinct second directory item.'
+        }
+        Invoke-UiNode -XPath $secondDirectoryItemXPath
+        $afterDirectoryJump = Wait-ReaderViewportState -Section 2
+        $directoryJumpResult = 'passed'
+        Assert-AppHealthy -ExpectedProcessId $firstLaunch.ProcessId
+    }
+
     $pickerCache = (Invoke-Adb shell run-as $package ls '-A' 'cache/Picker' | Out-String).Trim()
     if ($pickerCache.Length -ne 0) { throw 'Android picker cache was not cleaned after EPUB import.' }
     $athaLogs = (Invoke-Adb logcat '-d' "--pid=$($firstLaunch.ProcessId)" '-v' 'brief' | Out-String)
-    if ($athaLogs -match '(?i)content://|/sdcard/|Atha-validation\.epub') {
-        throw 'Android application logs exposed picker URI or file details.'
+    $privateLogPattern = '(?i)content://|/sdcard/|Atha-validation\.epub'
+    if ($VerifyEpub2NcxFixture) {
+        $privateLogPattern += '|Example EPUB2|Legacy Author|Part One|Nested Two|fixture-body-(?:one|two)-7cb4'
+    }
+    if ($athaLogs -match $privateLogPattern) {
+        throw 'Android application logs exposed picker or book content details.'
     }
 
     $secondLaunch = Start-AthaReader
@@ -362,7 +451,15 @@ if ($null -ne $resolvedEpub) {
     $reopenMs = Wait-AppLog -ProcessId $secondLaunch.ProcessId -Pattern 'atha::library.*operation=open outcome=ok'
     $secondStableMs = Wait-AppLog -ProcessId $secondLaunch.ProcessId -Pattern 'atha::reader.*event=reader_metric stage=first_stable'
     $secondReadyMs = Wait-AppLog -ProcessId $secondLaunch.ProcessId -Pattern 'atha::reader.*event=reader_ready'
+    if ($VerifyEpub2NcxFixture) {
+        $null = Wait-ReaderViewportState -Section 2 -Page $afterDirectoryJump.Page
+        $restartLocatorResult = 'passed'
+    }
     Assert-AppHealthy -ExpectedProcessId $secondLaunch.ProcessId
+    $secondAthaLogs = (Invoke-Adb logcat '-d' "--pid=$($secondLaunch.ProcessId)" '-v' 'brief' | Out-String)
+    if ($secondAthaLogs -match $privateLogPattern) {
+        throw 'Restarted Android application logs exposed picker or book content details.'
+    }
 
     $evidenceDirectory = Join-Path $repoRoot 'artifacts\local\android'
     New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
@@ -391,6 +488,7 @@ if ($null -ne $resolvedEpub) {
             startup_wait_ms = [long]$firstLaunch.StartupMs
         }
         epub = [ordered]@{
+            fixture_sha256 = if ($VerifyEpub2NcxFixture) { $epubSha256 } else { 'not-requested' }
             system_picker = 'passed'
             import = 'passed'
             import_wait_ms = [long]$importMs
@@ -400,7 +498,9 @@ if ($null -ne $resolvedEpub) {
             first_stable_wait_ms = [long]$firstStableMs
             reader_ready = 'passed'
             reader_ready_wait_ms = [long]$readyMs
+            directory_second_item_jump = $directoryJumpResult
             restart_shelf_persistence = 'passed'
+            restart_locator_persistence = $restartLocatorResult
             reopen = 'passed'
             reopen_wait_ms = [long]$reopenMs
             restart_first_stable_wait_ms = [long]$secondStableMs
@@ -415,7 +515,12 @@ if ($null -ne $resolvedEpub) {
         }
     }
     $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceDirectory 'reader-gate-epub.json') -Encoding utf8NoBOM
-    Write-Host 'Android EPUB picker, open, reader-ready, restart, and persistence slice passed; structured evidence recorded.'
+    if ($VerifyEpub2NcxFixture) {
+        Write-Host 'Android EPUB picker, open, directory jump, reader-ready, restart, and location persistence slice passed; structured evidence recorded.'
+    }
+    else {
+        Write-Host 'Android EPUB picker, open, reader-ready, restart, and shelf persistence slice passed; structured evidence recorded.'
+    }
 }
 
 Write-Host "Android reader gate passed: $avdName, API $actualApi, $actualAbi, ${pageSize}-byte pages, WebView $webviewPackage $webviewVersion."

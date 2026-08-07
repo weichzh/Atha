@@ -215,7 +215,7 @@ export function createPagination({
     book.style.transform = `translateX(${-state.page * step}px)`;
     const label = `${state.page + 1} / ${state.pages}`;
     position.textContent = label;
-    document.title = `Atha Reader — ${label}`;
+    document.title = `Atha Reader — section ${document.documentElement.dataset.sectionPosition} — page ${label}`;
   }
 
   function layout() {

@@ -1,4 +1,4 @@
-//! Import one constrained EPUB 3 rendition into the reader manifest contract.
+//! Import one constrained EPUB 2 or EPUB 3 rendition into the reader manifest contract.
 
 mod archive;
 mod package;
@@ -142,6 +142,12 @@ fn build_import(source: &Path, staging: &Path, content_version: &str) -> Result<
     for path in &plan.files {
         archive::copy(&mut epub, &index, path, staging, &mut extracted)?;
     }
+    for path in plan.section_paths() {
+        let bytes = fs::read(staging.join(path)).map_err(|_| ImportError::WriteFailed)?;
+        if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
+            return Err(ImportError::UnsupportedEpub);
+        }
+    }
     let mut manifest =
         File::create(staging.join(READER_MANIFEST)).map_err(|_| ImportError::WriteFailed)?;
     serde_json::to_writer_pretty(&mut manifest, &plan.manifest)
@@ -226,11 +232,27 @@ fn publish(staging: &Path, target: &Path, content_version: &str) -> Result<(), I
     if target.exists() {
         fs::remove_dir_all(target).map_err(|_| ImportError::WriteFailed)?;
     }
-    match fs::rename(staging, target) {
+    let mut renamed = fs::rename(staging, target);
+    // ponytail: bounded retry covers transient Windows file sharing; use a native move API only if 40 ms proves insufficient.
+    for _ in 0..4 {
+        if !matches!(&renamed, Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        renamed = fs::rename(staging, target);
+    }
+    match renamed {
         Ok(()) => Ok(()),
         Err(_) if complete_cache(target, content_version) => {
             fs::remove_dir_all(staging).map_err(|_| ImportError::WriteFailed)
         }
-        Err(_) => Err(ImportError::WriteFailed),
+        Err(error) => {
+            log::warn!(
+                target: "atha::reader",
+                "operation=import stage=publish-rename outcome=failed code=epub-import-write-failed io_kind={:?}",
+                error.kind()
+            );
+            Err(ImportError::WriteFailed)
+        }
     }
 }

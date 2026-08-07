@@ -2,7 +2,7 @@
 
 ## 仓库状态
 
-当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核；Windows WebView2 是稳定基线，Android 已有同一产品壳与 reader runtime 的 EPUB 功能纵切，直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
+当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3 与 EPUB2 / NCX 子集导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核；Windows WebView2 是稳定基线，Android 已有同一产品壳与 reader runtime 的 EPUB 功能纵切，EPUB2 的系统 picker、目录跳转与位置恢复已通过正式模拟器入口，直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
 
 ## 顶层结构
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
-| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 导入、本地书架、消息数据库与阅读遥测校验 | 已实现 |
+| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 与 EPUB2 / NCX 子集导入、本地书架、消息数据库与阅读遥测校验 | 已验证 |
 | `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry、固定字段平台日志与 protocol adapter | 已验证 |
 | `reader/app/src-tauri/src/platform_file.rs` | 普通路径与 Android SAF content URI 共用的流式 Picker cache bridge；RAII / 启动清理和输入大小边界 | Android 模拟器已验证 |
@@ -58,11 +58,11 @@
 
 - `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；reader manifest 已声明的 section 以 XHTML 返回，因此不依赖源文件扩展名，也不把未声明的无扩展名文件当作 XHTML；
 - schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--epub` 与 `--book-root` 输入互斥，后者再从 `--manifest` 与兼容 `--entry` 二选一；
-- `reader::epub` 的公开 interface 只有 `import_epub`：`mod` 编排内容哈希与原子缓存，`archive` 拥有 ZIP/路径/大小边界，`package` 拥有 container、OPF spine、navigation 和 schema 1 计划；XHTML 由 OPF media type 判定，navigation 仅额外允许标准 HTML5 DOCTYPE；同一源字节跨路径得到相同缓存根和状态键；
+- `reader::epub` 的公开 interface 只有 `import_epub`：`mod` 编排内容哈希与原子缓存，`archive` 拥有 ZIP/路径/大小边界，`package` 拥有 container、OPF2 / OPF3 spine、navigation 和 schema 1 计划；OPF2 只从 `spine@toc` 找到有界 NCX，把嵌套 `navPoint` 按前序拍平成现有 TOC，OPF3 继续使用唯一 XHTML nav；XHTML 由 OPF media type 判定，同一源字节跨路径得到相同缓存根和状态键；
 - `reader::library::LocalLibrary` 复用 EPUB importer，以内容哈希为身份，用每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`；移除记录不删除导入缓存或阅读状态；
 - `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
-- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式执行当前页优先校验、解码和章节内短期复用；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
+- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式执行当前页优先校验、解码和章节内短期复用；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
 - 十八份页面源码由 Vite 或应用资源协议按固定顺序交付为单个 `atha-reader` runtime，避免为源码分层增加多次请求；浏览器验证服务器使用同一顺序，并对各 module 与拼接后的整体 bundle 运行语法检查；
 - Locator 以内容版本、section id 和 DOM 文本 UTF-16 偏移表示 point/range；R2 range 限于单 section 并检查实际文本边界，无效输入安全回落并留下诊断，页码不作为内容坐标；窗口重排暂时无法测量文字矩形时保留已校验偏移和当前页，错误界面显示稳定代码与阶段而不暴露书籍内容；
 - 上一页和下一页可跨 section；manifest TOC 与已有书签继续共用隐藏的原生 `select` 数据源，壳层把它投影为全屏目录按钮，书签紧随对应章节并通过 Locator 跳转；用户点击章节或书签后等待导航稳定并返回沉浸阅读；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
@@ -121,6 +121,7 @@
 | 产品入口 | `scripts/check-tauri-reader.ps1`、`scripts/check-library-shelf.ps1` | 真实 Windows Tauri / WebView2 本地链路 |
 | 消息与数据 | `scripts/check-message-reading.ps1`、`scripts/check-tauri-reader.ps1` | 真实 Windows Tauri / WebView2 消息闭环，以及本地集成测试、前端构建、Tauri seam 与权限检查 |
 | Android EPUB 纵切 | `scripts/check-android-reader.ps1`；活动 change 记录的消息 SAF opt-in 链路 | API 35 x86_64 16 KiB 模拟器上的构建、安装、冷启动、系统 picker 导入 / 打开 / 重启持久，以及消息 export / backup / restore；不是 ARM 真机性能证据 |
+| EPUB2 / NCX 子集 | `cargo test -p atha-backend --test epub_import`、EPUBCheck 5.3.0、`scripts/check-android-reader.ps1 -VerifyEpub2NcxFixture` | 动态原创 fixture 通过规范 oracle；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证目录跳转和强停后同一 section / page 恢复 |
 | 公式性能 | `scripts/check-reader-formula-performance.ps1` | 固定真实 EPUB 章节的十样本本地 benchmark |
 
 这些结果不是 CI、安装包、生产环境或跨设备证据。源码、依赖、配置或样本变化后，应重新运行受影响的最小入口；只有最终候选才扩展到 required gate。
@@ -131,7 +132,7 @@
 | 类别 | 当前缺口 |
 | --- | --- |
 | 产品回流 | 书架没有文件关联、拖放、分组、排序设置或最近阅读；尚未用日常使用验收确认哪些真的阻塞主循环 |
-| 格式与引用 | 只支持本地 EPUB3；没有 EPUB2 / NCX fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移 |
+| 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；未完成 UTF-16、DTBook、完整 fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移 |
 | 数据与设备 | 没有加密、checkpoint、全应用备份或跨设备同步 |
 | 交付 | 没有 CI、Windows 安装包或签名 Android 发布包；Android 当前只验证 x86_64 debug APK 与模拟器 |
 | 工程结构 | 旧 Wry / Tao host 尚未删除；reader runtime 仍由固定顺序组成单 bundle |
