@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -47,7 +47,7 @@ present
 - [x] command 名、序列化 DTO、稳定错误、capability、数据库和运行行为不变；
 - [x] 消息 gate 双向精确比较 17 个已注册 command 与 `allow-message-commands` 块内的 17 个 permission，并覆盖无尾逗号的最后一项；
 - [x] `docs/codebase/MAP.md` 与三 package workspace、Tauri adapter 的 as-built 事实一致；
-- [ ] 目标检查、中文 Markdown 排版、docs gate、diff 检查与独立 Standards / Spec review 通过。
+- [x] 目标检查、中文 Markdown 排版、docs gate、diff 检查与独立 Standards / Spec review 通过。
 
 ## Files And Steps
 
@@ -85,10 +85,9 @@ present
 
 ## Review
 
-- Standards：初审发现运行拓扑表述、ADR 最小字段和 permission 块解析三个 Blocking，均已修正，待复审。
-- Spec：通过，无 findings。
-- Non-blocking：无。
-- Out-of-scope：快照恢复与旧 host 风险已登记，不在本切片扩项。
+- Standards：最终通过；初审发现的运行拓扑表述、ADR 最小字段和 permission 块解析三个 Blocking 均已关闭。注册 / 授权为 17 / 17，跨块探针正确隔离，重复目标块会拒绝；无 Non-blocking 或 smell。
+- Spec：最终通过；17 个 command 函数体与固定点等价，permission、capability、DTO、错误和运行数据未改；无 Blocking 或 Non-blocking。
+- Out-of-scope：快照恢复与旧 host 风险已登记，未在本切片扩项。
 
 ## Evidence And Residual Risks
 
@@ -97,4 +96,7 @@ present
 - 历史真实目标证据：消息 capability 曾漏授权并在真实 Tauri 链路失败，修复后已进入正式检查；
 - 本地静态证据：`cargo fmt --all --check`、`cargo clippy -p atha-reader-app --all-targets -- -D warnings` 与 PowerShell 语法检查通过；
 - 本地目标证据：`cargo test -p atha-reader-app` 的 3 项测试通过；`check-message-reading.ps1` 通过 16 项消息集成测试、Markdown 测试、Svelte check、production build、3 项 Tauri app 测试与 5 项旧 host 测试；
+- 干净候选证据：提交 `2e35856` 的消息专项与 required `docs` gate 通过；修正初审 findings 后，提交 `92543c1` 的完整消息专项与 required `docs` gate 再次通过；
+- 独立 review：以 `c9397a9` 为固定点，Standards 与 Spec 最终均通过且无未关闭 finding；
+- 证据边界：本 change 的新增证据最高为 Windows 本地测试 / build 与静态检查，没有重新启动真实 Tauri / WebView2 交互链路；上文真实目标证据来自既有验收基线；
 - 残余风险：快照资产的 crash-safe 发布 / 孤儿清理与完整备份 / 恢复仍未实现；旧 Wry/Tao host 与 runtime 清单仍在迁移期并存；TypeScript / Rust DTO 仍人工同步；这些风险必须按 ADR 的独立触发条件处理，不能在本切片顺手扩张。
