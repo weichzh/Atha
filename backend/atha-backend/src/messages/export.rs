@@ -13,9 +13,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 use super::{
     model::{
-        EditionInput, ExportInspection, MessageError, RichTextInput, SnapshotResourceInput,
-        SourceAnchorInput, SourceSnapshotInput, rich_message_content, validate_edition,
-        validate_range_locator, validate_source,
+        EditionInput, ExportInspection, MessageError, SnapshotResourceInput, SourceAnchorInput,
+        SourceSnapshotInput, validate_edition, validate_range_locator, validate_source,
+        validate_stored_revision,
     },
     store::MessageStore,
     util::{decode_hex, encode_hex},
@@ -766,41 +766,13 @@ fn insert_unique_id<'a, const N: usize, T>(
 }
 
 fn validate_export_revision(row: &ExportRevision) -> Result<(), MessageError> {
-    if row.schema != 1 {
-        return Err(MessageError::InvalidExport);
-    }
-    let valid = match (row.kind.as_str(), row.content.get("richText")) {
-        ("source-only", None) => {
-            row.plain_text.is_empty()
-                && row.content
-                    == serde_json::json!({ "schema": 1, "kind": "source-only", "text": "" })
-        }
-        ("text", Some(value)) => serde_json::from_value::<RichTextInput>(value.clone())
-            .map_err(|_| MessageError::InvalidExport)
-            .and_then(|rich| rich_message_content(&rich))
-            .ok()
-            .is_some_and(|content| {
-                content.plain_text == row.plain_text
-                    && serde_json::from_str::<Value>(&content.content_json).ok()
-                        == Some(row.content.clone())
-            }),
-        ("text", None) => {
-            !row.plain_text.trim().is_empty()
-                && row.plain_text.chars().count() <= 8_000
-                && row.content
-                    == serde_json::json!({
-                        "schema": 1,
-                        "kind": "text",
-                        "text": row.plain_text,
-                    })
-        }
-        _ => false,
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(MessageError::InvalidExport)
-    }
+    validate_stored_revision(
+        i64::from(row.schema),
+        &row.kind,
+        &row.content,
+        &row.plain_text,
+    )
+    .map_err(|_| MessageError::InvalidExport)
 }
 
 fn validate_snapshot_payloads(

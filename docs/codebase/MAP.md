@@ -20,6 +20,7 @@
 | `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry 与 protocol adapter | 已验证 |
 | `reader/app/src-tauri/src/message_commands.rs` | 消息 IPC adapter；统一阅读路由校验、DTO 转发、稳定错误和原生导出 dialog | 已验证 |
+| `reader/app/src-tauri/src/message_maintenance.rs` | 全库消息维护 IPC adapter；统一资料库根路由、备份 / 恢复 dialog 与 blocking worker | 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、默认样式、原生阅读偏好、书签、消息投影、搜索面板、对话浮层与内容 dialog | 已实现 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、分页、诊断、benchmark 和页面组合入口 | 已实现 |
@@ -37,7 +38,7 @@
 | `scripts/check-reader-wheel.ps1` | 真实浏览器媒体滚轮、连续离散输入接受率与输入到稳定页 P95 快速检查 | 已通过 |
 | `scripts/check-reader-gate.ps1` | 组合四样本、大书搜索、进程树内存、强杀恢复和固定 P95 性能门槛 | M2 R8 已通过 |
 | `scripts/check-tauri-reader.ps1` | Svelte production build、workspace Rust 检查、Tauri build、普通 EPUB 消息模式启动、导入探针与性能门槛 | 已通过 |
-| `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build 与 Tauri/host 测试 | 已通过 |
+| `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build、Tauri/host 测试及 command / permission 映射 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 无参数启动与移动书架 UI | M4 已通过 |
 | `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
@@ -53,7 +54,7 @@
 - 版本 `0.1.0`、edition 2024、Rust `1.97.1` 和禁止 unsafe 的 lint 由 workspace 统一；
 - 后端 crate 使用 `zip`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB，并用 `dom_query` 与锁定的 `rusqlite 0.40.1` bundled SQLite 实现严格快照校验和消息事实；没有 repository trait 或多格式工厂；
 - 根锁文件包含正式后端导入、消息数据库与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
-- `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移和自包含导出。
+- `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移、自包含交换导出及 schema 1 完整备份 / 恢复。
 
 ### HTML 阅读切片
 
@@ -73,7 +74,7 @@
 - Windows 窗口与壳层控件使用系统逻辑像素，默认内部尺寸为 430 × 820，最小为 360 × 640，可自由调整和最大化；窗口变化经 Navigation 队列恢复 Locator；
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
 - Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，Vite 直接拼接十八份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
-- Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle 与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目，不返回源路径或内容；`message_commands` adapter 统一校验当前阅读窗口、转发受限 DTO 并返回稳定错误；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测仍复用后端解析和共享 diagnostics；消息专项检查双向比较 handler 注册与 permission 集合，最后一个无尾逗号 command 也必须纳入；
+- Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle 与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目，不返回源路径或内容；`message_commands` adapter 统一校验当前阅读窗口并转发受限 DTO，`message_maintenance` adapter 只接受资料库根路由并在 blocking worker 执行全库备份 / 恢复；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测仍复用后端解析和共享 diagnostics；消息专项检查精确核对 handler 注册与 permission；
 
 ## 已实现能力
 
@@ -146,7 +147,7 @@
 - M4 本地书架检查在 Windows 本地通过：Agent Browser 经 WebView2 调试端口确认无参数 Tauri 的规范应用根和真实书架 DOM，避免窗口标题对 `about:blank` 的假阳性；390 × 840 和 960 × 720 书架无横向溢出，后端验证内容哈希去重、耐久重开、受限封面、移除保留缓存与损坏记录拒绝；六本演示书架仅用于布局检查；
 - M4 完整困难样本回归与 Tauri 产品检查通过；书架启动修复后基准 `1785803101324-25568` 的 P95 为冷启动 749.057ms、首稳 157.500ms、热开 21.000ms、翻页 6.700ms、字号重排 48.600ms，均低于既有门槛；
 - 选中文字切片的四样本正式回归通过：真实鼠标与浏览器自检覆盖复制、标注、笔记、触摸/键盘入口、失效选区撤销、重排/重载恢复和列表跳转；Tauri 基准 `1785818772540-28968` 的 P95 为冷启动 559.453ms、首稳 142.400ms、热开 20.900ms、翻页 10.000ms、字号重排 48.500ms，均低于既有门槛；
-- 完整消息后端 interface 集成测试 17/17 通过，覆盖迁移、事务、富文本 allowlist 与纯文本投影、修订冲突、关系、FTS、快照资源、资产中止恢复与链接边界、旧标注迁移、自包含导出及同一 Edition 重开恢复；Markdown 双向转换测试、Svelte check、production build 与 Tauri command seam 测试通过；
+- 完整消息后端 interface 集成测试 19/19 通过，覆盖迁移、事务、富文本 allowlist 与纯文本投影、修订冲突、关系、FTS、快照资源、资产中止恢复与链接边界、旧标注迁移、自包含导出、WAL 完整备份、资产修复、伪造 schema / 活动快照内容拒绝、损坏 / busy 恢复回滚及同一 Edition 重开恢复；Markdown 双向转换测试、Svelte check、production build、Tauri 资料库路由与 command permission seam 测试通过；
 - 消息实现后的四样本正式 runner、书架与 Tauri 产品回归均通过；基准 `1785859567155-20612` 的 P95 为冷启动 739.307ms、首稳 148.700ms、热开 27.300ms、翻页 31.900ms、字号重排 41.600ms，均低于既有门槛。本轮未做同时间旧代码对照，不能把差异归因于消息改动；
 - 普通 `--epub` 消息模式曾在 manifest 加载前读取 edition 而以 `invalid-manifest` 失败；初始化顺序修复后，真实 Tauri/WebView2 启动检查进入 `pass`，并作为 `scripts/check-tauri-reader.ps1` 固定回归。基准 `1785889633788-21736` 的 P95 为冷启动 724.373ms、首稳 133.500ms、热开 21.500ms、翻页 6.700ms、字号重排 41.700ms，均低于既有门槛；
 - Tauri 主窗口曾因 capability 未启用消息 permission，导致书架打开书籍后创建标注在 IPC 边界被拒绝；现以 `allow-message-commands` 授权全部消息接口，消息检查脚本固定校验 capability 与 command 清单。隔离应用数据下的真实 Tauri/WebView2 已完成“书架打开 → 鼠标选择 → 标注 → 笔记页显示 1 条记录”，未写入用户现有消息数据库；
@@ -161,7 +162,7 @@
 
 ## 已知缺口
 
-- P0 schema 与 10,000 条 SQLite CLI benchmark 仍只是历史对照；正式数据库已有版本化迁移，但尚未建立备份、加密、checkpoint 或跨设备同步；
+- P0 schema 与 10,000 条 SQLite CLI benchmark 仍只是历史对照；正式数据库已有版本化迁移和完整 MessageStore 备份 / 恢复，但尚未建立加密、checkpoint、全应用备份或跨设备同步；
 - 书架仅支持本地 EPUB3 选择、打开和移除；没有文件关联、拖放、分组、排序设置、最近阅读、EPUB2/NCX fallback、多格式来源、跨内容版本 Locator 重锚定或富文本迁移；
 - 没有 CI 或 Windows 安装包；Tauri 当前只验证 debug build，旧 Wry/Tao host 尚未删除；
 - 性能数据未记录设备指纹，也没有跨日期重复运行统计。

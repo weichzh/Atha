@@ -35,6 +35,7 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 mod message_commands;
+mod message_maintenance;
 
 const TAURI_READER_PAGE: &str = "https://tauri.localhost/index.html";
 const TAURI_READER_ORIGIN: &str = "https://tauri.localhost";
@@ -295,6 +296,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             import_library_books,
             open_library_book,
             remove_library_book,
+            message_maintenance::backup_message_store,
+            message_maintenance::restore_message_store,
             message_commands::message_roots,
             message_commands::message_edition_context,
             message_commands::message_conversation,
@@ -421,7 +424,7 @@ fn is_reader_url(url: &str) -> bool {
 }
 
 fn is_app_navigation_url(url: &str) -> bool {
-    url == "https://tauri.localhost/" || is_reader_url(url)
+    message_maintenance::is_library_url(url) || is_reader_url(url)
 }
 
 fn handle_diagnostic_error(

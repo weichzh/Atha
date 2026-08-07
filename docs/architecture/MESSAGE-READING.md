@@ -37,12 +37,19 @@ SQLite 与本地内容寻址资产是消息事实源。产品界面只通过应�
 
 ## 当前实现
 
-- `backend::messages::MessageStore` 隐藏 schema v2 迁移、WAL、外键、FTS5、事务 Outbox、快照资产恢复、旧标注迁移和自包含导出；资源在 SQLite writer lock 内通过同目录临时文件、`sync_all` 和 rename 发布，重开会清理 Atha 临时文件与数据库未引用的规范哈希资产；`Assets` 根必须是实际目录，读取、导出与复用统一拒绝 symlink 等非普通资产；
+- `backend::messages::MessageStore` 隐藏 schema v2 迁移、WAL、外键、FTS5、事务 Outbox、快照资产恢复、旧标注迁移、自包含交换导出及完整备份 / 恢复；资源在 SQLite writer lock 内通过同目录临时文件、`sync_all` 和 rename 发布，重开会清理 Atha 临时文件与数据库未引用的规范哈希资产；`Assets` 根必须是实际目录，读取、导出、备份与复用统一拒绝 symlink 等非普通资产；
 - 阅读内核从已验证 Range 捕获一份候选 Anchor、选区 HTML、生效 CSS、呈现参数和实际引用资源，Tauri command 在写入前再次执行信任边界校验；
 - 首次打开会把旧 localStorage 标注原子、幂等地导入 Message Store；成功后阅读页只从正式根 Message 投影高亮和笔记，不继续双写；
 - 全屏笔记页支持全文与章节筛选、进入对话和导出本书消息；新增或编辑笔记直接打开定位到根消息的半屏底部对话浮层，浮层可拖动调高或进入全屏，并支持回复、编辑、删除、修订、关系回顾、历史快照和跳回；
 - 消息输入器由 Tiptap 承担编辑状态和 JSON 序列化，随换行增高；超过紧凑高度后可展开为全屏编辑器。全屏工具栏分为输入模式与文字格式两层，用户可在可视化编辑和原始 Markdown 之间无损切换；Markdown 只作为临时输入视图，持久化仍是同一份受限 JSON。当前正文 schema 只接收段落、三级以内标题、列表、引用、换行及粗体、斜体和安全链接，不接收任意 HTML；
 - 历史快照在隔离的 Shadow Root 中以 `.book` 容器、存档 CSS、冻结的主题/字号/字体/行距/亮度和内容寻址资源呈现；外部 URL、CSS 子资源、活动内容、事件属性和未登记资源在后端与显示端均拒绝，不在显示时静默修复。
+
+## 交换与完整恢复
+
+- 按 Edition 或单 Conversation 导出的 `.zip` 是自包含交换制品，只覆盖所选业务范围，不包含完整数据库状态，也没有恢复语义；
+- `.atha-backup` 是 schema 1 的完整 MessageStore 恢复制品，只包含 Online Backup API 生成的一致 `Messages.sqlite3`、严格 manifest 和该快照引用的全部且仅有内容寻址资产；
+- 恢复是全量替换，不做 merge。backend 在正式写入前校验 entry 集合与容量、哈希、当前 database schema 精确签名、SQLite / 外键完整性、消息关系、Edition / 修订 / Locator / Snapshot 内容、FTS 投影和资产引用集合；未完成的数据库 copy 由 SQLite 回滚；
+- 资料库页只负责选择文件、显示忙碌 / 取消 / 错误状态并确认替换全部消息事实；Tauri `message_maintenance` 只接受主窗口资料库根路由，制品与事务规则不进入前端。
 
 ## 关联语义
 
@@ -60,9 +67,11 @@ SQLite 与本地内容寻址资产是消息事实源。产品界面只通过应�
 - 不为 AI 预先定义固定技能清单、工具协议或权限 UI；
 - 不把消息记录做成脱离书籍语境的通用聊天产品。
 - 当前不提供附件、图片、表格、公式、AI 写作或网络发送；这些能力需分别解决本地资源生命周期、导出和不可信内容边界后再进入正文 schema。
+- 完整消息备份不包含 EPUB、书架、阅读进度或偏好，也不提供加密、云端、计划任务、增量或合并恢复。
 
 ## 相关文档
 
 - 产品定义：`docs/product/OVERVIEW.md`
 - 阅读内核：`docs/architecture/READER-CORE.md`
 - 数据库基线：`docs/codebase/DATABASE.md`
+- 完整消息备份 / 恢复：`docs/decisions/ADR-0006-message-store-backup-restore.md`

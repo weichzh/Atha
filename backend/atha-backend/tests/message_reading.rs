@@ -127,6 +127,18 @@ fn tamper_export_manifest(
     target: &Path,
     mutate: impl FnOnce(&mut serde_json::Value),
 ) {
+    let mut mutate = Some(mutate);
+    rewrite_archive(source, target, |name, bytes| {
+        if name != "manifest.json" {
+            return;
+        }
+        let mut value = serde_json::from_slice(bytes).expect("parse manifest");
+        mutate.take().expect("mutate manifest")(&mut value);
+        *bytes = serde_json::to_vec_pretty(&value).expect("serialize manifest");
+    });
+}
+
+fn rewrite_archive(source: &Path, target: &Path, mut mutate: impl FnMut(&str, &mut Vec<u8>)) {
     let mut archive = ZipArchive::new(File::open(source).expect("open source export"))
         .expect("read source export");
     let mut entries = Vec::with_capacity(archive.len());
@@ -134,15 +146,9 @@ fn tamper_export_manifest(
         let mut entry = archive.by_index(index).expect("read export entry");
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).expect("read export bytes");
+        mutate(entry.name(), &mut bytes);
         entries.push((entry.name().to_owned(), bytes));
     }
-    let manifest = entries
-        .iter_mut()
-        .find(|(name, _)| name == "manifest.json")
-        .expect("manifest entry");
-    let mut value = serde_json::from_slice(&manifest.1).expect("parse manifest");
-    mutate(&mut value);
-    manifest.1 = serde_json::to_vec_pretty(&value).expect("serialize manifest");
 
     let mut writer = ZipWriter::new(File::create(target).expect("create tampered export"));
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
@@ -153,6 +159,250 @@ fn tamper_export_manifest(
         writer.write_all(&bytes).expect("write export entry");
     }
     writer.finish().expect("finish tampered export");
+}
+
+fn replace_backup_database(source: &Path, target: &Path, database: &[u8]) {
+    let hash = Sha256::digest(database)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    rewrite_archive(source, target, |name, bytes| match name {
+        "Messages.sqlite3" => *bytes = database.to_vec(),
+        "manifest.json" => {
+            let mut manifest =
+                serde_json::from_slice::<serde_json::Value>(bytes).expect("parse backup manifest");
+            manifest["database"]["contentHash"] = hash.clone().into();
+            manifest["database"]["byteLength"] = (database.len() as u64).into();
+            *bytes = serde_json::to_vec_pretty(&manifest).expect("serialize backup manifest");
+        }
+        _ => {}
+    });
+}
+
+#[test]
+fn full_backup_restores_wal_database_and_referenced_assets() {
+    let root = TestRoot::new("message-full-backup");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let database = root.0.join("Messages/Messages.sqlite3");
+    let keeper = rusqlite::Connection::open(&database).expect("open WAL keeper");
+    keeper
+        .execute_batch("BEGIN; SELECT count(*) FROM message;")
+        .expect("hold WAL reader");
+
+    let mut captured = snapshot();
+    captured.fragment_html = "<p>算术与几何<img src=\"images/backup.png\"></p>".into();
+    captured.resources.push(SnapshotResourceInput {
+        path: "images/backup.png".into(),
+        media_type: "image/png".into(),
+        bytes: b"backup snapshot asset".to_vec(),
+    });
+    let first = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: captured,
+            text: Some("备份内笔记".into()),
+        })
+        .expect("create backed up message");
+    assert!(database.with_file_name("Messages.sqlite3-wal").is_file());
+
+    let archive = root.0.join("messages.atha-backup");
+    store.create_backup(&archive).expect("create full backup");
+    let original_archive = fs::read(&archive).expect("read full backup");
+    assert_eq!(
+        store.create_backup(&archive),
+        Err(atha_backend::messages::MessageError::Backup)
+    );
+    assert_eq!(
+        fs::read(&archive).expect("reread full backup"),
+        original_archive
+    );
+    keeper
+        .execute_batch("ROLLBACK")
+        .expect("release WAL reader");
+
+    let mut second_anchor = anchor();
+    set_anchor_text(&mut second_anchor, "备份后原文");
+    let mut second_snapshot = snapshot_for("备份后原文");
+    second_snapshot.fragment_html = "<p>备份后原文<img src=\"images/later.png\"></p>".into();
+    second_snapshot.resources.push(SnapshotResourceInput {
+        path: "images/later.png".into(),
+        media_type: "image/png".into(),
+        bytes: b"asset created after backup".to_vec(),
+    });
+    store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: second_anchor,
+            snapshot: second_snapshot,
+            text: Some("不应在恢复后保留".into()),
+        })
+        .expect("create post-backup message");
+    let later_asset = root
+        .0
+        .join("Messages/Assets")
+        .join(text_hash("asset created after backup"));
+    let backed_up_asset = root
+        .0
+        .join("Messages/Assets")
+        .join(text_hash("backup snapshot asset"));
+    fs::write(&backed_up_asset, b"corrupt before restore").expect("corrupt backed up asset");
+    assert_eq!(
+        store
+            .roots(&edition().content_version, None)
+            .expect("list before restore")
+            .len(),
+        2
+    );
+
+    store.restore_backup(&archive).expect("restore full backup");
+    let restored = store
+        .roots(&edition().content_version, None)
+        .expect("list restored roots");
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].message_id, first.message_id);
+    let captures = store
+        .source_captures(&first.message_id)
+        .expect("load restored capture");
+    assert_eq!(
+        store
+            .read_snapshot_resource(&captures[0].source.id, "images/backup.png")
+            .expect("read restored asset")
+            .bytes,
+        b"backup snapshot asset"
+    );
+    assert!(store.health().expect("restored health").integrity);
+    drop(store);
+
+    let reopened = MessageStore::open(&root.0).expect("reopen restored store");
+    assert_eq!(
+        reopened
+            .roots(&edition().content_version, None)
+            .expect("list reopened roots")
+            .len(),
+        1
+    );
+    assert!(!later_asset.exists());
+    assert!(reopened.health().expect("reopened health").integrity);
+}
+
+#[test]
+fn invalid_or_busy_restore_keeps_current_message_facts() {
+    let root = TestRoot::new("message-restore-rollback");
+    let store = MessageStore::open(&root.0).expect("open store");
+    store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: snapshot(),
+            text: Some("备份事实".into()),
+        })
+        .expect("create backup fact");
+    let archive = root.0.join("valid.atha-backup");
+    store.create_backup(&archive).expect("create backup");
+
+    let mut current_anchor = anchor();
+    set_anchor_text(&mut current_anchor, "当前事实");
+    store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: current_anchor,
+            snapshot: snapshot_for("当前事实"),
+            text: Some("必须保留".into()),
+        })
+        .expect("create current fact");
+    let corrupt = root.0.join("corrupt.atha-backup");
+    rewrite_archive(&archive, &corrupt, |name, bytes| {
+        if name == "Messages.sqlite3" {
+            *bytes = b"not a sqlite database".to_vec();
+        }
+    });
+    assert_eq!(
+        store.restore_backup(&corrupt),
+        Err(atha_backend::messages::MessageError::InvalidBackup)
+    );
+    assert_eq!(
+        store
+            .roots(&edition().content_version, None)
+            .expect("list after invalid restore")
+            .len(),
+        2
+    );
+
+    let forged_database_path = root.0.join("forged.sqlite3");
+    let forged_database = {
+        let mut archive_reader = ZipArchive::new(File::open(&archive).expect("open valid backup"))
+            .expect("read valid backup");
+        let mut entry = archive_reader
+            .by_name("Messages.sqlite3")
+            .expect("backup database");
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).expect("read backup database");
+        fs::write(&forged_database_path, bytes).expect("stage forged database");
+        let connection =
+            rusqlite::Connection::open(&forged_database_path).expect("open forged database");
+        connection
+            .execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE injected(value TEXT);")
+            .expect("forge current-version schema");
+        drop(connection);
+        fs::read(&forged_database_path).expect("read forged database")
+    };
+    let forged = root.0.join("forged.atha-backup");
+    replace_backup_database(&archive, &forged, &forged_database);
+    assert_eq!(
+        store.restore_backup(&forged),
+        Err(atha_backend::messages::MessageError::InvalidBackup)
+    );
+    assert_eq!(
+        store
+            .roots(&edition().content_version, None)
+            .expect("list after forged restore")
+            .len(),
+        2
+    );
+
+    let connection =
+        rusqlite::Connection::open(&forged_database_path).expect("reopen forged database");
+    connection
+        .execute_batch(
+            "DROP TABLE injected;
+             UPDATE source_snapshot SET fragment_html = '<script>active</script>';",
+        )
+        .expect("forge unsafe snapshot content");
+    drop(connection);
+    let unsafe_content = fs::read(&forged_database_path).expect("read unsafe database");
+    let unsafe_archive = root.0.join("unsafe-content.atha-backup");
+    replace_backup_database(&archive, &unsafe_archive, &unsafe_content);
+    assert_eq!(
+        store.restore_backup(&unsafe_archive),
+        Err(atha_backend::messages::MessageError::InvalidBackup)
+    );
+    assert_eq!(
+        store
+            .roots(&edition().content_version, None)
+            .expect("list after unsafe restore")
+            .len(),
+        2
+    );
+
+    let database = root.0.join("Messages/Messages.sqlite3");
+    let blocker = rusqlite::Connection::open(database).expect("open restore blocker");
+    blocker
+        .execute_batch("BEGIN IMMEDIATE")
+        .expect("hold restore writer");
+    assert_eq!(
+        store.restore_backup(&archive),
+        Err(atha_backend::messages::MessageError::Restore)
+    );
+    blocker.execute_batch("ROLLBACK").expect("release blocker");
+    assert_eq!(
+        store
+            .roots(&edition().content_version, None)
+            .expect("list after busy restore")
+            .len(),
+        2
+    );
+    assert!(store.health().expect("rollback health").integrity);
 }
 
 #[test]

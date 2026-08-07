@@ -34,6 +34,14 @@ export async function importBooks(): Promise<ImportReport | null> {
   return invoke<ImportReport | null>("import_library_books");
 }
 
+export function backupMessages(): Promise<boolean> {
+  return invoke<boolean>("backup_message_store");
+}
+
+export function restoreMessages(): Promise<boolean> {
+  return invoke<boolean>("restore_message_store");
+}
+
 export async function openBook(id: string): Promise<void> {
   const launch = await invoke<ReaderLaunch>("open_library_book", { id });
   location.assign(launch.href);

@@ -13,10 +13,10 @@ accepted
 ## Scope
 
 - 新增 schema 1 的单文件 `.atha-backup` ZIP 制品，包含 SQLite Online Backup API 生成的 `Messages.sqlite3` 一致快照、manifest 与快照引用的全部内容寻址资产；
-- 备份先写同目录临时文件，完整写入、`sync_all`、重新检查后 rename；已存在目标不得被覆盖；
-- 恢复先完整验证 ZIP 结构、边界、manifest、数据库哈希 / 长度、当前 database schema、SQLite / 外键完整性及资产集合 / 哈希，再触碰正式数据；
+- 备份先写同目录临时文件，完整写入、`sync_all`、重新检查后以同文件系统 hard link 原子且不覆盖地发布，再删除临时名；
+- 恢复先完整验证 ZIP 结构、边界、manifest、数据库哈希 / 长度、当前 database schema 精确签名、SQLite / 外键完整性、消息关系 / 内容 / FTS 投影及资产集合 / 哈希，再触碰正式数据；
 - 资产先在 SQLite writer lock 下原子发布，随后以 Online Backup API 把已验证数据库恢复到活动数据库；未完成的数据库恢复由 SQLite 回滚，原消息事实保持不变；
-- `Assets/.atha-maintenance.lock` 使用 Rust 标准库文件锁：open / recovery 与备份持 shared lock，恢复持 exclusive lock，避免恢复资产被另一个遵循协议的 `open` 当作孤儿清理；
+- `Assets/.atha-maintenance.lock` 使用 Rust 标准库文件锁：open / recovery 持 exclusive lock，备份持 shared lock，恢复持 exclusive lock，避免启动清理删除备份暂存数据库或恢复资产；
 - 在书架页提供“备份消息”和“恢复消息”入口；恢复前明确确认会替换全部消息事实，Tauri Adapter 只接受主窗口书架路由并在 blocking worker 执行文件 I/O；
 - 更新稳定错误、Tauri 权限、架构 / 数据库 / 代码地图和专项检查。
 
@@ -67,21 +67,21 @@ present
 
 ## Acceptance Criteria
 
-- [ ] 备份使用 SQLite Online Backup API，不普通复制活动 DB / WAL；备份时并发已提交事实形成一致单点快照；
-- [ ] `.atha-backup` 只在临时 ZIP 完成、`sync_all` 和重新校验后发布，已存在目标内容保持不变；
-- [ ] manifest、entry 数 / 总解压长度、重复 / 未知路径、数据库版本 / 完整性 / 外键、数据库与资产哈希 / 长度及引用集合均在恢复前验证；
-- [ ] open / backup shared maintenance lock 与 restore exclusive lock 使用标准库实现，不引入通用锁层；
-- [ ] 成功恢复替换全部 MessageStore 事实并保持资源可读；重开后旧孤儿资产被清理；
-- [ ] 损坏备份和 SQLite busy 失败注入证明原消息事实不变，暂存 / 孤儿可在重开恢复；
-- [ ] 书架页只通过受限 Tauri command 选择文件并在 blocking worker 调用 backend；取消、确认、忙碌和错误状态可见；
-- [ ] 不改变 schema，不备份书籍 / 阅读状态，不增加 crate、trait 或通用 archive abstraction；
+- [x] 备份使用 SQLite Online Backup API，不普通复制活动 DB / WAL；备份时并发已提交事实形成一致单点快照；
+- [x] `.atha-backup` 只在临时 ZIP 完成、`sync_all` 和重新校验后以 hard link 原子且不覆盖地发布，已存在目标内容保持不变；
+- [x] manifest、entry 数 / 总解压长度、重复 / 未知路径、数据库精确 schema / 完整性 / 外键、领域关系 / 内容 / FTS 投影、数据库与资产哈希 / 长度及引用集合均在恢复前验证；
+- [x] open / recovery exclusive、backup shared、restore exclusive maintenance lock 使用标准库实现，不引入通用锁层；
+- [x] 成功恢复替换全部 MessageStore 事实并保持资源可读；重开后旧孤儿资产被清理；
+- [x] 损坏备份和 SQLite busy 失败注入证明原消息事实不变，暂存 / 孤儿可在重开恢复；
+- [x] 书架页只通过受限 Tauri command 选择文件并在 blocking worker 调用 backend；取消、确认、忙碌和错误状态可见；
+- [x] 不改变 schema，不备份书籍 / 阅读状态，不增加 crate、trait 或通用 archive abstraction；
 - [ ] 中文 Markdown、目标检查、required gate、diff 检查和独立 Standards / Spec review 通过。
 
 ## Files And Steps
 
 1. 用现有 MessageStore interface 测试固定 WAL 一致备份、成功替换、损坏制品和 SQLite busy 回滚。
 2. 在新 `messages::backup` 模块实现 schema 1 archive、Online Backup copy、边界验证、资产发布与维护锁；复用既有 ZIP、哈希和资产原子发布。
-3. 在书架 Adapter 增加文件选择 command、权限和最小状态 UI，不把协议复制到前端。
+3. 在独立 `message_maintenance` Adapter 增加资料库根路由、文件选择 command、权限和最小状态 UI，不把协议复制到前端。
 4. 更新 `OVERVIEW`、`MESSAGE-READING`、`DATABASE`、`MAP` 与 ADR-0006。
 5. 运行专项检查、候选 required gate 和双轴 review，记录证据并关闭任务。
 
@@ -106,19 +106,22 @@ present
 
 ## Result
 
-待实施。
+已形成实施候选：`MessageStore` 增加 schema 1 `.atha-backup` 创建 / 恢复，数据库双向 copy 只使用 SQLite Online Backup API；严格 ZIP / manifest / database schema / 领域内容 / FTS / asset 验证位于 backend，维护锁与既有资产原子发布共同保护暂存生命周期，最终备份用 hard link 原子 no-replace 发布。书架页通过独立 `message_maintenance` Adapter 提供备份 / 恢复、覆盖确认和忙碌 / 取消 / 错误状态；交换导出语义未改变。
 
 ## Review
 
-- Blocking：待 review。
-- Non-blocking：待 review。
-- Out-of-scope：待 review。
+- Blocking：待独立 Standards / Spec review。
+- Non-blocking：待独立 Standards / Spec review。
+- Out-of-scope：待独立 Standards / Spec review。
 
 ## Evidence And Residual Risks
 
 - 审计静态证据：现有按书 / 会话导出没有恢复入口，也不包含完整 DB 状态；正式数据库使用 WAL，资产位于事务之外；
 - 官方语义证据：SQLite Online Backup API 对活动源生成一致 snapshot，在 copy 未完成时回滚 destination write transaction；Rust 1.97 标准库 `File` 提供 Windows / Unix 文件 shared / exclusive lock；
-- 证据边界：待实施后记录；不会把静态阅读或本地测试称为真实 Tauri / WebView2 验收；
+- Windows 本地证据：后端 `cargo fmt`、warnings-as-errors clippy 与消息 interface 集成测试 19/19 通过；测试覆盖 WAL 快照、目标零覆盖、完整恢复、损坏资产修复、重开孤儿清理、损坏制品、伪造 schema、活动快照内容拒绝和 SQLite busy 回滚；
+- Windows 本地证据：正式 `scripts/check-message-reading.ps1` 通过，包含 command / permission 精确映射、Markdown 测试、Svelte check、production build、Tauri app / host 测试；
+- 证据边界：尚未通过真实原生 dialog 执行用户数据备份 / 恢复，也未执行进程强杀、磁盘故障或生产等价验收；不会把 backend 测试和前端 build 称为真实 Tauri / WebView2 恢复验收；
 - 并发边界：维护锁只协调遵循 Atha 协议的 open / backup / restore；已有正常写连接继续由 SQLite destination transaction 排他，外部程序绕过协议不受保证；
 - 制品边界：本地备份未加密、未认证且只含消息事实；用户应按敏感数据保存，书籍与阅读状态另行恢复；
 - 容量边界：V1 对 entry 数与总解压字节设固定上限；真实数据接近门槛时以测量驱动流式分卷或可配置上限，不预建框架。
+- 文件系统边界：最终 no-replace 发布依赖目标目录支持同文件系统 hard link；不支持时安全返回 `message-backup`，不降级为可能覆盖并发目标的 rename。

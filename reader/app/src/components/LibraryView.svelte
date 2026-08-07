@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { BookOpen, Plus, Trash2 } from "@lucide/svelte";
+  import { Archive, ArchiveRestore, BookOpen, Plus, Trash2 } from "@lucide/svelte";
   import { onMount } from "svelte";
 
   import {
+    backupMessages,
     coverUrl,
     importBooks,
     importFailureMessage,
@@ -10,6 +11,7 @@
     listBooks,
     openBook,
     removeBook,
+    restoreMessages,
     type LibraryBook,
   } from "../library";
 
@@ -58,6 +60,41 @@
     }
   }
 
+  async function backup() {
+    if (busy) return;
+    if (!libraryAvailable) {
+      status = "请在 Atha 桌面应用中备份消息。";
+      return;
+    }
+    busy = true;
+    status = "正在创建消息备份…";
+    try {
+      status = (await backupMessages()) ? "消息备份已保存。" : "";
+    } catch {
+      status = "无法创建消息备份。";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function restore() {
+    if (busy) return;
+    if (!libraryAvailable) {
+      status = "请在 Atha 桌面应用中恢复消息。";
+      return;
+    }
+    if (!confirm("恢复会替换全部标注、笔记和对话。请先关闭其他 Atha 窗口。继续？")) return;
+    busy = true;
+    status = "正在验证并恢复消息备份…";
+    try {
+      status = (await restoreMessages()) ? "消息已从备份恢复。" : "";
+    } catch {
+      status = "无法恢复：备份无效、数据库正被占用，或文件不可读取。";
+    } finally {
+      busy = false;
+    }
+  }
+
   async function read(book: LibraryBook) {
     if (busy) return;
     busy = true;
@@ -95,15 +132,39 @@
       <span class="library-brand">Atha</span>
       <h1>书架</h1>
     </div>
-    <button
-      class="library-import-button"
-      type="button"
-      onclick={chooseBooks}
-      disabled={busy}
-    >
-      <Plus aria-hidden="true" />
-      <span>导入</span>
-    </button>
+    <div class="library-actions">
+      <button
+        class="library-header-button library-maintenance-button"
+        type="button"
+        aria-label="备份全部消息"
+        title="备份全部消息"
+        onclick={backup}
+        disabled={busy}
+      >
+        <Archive aria-hidden="true" />
+        <span>备份</span>
+      </button>
+      <button
+        class="library-header-button library-maintenance-button"
+        type="button"
+        aria-label="恢复全部消息"
+        title="恢复全部消息"
+        onclick={restore}
+        disabled={busy}
+      >
+        <ArchiveRestore aria-hidden="true" />
+        <span>恢复</span>
+      </button>
+      <button
+        class="library-header-button library-import-button"
+        type="button"
+        onclick={chooseBooks}
+        disabled={busy}
+      >
+        <Plus aria-hidden="true" />
+        <span>导入</span>
+      </button>
+    </div>
   </header>
 
   {#if loading}

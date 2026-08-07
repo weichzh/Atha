@@ -5,12 +5,14 @@ commands.allow = ["reader_event"]
 
 [[permission]]
 identifier = "allow-library-commands"
-description = "允许主窗口列出、导入、打开和移除本地书架项目。"
+description = "允许资料库主窗口管理本地书架及消息存储备份。"
 commands.allow = [
   "list_library_books",
   "import_library_books",
   "open_library_book",
   "remove_library_book",
+  "backup_message_store",
+  "restore_message_store",
 ]
 
 [[permission]]

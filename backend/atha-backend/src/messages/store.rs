@@ -15,9 +15,10 @@ use super::{
     util::encode_hex,
 };
 
-const DATABASE_VERSION: i64 = 2;
+pub(crate) const DATABASE_VERSION: i64 = 2;
 const DATABASE_NAME: &str = "Messages.sqlite3";
 const ASSET_TEMP_PREFIX: &str = ".atha-asset-";
+const MAINTENANCE_LOCK: &str = ".atha-maintenance.lock";
 
 #[derive(Clone, Debug)]
 pub struct MessageStore {
@@ -35,6 +36,8 @@ impl MessageStore {
             assets,
         };
         store.ensure_assets_directory()?;
+        let maintenance = store.maintenance_file()?;
+        maintenance.try_lock().map_err(|_| MessageError::Database)?;
         store.migrate()?;
         store.recover_assets()?;
         Ok(store)
@@ -89,16 +92,7 @@ impl MessageStore {
             .map(|input| {
                 let hash = Sha256::digest(&input.bytes);
                 let asset_name = encode_hex(&hash);
-                let asset_path = self.assets.join(&asset_name);
-                match fs::symlink_metadata(&asset_path) {
-                    Ok(_) => {
-                        self.read_asset(&asset_name, &hash, input.bytes.len() as u64)?;
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        self.publish_asset(&asset_name, &hash, &input.bytes)?;
-                    }
-                    Err(_) => return Err(MessageError::InvalidRoot),
-                }
+                self.ensure_asset(_write_lock, &asset_name, &hash, &input.bytes)?;
                 Ok(PreparedResource {
                     path: input.path.clone(),
                     media_type: input.media_type.clone(),
@@ -108,6 +102,47 @@ impl MessageStore {
                 })
             })
             .collect()
+    }
+
+    pub(crate) fn ensure_asset(
+        &self,
+        _write_lock: &Transaction<'_>,
+        asset_name: &str,
+        expected_hash: &[u8],
+        bytes: &[u8],
+    ) -> Result<(), MessageError> {
+        if !is_asset_name(asset_name)
+            || expected_hash.len() != 32
+            || encode_hex(expected_hash) != asset_name
+        {
+            return Err(MessageError::CorruptData);
+        }
+        let asset_path = self.assets.join(asset_name);
+        match fs::symlink_metadata(&asset_path) {
+            Ok(_) => self
+                .read_asset(asset_name, expected_hash, bytes.len() as u64)
+                .map(|_| ()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.publish_asset(asset_name, expected_hash, bytes)
+            }
+            Err(_) => Err(MessageError::InvalidRoot),
+        }
+    }
+
+    pub(crate) fn restore_asset(
+        &self,
+        _write_lock: &Transaction<'_>,
+        asset_name: &str,
+        expected_hash: &[u8],
+        bytes: &[u8],
+    ) -> Result<(), MessageError> {
+        if self
+            .read_asset(asset_name, expected_hash, bytes.len() as u64)
+            .is_ok()
+        {
+            return Ok(());
+        }
+        self.publish_asset(asset_name, expected_hash, bytes)
     }
 
     fn publish_asset(
@@ -246,6 +281,23 @@ impl MessageStore {
             return Err(MessageError::InvalidRoot);
         }
         Ok(())
+    }
+
+    pub(crate) fn maintenance_file(&self) -> Result<fs::File, MessageError> {
+        self.ensure_assets_directory()?;
+        let path = self.assets.join(MAINTENANCE_LOCK);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|_| MessageError::InvalidRoot)?;
+        let metadata = fs::symlink_metadata(path).map_err(|_| MessageError::InvalidRoot)?;
+        if !metadata.file_type().is_file() || is_reparse_point(&metadata) {
+            return Err(MessageError::InvalidRoot);
+        }
+        Ok(file)
     }
 
     fn migrate(&self) -> Result<(), MessageError> {

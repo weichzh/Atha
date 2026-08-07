@@ -32,10 +32,10 @@ accepted
 
 1. `MessageStore::create_backup` 使用 SQLite Online Backup API 把活动 main database 复制到暂存数据库；不复制活动 DB、`-wal` 或 `-shm` 文件。
 2. schema 1 `.atha-backup` 是 ZIP：`manifest.json` 记录数据库哈希 / 长度及排序后的资产哈希 / 长度，`Messages.sqlite3` 是一致 snapshot，`assets/<sha256>` 是该 snapshot 引用的完整资产集合。
-3. 备份写到目标同目录独占临时文件；ZIP 完成、`sync_all` 并重新读取校验后才 rename 到不存在的最终路径。进程中止最多留下显式 `.tmp`，不会发布看似成功的最终制品。
-4. `restore_backup` 先验证 archive 唯一 / 已知 entry、容量边界、manifest、数据库 / 资产哈希与长度，再打开暂存数据库验证当前 schema、`integrity_check`、`foreign_key_check`、FTS 能力和资产引用集合；任何正式写入都发生在完整验证之后。
+3. 备份写到目标同目录独占临时文件；ZIP 完成、`sync_all` 并重新读取校验后，才以标准库 hard link 原子创建不存在的最终路径并删除临时名。hard link 在目标已存在时失败，消除“先检查、后 rename”覆盖竞态；进程中止最多留下显式 `.tmp` 或完整最终制品，不会发布半成品。
+4. `restore_backup` 先验证 archive 唯一 / 已知 entry、容量边界、manifest、数据库 / 资产哈希与长度，再打开暂存数据库验证当前 schema 精确签名、`integrity_check`、`foreign_key_check`、消息关系、Edition / 修订 / Locator / Snapshot 内容、FTS 精确投影和资产引用集合；任何正式写入都发生在完整验证之后。
 5. 恢复先在 SQLite `IMMEDIATE` writer lock 下复用既有原子资产发布，再通过 Online Backup API 把暂存数据库复制到活动数据库。SQLite 在 backup sequence 未完成时回滚 destination write transaction；已提前发布但未引用的资产由下次 open 清理。
-6. `Assets/.atha-maintenance.lock` 是具体生命周期协调文件：open / recovery 与备份持 shared lock，恢复持 exclusive lock。它只防止另一个遵循协议的 open 在数据库替换前清理恢复资产，不发展为通用锁服务。
+6. `Assets/.atha-maintenance.lock` 是具体生命周期协调文件：open / recovery 持 exclusive lock，备份持 shared lock，恢复持 exclusive lock。启动恢复会删除 Atha 暂存文件，因此必须与备份 / 恢复互斥；并发备份可以共享锁。它不发展为通用锁服务。
 7. 书架 Tauri Adapter 负责 save / open dialog、书架路由校验与 blocking worker；backend 独占 archive、SQLite、资产和恢复语义。恢复前 UI 明确确认“替换全部消息事实”。
 
 ## 候选、理由与证据
@@ -55,11 +55,12 @@ SQLite 官方文档保证成功 backup sequence 产生源数据库一致 snapsho
 - 正面：只启用既有 rusqlite feature，复用现有 ZIP、哈希、writer lock 与资产发布，不增加 storage / repository 抽象。
 - 负面：完整备份 / 恢复是 O(database + referenced assets)，V1 没有进度条、取消或增量；在书架页 blocking worker 中运行。
 - 负面：恢复是全量替换而非 merge；旧孤儿资产到下次 open 才按恢复后的引用集合清理。
+- 负面：原子 no-replace 发布要求目标目录支持 hard link；不支持的文件系统会安全拒绝，不回退到有覆盖竞态的 rename。
 
 ## 风险与缓解
 
 - 活动 WAL 普通复制：禁止，所有数据库 copy 只经 Online Backup API。
-- 恢复资产被并发 open 清理：shared / exclusive 维护锁覆盖 open recovery、backup 与 restore；测试模拟独立 store 生命周期。
+- 备份暂存数据库或恢复资产被并发 open 清理：open / recovery 与 restore 使用 exclusive lock，backup 使用 shared lock；测试重开后的清理与恢复结果。
 - ZIP 路径穿越 / zip bomb / 重复 entry：不做通用解压；只按精确名称读取，拒绝未知 / 重复 / overlapping entry，并限制数量、manifest 与总解压长度。
 - 恢复 DB 引用缺失 / 损坏资产：数据库与全部资产先流式哈希，数据库引用集合必须与 manifest / archive 完全相等，正式 DB copy 前发布全部资产。
 - SQLite busy：bounded retry 后返回稳定恢复错误；未完成 destination transaction 由 SQLite 回滚，当前事实保留。
@@ -68,7 +69,7 @@ SQLite 官方文档保证成功 backup sequence 产生源数据库一致 snapsho
 ## 实施与检查位置
 
 - backend：`backend/atha-backend/src/messages/backup.rs`、`store.rs`、`model.rs`；
-- Tauri / UI：`reader/app/src-tauri/src/lib.rs`、`permissions/reader.toml`、`reader/app/src/library.ts`、`components/LibraryView.svelte`；
+- Tauri / UI：`reader/app/src-tauri/src/message_maintenance.rs`、`lib.rs`、`permissions/reader.toml`、`reader/app/src/library.ts`、`components/LibraryView.svelte`；
 - 失败注入：`backend/atha-backend/tests/message_reading.rs`；
 - 事实：`docs/codebase/DATABASE.md`、`docs/architecture/MESSAGE-READING.md`、`docs/architecture/OVERVIEW.md`；
 - 正式检查：`scripts/check-message-reading.ps1` 与 required `docs` gate。
@@ -97,3 +98,4 @@ SQLite 官方文档保证成功 backup sequence 产生源数据库一致 snapsho
 - SQLite Online Backup API：<https://sqlite.org/backup.html>
 - SQLite Backup C API：<https://sqlite.org/c3ref/backup_finish.html>
 - Rust 文件锁：<https://doc.rust-lang.org/std/fs/struct.File.html#method.lock_shared>
+- Rust hard link：<https://doc.rust-lang.org/std/fs/fn.hard_link.html>

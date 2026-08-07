@@ -77,9 +77,29 @@ commands.allow = ["message_export"]
     }
 }
 
+function Assert-MessageMaintenanceCommandsEnabled {
+    $capability = Get-Content -LiteralPath 'reader/app/src-tauri/capabilities/main.json' -Raw | ConvertFrom-Json
+    if ($capability.permissions -notcontains 'allow-library-commands') {
+        throw 'Tauri main capability does not enable allow-library-commands.'
+    }
+
+    $permissions = Get-Content -LiteralPath 'reader/app/src-tauri/permissions/reader.toml' -Raw
+    $tauriCommands = Get-Content -LiteralPath 'reader/app/src-tauri/src/lib.rs' -Raw
+    $allowedCommands = @(Get-TauriPermissionCommands -Toml $permissions -Identifier 'allow-library-commands')
+    foreach ($command in 'backup_message_store', 'restore_message_store') {
+        if (@($allowedCommands | Where-Object { $_ -eq $command }).Count -ne 1) {
+            throw "Tauri library permission must allow $command exactly once."
+        }
+        if ([regex]::Matches($tauriCommands, "(?m)^\s+message_maintenance::$command,?$", 'CultureInvariant').Count -ne 1) {
+            throw "Tauri invoke handler must register $command exactly once."
+        }
+    }
+}
+
 Push-Location $repoRoot
 try {
     Assert-MessageCommandsEnabled
+    Assert-MessageMaintenanceCommandsEnabled
     Invoke-Checked $env:ATHA_CARGO @('fmt', '--all', '--check')
     Invoke-Checked $env:ATHA_CARGO @('test', '-p', 'atha-backend', '--test', 'message_reading')
     Invoke-Checked $env:ATHA_NODE @('reader/web/conversations.test.mjs')

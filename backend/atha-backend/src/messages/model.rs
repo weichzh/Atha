@@ -342,6 +342,9 @@ pub enum MessageError {
     FutureDatabase,
     LegacyConflict,
     CorruptData,
+    Backup,
+    InvalidBackup,
+    Restore,
     Export,
     InvalidExport,
     Database,
@@ -359,6 +362,9 @@ impl MessageError {
             Self::FutureDatabase => "future-message-database",
             Self::LegacyConflict => "legacy-message-conflict",
             Self::CorruptData => "corrupt-message-data",
+            Self::Backup => "message-backup",
+            Self::InvalidBackup => "invalid-message-backup",
+            Self::Restore => "message-restore",
             Self::Export => "message-export",
             Self::InvalidExport => "invalid-message-export",
             Self::Database => "message-database",
@@ -430,6 +436,44 @@ pub(crate) fn rich_message_content(
         .to_string(),
         plain_text,
     })
+}
+
+pub(crate) fn validate_stored_revision(
+    schema: i64,
+    kind: &str,
+    content: &Value,
+    plain_text: &str,
+) -> Result<(), MessageError> {
+    let valid = match (kind, content.get("richText")) {
+        ("source-only", None) => {
+            plain_text.is_empty()
+                && content == &serde_json::json!({ "schema": 1, "kind": "source-only", "text": "" })
+        }
+        ("text", Some(value)) => serde_json::from_value::<RichTextInput>(value.clone())
+            .ok()
+            .and_then(|rich| rich_message_content(&rich).ok())
+            .is_some_and(|validated| {
+                validated.plain_text == plain_text
+                    && serde_json::from_str::<Value>(&validated.content_json).ok()
+                        == Some(content.clone())
+            }),
+        ("text", None) => {
+            !plain_text.trim().is_empty()
+                && plain_text.chars().count() <= 8_000
+                && content
+                    == &serde_json::json!({
+                        "schema": 1,
+                        "kind": "text",
+                        "text": plain_text,
+                    })
+        }
+        _ => false,
+    };
+    if schema == 1 && valid {
+        Ok(())
+    } else {
+        Err(MessageError::InvalidInput)
+    }
 }
 
 #[derive(Clone, Copy)]
