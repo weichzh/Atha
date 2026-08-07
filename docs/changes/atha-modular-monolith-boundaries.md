@@ -17,7 +17,7 @@ accepted
 - 用 ADR 固定模块化单体和增量迁移原则；
 - 把全部 Tauri 消息 command、共同来源校验和错误映射提取为一个 concrete platform adapter module；
 - 保持 command 名、DTO、错误、capability、数据库、reader kernel 和运行拓扑不变；
-- 修复消息 gate 的最后命令盲区，并双向校验注册 command 与 permission 集合；
+- 修复消息 gate 的最后命令盲区，并把注册 command 与实际启用的 `allow-message-commands` permission 块双向精确比较；
 - 更新 as-built 代码地图并完成目标检查、required gate 与独立 review。
 
 ## Non-Goals
@@ -45,7 +45,7 @@ present
 - [x] 所有现有消息 Tauri command 及共同 route / error 规则由单一 `message_commands` module 拥有；
 - [x] `lib.rs` 保留状态构造与 handler 注册，不再直接实现消息用例或导入无关消息 DTO；
 - [x] command 名、序列化 DTO、稳定错误、capability、数据库和运行行为不变；
-- [x] 消息 gate 双向精确比较 17 个已注册 command 与 17 个 permission，并覆盖无尾逗号的最后一项；
+- [x] 消息 gate 双向精确比较 17 个已注册 command 与 `allow-message-commands` 块内的 17 个 permission，并覆盖无尾逗号的最后一项；
 - [x] `docs/codebase/MAP.md` 与三 package workspace、Tauri adapter 的 as-built 事实一致；
 - [ ] 目标检查、中文 Markdown 排版、docs gate、diff 检查与独立 Standards / Spec review 通过。
 
@@ -77,17 +77,18 @@ present
 
 ## Result
 
-- Atha 的目标架构明确为单进程模块化单体；系统总览现在同时记录质量场景、as-built / target 差异、依赖方向、信任边界、候选取舍与风险迁移顺序；
+- Atha 的目标架构明确为单产品部署单元的模块化单体；系统总览现在如实记录原生 host、WebView2 多进程树与 IPC，并同时记录质量场景、as-built / target 差异、依赖方向、信任边界、候选取舍与风险迁移顺序；
 - ADR-0004 固定 concrete deep module 与显式平台 adapter，拒绝当前没有消费者的 trait、service、进程和网络边界；
 - 17 个消息 command、共同窗口 / URL 检查、稳定错误映射与原生导出 dialog 已从 Tauri root 移入 `message_commands`；所有外部名称和 backend 调用保持不变；
-- 消息专项 gate 现在把 handler 注册与 permission 解析成集合并双向比较，实际无尾逗号的 `message_export` 已被纳入；
+- 消息专项 gate 现在把 handler 注册与实际 `allow-message-commands` 块解析成集合并双向比较，实际无尾逗号的 `message_export` 已被纳入；
 - 没有新增依赖、crate、数据迁移、运行时或产品行为。
 
 ## Review
 
-- Blocking：待 review。
-- Non-blocking：待 review。
-- Out-of-scope：待 review。
+- Standards：初审发现运行拓扑表述、ADR 最小字段和 permission 块解析三个 Blocking，均已修正，待复审。
+- Spec：通过，无 findings。
+- Non-blocking：无。
+- Out-of-scope：快照恢复与旧 host 风险已登记，不在本切片扩项。
 
 ## Evidence And Residual Risks
 

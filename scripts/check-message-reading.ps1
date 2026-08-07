@@ -15,10 +15,45 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw "$FilePath failed with exit code $LASTEXITCODE." }
 }
 
+function Get-TauriPermissionCommands {
+    param([string]$Toml, [string]$Identifier)
+
+    $blocks = @(
+        [regex]::Matches($Toml, '(?ms)^\[\[permission\]\]\s*(.*?)(?=^\[\[permission\]\]|\z)') |
+            ForEach-Object { $_.Groups[1].Value }
+    )
+    $identifierPattern = '(?m)^\s*identifier\s*=\s*"{0}"\s*$' -f [regex]::Escape($Identifier)
+    $selectedBlocks = @($blocks | Where-Object { $_ -match $identifierPattern })
+    if ($selectedBlocks.Count -ne 1) {
+        throw "Expected exactly one Tauri permission block named $Identifier."
+    }
+
+    $allowList = [regex]::Match($selectedBlocks[0], '(?ms)^\s*commands\.allow\s*=\s*\[(.*?)\]')
+    if (-not $allowList.Success) { throw "Tauri permission $Identifier has no commands.allow list." }
+    @(
+        [regex]::Matches($allowList.Groups[1].Value, '"([^"]+)"') |
+            ForEach-Object { $_.Groups[1].Value }
+    )
+}
+
 function Assert-MessageCommandsEnabled {
     $capability = Get-Content -LiteralPath 'reader/app/src-tauri/capabilities/main.json' -Raw | ConvertFrom-Json
     if ($capability.permissions -notcontains 'allow-message-commands') {
         throw 'Tauri main capability does not enable allow-message-commands.'
+    }
+
+    $parserProbe = @'
+[[permission]]
+identifier = "allow-message-commands"
+commands.allow = ["message_roots"]
+
+[[permission]]
+identifier = "allow-other"
+commands.allow = ["message_export"]
+'@
+    $parserProbeCommands = @(Get-TauriPermissionCommands -Toml $parserProbe -Identifier 'allow-message-commands')
+    if ($parserProbeCommands.Count -ne 1 -or $parserProbeCommands[0] -ne 'message_roots') {
+        throw 'Tauri permission parser crossed a permission block boundary.'
     }
 
     $permissions = Get-Content -LiteralPath 'reader/app/src-tauri/permissions/reader.toml' -Raw
@@ -27,10 +62,7 @@ function Assert-MessageCommandsEnabled {
         [regex]::Matches($tauriCommands, '(?m)^\s+(?:message_commands::)?(message_[a-z_]+),?$') |
             ForEach-Object { $_.Groups[1].Value }
     )
-    $allowedCommands = @(
-        [regex]::Matches($permissions, '(?m)^\s*"(message_[a-z_]+)",?$') |
-            ForEach-Object { $_.Groups[1].Value }
-    )
+    $allowedCommands = @(Get-TauriPermissionCommands -Toml $permissions -Identifier 'allow-message-commands')
     if ($messageCommands.Count -eq 0) { throw 'No registered Tauri message commands found.' }
     if (($messageCommands | Sort-Object -Unique).Count -ne $messageCommands.Count) {
         throw 'Tauri message command registration contains duplicates.'
