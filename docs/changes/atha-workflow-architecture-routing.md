@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -39,7 +39,7 @@ none
 - [x] `doc_guard.py` 在代码变更时拒绝缺少或使用未知 Architecture Impact 值的活动 change；
 - [x] `doc_guard.py --self-check` 覆盖 `none`、`present`、缺失和未知值；
 - [x] `workflow-self-check` 同时运行本地日志自检和文档门禁自检；
-- [ ] 中文 Markdown 排版、docs gate、workflow-self-check、diff 检查和独立 review 通过。
+- [x] 中文 Markdown 排版、docs gate、workflow-self-check、diff 检查和独立 review 通过。
 
 ## Files And Steps
 
@@ -77,13 +77,16 @@ none
 
 ## Review
 
-- Blocking: 待 review。
-- Non-blocking: 待 review。
-- Out-of-scope: 待 review。
+- Standards：通过；未发现仓库标准违规或基线 smell。
+- Spec：通过；未发现遗漏、错误实现或范围蔓延。
+- Blocking：无。
+- Non-blocking：无。
+- Out-of-scope：无。
 
 ## Evidence And Residual Risks
 
 - 测量证据：2026-08-07 的 `project_workflow.py benchmark --all` 共 678 次运行、1 个仓库；22 次 adopted dirty claims、141 次 command failed、10 次 failed wait over 120s、57 种 activity 和 30 种单次 activity；
 - 本地静态证据：`doc_guard.py --self-check`、正常 `doc_guard.py`、文档长度检查、workflow log 自检、Markdown lint 和 diff 检查通过；
+- 干净候选证据：提交 `5cf4c41` 上的 `docs` 与 `workflow-self-check` required gate 均通过；Standards / Spec 双轴独立 review 均无 finding；
 - 残余风险：Architecture Impact 只机械校验分类值，`present` 内容质量仍由独立 review 和架构规范判断；activity 词汇由项目契约约束，但全局 CLI 当前不读取项目级枚举；
 - 当前只有 Atha 一个仓库样本，任何全局 CLI 修改仍需至少两个仓库出现同类摩擦。`Measure-Workflow.ps1` 的去留仍待比较其独有信号后决定。
