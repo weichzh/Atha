@@ -5,7 +5,7 @@ commands.allow = ["reader_event"]
 
 [[permission]]
 identifier = "allow-library-commands"
-description = "允许资料库主窗口管理本地书架及消息存储备份。"
+description = "允许资料库主窗口管理本地书架及消息存储备份与恢复。"
 commands.allow = [
   "list_library_books",
   "import_library_books",

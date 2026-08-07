@@ -179,6 +179,26 @@ fn replace_backup_database(source: &Path, target: &Path, database: &[u8]) {
     });
 }
 
+fn forge_backup_database(
+    source: &Path,
+    target: &Path,
+    staged_database: &Path,
+    valid_database: &[u8],
+    sql: &str,
+) {
+    fs::write(staged_database, valid_database).expect("stage valid backup database");
+    let connection = rusqlite::Connection::open(staged_database).expect("open staged database");
+    connection
+        .execute_batch("PRAGMA journal_mode=DELETE;")
+        .expect("disable staged WAL");
+    connection
+        .execute_batch(sql)
+        .expect("forge backup database");
+    drop(connection);
+    let database = fs::read(staged_database).expect("read forged database");
+    replace_backup_database(source, target, &database);
+}
+
 #[test]
 fn full_backup_restores_wal_database_and_referenced_assets() {
     let root = TestRoot::new("message-full-backup");
@@ -330,7 +350,7 @@ fn invalid_or_busy_restore_keeps_current_message_facts() {
     );
 
     let forged_database_path = root.0.join("forged.sqlite3");
-    let forged_database = {
+    let valid_database = {
         let mut archive_reader = ZipArchive::new(File::open(&archive).expect("open valid backup"))
             .expect("read valid backup");
         let mut entry = archive_reader
@@ -338,17 +358,16 @@ fn invalid_or_busy_restore_keeps_current_message_facts() {
             .expect("backup database");
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).expect("read backup database");
-        fs::write(&forged_database_path, bytes).expect("stage forged database");
-        let connection =
-            rusqlite::Connection::open(&forged_database_path).expect("open forged database");
-        connection
-            .execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE injected(value TEXT);")
-            .expect("forge current-version schema");
-        drop(connection);
-        fs::read(&forged_database_path).expect("read forged database")
+        bytes
     };
     let forged = root.0.join("forged.atha-backup");
-    replace_backup_database(&archive, &forged, &forged_database);
+    forge_backup_database(
+        &archive,
+        &forged,
+        &forged_database_path,
+        &valid_database,
+        "CREATE TABLE injected(value TEXT);",
+    );
     assert_eq!(
         store.restore_backup(&forged),
         Err(atha_backend::messages::MessageError::InvalidBackup)
@@ -361,18 +380,14 @@ fn invalid_or_busy_restore_keeps_current_message_facts() {
         2
     );
 
-    let connection =
-        rusqlite::Connection::open(&forged_database_path).expect("reopen forged database");
-    connection
-        .execute_batch(
-            "DROP TABLE injected;
-             UPDATE source_snapshot SET fragment_html = '<script>active</script>';",
-        )
-        .expect("forge unsafe snapshot content");
-    drop(connection);
-    let unsafe_content = fs::read(&forged_database_path).expect("read unsafe database");
     let unsafe_archive = root.0.join("unsafe-content.atha-backup");
-    replace_backup_database(&archive, &unsafe_archive, &unsafe_content);
+    forge_backup_database(
+        &archive,
+        &unsafe_archive,
+        &forged_database_path,
+        &valid_database,
+        "UPDATE source_snapshot SET fragment_html = '<script>active</script>';",
+    );
     assert_eq!(
         store.restore_backup(&unsafe_archive),
         Err(atha_backend::messages::MessageError::InvalidBackup)
@@ -381,6 +396,55 @@ fn invalid_or_busy_restore_keeps_current_message_facts() {
         store
             .roots(&edition().content_version, None)
             .expect("list after unsafe restore")
+            .len(),
+        2
+    );
+
+    let null_search = root.0.join("null-search.atha-backup");
+    forge_backup_database(
+        &archive,
+        &null_search,
+        &forged_database_path,
+        &valid_database,
+        "UPDATE message_search SET conversation_id = NULL WHERE rowid = (SELECT min(rowid) FROM message_search);",
+    );
+    assert_eq!(
+        store.restore_backup(&null_search),
+        Err(atha_backend::messages::MessageError::InvalidBackup)
+    );
+
+    let invalid_outbox = root.0.join("invalid-outbox.atha-backup");
+    forge_backup_database(
+        &archive,
+        &invalid_outbox,
+        &forged_database_path,
+        &valid_database,
+        "UPDATE outbox_event SET event_type = 'unknown-message-event'
+         WHERE rowid = (SELECT min(rowid) FROM outbox_event);",
+    );
+    assert_eq!(
+        store.restore_backup(&invalid_outbox),
+        Err(atha_backend::messages::MessageError::InvalidBackup)
+    );
+
+    let invalid_legacy = root.0.join("invalid-legacy.atha-backup");
+    forge_backup_database(
+        &archive,
+        &invalid_legacy,
+        &forged_database_path,
+        &valid_database,
+        "INSERT INTO legacy_import_state
+             (edition_id, source_key, record_hash, item_count, completed_at_ms)
+         SELECT id, 'forged-source', zeroblob(32), 1, 0 FROM edition LIMIT 1;",
+    );
+    assert_eq!(
+        store.restore_backup(&invalid_legacy),
+        Err(atha_backend::messages::MessageError::InvalidBackup)
+    );
+    assert_eq!(
+        store
+            .roots(&edition().content_version, None)
+            .expect("list after semantic restore rejection")
             .len(),
         2
     );
@@ -989,7 +1053,7 @@ fn legacy_annotation_import_is_atomic_and_idempotent() {
         .import_legacy_annotations(input.clone())
         .expect("import legacy annotations");
     let repeated = store
-        .import_legacy_annotations(input)
+        .import_legacy_annotations(input.clone())
         .expect("repeat legacy import");
     let active = store
         .conversation(&imported.items[0].conversation_id)
@@ -1012,6 +1076,20 @@ fn legacy_annotation_import_is_atomic_and_idempotent() {
             .expect("load imported revision")[0]
             .text,
         "旧版笔记"
+    );
+
+    let archive = root.0.join("legacy.atha-backup");
+    store
+        .create_backup(&archive)
+        .expect("backup imported legacy state");
+    store
+        .restore_backup(&archive)
+        .expect("restore imported legacy state");
+    assert!(
+        store
+            .import_legacy_annotations(input)
+            .expect("repeat restored legacy import")
+            .already_complete
     );
 }
 

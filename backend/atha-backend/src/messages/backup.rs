@@ -475,6 +475,15 @@ fn validate_message_content(
                     WHERE length(CAST(source_path AS BLOB)) > 4096
                        OR length(CAST(media_type AS BLOB)) > 512
                        OR length(CAST(asset_name AS BLOB)) > 64
+                UNION ALL SELECT 1 FROM outbox_event
+                    WHERE length(CAST(aggregate_type AS BLOB)) > 32
+                       OR length(CAST(event_type AS BLOB)) > 64
+                       OR length(CAST(payload_json AS BLOB)) > 4096
+                UNION ALL SELECT 1 FROM legacy_import_state
+                    WHERE length(CAST(source_key AS BLOB)) > 200
+                UNION ALL SELECT 1 FROM legacy_annotation_import
+                    WHERE length(CAST(source_key AS BLOB)) > 200
+                       OR length(CAST(legacy_id AS BLOB)) > 64
             )",
             [],
             |row| row.get(0),
@@ -501,7 +510,7 @@ fn validate_message_content(
                 WHERE m.current_revision_id IS NULL
                    OR m.created_at_ms < 0 OR m.updated_at_ms < m.created_at_ms
                    OR (m.deleted_at_ms IS NOT NULL
-                       AND (m.deleted_at_ms < m.created_at_ms OR m.deleted_at_ms > m.updated_at_ms))
+                       AND m.deleted_at_ms < m.updated_at_ms)
                    OR (m.id = c.root_message_id AND
                        (m.ordinal <> 0 OR m.reply_to_message_id IS NOT NULL
                         OR m.current_source_anchor_id IS NULL))
@@ -616,6 +625,8 @@ fn validate_message_content(
         validate_revision_content(schema, &kind, &content_json, &plain_text, created, error)?;
     }
 
+    validate_legacy_content(connection, error)?;
+    validate_outbox_content(connection, error)?;
     validate_source_content(connection, &mut load_asset, error)?;
     validate_search_projection(connection, error)
 }
@@ -634,6 +645,235 @@ fn validate_revision_content(
     } else {
         Err(error)
     }
+}
+
+fn validate_legacy_content(
+    connection: &Connection,
+    error: MessageError,
+) -> Result<(), MessageError> {
+    let invalid_relationship: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM legacy_import_state s
+                WHERE s.completed_at_ms < 0 OR s.item_count > 1000
+                   OR s.item_count <> (
+                       SELECT count(*) FROM legacy_annotation_import i
+                       WHERE i.edition_id = s.edition_id AND i.source_key = s.source_key
+                   )
+                   OR s.item_count <> (
+                       SELECT count(DISTINCT i.message_id) FROM legacy_annotation_import i
+                       WHERE i.edition_id = s.edition_id AND i.source_key = s.source_key
+                   )
+                UNION ALL
+                SELECT 1 FROM legacy_annotation_import i
+                JOIN message m ON m.id = i.message_id
+                JOIN conversation c ON c.id = m.conversation_id
+                WHERE c.edition_id <> i.edition_id OR c.root_message_id <> m.id
+                   OR m.ordinal <> 0 OR m.reply_to_message_id IS NOT NULL
+            )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| error)?;
+    if invalid_relationship {
+        return Err(error);
+    }
+
+    let mut states = connection
+        .prepare("SELECT source_key FROM legacy_import_state ORDER BY edition_id, source_key")
+        .map_err(|_| error)?;
+    for row in states
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|_| error)?
+    {
+        if !valid_legacy_source_key(&row.map_err(|_| error)?) {
+            return Err(error);
+        }
+    }
+
+    let mut mappings = connection
+        .prepare(
+            "SELECT source_key, legacy_id FROM legacy_annotation_import
+             ORDER BY edition_id, source_key, legacy_id",
+        )
+        .map_err(|_| error)?;
+    for row in mappings
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|_| error)?
+    {
+        let (source_key, legacy_id) = row.map_err(|_| error)?;
+        if !valid_legacy_source_key(&source_key) || !valid_legacy_id(&legacy_id) {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+fn validate_outbox_content(
+    connection: &Connection,
+    error: MessageError,
+) -> Result<(), MessageError> {
+    let mut events = connection
+        .prepare(
+            "SELECT aggregate_type, aggregate_id, event_type, payload_json,
+                    created_at_ms, attempt_count, next_attempt_ms
+             FROM outbox_event ORDER BY created_at_ms, id",
+        )
+        .map_err(|_| error)?;
+    let rows = events
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+            ))
+        })
+        .map_err(|_| error)?;
+    for row in rows {
+        let (aggregate_type, aggregate_id, event_type, payload_json, created, attempts, next) =
+            row.map_err(|_| error)?;
+        if aggregate_type != "message"
+            || created < 0
+            || !(0..=1_000).contains(&attempts)
+            || next.is_some_and(|next| next < created)
+            || !record_exists(
+                connection,
+                "SELECT EXISTS(SELECT 1 FROM message WHERE id = ?1)",
+                &aggregate_id,
+                error,
+            )?
+        {
+            return Err(error);
+        }
+        let payload = serde_json::from_str::<Value>(&payload_json).map_err(|_| error)?;
+        let object = payload.as_object().ok_or(error)?;
+        let message_id = payload_id(object, "messageId", error)?;
+        if message_id.as_slice() != aggregate_id.as_slice() {
+            return Err(error);
+        }
+
+        match event_type.as_str() {
+            "message-created" if has_exact_keys(object, &["messageId"]) => {}
+            "message-deleted" if has_exact_keys(object, &["messageId"]) => {
+                if !record_exists(
+                    connection,
+                    "SELECT EXISTS(SELECT 1 FROM message WHERE id = ?1 AND deleted_at_ms IS NOT NULL)",
+                    &aggregate_id,
+                    error,
+                )? {
+                    return Err(error);
+                }
+            }
+            "message-source-reselected" | "message-source-reanchored"
+                if has_exact_keys(object, &["messageId", "sourceId"]) =>
+            {
+                let source_id = payload_id(object, "sourceId", error)?;
+                if !related_record_exists(
+                    connection,
+                    "SELECT EXISTS(SELECT 1 FROM source_anchor WHERE id = ?1 AND message_id = ?2)",
+                    &source_id,
+                    &aggregate_id,
+                    error,
+                )? {
+                    return Err(error);
+                }
+            }
+            "message-revised" if has_exact_keys(object, &["messageId", "revisionId"]) => {
+                let revision_id = payload_id(object, "revisionId", error)?;
+                if !related_record_exists(
+                    connection,
+                    "SELECT EXISTS(SELECT 1 FROM message_revision WHERE id = ?1 AND message_id = ?2)",
+                    &revision_id,
+                    &aggregate_id,
+                    error,
+                )? {
+                    return Err(error);
+                }
+            }
+            "message-imported" if has_exact_keys(object, &["messageId", "legacyId"]) => {
+                let legacy_id = object
+                    .get("legacyId")
+                    .and_then(Value::as_str)
+                    .filter(|value| valid_legacy_id(value))
+                    .ok_or(error)?;
+                let exists: bool = connection
+                    .query_row(
+                        "SELECT EXISTS(
+                            SELECT 1 FROM legacy_annotation_import i
+                            JOIN legacy_import_state s
+                              ON s.edition_id = i.edition_id AND s.source_key = i.source_key
+                            WHERE i.message_id = ?1 AND i.legacy_id = ?2
+                              AND s.completed_at_ms = ?3
+                        )",
+                        params![aggregate_id, legacy_id, created],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| error)?;
+                if !exists {
+                    return Err(error);
+                }
+            }
+            _ => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn has_exact_keys(object: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {
+    object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key))
+}
+
+fn payload_id(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+    error: MessageError,
+) -> Result<Vec<u8>, MessageError> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or(error)
+        .and_then(|value| decode_hex::<16>(value).map_err(|_| error))
+}
+
+fn record_exists(
+    connection: &Connection,
+    sql: &str,
+    id: &[u8],
+    error: MessageError,
+) -> Result<bool, MessageError> {
+    connection
+        .query_row(sql, params![id], |row| row.get(0))
+        .map_err(|_| error)
+}
+
+fn related_record_exists(
+    connection: &Connection,
+    sql: &str,
+    id: &[u8],
+    message_id: &[u8],
+    error: MessageError,
+) -> Result<bool, MessageError> {
+    connection
+        .query_row(sql, params![id, message_id], |row| row.get(0))
+        .map_err(|_| error)
+}
+
+fn valid_legacy_source_key(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 200 && !value.chars().any(char::is_control)
+}
+
+fn valid_legacy_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 fn validate_source_content(
@@ -780,11 +1020,11 @@ fn validate_search_projection(
                 LEFT JOIN message root ON root.id = c.root_message_id
                 LEFT JOIN source_anchor root_a ON root_a.id = root.current_source_anchor_id
                 WHERE m.id IS NULL OR m.deleted_at_ms IS NOT NULL
-                   OR search.conversation_id <> lower(hex(m.conversation_id))
-                   OR search.edition_id <> lower(hex(c.edition_id))
-                   OR search.section_id <> COALESCE(a.section_id, root_a.section_id, '')
-                   OR search.selected_text <> COALESCE(a.selected_text, root_a.selected_text, '')
-                   OR search.plain_text <> r.plain_text
+                   OR search.conversation_id IS NOT lower(hex(m.conversation_id))
+                   OR search.edition_id IS NOT lower(hex(c.edition_id))
+                   OR search.section_id IS NOT COALESCE(a.section_id, root_a.section_id, '')
+                   OR search.selected_text IS NOT COALESCE(a.selected_text, root_a.selected_text, '')
+                   OR search.plain_text IS NOT r.plain_text
                 UNION ALL
                 SELECT 1 FROM message m
                 LEFT JOIN message_search search ON search.message_id = lower(hex(m.id))

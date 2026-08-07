@@ -69,7 +69,7 @@
     busy = true;
     status = "正在创建消息备份…";
     try {
-      status = (await backupMessages()) ? "消息备份已保存。" : "";
+      status = (await backupMessages()) ? "消息备份已保存。" : "已取消消息备份。";
     } catch {
       status = "无法创建消息备份。";
     } finally {
@@ -83,11 +83,14 @@
       status = "请在 Atha 桌面应用中恢复消息。";
       return;
     }
-    if (!confirm("恢复会替换全部标注、笔记和对话。请先关闭其他 Atha 窗口。继续？")) return;
+    if (!confirm("恢复会替换全部标注、笔记和对话。请先关闭其他 Atha 窗口。继续？")) {
+      status = "已取消消息恢复。";
+      return;
+    }
     busy = true;
     status = "正在验证并恢复消息备份…";
     try {
-      status = (await restoreMessages()) ? "消息已从备份恢复。" : "";
+      status = (await restoreMessages()) ? "消息已从备份恢复。" : "已取消消息恢复。";
     } catch {
       status = "无法恢复：备份无效、数据库正被占用，或文件不可读取。";
     } finally {

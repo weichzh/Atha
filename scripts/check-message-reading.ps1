@@ -94,6 +94,13 @@ function Assert-MessageMaintenanceCommandsEnabled {
             throw "Tauri invoke handler must register $command exactly once."
         }
     }
+
+    $libraryView = Get-Content -LiteralPath 'reader/app/src/components/LibraryView.svelte' -Raw
+    foreach ($message in '已取消消息备份。', '已取消消息恢复。') {
+        if (-not $libraryView.Contains($message)) {
+            throw "Library maintenance cancellation status is missing: $message"
+        }
+    }
 }
 
 Push-Location $repoRoot
