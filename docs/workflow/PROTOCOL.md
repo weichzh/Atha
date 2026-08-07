@@ -16,6 +16,19 @@
 
 涉及产品行为、依赖、架构、数据、阅读兼容性、验收、跨模块实现或难以回滚的变化。实施前必须有一份状态为 `accepted` 的 `docs/changes/<slug>.md`，并获得用户对范围的明确批准。
 
+## 问题分流
+
+先按观察到的信号选择唯一所有者，再决定任务类型。流程优化与 Atha 产品或架构变化分别建任务、分别验证，不共享 change。
+
+| 信号 | 路由 | 处理 |
+| --- | --- | --- |
+| 重复失败、长等待、claim 冲突、改动无法归因，或任务状态与当前文档漂移 | `project-workflow` | 先检查工作流基准和必要 run 记录；只有 Atha 的证据留在项目契约、脚本或文档，跨项目证据才进入全局工具 |
+| 用户无法完成打开、阅读、引用消息、讨论、搜索或回顾主循环 | Atha 产品 | 更新产品事实与路线图，只选择一个可独立验收的纵向切片 |
+| 质量场景、Module、Interface、Seam、Adapter、数据语义、信任边界或运行拓扑需要变化 | Atha 架构 | 按架构规范评估替代方案，并通过 `accepted` change 和必要 ADR 实施 |
+| 已获批切片内的局部实现问题 | 所属代码 Module | 在既有范围内修复并运行最小相关检查，不借机扩张流程或架构 |
+
+架构缺口本身不是产品待办，流程摩擦也不是重构产品代码的理由；二者只有在各自证据成立时推进。
+
 ## Change 记录
 
 状态只使用 `proposed`、`accepted`、`implemented`。一份 change 至少保存 Problem、Scope、Acceptance Criteria、Files And Steps、Checks、Result、Review 与 Evidence And Residual Risks；需要时再写非目标、回滚和风险。
