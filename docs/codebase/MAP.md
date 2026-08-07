@@ -45,7 +45,7 @@
 ### 正式后端基线
 
 - workspace 包含 `atha-backend`、`atha-reader-host` 与 `atha-reader-app`，并显式排除 P0 Rust crate；产品 app 依赖 backend 与 host 的共享 Windows 启动 / 诊断代码，host 只依赖 backend；
-- 版本 `0.1.0`、edition 2024、Rust `1.97.1` 和禁止 unsafe 的 lint 由 workspace 统一；
+- 版本 `0.1.0`、edition 2024、Rust `1.97.1`、第一方许可证 `AGPL-3.0-or-later` 和禁止 unsafe 的 lint 由 workspace 统一；独立 P0 crate 与前端 package 显式投影同一许可证；
 - 后端 crate 使用 `zip`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB，并用 `dom_query` 与锁定的 `rusqlite 0.40.1` bundled SQLite 实现严格快照校验和消息事实；没有 repository trait 或多格式工厂；
 - 根锁文件包含正式后端导入、消息数据库、Tauri 官方日志插件与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
 - `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移、自包含交换导出及 schema 1 完整备份 / 恢复。

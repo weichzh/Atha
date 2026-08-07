@@ -82,11 +82,11 @@ Readest 的自定义词典实现提供了值得复用的架构证据：
 
 来源：[Readest 自定义 MDict/StarDict PR](https://github.com/readest/readest/pull/4012)、[Readest 系统词典 PR](https://github.com/readest/readest/pull/4219)、[Android `ACTION_PROCESS_TEXT`](https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT)
 
-这些是“架构证据”，不是可直接复制的代码。Readest 与上游 `js-mdict` 采用 AGPL 路线；Atha 当前仓库没有可据以判断兼容性的许可证文件，必须先做项目级许可证决定。
+这些是“架构证据”，不是可直接复制的代码。Atha 已采用 `AGPL-3.0-or-later`，但 Readest 与上游 `js-mdict` 的精确 `-only` / `-or-later`、版权与修改说明仍需单独核对；项目采用 AGPL 不等于可以无出处复制。
 
 `mdict-rs` 是更符合 Rust 后端的候选。项目文档声明其为 clean-room、按需读取的 MDX/MDD v2 实现，支持加密关键字索引、MDD 资源、zlib、可选 LZO、多种文本编码、边界校验和模糊测试；但 0.1.0 到 0.1.4 都发布于 2026 年 4 月，项目自称早期公开版本，许可证为 AGPL-3.0-only 或商业许可。[mdict-rs 0.1.4](https://docs.rs/crate/mdict-rs/0.1.4)、[mdict-rs API](https://docs.rs/mdict-rs/latest/mdict_rs/)
 
-因此对 MDict 的结论是：技术方向明确，生产依赖尚未批准。若 Atha 不采用 AGPL，则应先询价商业许可或重新检索具有明确宽松许可证且能通过本样本的实现；不能为了绕开许可证而照着 AGPL 源码重写。
+因此对 MDict 的结论是：技术方向明确，生产依赖尚未批准。`mdict-rs` 的 `AGPL-3.0-only` 与 Atha 的 `AGPL-3.0-or-later` 不能仅凭名称相近自动判定兼容；生产接入前必须完成精确组合许可判断，否则询价商业许可或重新检索可兼容且能通过本样本的实现。不能为了绕开许可证而照着 AGPL 源码重写。
 
 ### 候选矩阵
 
@@ -210,7 +210,7 @@ AndroidX Benchmark 官方文档要求在物理设备上测量；Microbenchmark �
 
 ## 实施顺序与未决项
 
-1. 先决定 Atha 的项目许可证及 LGPL 动态/静态链接、AGPL 或商业依赖边界；许可证未决时只做隔离实验，不把候选源码并入主产品。
+1. Atha 项目许可证已定为 `AGPL-3.0-or-later`；下一许可门槛是 LGPL 动态 / 静态链接材料与 `AGPL-3.0-only` / 商业依赖的精确组合边界，未解决时只做隔离实验，不把候选源码并入主产品。
 2. 为 `libmobi` 建立最薄 Android P0：只做打开、精确查词、旧式屈折查词和词条范围读取；用 Bing 样本执行上述 benchmark，并对损坏头/截断记录做无正文的合成测试。
 3. 为获准的 MDict 候选建立独立 P0：验证 Merriam 样本的 encrypt=2 键索引、精确/不存在查询、一个 MDD 资源和内存曲线。没有许可证或样本失败时不进入 UI。
 4. 两个 P0 达标后再接入统一的最小查词结果和安全定义视图；最后增加字典排序、启停和可选 Android 系统词典动作。

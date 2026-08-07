@@ -89,6 +89,7 @@ Atha 是 Windows 优先、本地优先的高保真个人阅读系统。产品目
 - 快照资产恢复决策：`docs/decisions/ADR-0005-message-snapshot-asset-recovery.md`
 - 完整消息备份 / 恢复决策：`docs/decisions/ADR-0006-message-store-backup-restore.md`
 - Android 开发前的本地诊断日志决策：`docs/decisions/ADR-0007-android-observability.md`
+- 项目许可证决策：`docs/decisions/ADR-0008-project-license.md`
 - 当前状态：`docs/ACTIVE.md`
 - 代码现状：`docs/codebase/MAP.md`
 - 数据库基线：`docs/codebase/DATABASE.md`

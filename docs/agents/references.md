@@ -18,6 +18,14 @@
 - 最短检查：运行 `scripts/check-tauri-reader.ps1` 后检查平台 AppLog 同时包含启动、打开和 reader 固定阶段事件，并确认不含 fixture 路径或内容。
 - 必须重查：插件 release line、Android 日志目录 / logcat 行为、target filter、轮转语义和敏感字段。
 
+## 项目与依赖许可证
+
+- 版本事实：根 `LICENSE`、根 / member Cargo manifest、独立 P0 manifest 与 `reader/app/package.json` 中的精确 SPDX。
+- 官方入口：[GNU AGPL v3](https://www.gnu.org/licenses/agpl-3.0.html)、[SPDX `AGPL-3.0-or-later`](https://spdx.org/licenses/AGPL-3.0-or-later.html)、[Cargo license 字段](https://doc.rust-lang.org/cargo/reference/manifest.html#the-license-and-license-file-fields)、[Cargo workspace package 继承](https://doc.rust-lang.org/cargo/reference/workspaces.html#the-package-table)、[npm license 字段](https://docs.npmjs.com/cli/configuring-npm/package-json/#license)。
+- 项目快速用法：Atha 第一方代码使用 `AGPL-3.0-or-later`；第三方代码与资产保留各自许可。依赖接入必须核对精确 `-only` / `-or-later`、链接与分发方式以及适用的源码、NOTICE、修改说明或重新链接义务。
+- 最短检查：Cargo / npm manifest 解析、根许可证与 GNU 官方纯文本哈希一致、三个锁文件无 diff、required `docs` gate。
+- 必须重查：首次正式分发、双许可 / CLA、CSS 社区独立仓库、`AGPL-3.0-only` 依赖、LGPL Android 链接以及任何可再分发性不明的字体、书籍、词典或 fixture。
+
 ## Svelte 5
 
 - 版本事实：`reader/app/package.json` 与 `reader/app/pnpm-lock.yaml`。

@@ -157,7 +157,7 @@ Atha 当前 Android 编译的直接阻塞包括：产品 app 无条件依赖只�
 
 - 不换成 Next.js/React；Tauri 官方支持任意可编译为 HTML/CSS/JS 的前端。
 - 不替换 Atha reader kernel、Locator、消息模型和内容安全边界为 foliate view。
-- 不复制 Readest 应用层源码。Readest 主仓库是 AGPL-3.0；可直接复用的目标应限定为 MIT 的 foliate-js、标准和独立许可依赖（[Readest LICENSE](https://github.com/readest/readest/blob/2b719600c27b4c9c91bef7b2bb148b3251338ea7/LICENSE)、[foliate-js LICENSE](https://github.com/readest/foliate-js/blob/f65836f77e8b66b84baacd54bfc92096578e7a84/LICENSE)）。Atha 尚无仓库级 LICENSE，合并第三方源码前必须先明确分发许可策略。
+- 不复制 Readest 应用层源码。Atha 已采用 `AGPL-3.0-or-later`，但这不会自动批准 Readest 的源码或消除版权 / 修改说明义务；优先复用 MIT 的 foliate-js、标准和独立许可依赖，并在合并第三方源码前核对精确 `-only` / `-or-later` 与实际分发方式（[Readest LICENSE](https://github.com/readest/readest/blob/2b719600c27b4c9c91bef7b2bb148b3251338ea7/LICENSE)、[foliate-js LICENSE](https://github.com/readest/foliate-js/blob/f65836f77e8b66b84baacd54bfc92096578e7a84/LICENSE)）。
 - 不预建格式插件系统、generic factory 或远程格式服务。每个 importer 直接实现“输入 → 现有书根/manifest”，等至少两个实现出现真正重复后再提取。
 - 不引入 PDF.js、Readest webview-upgrade、`largeHeap` 或 native MOBI 快路，除非对应实测问题出现。
 
@@ -188,7 +188,7 @@ Readest 源码说明了两个应重点防守的瓶颈：Android WebView 本地�
 2. **Android SDK/NDK 现场：** 当前主机是否已安装可用 JDK、SDK、NDK、adb 和 arm64 真机尚未在本研究中执行探针；这是纵切 1 的第一项现场检查。
 3. **dialog 版本行为：** Atha 锁定 `tauri-plugin-dialog 2.7.2`，但还没有在 Android 实机验证 Rust blocking picker 与新版 JS `copy` 模式的差异；应以官方 JS API 的 sandbox copy 做首个实验。
 4. **规范化导入接口：** FB2/MOBI 的 foliate Book → Atha `ReaderManifest` adapter 需要小型 PoC，确认资源 URL、CSS 引用、字体、内部链接与确定性 content version 能完整落盘；这是采用 foliate parser 的 go/no-go 条件。
-5. **许可：** Atha 的发布许可未声明；在 vendoring foliate-js 或引入 LGPL `libmobi` 前需明确。研究和独立重写不等于获准复制 Readest AGPL 代码。
+5. **许可：** Atha 已采用 `AGPL-3.0-or-later`；vendoring foliate-js 仍需保留 MIT 许可，Android 引入 LGPL `libmobi` 仍需解决源码与重新链接材料。研究和独立重写不等于获准复制 Readest 代码。
 6. **DRM/真实语料：** 需要明确所有验收文件均为可合法测试的 DRM-free 文件，并补齐 EPUB2、FB2、CBZ、TXT、MD、MOBI/KF8 固定 corpus。
 7. **Readest `main` 与稳定版差异：** `main` 仍标记为 `0.11.20`，但包含发布后提交；本报告的 Android Range、TXT/MD 与 native fast path 细节不能自动声称已在 `v0.11.20` 商店包中验证。
 8. **内容安全：** foliate-js 官方警告同源 blob 与 scripted EPUB 风险，要求 CSP（[Security](https://github.com/readest/foliate-js/blob/f65836f77e8b66b84baacd54bfc92096578e7a84/README.md#security)）。任何新格式 adapter 都必须在进入 Atha 书根前清洗/验证，不能以“成熟库已解析”为信任依据。
@@ -205,4 +205,3 @@ Readest 源码说明了两个应重点防守的瓶颈：Android WebView 本地�
 - [foliate-js EPUB](https://github.com/readest/foliate-js/blob/f65836f77e8b66b84baacd54bfc92096578e7a84/epub.js)、[MOBI/KF8](https://github.com/readest/foliate-js/blob/f65836f77e8b66b84baacd54bfc92096578e7a84/mobi.js)、[FB2](https://github.com/readest/foliate-js/blob/f65836f77e8b66b84baacd54bfc92096578e7a84/fb2.js)、[CBZ](https://github.com/readest/foliate-js/blob/f65836f77e8b66b84baacd54bfc92096578e7a84/comic-book.js)
 - [Tauri Android prerequisites](https://v2.tauri.app/start/prerequisites/)、[WebView versions](https://v2.tauri.app/reference/webview-versions/)、[dialog API](https://v2.tauri.app/reference/javascript/dialog/)、[mobile file associations](https://v2.tauri.app/learn/mobile-file-associations/)
 - [W3C EPUB 3.3](https://www.w3.org/TR/epub-33/)、[Anansi ComicInfo](https://anansi-project.github.io/docs/comicinfo/intro)
-

@@ -27,7 +27,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/web/conversations.mjs` | 对话浮层、本条/本章/本书记录、时间/书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
 | `reader/web/navigation.mjs` | 章节标题、目录选择、全书近似进度和进度拖动 |
 | `reader/web/pagination.mjs` | 视口设备像素换算、分页、尺寸变化、进度和公式尺寸 |
-| `reader/assets/bookmark-24-regular.svg` | 右上角书签图标，来自 Microsoft Fluent System Icons |
+| `reader/assets/bookmark-24-regular.svg` | 右上角书签图标，来自 Microsoft Fluent System Icons；固定来源与 MIT 文本见根 `THIRD_PARTY_NOTICES.md` |
 | `reader/app/src-tauri/src/lib.rs` | Tauri 窗口、受控书籍协议、导航限制和遥测 command |
 | `reader/atha-reader-host/src/windows/launch.rs` | 两个 host 共用的 Windows 窗口尺寸、CLI 与阅读 URL |
 | `reader/app/vite.config.ts` | production 壳构建和既有 reader module 拼接顺序 |

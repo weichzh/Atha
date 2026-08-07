@@ -56,3 +56,7 @@ Tauri 阅读器的完整本地检查入口是 `pwsh -NoProfile -File .\scripts\c
 - 协作规则：`AGENTS.md`
 
 生产代码必须经过规格、计划、交叉审阅和用户批准门禁。
+
+## 许可证
+
+除另有标注的第三方代码与资产外，Atha 第一方代码依据 GNU Affero General Public License v3.0 or later（SPDX：`AGPL-3.0-or-later`）授权，详见 [`LICENSE`](LICENSE)。第三方字体、书籍、词典、fixture 与用户内容保留各自许可或权利状态；仓库内已复制资产的版权与许可见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
