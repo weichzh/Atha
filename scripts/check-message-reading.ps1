@@ -23,13 +23,25 @@ function Assert-MessageCommandsEnabled {
 
     $permissions = Get-Content -LiteralPath 'reader/app/src-tauri/permissions/reader.toml' -Raw
     $tauriCommands = Get-Content -LiteralPath 'reader/app/src-tauri/src/lib.rs' -Raw
-    $messageCommands = [regex]::Matches($tauriCommands, '(?m)^\s+(message_[a-z_]+),$') |
-        ForEach-Object { $_.Groups[1].Value }
+    $messageCommands = @(
+        [regex]::Matches($tauriCommands, '(?m)^\s+(?:message_commands::)?(message_[a-z_]+),?$') |
+            ForEach-Object { $_.Groups[1].Value }
+    )
+    $allowedCommands = @(
+        [regex]::Matches($permissions, '(?m)^\s*"(message_[a-z_]+)",?$') |
+            ForEach-Object { $_.Groups[1].Value }
+    )
     if ($messageCommands.Count -eq 0) { throw 'No registered Tauri message commands found.' }
-    foreach ($command in $messageCommands) {
-        if (-not $permissions.Contains(('"{0}"' -f $command))) {
-            throw "Tauri permission does not allow $command."
-        }
+    if (($messageCommands | Sort-Object -Unique).Count -ne $messageCommands.Count) {
+        throw 'Tauri message command registration contains duplicates.'
+    }
+    if (($allowedCommands | Sort-Object -Unique).Count -ne $allowedCommands.Count) {
+        throw 'Tauri message command permission contains duplicates.'
+    }
+    $drift = @(Compare-Object ($messageCommands | Sort-Object) ($allowedCommands | Sort-Object))
+    if ($drift.Count -gt 0) {
+        $details = ($drift | ForEach-Object { "{0}{1}" -f $_.InputObject, $_.SideIndicator }) -join ', '
+        throw "Tauri message command registration and permission differ: $details"
     }
 }
 

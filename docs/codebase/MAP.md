@@ -18,6 +18,8 @@
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
 | `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3 导入、本地书架、消息数据库与阅读遥测校验 | 已实现 |
 | `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
+| `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry 与 protocol adapter | 已验证 |
+| `reader/app/src-tauri/src/message_commands.rs` | 消息 IPC adapter；统一阅读路由校验、DTO 转发、稳定错误和原生导出 dialog | 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、默认样式、原生阅读偏好、书签、消息投影、搜索面板、对话浮层与内容 dialog | 已实现 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、分页、诊断、benchmark 和页面组合入口 | 已实现 |
@@ -47,7 +49,7 @@
 
 ### 正式后端基线
 
-- workspace 包含 `atha-backend` 与 `atha-reader-host`，并显式排除 P0 Rust crate；
+- workspace 包含 `atha-backend`、`atha-reader-host` 与 `atha-reader-app`，并显式排除 P0 Rust crate；产品 app 依赖 backend 与 host 的共享 Windows 启动 / 诊断代码，host 只依赖 backend；
 - 版本 `0.1.0`、edition 2024、Rust `1.97.1` 和禁止 unsafe 的 lint 由 workspace 统一；
 - 后端 crate 使用 `zip`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB，并用 `dom_query` 与锁定的 `rusqlite 0.40.1` bundled SQLite 实现严格快照校验和消息事实；没有 repository trait 或多格式工厂；
 - 根锁文件包含正式后端导入、消息数据库与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
@@ -71,7 +73,7 @@
 - Windows 窗口与壳层控件使用系统逻辑像素，默认内部尺寸为 430 × 820，最小为 360 × 640，可自由调整和最大化；窗口变化经 Navigation 队列恢复 Locator；
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
 - Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，Vite 直接拼接十八份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
-- Tauri 书架 command 只向可信壳暴露受限书目，不返回源路径或内容；消息 command 只在当前阅读窗口接受受限 DTO，并把稳定错误返回前端；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测仍复用后端解析和共享 diagnostics；
+- Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle 与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目，不返回源路径或内容；`message_commands` adapter 统一校验当前阅读窗口、转发受限 DTO 并返回稳定错误；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测仍复用后端解析和共享 diagnostics；消息专项检查双向比较 handler 注册与 permission 集合，最后一个无尾逗号 command 也必须纳入；
 
 ## 已实现能力
 
