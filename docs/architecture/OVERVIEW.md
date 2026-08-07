@@ -2,7 +2,7 @@
 
 ## 入口
 
-产品目标和不可违反的体验原则见 `docs/product/OVERVIEW.md`。本文件只定义系统分层与长期边界；具体阅读和消息语义分别由专门文档维护。
+产品目标和不可违反的体验原则见 `docs/product/OVERVIEW.md`。通用架构设计、评估与完成规则见 `docs/architecture/DESIGN-GUIDE.md`。本文件只定义系统分层与长期边界；具体阅读和消息语义分别由专门文档维护。
 
 当前仅面向 Windows，采取后端先于前端的顺序。Windows UI 可以采用窄窗口阅读体验，但不得反向污染领域模型、数据语义或阅读内核。范围决策见 `docs/decisions/ADR-0001-windows-backend-first.md`。
 
@@ -44,6 +44,7 @@ SQLite 与本地资产是事实源。用户可变数据、全文索引、缓存�
 
 ## 相关文档
 
+- 架构设计规范：`docs/architecture/DESIGN-GUIDE.md`
 - 产品定义：`docs/product/OVERVIEW.md`
 - 阅读内核：`docs/architecture/READER-CORE.md`
 - 消息与共读：`docs/architecture/MESSAGE-READING.md`

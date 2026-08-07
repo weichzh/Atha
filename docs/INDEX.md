@@ -7,6 +7,7 @@
 | 任务 | 读取 |
 | --- | --- |
 | `product` | `product/OVERVIEW.md`、`architecture/OVERVIEW.md`、相关当前 change |
+| `architecture` | `architecture/DESIGN-GUIDE.md`、`architecture/OVERVIEW.md`、`codebase/MAP.md`、相关 ADR/change |
 | `reader` | `architecture/READER-CORE.md`、`codebase/MAP.md`、相关 ADR/change 与样本契约 |
 | `messages` | `architecture/MESSAGE-READING.md`、`codebase/DATABASE.md`、相关 change |
 | `workflow` | `agents/workflow.md`、`agents/references.md`、`workflow/PROTOCOL.md`、活动 change |
@@ -23,6 +24,7 @@
 | [agents/references.md](agents/references.md) | 外部技术与标准的官方入口和项目快速用法 |
 | [workflow/PROTOCOL.md](workflow/PROTOCOL.md) | 任务和 change 生命周期 |
 | [product/OVERVIEW.md](product/OVERVIEW.md) | 产品目标与体验边界 |
+| [architecture/DESIGN-GUIDE.md](architecture/DESIGN-GUIDE.md) | 架构设计、评估与审查规范 |
 | [architecture/OVERVIEW.md](architecture/OVERVIEW.md) | 系统边界 |
 | [architecture/READER-CORE.md](architecture/READER-CORE.md) | 阅读内核与样本策略 |
 | [architecture/MESSAGE-READING.md](architecture/MESSAGE-READING.md) | 消息、引用与共读语义 |
