@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -56,7 +56,7 @@ present
 - [x] `open` 拒绝作为 reparse point / symlink / junction 的 `Assets/`，读取与导出拒绝已引用 symlink；
 - [x] 失败注入回归证明数据库事务回滚、截断孤儿被清理、未知文件保留、重试成功且后续重开仍可读取；
 - [x] 不改变 schema、公开 DTO / error / command，不增加依赖或抽象；
-- [ ] 中文 Markdown、目标检查、required gate、diff 检查和独立 Standards / Spec review 通过。
+- [x] 中文 Markdown、目标检查、required gate、diff 检查和独立 Standards / Spec review 通过。
 
 ## Files And Steps
 
@@ -94,9 +94,9 @@ present
 
 ## Review
 
-- Blocking：待 review。
-- Non-blocking：待 review。
-- Out-of-scope：待 review。
+- Blocking：Standards 首轮发现 `Assets` reparse point / junction 可能越界清理，以及读取 / 导出会跟随已引用 symlink；修正为共享目录与资产校验后，Standards 复核通过，无剩余 Blocking。Spec 复核通过。
+- Non-blocking：两路复核仅发现证据中的测试数仍为 16；已更新为实际 17，并重跑完整消息专项。无剩余 Non-blocking。
+- Out-of-scope：真实进程强杀、硬件 / 文件系统耐久性与完整备份 / 恢复仍按 Non-Goals 保留，没有混入本 change。
 
 ## Evidence And Residual Risks
 
@@ -105,6 +105,8 @@ present
 - Red：目标失败注入测试在旧实现的重开步骤观察到截断孤儿仍存在，按预期失败；
 - Green：同一测试在新实现通过，并证明事务事实回滚、Atha 临时 / 截断孤儿清理、未知文件保留、同资源重试和再次重开读取；
 - Review fix Red / Green：旧实现会读取同字节 symlink 并接受 `Assets` junction；集中 no-follow 元数据校验后，读取 / 导出均返回损坏且 `open` 返回无效数据根；
+- 交付提交：`b4b9eba` 实现原子发布与重开恢复，`c2bcfee` 关闭独立 review 发现的链接边界并集中资产校验；
+- 独立 review：最终 Standards 与 Spec 均通过，无剩余 Blocking 或 Non-blocking；
 - Windows 本地：17 项 `message_reading` interface 集成测试、fmt、backend clippy `-D warnings`、中文 Markdown lint、doc guard、doc length 与 diff 检查通过；
 - Windows 本地完整消息专项：17 项后端集成测试、Markdown 测试、Svelte check / production build、3 项 Tauri app 测试与 5 项旧 host 测试通过；
 - 证据边界：本轮最高证据为 Windows 本地测试 / build 与静态检查，没有执行真实 Tauri / WebView2 交互或进程强杀；
