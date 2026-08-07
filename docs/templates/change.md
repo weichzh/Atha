@@ -10,6 +10,18 @@ proposed / accepted / implemented
 
 ## Non-Goals
 
+## Architecture Impact
+
+none / present
+
+若为 `present`，填写：
+
+- Design purpose:
+- Drivers / quality scenarios:
+- Modules / Interfaces / Seams / Adapters:
+- Candidate and tradeoffs:
+- Evidence / ADR / review trigger:
+
 ## Acceptance Criteria
 
 - [ ] ……

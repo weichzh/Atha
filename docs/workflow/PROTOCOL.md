@@ -20,6 +20,13 @@
 
 状态只使用 `proposed`、`accepted`、`implemented`。一份 change 至少保存 Problem、Scope、Acceptance Criteria、Files And Steps、Checks、Result、Review 与 Evidence And Residual Risks；需要时再写非目标、回滚和风险。
 
+每份新 change 必须包含 `Architecture Impact`，值只使用 `none` 或 `present`：
+
+- `none`：不改变产品 Module、Interface、Seam、Adapter、数据语义、信任模型、运行拓扑、依赖或长期质量门槛；
+- `present`：至少记录设计目的、关联驱动因素或质量场景、受影响的 Module / Interface / Seam / Adapter、一个合理替代方案及权衡、证据计划，以及适用的 ADR 或复查触发器。
+
+workflow 只负责要求这些输入存在并保存验收证据；具体架构内容由 `docs/architecture/DESIGN-GUIDE.md` 和对应事实所有者负责。不得把流程优化与产品架构重设计合并为同一 change。
+
 同一事实不复制到 `ACTIVE`、计划和评审。实现完成后进行一次独立 review pass：
 
 - `blocking`：违反范围、契约、安全或验收条件，必须关闭；
@@ -40,6 +47,8 @@
 - `ACTIVE.md` 只保留当前指针；详细范围、检查和风险更新到事实所有者或活动 change；
 - 全局 `project-workflow` 按 `docs/agents/workflow.md` 管理 task claim、工站证据与关闭；本协议仍独占任务分类和 change 生命周期；
 - 已接入的正式检查通过 `pwsh -NoProfile -File scripts/Invoke-Atha.ps1 check <target> -Activity <activity>` 运行；`Measure-Workflow.ps1` 只作为兼容记录层，不再手工维护日常 run/phase；
+- 预期拒绝类检查由项目脚本把“观察到预期拒绝”转换为成功退出；任何非预期接受、失败类型或未完成检查仍非零退出；
+- 检查按静态预检、受影响 Module、required gate、真实目标或 benchmark 的成本顺序推进，不在低成本失败未收敛时运行高成本链路；
 - 修改中文 Markdown 后，只处理本次文件的 `autocorrect --fix`、适用格式化和 `autocorrect --lint`；
 - 运行相称的测试、`python3 scripts/doc_guard.py`、`python3 scripts/doc_length_check.py` 和 `git diff --check`；
 - 未运行或未覆盖的检查必须明确记录，不用静态或本地证据代替真实目标验收。

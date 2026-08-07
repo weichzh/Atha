@@ -40,6 +40,7 @@ CODE_FILES = {
 CHANGE_HEADINGS = (
     "## Problem",
     "## Scope",
+    "## Architecture Impact",
     "## Acceptance Criteria",
     "## Files And Steps",
     "## Checks",
@@ -47,6 +48,8 @@ CHANGE_HEADINGS = (
     "## Review",
     "## Evidence And Residual Risks",
 )
+
+ARCHITECTURE_IMPACT_VALUES = {"none", "present"}
 
 
 def run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -97,6 +100,30 @@ def active_changes(root: Path) -> list[str]:
     return re.findall(r"^- `change`：.*→ `([^`]+)`\s*$", text, re.MULTILINE)
 
 
+def architecture_impact(text: str) -> str | None:
+    match = re.search(
+        r"^## Architecture Impact\s*$\n+\s*(\S+)\s*$",
+        text,
+        re.MULTILINE,
+    )
+    if match is None or match.group(1) not in ARCHITECTURE_IMPACT_VALUES:
+        return None
+    return match.group(1)
+
+
+def valid_change_text(text: str) -> bool:
+    status = re.search(
+        r"^## Status\s*$\n+\s*(accepted|implemented)\s*$",
+        text,
+        re.MULTILINE,
+    )
+    return (
+        status is not None
+        and all(heading in text for heading in CHANGE_HEADINGS)
+        and architecture_impact(text) is not None
+    )
+
+
 def accepted_change(root: Path, relative: str) -> bool:
     path = Path(relative)
     if path.is_absolute() or ".." in path.parts or path.parts[:2] != ("docs", "changes"):
@@ -105,11 +132,46 @@ def accepted_change(root: Path, relative: str) -> bool:
     if not target.is_file():
         return False
     text = target.read_text(encoding="utf-8")
-    status = re.search(r"^## Status\s*$\n+\s*(accepted|implemented)\s*$", text, re.MULTILINE)
-    return status is not None and all(heading in text for heading in CHANGE_HEADINGS)
+    return valid_change_text(text)
+
+
+def self_check() -> int:
+    body = "\n\n".join(
+        (
+            "# Self check",
+            "## Status\n\naccepted",
+            *(f"{heading}\n\nplaceholder" for heading in CHANGE_HEADINGS),
+        )
+    )
+    none = body.replace(
+        "## Architecture Impact\n\nplaceholder",
+        "## Architecture Impact\n\nnone",
+    )
+    present = none.replace(
+        "## Architecture Impact\n\nnone",
+        "## Architecture Impact\n\npresent",
+    )
+    missing = none.replace("## Architecture Impact\n\nnone\n\n", "")
+    unknown = none.replace(
+        "## Architecture Impact\n\nnone",
+        "## Architecture Impact\n\nunknown",
+    )
+
+    if not valid_change_text(none) or not valid_change_text(present):
+        raise AssertionError("valid architecture impact was rejected")
+    if valid_change_text(missing) or valid_change_text(unknown):
+        raise AssertionError("invalid architecture impact was accepted")
+    print("doc_guard_self_check: ok")
+    return 0
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--self-check"]:
+        return self_check()
+    if sys.argv[1:]:
+        print("Usage: doc_guard.py [--self-check]", file=sys.stderr)
+        return 2
+
     root = repo_root()
     changed = changed_files()
 
