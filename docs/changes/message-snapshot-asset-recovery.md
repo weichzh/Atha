@@ -15,6 +15,7 @@ accepted
 - 所有 SourceSnapshot 资源在 SQLite `IMMEDIATE` 写事务取得后才开始发布；
 - 新资产先以同目录独占临时文件写入，完成 `write_all` 与 `sync_all` 后再 rename 到最终内容哈希名；
 - `MessageStore::open` 在同一 SQLite 写锁下删除 Atha 临时资产和数据库未引用的规范哈希文件；
+- `Assets/` 必须是实际目录，Windows reparse point、目录 symlink / junction 均拒绝；读取与导出统一拒绝 symlink 等非普通资产，即使目标字节恰好匹配；
 - 已引用资产、非 Atha 文件和未知目录不得被清理；已引用资产损坏必须由读取和 `health` 明确报告，不能静默删除或覆盖；
 - 保持 `MessageStore` 公开 Interface、schema、DTO、稳定错误、Tauri command、依赖和正常产品行为不变；
 - 更新消息架构、数据库事实与系统风险顺序，并完成专项检查和独立 review。
@@ -52,6 +53,7 @@ present
 - [x] 进程中止遗留的 Atha 临时文件和数据库未引用的 64 位小写哈希文件在下次 `open` 时清理；
 - [x] 清理与写入使用同一 SQLite writer lock 协调，不删除已引用资产、未知文件、目录或可能正在发布的资产；
 - [x] `health.integrity` 同时覆盖 SQLite / 外键与已引用资产的存在、普通文件类型、长度和哈希；损坏资产不被静默修复；
+- [x] `open` 拒绝作为 reparse point / symlink / junction 的 `Assets/`，读取与导出拒绝已引用 symlink；
 - [x] 失败注入回归证明数据库事务回滚、截断孤儿被清理、未知文件保留、重试成功且后续重开仍可读取；
 - [x] 不改变 schema、公开 DTO / error / command，不增加依赖或抽象；
 - [ ] 中文 Markdown、目标检查、required gate、diff 检查和独立 Standards / Spec review 通过。
@@ -87,6 +89,7 @@ present
 - 新资源通过独占临时文件、`write_all`、`sync_all` 和同目录 rename 发布；最终名称仍是内容 SHA-256，既有有效资产继续去重复用；
 - `MessageStore::open` 在同一 writer lock 下删除 Atha 临时文件和未引用规范哈希文件，保留引用资产、未知文件和目录；
 - `health.integrity` 现在同时检查数据库、外键以及每个已引用资产的类型、长度、名称与实际 SHA-256；
+- `open`、资源读取与导出现在共用资产目录 / 文件边界：拒绝 `Assets` junction / symlink 与已引用 symlink，不会沿链接清理或读取；
 - 未改变 schema、公开 Interface、DTO、错误代码、Tauri command、crate 或依赖。
 
 ## Review
@@ -101,8 +104,9 @@ present
 - 官方语义证据：Rust `create_new` 提供原子独占创建，`File::sync_all` 报告关闭时可能遗漏的写回错误，`fs::rename` 在同一文件系统移动名称；
 - Red：目标失败注入测试在旧实现的重开步骤观察到截断孤儿仍存在，按预期失败；
 - Green：同一测试在新实现通过，并证明事务事实回滚、Atha 临时 / 截断孤儿清理、未知文件保留、同资源重试和再次重开读取；
-- Windows 本地：16 项 `message_reading` interface 集成测试、fmt、backend clippy `-D warnings`、中文 Markdown lint、doc guard、doc length 与 diff 检查通过；
-- Windows 本地完整消息专项：16 项后端集成测试、Markdown 测试、Svelte check / production build、3 项 Tauri app 测试与 5 项旧 host 测试通过；
+- Review fix Red / Green：旧实现会读取同字节 symlink 并接受 `Assets` junction；集中 no-follow 元数据校验后，读取 / 导出均返回损坏且 `open` 返回无效数据根；
+- Windows 本地：17 项 `message_reading` interface 集成测试、fmt、backend clippy `-D warnings`、中文 Markdown lint、doc guard、doc length 与 diff 检查通过；
+- Windows 本地完整消息专项：17 项后端集成测试、Markdown 测试、Svelte check / production build、3 项 Tauri app 测试与 5 项旧 host 测试通过；
 - 证据边界：本轮最高证据为 Windows 本地测试 / build 与静态检查，没有执行真实 Tauri / WebView2 交互或进程强杀；
 - 并发假设：所有正式资源发布和 open 清理均先取得 SQLite `IMMEDIATE` writer lock；若以后增加绕过该锁的资源写入口，必须重评本协议；
 - 残余风险：目录项在断电后的耐久性依赖操作系统、文件系统与硬件；完整备份 / 恢复、加密和 checkpoint 仍未实现。

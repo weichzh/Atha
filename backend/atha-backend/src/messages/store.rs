@@ -34,6 +34,7 @@ impl MessageStore {
             database: root.join(DATABASE_NAME),
             assets,
         };
+        store.ensure_assets_directory()?;
         store.migrate()?;
         store.recover_assets()?;
         Ok(store)
@@ -90,8 +91,9 @@ impl MessageStore {
                 let asset_name = encode_hex(&hash);
                 let asset_path = self.assets.join(&asset_name);
                 match fs::symlink_metadata(&asset_path) {
-                    Ok(_) if asset_file_matches(&asset_path, &hash, input.bytes.len() as i64) => {}
-                    Ok(_) => return Err(MessageError::CorruptData),
+                    Ok(_) => {
+                        self.read_asset(&asset_name, &hash, input.bytes.len() as u64)?;
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                         self.publish_asset(&asset_name, &hash, &input.bytes)?;
                     }
@@ -114,6 +116,7 @@ impl MessageStore {
         expected_hash: &[u8],
         bytes: &[u8],
     ) -> Result<(), MessageError> {
+        self.ensure_assets_directory()?;
         let asset_path = self.assets.join(asset_name);
         let temporary = self.assets.join(format!(
             "{ASSET_TEMP_PREFIX}{asset_name}-{}.tmp",
@@ -130,7 +133,10 @@ impl MessageStore {
                 .map_err(|_| MessageError::InvalidRoot)?;
             drop(file);
             if fs::rename(&temporary, &asset_path).is_err() {
-                if !asset_file_matches(&asset_path, expected_hash, bytes.len() as i64) {
+                if self
+                    .read_asset(asset_name, expected_hash, bytes.len() as u64)
+                    .is_err()
+                {
                     return Err(MessageError::InvalidRoot);
                 }
                 fs::remove_file(&temporary).map_err(|_| MessageError::InvalidRoot)?;
@@ -144,6 +150,7 @@ impl MessageStore {
     }
 
     fn recover_assets(&self) -> Result<(), MessageError> {
+        self.ensure_assets_directory()?;
         let mut connection = self.connect()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -198,12 +205,47 @@ impl MessageStore {
             if !is_asset_name(&name)
                 || hash.len() != 32
                 || encode_hex(&hash) != name
-                || !asset_file_matches(&self.assets.join(name), &hash, byte_length)
+                || u64::try_from(byte_length)
+                    .ok()
+                    .is_none_or(|length| self.read_asset(&name, &hash, length).is_err())
             {
                 return Ok(false);
             }
         }
         Ok(true)
+    }
+
+    pub(crate) fn read_asset(
+        &self,
+        asset_name: &str,
+        expected_hash: &[u8],
+        byte_length: u64,
+    ) -> Result<Vec<u8>, MessageError> {
+        self.ensure_assets_directory()?;
+        if !is_asset_name(asset_name)
+            || expected_hash.len() != 32
+            || encode_hex(expected_hash) != asset_name
+        {
+            return Err(MessageError::CorruptData);
+        }
+        let path = self.assets.join(asset_name);
+        let metadata = fs::symlink_metadata(&path).map_err(|_| MessageError::CorruptData)?;
+        if !metadata.file_type().is_file() || metadata.len() != byte_length {
+            return Err(MessageError::CorruptData);
+        }
+        let bytes = fs::read(path).map_err(|_| MessageError::CorruptData)?;
+        if bytes.len() as u64 != byte_length || Sha256::digest(&bytes).as_slice() != expected_hash {
+            return Err(MessageError::CorruptData);
+        }
+        Ok(bytes)
+    }
+
+    fn ensure_assets_directory(&self) -> Result<(), MessageError> {
+        let metadata = fs::symlink_metadata(&self.assets).map_err(|_| MessageError::InvalidRoot)?;
+        if !metadata.file_type().is_dir() || is_reparse_point(&metadata) {
+            return Err(MessageError::InvalidRoot);
+        }
+        Ok(())
     }
 
     fn migrate(&self) -> Result<(), MessageError> {
@@ -252,12 +294,15 @@ fn is_asset_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn asset_file_matches(path: &Path, expected_hash: &[u8], byte_length: i64) -> bool {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
-    };
-    if !metadata.file_type().is_file() || byte_length < 0 || metadata.len() != byte_length as u64 {
-        return false;
-    }
-    fs::read(path).is_ok_and(|bytes| Sha256::digest(bytes).as_slice() == expected_hash)
+#[cfg(windows)]
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }

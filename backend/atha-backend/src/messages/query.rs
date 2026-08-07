@@ -1,7 +1,4 @@
-use std::fs;
-
 use rusqlite::{Connection, params};
-use sha2::{Digest, Sha256};
 
 use super::{
     model::*,
@@ -373,25 +370,22 @@ impl MessageStore {
         validate_resource_path(source_path)?;
         let source = decode_hex::<16>(source_id)?;
         let connection = self.connect()?;
-        let (media_type, expected_hash, asset_name): (String, Vec<u8>, String) = connection
-            .query_row(
-                "SELECT r.media_type, r.content_hash, r.asset_name
+        let (media_type, expected_hash, asset_name, byte_length): (String, Vec<u8>, String, i64) =
+            connection
+                .query_row(
+                    "SELECT r.media_type, r.content_hash, r.asset_name, r.byte_length
                  FROM source_anchor a
                  JOIN snapshot_resource r ON r.snapshot_id = a.snapshot_id
                  WHERE a.id = ?1 AND r.source_path = ?2",
-                params![source, source_path],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .map_err(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => MessageError::InvalidInput,
-                _ => MessageError::Database,
-            })?;
-        let bytes =
-            fs::read(self.assets.join(&asset_name)).map_err(|_| MessageError::CorruptData)?;
-        let actual = Sha256::digest(&bytes);
-        if actual.as_slice() != expected_hash || encode_hex(&actual) != asset_name {
-            return Err(MessageError::CorruptData);
-        }
+                    params![source, source_path],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => MessageError::InvalidInput,
+                    _ => MessageError::Database,
+                })?;
+        let byte_length = u64::try_from(byte_length).map_err(|_| MessageError::CorruptData)?;
+        let bytes = self.read_asset(&asset_name, &expected_hash, byte_length)?;
         Ok(SnapshotResourceData {
             media_type,
             content_hash: encode_hex(&expected_hash),

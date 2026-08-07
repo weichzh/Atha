@@ -374,13 +374,10 @@ impl MessageStore {
                 .write_all(&manifest_bytes)
                 .map_err(|_| MessageError::Export)?;
             for asset in &manifest.assets {
-                let bytes = fs::read(self.assets.join(&asset.content_hash))
-                    .map_err(|_| MessageError::CorruptData)?;
-                if bytes.len() as u64 != asset.byte_length
-                    || encode_hex(&Sha256::digest(&bytes)) != asset.content_hash
-                {
-                    return Err(MessageError::CorruptData);
-                }
+                let expected_hash =
+                    decode_hex::<32>(&asset.content_hash).map_err(|_| MessageError::CorruptData)?;
+                let bytes =
+                    self.read_asset(&asset.content_hash, &expected_hash, asset.byte_length)?;
                 archive
                     .start_file(format!("assets/{}", asset.content_hash), stored)
                     .map_err(|_| MessageError::Export)?;

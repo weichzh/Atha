@@ -50,6 +50,36 @@ fn text_hash(value: &str) -> String {
         .collect()
 }
 
+#[cfg(windows)]
+fn link_directory(target: &Path, link: &Path) {
+    let target = fs::canonicalize(target).expect("canonicalize junction target");
+    let link = fs::canonicalize(link.parent().expect("junction parent"))
+        .expect("canonicalize junction parent")
+        .join(link.file_name().expect("junction name"));
+    let status = std::process::Command::new("cmd.exe")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .status()
+        .expect("run mklink");
+    assert!(status.success(), "create directory junction");
+}
+
+#[cfg(unix)]
+fn link_directory(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).expect("create directory symlink");
+}
+
+#[cfg(windows)]
+fn link_file(target: &Path, link: &Path) {
+    std::os::windows::fs::symlink_file(target, link).expect("create file symlink");
+}
+
+#[cfg(unix)]
+fn link_file(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).expect("create file symlink");
+}
+
 fn anchor() -> SourceAnchorInput {
     let selected_text = "算术与几何";
     SourceAnchorInput {
@@ -447,8 +477,21 @@ fn source_snapshot_resources_are_content_addressed_and_retrievable() {
         .0
         .join("Messages/Assets")
         .join(&captures[0].snapshot.resources[0].content_hash);
-    fs::write(&asset, b"corrupt referenced asset").expect("corrupt referenced asset");
+    let linked_asset = root.0.join("linked-asset");
+    fs::write(&linked_asset, b"safe local image").expect("write linked asset");
+    fs::remove_file(&asset).expect("remove original asset");
+    link_file(&linked_asset, &asset);
     assert!(!store.health().expect("corrupt health").integrity);
+    assert_eq!(
+        store.read_snapshot_resource(&source_id, "images/formula.png"),
+        Err(atha_backend::messages::MessageError::CorruptData)
+    );
+    let archive = root.0.join("linked-resource-export.zip");
+    assert_eq!(
+        store.export_edition(&edition().content_version, &archive),
+        Err(atha_backend::messages::MessageError::CorruptData)
+    );
+    assert!(!archive.exists());
     drop(store);
 
     let reopened = MessageStore::open(&root.0).expect("reopen corrupt store");
@@ -457,6 +500,23 @@ fn source_snapshot_resources_are_content_addressed_and_retrievable() {
         reopened.read_snapshot_resource(&source_id, "images/formula.png"),
         Err(atha_backend::messages::MessageError::CorruptData)
     );
+}
+
+#[test]
+fn message_store_rejects_linked_assets_directory() {
+    let root = TestRoot::new("message-linked-assets-directory");
+    let messages = root.0.join("Messages");
+    let outside = root.0.join("outside-assets");
+    let assets = messages.join("Assets");
+    fs::create_dir_all(&messages).expect("create messages directory");
+    fs::create_dir_all(&outside).expect("create outside assets directory");
+    link_directory(&outside, &assets);
+
+    assert!(matches!(
+        MessageStore::open(&root.0),
+        Err(atha_backend::messages::MessageError::InvalidRoot)
+    ));
+    fs::remove_dir(&assets).expect("remove linked assets directory");
 }
 
 #[test]

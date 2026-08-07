@@ -25,12 +25,12 @@ accepted
 - 所有正式 SourceSnapshot 资源写入都经过 `MessageStore`，并在 SQLite `IMMEDIATE` transaction 取得后执行；
 - 正常数据不会物理删除 Snapshot / Resource，因此数据库引用集合在本轮只增长；
 - `Assets` 与临时文件位于同一目录和文件系统；
-- 应用数据目录不是跨主机共享文件系统，外部程序不会同时改写 Atha 管理的规范哈希文件。
+- 应用数据目录不是跨主机共享文件系统，外部程序不会在一次已开始的操作中并发替换 `Assets` 目录或 Atha 管理的规范哈希文件。
 
 ## 决策
 
 1. 新资产写到 `Assets` 内由 Atha 命名的独占临时文件；`write_all` 和 `sync_all` 成功后，以同目录 `rename` 发布到最终小写 SHA-256 名称。
-2. 已存在最终资产只在其为普通文件且字节哈希与名称一致时复用；损坏、目录或 symlink 均返回稳定损坏错误，不静默修复。
+2. `Assets` 必须是实际目录；每次 open、读取、发布和恢复都以 no-follow 元数据拒绝目录 symlink / junction / Windows reparse point。已存在最终资产只在其为普通文件且长度、字节哈希与名称一致时复用；读取与导出共用这一校验，损坏、目录或 symlink 均返回稳定损坏错误。
 3. `create_root` 与 `reselect` 在资源发布前取得 SQLite `IMMEDIATE` transaction；数据库只在全部资产发布成功后登记资源并提交。
 4. `MessageStore::open` 在迁移后取得同样的 writer lock，删除 Atha 临时资产和数据库未引用的规范哈希普通文件 / symlink；未知名称和目录不删除。
 5. `health.integrity` 在原 SQLite / 外键检查之外验证每个已引用资产的普通文件类型、长度与 SHA-256。
@@ -56,12 +56,13 @@ Rust 标准库文档确认 `create_new` 是避免 TOCTOU 的原子独占创建�
 
 - 清理与活跃写入竞态：两个操作都持有 SQLite `IMMEDIATE` writer lock；新增绕过入口时 review 必须拒绝。
 - 误删用户文件：只删除 Atha 临时前缀或 64 位小写哈希且未被数据库引用的文件 / symlink；未知名称和目录保留。
+- 链接越过数据根：清理前拒绝作为 symlink / junction / reparse point 的 `Assets` 根；资源读取和导出也拒绝 symlink，即使目标字节匹配。
 - 已引用损坏被误当孤儿：引用集合优先于文件内容；已引用项不清理，由读取和 `health` 明确报损坏。
 - 断电后 rename 目录项耐久性：写入前执行 `sync_all`，但不把本轮本地验证提升为硬件保证；完整备份 / 恢复仍是独立 P0 场景。
 
 ## 实施与检查位置
 
-- 实施：`backend/atha-backend/src/messages/store.rs`、`backend/atha-backend/src/messages/write.rs`；
+- 实施：`backend/atha-backend/src/messages/store.rs`、`backend/atha-backend/src/messages/write.rs`、`backend/atha-backend/src/messages/query.rs`、`backend/atha-backend/src/messages/export.rs`；
 - 失败注入：`backend/atha-backend/tests/message_reading.rs`；
 - 事实：`docs/codebase/DATABASE.md`、`docs/architecture/MESSAGE-READING.md`、`docs/architecture/OVERVIEW.md`；
 - 正式检查：`scripts/check-message-reading.ps1` 与 required `docs` gate。
