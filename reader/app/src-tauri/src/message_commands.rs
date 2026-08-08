@@ -22,7 +22,7 @@ pub(crate) async fn message_roots(
     runtime
         .messages
         .roots(&edition_id, section.as_deref())
-        .map_err(message_error)
+        .map_err(message_error("roots"))
 }
 
 #[tauri::command]
@@ -32,7 +32,10 @@ pub(crate) async fn message_edition_context(
     content_version: String,
 ) -> Result<EditionInput, String> {
     require_reader_window(&window)?;
-    let current = runtime.current_edition.read().map_err(|_| "reader-state")?;
+    let current = runtime
+        .current_edition
+        .read()
+        .map_err(|_| message_state_error("edition-context"))?;
     Ok(current
         .as_ref()
         .filter(|edition| edition.content_version == content_version)
@@ -54,7 +57,7 @@ pub(crate) async fn message_conversation(
     runtime
         .messages
         .conversation(&conversation_id)
-        .map_err(message_error)
+        .map_err(message_error("conversation"))
 }
 
 #[tauri::command]
@@ -68,7 +71,7 @@ pub(crate) async fn message_conversations(
     runtime
         .messages
         .conversations(&edition_id, section.as_deref())
-        .map_err(message_error)
+        .map_err(message_error("conversations"))
 }
 
 #[tauri::command]
@@ -78,7 +81,10 @@ pub(crate) async fn message_create_root(
     draft: RootMessageDraft,
 ) -> Result<CreatedRoot, String> {
     require_reader_window(&window)?;
-    runtime.messages.create_root(draft).map_err(message_error)
+    runtime
+        .messages
+        .create_root(draft)
+        .map_err(message_error("create-root"))
 }
 
 #[tauri::command]
@@ -101,7 +107,7 @@ pub(crate) async fn message_revise(
             .messages
             .revise(&message_id, &expected_revision_id, text.as_deref()),
     }
-    .map_err(message_error)
+    .map_err(message_error("revise"))
 }
 
 #[tauri::command]
@@ -111,7 +117,10 @@ pub(crate) async fn message_reply(
     draft: ReplyDraft,
 ) -> Result<CreatedMessage, String> {
     require_reader_window(&window)?;
-    runtime.messages.reply(draft).map_err(message_error)
+    runtime
+        .messages
+        .reply(draft)
+        .map_err(message_error("reply"))
 }
 
 #[tauri::command]
@@ -125,7 +134,7 @@ pub(crate) async fn message_delete(
     runtime
         .messages
         .delete(&message_id, &expected_revision_id)
-        .map_err(message_error)
+        .map_err(message_error("delete"))
 }
 
 #[tauri::command]
@@ -135,7 +144,10 @@ pub(crate) async fn message_search(
     search: MessageSearch,
 ) -> Result<Vec<MessageSearchHit>, String> {
     require_reader_window(&window)?;
-    runtime.messages.search(search).map_err(message_error)
+    runtime
+        .messages
+        .search(search)
+        .map_err(message_error("search"))
 }
 
 #[tauri::command]
@@ -148,7 +160,7 @@ pub(crate) async fn message_relationships(
     runtime
         .messages
         .relationships(&message_id)
-        .map_err(message_error)
+        .map_err(message_error("relationships"))
 }
 
 #[tauri::command]
@@ -161,7 +173,7 @@ pub(crate) async fn message_revisions(
     runtime
         .messages
         .revisions(&message_id)
-        .map_err(message_error)
+        .map_err(message_error("revisions"))
 }
 
 #[tauri::command]
@@ -174,7 +186,7 @@ pub(crate) async fn message_source_captures(
     runtime
         .messages
         .source_captures(&message_id)
-        .map_err(message_error)
+        .map_err(message_error("source-captures"))
 }
 
 #[tauri::command]
@@ -188,7 +200,7 @@ pub(crate) async fn message_snapshot_resource(
     runtime
         .messages
         .read_snapshot_resource(&source_id, &source_path)
-        .map_err(message_error)
+        .map_err(message_error("snapshot-resource"))
 }
 
 #[tauri::command]
@@ -198,7 +210,10 @@ pub(crate) async fn message_reselect(
     draft: ReselectDraft,
 ) -> Result<CreatedSource, String> {
     require_reader_window(&window)?;
-    runtime.messages.reselect(draft).map_err(message_error)
+    runtime
+        .messages
+        .reselect(draft)
+        .map_err(message_error("reselect"))
 }
 
 #[tauri::command]
@@ -213,7 +228,7 @@ pub(crate) async fn message_reanchor(
     runtime
         .messages
         .reanchor_source(&source_id, &expected_locator, &current_locator)
-        .map_err(message_error)
+        .map_err(message_error("reanchor"))
 }
 
 #[tauri::command]
@@ -226,7 +241,7 @@ pub(crate) async fn message_import_legacy(
     runtime
         .messages
         .import_legacy_annotations(input)
-        .map_err(message_error)
+        .map_err(message_error("import-legacy"))
 }
 
 #[tauri::command]
@@ -257,7 +272,7 @@ pub(crate) async fn message_export(
                 Some(conversation) => messages.export_conversation(&conversation, output.path()),
                 None => messages.export_edition(&edition_id, output.path()),
             }
-            .map_err(|error| ("backend", message_error(error)))?;
+            .map_err(|error| ("backend", error.code().to_owned()))?;
             output
                 .commit()
                 .map_err(|_| ("picker-commit", "message-export".to_owned()))
@@ -291,6 +306,65 @@ fn require_reader_window(window: &WebviewWindow) -> Result<(), String> {
     }
 }
 
-fn message_error(error: MessageError) -> String {
-    error.code().into()
+fn message_error(operation: &'static str) -> impl FnOnce(MessageError) -> String {
+    move |error| {
+        let code = error.code();
+        if is_internal_message_error(error) {
+            log::error!(
+                target: "atha::messages",
+                "operation={operation} outcome=failed code={code}"
+            );
+        }
+        code.into()
+    }
+}
+
+fn message_state_error(operation: &'static str) -> String {
+    log::error!(
+        target: "atha::messages",
+        "operation={operation} outcome=failed code=reader-state"
+    );
+    "reader-state".into()
+}
+
+const fn is_internal_message_error(error: MessageError) -> bool {
+    matches!(
+        error,
+        MessageError::InvalidRoot
+            | MessageError::FutureDatabase
+            | MessageError::CorruptData
+            | MessageError::Database
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_internal_message_failures_are_log_worthy() {
+        for error in [
+            MessageError::InvalidRoot,
+            MessageError::FutureDatabase,
+            MessageError::CorruptData,
+            MessageError::Database,
+        ] {
+            assert!(is_internal_message_error(error));
+        }
+        for error in [
+            MessageError::InvalidInput,
+            MessageError::UnknownConversation,
+            MessageError::UnknownEdition,
+            MessageError::UnknownMessage,
+            MessageError::RevisionConflict,
+            MessageError::LegacyConflict,
+            MessageError::Backup,
+            MessageError::InvalidBackup,
+            MessageError::Restore,
+            MessageError::Export,
+            MessageError::InvalidExport,
+        ] {
+            assert!(!is_internal_message_error(error));
+        }
+    }
 }

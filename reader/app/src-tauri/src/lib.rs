@@ -213,8 +213,12 @@ fn list_library_books(
     window: WebviewWindow,
     runtime: State<'_, ReaderRuntime>,
 ) -> Result<Vec<LibraryBook>, String> {
+    let started = Instant::now();
     let _ = window.set_title("Atha");
-    runtime.library.list().map_err(|error| error.code().into())
+    runtime
+        .library
+        .list()
+        .map_err(|error| library_command_error("list", "backend", &started, error))
 }
 
 #[tauri::command]
@@ -366,14 +370,43 @@ fn remove_library_book(
     runtime: State<'_, ReaderRuntime>,
     id: String,
 ) -> Result<Vec<LibraryBook>, String> {
+    let started = Instant::now();
     runtime
         .library
         .remove(&id)
-        .map_err(|error| error.code().to_owned())?;
+        .map_err(|error| library_command_error("remove", "record", &started, error))?;
     runtime
         .library
         .list()
-        .map_err(|error| error.code().to_owned())
+        .map_err(|error| library_command_error("remove", "list", &started, error))
+}
+
+fn library_command_error(
+    operation: &'static str,
+    stage: &'static str,
+    started: &Instant,
+    error: LibraryError,
+) -> String {
+    let code = error.code();
+    if is_internal_library_error(error) {
+        log::error!(
+            target: "atha::library",
+            "operation={operation} stage={stage} outcome=failed code={code} duration_ms={}",
+            started.elapsed().as_millis()
+        );
+    }
+    code.into()
+}
+
+const fn is_internal_library_error(error: LibraryError) -> bool {
+    matches!(
+        error,
+        LibraryError::InvalidRoot
+            | LibraryError::CorruptRecord
+            | LibraryError::ReadFailed
+            | LibraryError::WriteFailed
+            | LibraryError::Resource(ResourceError::InvalidRoot | ResourceError::ReadFailed)
+    )
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -898,5 +931,29 @@ mod tests {
         assert!(is_internal_resource_error(ResourceError::ReadFailed));
         assert!(!is_internal_resource_error(ResourceError::InvalidPath));
         assert!(!is_internal_resource_error(ResourceError::NotFound));
+    }
+
+    #[test]
+    fn only_internal_library_failures_are_log_worthy() {
+        for error in [
+            LibraryError::InvalidRoot,
+            LibraryError::CorruptRecord,
+            LibraryError::ReadFailed,
+            LibraryError::WriteFailed,
+            LibraryError::Resource(ResourceError::InvalidRoot),
+            LibraryError::Resource(ResourceError::ReadFailed),
+        ] {
+            assert!(is_internal_library_error(error));
+        }
+        for error in [
+            LibraryError::InvalidBookId,
+            LibraryError::UnknownBook,
+            LibraryError::MissingCover,
+            LibraryError::UnsupportedSource,
+            LibraryError::Resource(ResourceError::InvalidPath),
+            LibraryError::Resource(ResourceError::NotFound),
+        ] {
+            assert!(!is_internal_library_error(error));
+        }
     }
 }

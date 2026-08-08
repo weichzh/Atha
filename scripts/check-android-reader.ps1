@@ -733,6 +733,7 @@ function Get-TenSampleSummary {
 
 function Start-AthaReader {
     Invoke-Adb shell am force-stop $package | Out-Null
+    Invoke-Adb shell cmd statusbar collapse | Out-Null
     Invoke-Adb logcat '-c' | Out-Null
     $launch = (Invoke-Adb shell am start '-W' '-n' "$package/.MainActivity" | Out-String)
     if ($launch -notmatch '(?m)^Status: ok\s*$') {
@@ -792,6 +793,9 @@ if ($densityMatches.Count -eq 0 -or $sizeMatches.Count -eq 0) {
 $displayDensityDpi = [int]$densityMatches[$densityMatches.Count - 1].Groups[1].Value
 $displayWidth = [int]$sizeMatches[$sizeMatches.Count - 1].Groups[1].Value
 $displayHeight = [int]$sizeMatches[$sizeMatches.Count - 1].Groups[2].Value
+if ($displayDensityDpi -ne 320 -or $displayWidth -ne 720 -or $displayHeight -ne 1280) {
+    throw "Android gate requires a 720x1280 display at 320 dpi, found ${displayWidth}x${displayHeight} at $displayDensityDpi dpi."
+}
 
 $webviewState = (Invoke-Adb shell dumpsys webviewupdate | Out-String)
 $webviewMatch = [regex]::Match(
