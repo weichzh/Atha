@@ -34,7 +34,6 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   shadow.append(bookStyle, readerStyle, userStyle, book);
 
   let bookUrl;
-  let bookOrigin;
   let declaredResources;
   let cachedBody;
   let cachedCss;
@@ -73,7 +72,13 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     } catch {
       reject("external-resource");
     }
-    ensure(url.origin === bookOrigin && !url.username && !url.password, "external-resource");
+    ensure(
+      url.protocol === bookUrl.protocol &&
+        url.host === bookUrl.host &&
+        !url.username &&
+        !url.password,
+      "external-resource",
+    );
     ensure(!url.search, "external-resource");
     if (declaredResources) ensure(declaredResources.has(url.href), "undeclared-resource");
     return url.href;
@@ -88,8 +93,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       reject("active-link");
     }
     ensure(!target.username && !target.password, "active-link");
-    ensure(["http:", "https:"].includes(target.protocol), "active-link");
-    if (target.origin === bookOrigin) {
+    if (target.protocol === bookUrl.protocol && target.host === bookUrl.host) {
       ensure(!target.search, "active-link");
       return Object.freeze({
         kind: "internal",
@@ -97,6 +101,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         sameSection: target.pathname === bookUrl.pathname,
       });
     }
+    ensure(["http:", "https:"].includes(target.protocol), "active-link");
     return Object.freeze({ kind: "external", href: target.href, sameSection: false });
   }
 
@@ -491,7 +496,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='javascript:alert(1)'>x</a></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='mailto:x@example.com'>x</a></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='data:text/plain,x'>x</a></body></html>",
-      `<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='blob:${bookOrigin}/x.xhtml'>x</a></body></html>`,
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='blob:https://example.com/x.xhtml'>x</a></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='#x' target='_blank'>x</a></body></html>",
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><a href='#x' download=''>x</a></body></html>",
     ]) {
@@ -652,7 +657,6 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
 
   async function loadSection(url, resources, loadError) {
     bookUrl = url;
-    bookOrigin = url.origin;
     declaredResources = resources;
     if (!selfChecked) {
       await validatorSelfCheck();
@@ -748,7 +752,6 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     bookStyle.textContent = "";
     userStyle.textContent = "";
     bookUrl = undefined;
-    bookOrigin = undefined;
     declaredResources = undefined;
     cachedBody = undefined;
     cachedCss = undefined;

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     cbz,
     epub::{ImportError, READER_MANIFEST, import_epub},
+    fb2,
     resources::{BookRoot, Resource, ResourceError},
     text,
 };
@@ -68,6 +69,7 @@ pub enum LibraryError {
     UnsupportedSource,
     Import(ImportError),
     Cbz(cbz::ImportError),
+    Fb2(fb2::ImportError),
     Text(text::ImportError),
     Resource(ResourceError),
 }
@@ -128,6 +130,14 @@ impl LocalLibrary {
             )
         } else if extension.eq_ignore_ascii_case("cbz") {
             let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        } else if extension.eq_ignore_ascii_case("fb2") || extension.eq_ignore_ascii_case("fbz") {
+            let imported = fb2::import_fb2(source, &self.imports).map_err(LibraryError::Fb2)?;
             (
                 imported.content_version,
                 imported.title,
@@ -256,6 +266,7 @@ impl LibraryError {
             Self::UnsupportedSource => "invalid-library-source",
             Self::Import(error) => error.code(),
             Self::Cbz(error) => error.code(),
+            Self::Fb2(error) => error.code(),
             Self::Text(error) => error.code(),
             Self::Resource(error) => error.code(),
         }

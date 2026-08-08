@@ -2,7 +2,7 @@
 
 ## 仓库状态
 
-当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核；Android 已有同一产品壳与 reader runtime 的上述格式功能纵切，EPUB2、CBZ、Markdown 与 TXT 的系统 picker、目录、搜索和位置恢复均已通过正式模拟器入口；直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
+当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、FB2 / FBZ、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核。Linux Tauri / WebKitGTK 已成为日常 GUI 目标，FB2 书架、目录、搜索与恢复通过正式 Linux WebDriver 入口；Android 保留已有 EPUB2、CBZ、Markdown 与 TXT 的模拟器纵切，仅在发布前或移动端专项验收时启动。直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
 
 ## 顶层结构
 
@@ -10,8 +10,8 @@
 |---|---|---|
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
-| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3、EPUB2 / NCX、CBZ JPEG / PNG、Markdown / TXT 导入、本地书架、消息数据库与阅读遥测校验 | 本地已验证 |
-| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；离线搜索 / 进度 / 排序 / 批量选择书架、应用壳、能力清单、受控协议和打包配置 | Windows / Android 已验证 |
+| `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3、EPUB2 / NCX、CBZ JPEG / PNG、FB2 / FBZ、Markdown / TXT 导入、本地书架、消息数据库与阅读遥测校验 | Linux 本地已验证 |
+| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；离线搜索 / 进度 / 排序 / 批量选择书架、应用壳、能力清单、受控协议和打包配置 | Linux / Windows / Android 已验证 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry、固定字段平台日志与 protocol adapter | 已验证 |
 | `reader/app/src-tauri/src/platform_file.rs` | 普通路径与 Android SAF content URI 共用的流式 Picker cache bridge；RAII / 启动清理和输入大小边界 | Android 模拟器已验证 |
 | `reader/app/src-tauri/src/runtime_diagnostics.rs` | Windows Recorder 与移动端交互诊断的目标平台选择；固定事件 token 由 backend 统一校验 | Windows / Android 已验证 |
@@ -38,6 +38,7 @@
 | `scripts/check-android-reader.ps1` | 固定 16 KiB x86_64 AVD 的 APK 构建、对齐、安装、冷启动，以及 opt-in picker / 阅读恢复、书架、Markdown / TXT 目录与搜索、PSS、截图和双日志隐私检查 | 模拟器 EPUB / CBZ / Markdown / TXT / 书架纵切已通过 |
 | `scripts/android-webview-eval.mjs` | Android gate 通过 adb 转发的 WebView DevTools endpoint 执行单次受控表达式并返回 JSON；不依赖持久浏览器 daemon | 模拟器正式入口已验证 |
 | `scripts/check-text-source.ps1` | Markdown / TXT backend、前端与保留桌面 host 的本地格式回归；私有 TXT 仅由显式环境变量 opt-in | 本地已验证 |
+| `scripts/check-fb2-source.ps1` | 动态原创 FB2 / FBZ、安全矩阵、workspace / Svelte / Tauri build 与 opt-in Linux Tauri WebDriver 纵切 | Linux GUI 已通过 |
 | `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build、Tauri/host 测试及 command / permission 映射 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/check-cbz-source.ps1` | 动态原创 CBZ、workspace Rust 检查、导入形状与 Windows WebView2 import probe | Windows 已通过 |
@@ -53,7 +54,7 @@
 
 - workspace 包含 `atha-backend`、`atha-reader-host` 与 `atha-reader-app`，并显式排除 P0 Rust crate；产品 app 依赖 backend 与 host 的共享 Windows 启动 / 诊断代码，host 只依赖 backend；
 - 版本 `0.1.0`、edition 2024、Rust `1.97.1`、第一方许可证 `AGPL-3.0-or-later` 和禁止 unsafe 的 lint 由 workspace 统一；独立 P0 crate 与前端 package 显式投影同一许可证；
-- 后端 crate 使用共享 `zip 8.6`、`quick-xml`、`sha2`、`serde` 与 `serde_json` 处理 EPUB / CBZ，CBZ 只新增运行时 `imagesize 0.15.0` 的 `jpeg` / `png` feature；Markdown / TXT 具体 adapter 使用 `pulldown-cmark 0.13.4`、`chardetng 1.0.0`、`encoding_rs 0.8.35` 与已锁定 `regex 1.13.1`。动态原创 CBZ writer 使用 dev-only `png 0.18.1`。`dom_query`、锁定的 `rusqlite 0.40.1` bundled SQLite 与 `fs2 0.4.3` 实现严格快照校验、消息事实和跨 Windows / Android 维护锁；没有 repository trait、锁服务或多格式工厂；
+- 后端 crate 使用共享 `zip 8.6`、`quick-xml 0.41`、`sha2`、`serde` 与 `serde_json` 处理 EPUB / CBZ / FBZ；FB2 复用 `quick-xml` 的声明编码支持并只新增 `base64 0.22.1`，CBZ 与 FB2 图片复用运行时 `imagesize 0.15.0` 的 `jpeg` / `png` feature。Markdown / TXT 具体 adapter 使用 `pulldown-cmark 0.13.4`、`chardetng 1.0.0`、`encoding_rs 0.8.35` 与已锁定 `regex 1.13.1`。动态原创 CBZ writer 使用 dev-only `png 0.18.1`。`dom_query`、锁定的 `rusqlite 0.40.1` bundled SQLite 与 `fs2 0.4.3` 实现严格快照校验、消息事实和跨 Windows / Android 维护锁；没有 repository trait、锁服务或多格式工厂；
 - 根锁文件包含正式后端导入、消息数据库、`fs2 0.4.3`、Tauri 官方日志 / 文件系统插件与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
 - `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移、自包含交换导出及 schema 1 完整备份 / 恢复；维护锁通过 `fs2::FileExt` 实现，因为 Rust 1.97.1 的标准库 Unix 文件锁在 Android 返回 `Unsupported`。
 
@@ -61,11 +62,12 @@
 
 - `BookRoot` 规范化书根并拒绝编码、路径、符号链接、文件类型、MIME 与大小越界；reader manifest 已声明的 section 以 XHTML 返回，因此不依赖源文件扩展名，也不把未声明的无扩展名文件当作 XHTML；
 - schema 1 manifest 声明内容版本、有序 section、资源和可选 TOC；Windows host 的 `--epub` 与 `--book-root` 输入互斥，后者再从 `--manifest` 与兼容 `--entry` 二选一；
-- `reader::archive` 为 EPUB / CBZ 共享 crate-private `zip 8.6` 打开、路径、重复 / 重叠、加密、symlink、成员和声明解压总量边界；写入成员与 CBZ 页面另按实际读取量累计，少量 EPUB metadata 读取只受单成员上限约束。`zip 8.6` 没有 pre-allocation `max_entries` API，因此打开前只以标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，打开后再校验条目数；fallback / ZIP64 在 post-open 检查前的最坏预分配是受 512 MiB 源文件上限约束的残余风险；
+- `reader::archive` 为 EPUB / CBZ / FBZ 共享 crate-private `zip 8.6` 打开、路径、重复 / 重叠、加密、symlink、成员和声明解压总量边界；写入成员与 CBZ 页面另按实际读取量累计，少量 EPUB metadata 与单个 FBZ XML 读取只受单成员上限约束。`zip 8.6` 没有 pre-allocation `max_entries` API，因此打开前只以标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，打开后再校验条目数；fallback / ZIP64 在 post-open 检查前的最坏预分配是受 512 MiB 源文件上限约束的残余风险；
 - `reader::epub` 的公开 interface 是 `import_epub`：`mod` 编排内容哈希与原子缓存，`package` 拥有 container、OPF2 / OPF3 spine、navigation 和 schema 1 计划；OPF2 只从 `spine@toc` 找到有界 NCX，把嵌套 `navPoint` 按前序拍平成现有 TOC，OPF3 继续使用唯一 XHTML nav；XHTML 由 OPF media type 判定，同一源字节跨路径得到相同缓存根和状态键；
 - `reader::cbz::import_cbz` 只接受 JPEG / PNG，按路径分段自然序生成一图一 XHTML section 与声明资源；`ComicInfo.xml` 只投影 `Title`、`Writer` 与唯一有效 `FrontCover`，`imagesize` 校验类型和像素预算，WebView decode 失败时显示可导航坏页；
-- `reader::library::LocalLibrary` 以允许列表扩展名严格分派 EPUB / CBZ / Markdown / TXT；Android content URI 由 Tauri PathPlugin 读取显示文件名后保留同一允许列表后缀，不从 URI 或正文猜格式。EPUB / CBZ 保持裸 SHA-256 身份，Markdown / TXT 用不同固定格式域隔离相同字节；每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`，移除记录不删除导入缓存或阅读状态；
-- `atha` 与 `atha-book` 自定义协议只提供应用资源和当前书根资源；导航、新窗口、下载与外部请求默认拒绝；
+- `reader::fb2::import_fb2` 以 `quick-xml` 两遍有界流式解析直接 FB2 或单根成员 FBZ，投影 metadata、正文 / notes sections、目录、内部链接和 JPEG / PNG 图片；DTD、处理指令、外链、源 stylesheet、主动内容、未知正文元素、损坏引用与资源越界稳定拒绝；
+- `reader::library::LocalLibrary` 以允许列表扩展名严格分派 EPUB / CBZ / FB2 / FBZ / Markdown / TXT；Android content URI 由 Tauri PathPlugin 读取显示文件名后保留同一允许列表后缀，不从 URI 或正文猜格式。EPUB / CBZ 保持裸 SHA-256 身份，FB2 / FBZ 共享解包 XML 的固定格式域身份，Markdown / TXT 用不同固定格式域隔离相同字节；每书一份 JSON 提供 `list`、`import`、`open`、`cover` 和 `remove`，移除记录不删除导入缓存或阅读状态；
+- `atha`、`atha-book` 与 `atha-cover` 自定义协议只提供应用资源、当前书根与已登记封面；Windows / Android 使用 `https://*.localhost`，Linux 使用 `<scheme>://localhost`。同书校验比较协议与 host，不能依赖 custom scheme 恒为 `null` 的 `URL.origin`；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
 - 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式执行当前页优先校验、解码和章节内短期复用；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
 - 十八份页面源码由 Vite 或应用资源协议按固定顺序交付为单个 `atha-reader` runtime，避免为源码分层增加多次请求；浏览器验证服务器使用同一顺序，并对各 module 与拼接后的整体 bundle 运行语法检查；
@@ -78,6 +80,12 @@
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
 - Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，书架只对受限 DTO 做本地标题 / 作者搜索、严格进度二态、稳定排序与显式批量选择；Vite 直接拼接十八份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
 - Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle、固定字段平台日志与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目，不返回源路径或内容；`message_commands` adapter 统一校验当前阅读窗口并转发受限 DTO，`message_maintenance` adapter 只接受资料库根路由并在 blocking worker 执行全库备份 / 恢复；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测复用后端白名单解析和共享 diagnostics，reader failure 额外携带固定阶段；官方日志插件只持久化 `atha::` target 的启动、书架、消息内部存储故障、reader 首稳 / ready / failure 和 protocol 5xx 固定字段事件，1 MiB 轮转并保留三份，不记录书籍或消息内容；预期输入、并发和安全拒绝保持静默；消息专项检查精确核对 handler 注册与 permission；
+
+### Linux Tauri 目标
+
+- 日常 GUI 使用当前 GNOME Wayland 会话中的 Tauri / WebKitGTK，不启动 Android 模拟器；发布前与移动端专项验收才恢复 Android 门禁；
+- Linux 应用根是 `tauri://localhost`，书根与封面分别是 `atha-book://localhost`、`atha-cover://localhost`；平台常量统一供路由、维护 command、前端资源和 CSP 使用；
+- `scripts/check-fb2-source.ps1 -VerifyLinuxGui` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；当前已覆盖书架、目录、搜索、跨 section 导航、重启恢复、非空截图和 AppLog 隐私。
 
 ### Android EPUB 纵切
 
@@ -134,6 +142,7 @@
 | EPUB2 / NCX 子集 | `cargo test -p atha-backend --test epub_import`、EPUBCheck 5.3.0、`scripts/check-android-reader.ps1 -VerifyEpub2NcxFixture` | 动态原创 fixture 通过规范 oracle；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证目录跳转和强停后同一 section / page 恢复 |
 | CBZ JPEG / PNG | `cargo test --locked -p atha-backend --test cbz_import`、`scripts/check-cbz-source.ps1`、`scripts/check-android-reader.ps1 -VerifyCbzFixture` | 动态原创 fixture 的 importer、安全矩阵和 reader 坏页自检已通过；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证逐页、坏页继续和强停恢复 |
 | Markdown / TXT | `cargo test --locked -p atha-backend --test text_import`、`scripts/check-text-source.ps1`、`scripts/check-android-reader.ps1 -VerifyMarkdownText` | 仓库 Markdown 与私有 opt-in TXT 的 importer、安全矩阵、API 36 x86_64 16 KiB picker / 目录 / 搜索 / 翻页 / 强停恢复和十样本 TXT 相对基线已通过；未完成 ARM64 真机性能门 |
+| FB2 / FBZ | `cargo test --locked -p atha-backend --test fb2_import`、`scripts/check-fb2-source.ps1 -VerifyLinuxGui` | 动态原创 fixture 的 importer、安全矩阵、Windows-1251 与内容身份已通过；真实 Linux Tauri / WebKitGTK 已验证书架、三条目录、搜索、跨 section 导航、重启恢复、非空截图和 AppLog 隐私 |
 | 公式性能 | `scripts/check-reader-formula-performance.ps1` | 固定真实 EPUB 章节的十样本本地 benchmark |
 
 这些结果不是 CI、安装包、生产环境或跨设备证据。源码、依赖、配置或样本变化后，应重新运行受影响的最小入口；只有最终候选才扩展到 required gate。
@@ -144,9 +153,9 @@
 | 类别 | 当前缺口 |
 | --- | --- |
 | 产品回流 | 书架没有文件关联、拖放、分组或最近阅读；尚无多书 Android 排序、超大书架滚动与虚拟化性能证据 |
-| 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；CBZ 首版只有 JPEG / PNG，不含 RTL / spread / 区域标注；Markdown 不加载活动链接 / 图片，TXT 遗留编码识别是 best effort；未完成 UTF-16 EPUB、DTBook、完整 fallback、其他格式来源、跨内容版本 Locator 重锚定或富文本迁移 |
+| 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；CBZ 首版只有 JPEG / PNG，不含 RTL / spread / 区域标注；FB2 首版拒绝源 stylesheet、非 JPEG / PNG binary 与未知正文元素，FBZ 单成员受 16 MiB archive 上限；Markdown 不加载活动链接 / 图片，TXT 遗留编码识别是 best effort；未完成 Kindle 系列、UTF-16 EPUB、DTBook、完整 fallback、跨内容版本 Locator 重锚定或富文本迁移 |
 | 数据与设备 | 没有加密、checkpoint、全应用备份或跨设备同步 |
-| 交付 | 没有 CI、Linux / Windows 安装包或签名 Android 发布包；Android 当前只验证 x86_64 debug APK 与模拟器，APK 与桌面正式检查正迁往 Linux 主机 |
+| 交付 | 没有 CI、Linux / Windows 安装包或签名 Android 发布包；Linux 当前验证 debug Tauri 壳，Android 当前只验证 x86_64 debug APK 与模拟器 |
 | 工程结构 | 旧 Wry / Tao host 尚未删除；reader runtime 仍由固定顺序组成单 bundle |
 | 性能证据 | 基准没有设备指纹，也没有跨日期重复运行统计；Android 尚无 ARM 真机内存、I/O、WebView 或词典 benchmark |
 

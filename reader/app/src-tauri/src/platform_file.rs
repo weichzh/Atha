@@ -198,7 +198,7 @@ fn book_source_metadata(file_name: &str) -> Option<(&'static str, &str)> {
     }
     let path = Path::new(file_name);
     let extension = path.extension()?.to_str()?;
-    let suffix = ["epub", "cbz", "md", "markdown", "txt"]
+    let suffix = ["epub", "cbz", "fb2", "fbz", "md", "markdown", "txt"]
         .into_iter()
         .find(|candidate| extension.eq_ignore_ascii_case(candidate))?;
     let title_hint = path.file_stem()?.to_str()?;
@@ -234,6 +234,8 @@ mod tests {
         for (name, suffix, title_hint) in [
             ("book.epub", "epub", "book"),
             ("book.CBZ", "cbz", "book"),
+            ("book.fb2", "fb2", "book"),
+            ("book.FBZ", "fbz", "book"),
             ("notes.md", "md", "notes"),
             ("notes.MARKDOWN", "markdown", "notes"),
             ("novel.txt", "txt", "novel"),

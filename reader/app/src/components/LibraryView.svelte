@@ -100,7 +100,7 @@
   async function chooseBooks() {
     if (busy) return;
     if (!libraryAvailable) {
-      status = "请在 Atha 应用中选择 EPUB、CBZ、Markdown 或 TXT。";
+      status = "请在 Atha 应用中选择 EPUB、CBZ、FB2、FBZ、Markdown 或 TXT。";
       return;
     }
     busy = true;
@@ -380,7 +380,7 @@
     <section class="library-empty">
       <BookOpen aria-hidden="true" />
       <h2>开始你的书架</h2>
-      <p>选择 EPUB、CBZ、Markdown 或 TXT，导入后即可随时继续阅读。</p>
+      <p>选择 EPUB、CBZ、FB2、FBZ、Markdown 或 TXT，导入后即可随时继续阅读。</p>
       <button type="button" onclick={chooseBooks} disabled={busy}>选择书籍</button>
     </section>
   {:else if visibleBooks.length === 0}

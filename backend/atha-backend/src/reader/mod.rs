@@ -3,6 +3,7 @@
 mod archive;
 pub mod cbz;
 pub mod epub;
+pub mod fb2;
 pub mod library;
 pub mod resources;
 mod source;

@@ -96,7 +96,7 @@ fn log_maintenance(operation: &str, result: &Result<(), (&'static str, String)>,
 }
 
 pub(crate) fn is_library_url(url: &str) -> bool {
-    url == "https://tauri.localhost/"
+    url == crate::TAURI_LIBRARY_PAGE
 }
 
 fn require_library_window(window: &WebviewWindow) -> Result<(), String> {
@@ -114,8 +114,11 @@ mod tests {
 
     #[test]
     fn only_library_root_can_run_maintenance_commands() {
-        assert!(is_library_url("https://tauri.localhost/"));
-        assert!(!is_library_url("https://tauri.localhost/index.html"));
+        assert!(is_library_url(crate::TAURI_LIBRARY_PAGE));
+        assert!(!is_library_url(&format!(
+            "{}/index.html",
+            crate::TAURI_LIBRARY_PAGE.trim_end_matches('/')
+        )));
         assert!(!is_library_url("https://example.com/"));
     }
 }

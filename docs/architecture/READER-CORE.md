@@ -2,7 +2,7 @@
 
 ## 责任
 
-阅读内核负责把导入后的书籍内容以 HTML、CSS 和本地资源的形式呈现。它不以某个书籍封装格式为中心：EPUB、CBZ、Markdown 与 TXT 已在导入后投影为同一 ReaderManifest / BookRoot，MOBI、AZW 或其他来源也必须先归一到同一内容模型。
+阅读内核负责把导入后的书籍内容以 HTML、CSS 和本地资源的形式呈现。它不以某个书籍封装格式为中心：EPUB、CBZ、FB2 / FBZ、Markdown 与 TXT 已在导入后投影为同一 ReaderManifest / BookRoot，MOBI、AZW 或其他来源也必须先归一到同一内容模型。
 
 ## 兼容性契约
 
@@ -12,15 +12,15 @@
 
 ## 渲染技术
 
-WebView2 是当前唯一阅读渲染技术。宿主只提供窗口、受控资源、导航拦截与有限遥测，HTML、CSS、布局和绘制继续由浏览器完成；不维护自研或组合式第二引擎。
+平台 WebView 是当前唯一阅读渲染技术：Windows 使用 WebView2，Linux 使用 WebKitGTK，Android 使用系统 WebView。宿主只提供窗口、受控资源、导航拦截与有限遥测，HTML、CSS、布局和绘制继续由浏览器完成；不维护自研或组合式第二引擎。
 
 只有外部引擎的成熟度发生实质变化，并能在 ATHA 困难样本上同时证明浏览器兼容、文本选择与重锚、安全、无裁切和同机性能优势时，才通过新的研究与 change 重新决策。本轮及可预见功能开发只对 WebView2 做常规优化，不提前建设缓存数据库、预热系统或虚拟化框架。
 
 ### 应用壳与宿主
 
-产品入口采用 Tauri 2 与 Svelte 5，但仍只有一个 WebView2。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。
+产品入口采用 Tauri 2 与 Svelte 5，但每个平台仍只有一个 WebView。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。
 
-Tauri 复用后端书根、全部已支持格式导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限，reader 完成前会从真实文档策略复核关键能力确实不可用。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
+Tauri 复用后端书根、全部已支持格式导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限；浏览器暴露策略检查 API 时，reader 会从真实文档策略复核关键能力确实不可用，WebKitGTK 未暴露该 API 时仍由原生响应头和 Rust 静态检查守住边界。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
 
 Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持的 CSS `safe-area`。`MainActivity` 在 UI 线程观察 `systemBars | displayCutout`，只缓存四边物理像素并原样下传 insets；boolean-only bridge 负责阅读态状态栏显隐与图标明暗，Web 层把同一组值转换为 CSS 像素后只消费自有变量。书架与工具面板避开状态栏 / 导航栏，阅读态隐藏状态栏时左上章节标题仍在 cutout 安全区下方；工具打开时隐藏章节标题并把内容区放到顶部工具栏之下。native 不给 WebView 再加 padding，也不叠加 `env(safe-area-inset-*)`，避免新旧 WebView 双重避让。
 
@@ -34,9 +34,9 @@ Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持�
 
 ## 本地书架与应用内导入
 
-Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB、CBZ、Markdown 或 TXT。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；已知 `.epub`、`.cbz`、`.md` / `.markdown`、`.txt` 严格分派到对应 importer。Android content URI 由 Tauri 内置 PathPlugin 经 `ContentResolver` 取得显示文件名，只保留允许列表后缀后复制到 Picker cache；provider 不返回可用后缀时稳定拒绝，不从 URI 或正文猜格式。书架以格式域和完整源文件共同生成的 SHA-256 作为文本书身份，EPUB / CBZ 继续保持原始文件 SHA-256；在平台 Library 目录为每书保存一份受限 JSON，在 ImportedBooks 下保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
+Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB、CBZ、FB2 / FBZ、Markdown 或 TXT。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；已知 `.epub`、`.cbz`、`.fb2` / `.fbz`、`.md` / `.markdown`、`.txt` 严格分派到对应 importer。Android content URI 由 Tauri 内置 PathPlugin 经 `ContentResolver` 取得显示文件名，只保留允许列表后缀后复制到 Picker cache；provider 不返回可用后缀时稳定拒绝，不从 URI 或正文猜格式。EPUB / CBZ 保持原始文件 SHA-256，Markdown / TXT 使用各自格式域，FB2 / FBZ 使用解包后 FB2 XML 与固定格式域生成身份，因此同一书的直接与压缩封装复用内容版本；在平台 Library 目录为每书保存一份受限 JSON，在 ImportedBooks 下保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
 
-EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；EPUB2 的 `meta name="cover"` 与 EPUB3 的 `cover-image` 最终投影为同一封面字段。CBZ 只消费可选 `ComicInfo.xml` 中有界的 `Title`、`Writer` 与唯一有效 `FrontCover`，无效、冲突或超限元数据回退而不让有效图片书失败。无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性和导入时间，不接收源路径、缓存路径或书籍内容。打开书籍后，宿主把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
+EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；EPUB2 的 `meta name="cover"` 与 EPUB3 的 `cover-image` 最终投影为同一封面字段。CBZ 只消费可选 `ComicInfo.xml` 中有界的 `Title`、`Writer` 与唯一有效 `FrontCover`。FB2 从 `description/title-info` 有界投影书名、作者和封面引用。无效、冲突或超限的可选元数据不会扩大受信任内容边界；无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性和导入时间，不接收源路径、缓存路径或书籍内容。打开书籍后，宿主把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
 
 书架搜索与排序只投影内存中的受限 `LibraryBook[]`：搜索匹配标题 / 作者，默认保持后端导入顺序，另提供稳定的书名与作者顺序。进度页只读同源 schema 1 进度记录，并复用阅读器的内容版本、Locator、大小和精确字段约束；合法同书记录只表示“在读”，缺失或无效记录表示“未开始”，存储不可访问时禁用进度投影而不伪造状态。显式选择模式复用单本移出 command 串行完成当前结果全选与批量移出；普通模式没有常驻删除按钮。封面使用浏览器原生 lazy loading / async decoding，移动端保持三列，未引入虚拟列表、同步状态或新 DTO。
 
@@ -50,7 +50,9 @@ Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `
 
 `reader::cbz` 以路径分段 ASCII 数字自然序排列 ZIP 内的 JPEG / PNG，忽略隐藏段、`__MACOSX` 和非图片成员，并为每图生成一个 Atha 控制的 XHTML section 与一个声明资源。`imagesize 0.15` 只校验 JPEG / PNG 魔数、非零尺寸、8192 单边和 20000000 像素预算；ZIP CRC 与 WebView `img.decode()` 继续覆盖其余损坏，尾部损坏显示可访问占位并允许继续导航。
 
-首版 EPUB 兼容边界是 UTF-8 XML、单 package、XHTML spine，以及 EPUB3 XHTML nav 或 EPUB2 NCX `navMap`。NCX 可无 DOCTYPE，或只包含精确 canonical NCX 声明；带声明时要求合法且唯一的 `playOrder`，不加载外部 DTD 或通用实体。正文和搜索在 `DOMParser` 前只白名单精确的 HTML5、XHTML 1.1 与兼容扩展 XHTML 1.0 Strict 声明，并先剥离声明；未知、重复或带 internal subset 的声明继续拒绝，脚本、事件处理器、表单和其他主动内容仍由既有边界拒绝。container 与 OPF 的 DOCTYPE 继续拒绝。章节可以没有书源样式表，此时只应用阅读器样式。EPUB / CBZ 共用 `reader::archive` 的 512 MiB 源文件与声明解压总量、10000 成员、16 MiB 单成员、加密、重叠、symlink、重复 / Windows 歧义和路径边界；写入成员与 CBZ 页面另按实际读取量累计，container / OPF / navigation 等少量元数据只受单成员上限约束。`zip 8.6` 没有打开前的 `max_entries` 配置；Atha 先以标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，再在打开后校验实际条目数。该 hint 不是完整 ZIP parser，fallback / ZIP64 在 post-open 检查前的最坏预分配仍是受源文件上限约束的残余风险。外部 URL、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。UTF-16 XML、DTBook、OEBPS 文档、fallback 链、完整 EPUB2 Reading System、多 rendition、远程资源、字体、混淆、修复和多格式工厂尚未完成。
+`reader::fb2` 用已有 `quick-xml 0.41` 的声明编码支持做两遍有界流式解析，并用 `base64 0.22.1` 解码书内二进制。它只接受直接 `.fb2` 或恰含一个根级 `.fb2` 成员的 `.fbz`，将正文、notes body、目录、内部锚点和 JPEG / PNG 图片投影为 Atha 控制的 XHTML 与 manifest；源 stylesheet、外链、DTD、处理指令、脚本、未知正文元素、未知二进制类型、损坏引用及超限输入均拒绝。直接 FB2 上限为 64 MiB；FBZ 复用共享 archive 边界，成员仍受 16 MiB 上限。
+
+首版 EPUB 兼容边界是 UTF-8 XML、单 package、XHTML spine，以及 EPUB3 XHTML nav 或 EPUB2 NCX `navMap`。NCX 可无 DOCTYPE，或只包含精确 canonical NCX 声明；带声明时要求合法且唯一的 `playOrder`，不加载外部 DTD 或通用实体。正文和搜索在 `DOMParser` 前只白名单精确的 HTML5、XHTML 1.1 与兼容扩展 XHTML 1.0 Strict 声明，并先剥离声明；未知、重复或带 internal subset 的声明继续拒绝，脚本、事件处理器、表单和其他主动内容仍由既有边界拒绝。container 与 OPF 的 DOCTYPE 继续拒绝。章节可以没有书源样式表，此时只应用阅读器样式。EPUB / CBZ / FBZ 共用 `reader::archive` 的 512 MiB 源文件与声明解压总量、10000 成员、16 MiB 单成员、加密、重叠、symlink、重复 / Windows 歧义和路径边界；写入成员与 CBZ 页面另按实际读取量累计，container / OPF / navigation 等少量元数据只受单成员上限约束。`zip 8.6` 没有打开前的 `max_entries` 配置；Atha 先以标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，再在打开后校验实际条目数。该 hint 不是完整 ZIP parser，fallback / ZIP64 在 post-open 检查前的最坏预分配仍是受源文件上限约束的残余风险。外部 URL、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。UTF-16 XML、DTBook、OEBPS 文档、fallback 链、完整 EPUB2 Reading System、多 rendition、远程资源、字体、混淆、修复和多格式工厂尚未完成。
 
 `Section` 是一次只加载一份的顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 前必须释放上一 section 的 DOM、书源样式和缓存；关闭后不保留书籍 DOM。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
 
@@ -64,7 +66,7 @@ schema 1 Locator 是同一书籍内容版本内的内容坐标：起点由 secti
 
 ### 阅读状态与书签
 
-Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。所有导入入口的规范路径位于以内容版本命名的缓存目录，因此移动源文件不改变状态键；EPUB / CBZ 内容版本保持原始文件 SHA-256，Markdown / TXT 以不同固定格式域隔离相同字节。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可用时当前会话仍可继续。
+Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。所有导入入口的规范路径位于以内容版本命名的缓存目录，因此移动源文件不改变状态键；EPUB / CBZ 内容版本保持原始文件 SHA-256，FB2 / FBZ 共享解包 XML 的格式域身份，Markdown / TXT 以不同固定格式域隔离相同字节。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可访问时当前会话仍可继续。
 
 稳定导航只在同一任务末尾合并写入一次小型进度记录，并在页面隐藏或离开时同步 flush。恢复顺序是有效偏好优先，再恢复同内容版本且可定位的进度；错版本进度不应用，错版本书签保留并显示为不可跳转。书签只提供当前位置创建、去重、跳转与删除；纯图片或只有不可见字符的页面通过当前 Locator 识别已有书签，不依赖可见文字偏移；书籍身份迁移、跨版本重锚、同步和历史记录不属于本层。
 
@@ -140,6 +142,10 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 `scripts/check-cbz-source.ps1` 从 Rust 测试 writer 生成并锁定原创 CBZ，运行 workspace Rust 检查并通过保留 Windows host 的 `--book-root --manifest --verify-import` 检查实际 WebView2。`scripts/check-android-reader.ps1 -BookPath <generated.cbz> -CleanAppData -VerifyCbzFixture` 在专用 AVD 上覆盖系统 picker、逐页到末页、坏页继续、强停恢复、隐私日志与 PSS 证据；最终目标端证据由对应 change 记录。
 
+### FB2 / FBZ 入口门槛
+
+`scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、三条目录、跨 section 跳转、全书搜索、进度恢复、非空截图和 AppLog 隐私。系统 picker 后缀只由 Rust 单元测试覆盖；该 GUI 门不伪装为原生对话框交互，也不替代 Android ARM 真机性能证据。
+
 ## 性能策略
 
 - 使用内容已知尺寸或缓存测量结果为重内容预留空间，减少重排。
@@ -153,11 +159,11 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ## 位置与版本
 
-阅读位置按书籍状态键与内容版本保存，样式变化后仍以内容 Locator 恢复到同一内容位置。EPUB / CBZ 状态键绑定内容哈希缓存路径，不绑定源文件位置；内容版本变化时不猜测旧位置。
+阅读位置按书籍状态键与内容版本保存，样式变化后仍以内容 Locator 恢复到同一内容位置。EPUB / CBZ 状态键绑定源文件内容哈希缓存路径，FB2 / FBZ 绑定解包 XML 的格式域哈希缓存路径，均不绑定源文件位置；内容版本变化时不猜测旧位置。
 
 ## 非责任
 
-- 阅读页不定义书籍格式 parser；EPUB2 / EPUB3 与 CBZ 导入细节分别只属于后端 `reader::epub` / `reader::cbz` module；
+- 阅读页不定义书籍格式 parser；EPUB2 / EPUB3、CBZ 与 FB2 / FBZ 导入细节分别只属于后端 `reader::epub`、`reader::cbz` 与 `reader::fb2` module；
 - 阅读内核只捕获与投影消息，不拥有 SQLite、AI 或同步协议；
 - 不替用户修复损坏书源；
 - 不预设跨机器性能数值，后续规格基于困难书籍样本决定。

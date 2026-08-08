@@ -43,8 +43,18 @@ use runtime_diagnostics::{
     DiagnosticError as RuntimeDiagnosticError, Diagnostics as RuntimeDiagnostics, ReadyDisposition,
 };
 
+#[cfg(any(windows, target_os = "android"))]
+pub(crate) const TAURI_LIBRARY_PAGE: &str = "https://tauri.localhost/";
+#[cfg(not(any(windows, target_os = "android")))]
+pub(crate) const TAURI_LIBRARY_PAGE: &str = "tauri://localhost";
+#[cfg(any(windows, target_os = "android"))]
 const TAURI_READER_PAGE: &str = "https://tauri.localhost/index.html";
+#[cfg(not(any(windows, target_os = "android")))]
+const TAURI_READER_PAGE: &str = "tauri://localhost/index.html";
+#[cfg(any(windows, target_os = "android"))]
 const TAURI_READER_ORIGIN: &str = "https://tauri.localhost";
+#[cfg(not(any(windows, target_os = "android")))]
+const TAURI_READER_ORIGIN: &str = "tauri://localhost";
 const MAX_IMPORT_FILES: usize = 32;
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), clipboard-read=(), clipboard-write=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()";
 
@@ -230,8 +240,8 @@ async fn import_library_books(
         .dialog()
         .file()
         .add_filter(
-            "EPUB / CBZ / Markdown / TXT",
-            &["epub", "cbz", "md", "markdown", "txt"],
+            "EPUB / CBZ / FB2 / FBZ / Markdown / TXT",
+            &["epub", "cbz", "fb2", "fbz", "md", "markdown", "txt"],
         )
         .blocking_pick_files()
     else {
@@ -895,17 +905,15 @@ mod tests {
 
     #[test]
     fn only_reader_page_navigation_is_allowed() {
-        assert!(is_reader_url(
-            "https://tauri.localhost/index.html?state=test"
-        ));
-        assert!(!is_reader_url("https://tauri.localhost/other.html"));
+        assert!(is_reader_url(&format!("{TAURI_READER_PAGE}?state=test")));
+        assert!(!is_reader_url(&format!("{TAURI_READER_ORIGIN}/other.html")));
         assert!(!is_reader_url("https://example.com/index.html"));
     }
 
     #[test]
     fn canonical_app_root_navigation_is_allowed() {
-        assert!(is_app_navigation_url("https://tauri.localhost/"));
-        assert!(is_app_navigation_url("https://tauri.localhost/index.html"));
+        assert!(is_app_navigation_url(TAURI_LIBRARY_PAGE));
+        assert!(is_app_navigation_url(TAURI_READER_PAGE));
         assert!(!is_app_navigation_url("https://example.com/"));
     }
 

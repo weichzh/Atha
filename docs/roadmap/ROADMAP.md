@@ -4,20 +4,18 @@
 
 核心阅读、EPUB3、本地书架和消息式阅读已经形成完整主循环，Android EPUB 纵切也已通过真实模拟器链路。当前目标是在保留现有 ReaderManifest、BookRoot、Locator 与内容安全边界的前提下，逐步补齐 Readest 已成熟支持的非 PDF 格式，再交付 CSS、统计和离线词典能力。
 
-## Now：Linux 目标测试迁移
+## Now：MOBI / AZW / KF8 / AZW3
 
-把后续 APK 与桌面应用构建、目标端检查和 GUI 调试迁到用户现有 Linux GNOME 会话；Windows 只在用户明确要求时使用。先补齐用户级 Rust / Android / JDK / Node 工具链和仓库副本，再以 CLI 构建、`systemd-run --user --collect` 启动 GUI，通过现有远程桌面观察，不用 `sudo` 启动 GUI。
+FB2 / FBZ 已归一到同一 ReaderManifest、BookRoot、Locator 与安全渲染边界。下一格式切片研究并实现 MOBI、AZW、KF8 与 AZW3，先用包元数据、许可证和真实样本确认成熟 Rust 解析库的覆盖范围，再决定采用或补齐最小 adapter；不复制 Readest 的 AGPL 应用实现，不在 WebView 中维护第二套书籍模型。
 
-停止条件：Linux 上能从干净仓库复现 workspace / Svelte 检查、APK 构建与 16 KiB 对齐、Android 模拟器链路和 Tauri 桌面壳；GUI 确实进入当前 GNOME Wayland 会话并在 SSH 断开后保留。用户批准的私有 `fixtures/local` 只经安全通道复制到目标仓库的忽略目录，仍不得提交、记录或分发。
+日常目标端检查和 GUI 调试使用现有 Linux GNOME 会话与 Tauri / WebKitGTK；Windows 只在用户明确要求时使用，Android 模拟器只在发布前或移动端专项验收时启动。停止条件是四类扩展名能稳定导入 Readest 对应的非 DRM 子集，共享目录、搜索、翻页和恢复，拒绝 DRM、活动内容、外部资源与超限输入；本地 GUI 通过后，再以指定 ARM 真机和私有样本记录内存、冷开、翻页与重排，不把 Linux 数字冒充移动端性能。
 
 ## Next：按格式风险逐片交付
 
-1. **FB2**：优先采用成熟解析库并保持相同 Locator 与安全渲染边界；
-2. **MOBI / AZW / KF8 / AZW3**：借鉴 Readest 的 foliate-js 能力边界，最终方案先过许可证审查，并以 Android 真机内存、冷开、翻页和重排门槛验收；
-3. **CSS 编辑器与模块管理**：每书覆盖、可组合模块、预览、撤销、导入导出和失败回退；
-4. **CSS 社区**：GitHub 仓库作为存储与 review 边界，用户登录 GitHub 后以 pull request 投稿，不自建账号或审核后端；
-5. **阅读统计**：本地优先记录阅读时长、进度与连续阅读，先明确暂停、后台和跨设备语义；
-6. **离线词典**：先实现本地索引、查词与安全释义渲染，再用指定 MOBI / MDict 样本在 Android ARM 真机做基准；AGPL 兼容不替代词典内容版权与分发审查。
+1. **CSS 编辑器与模块管理**：每书覆盖、可组合模块、预览、撤销、导入导出和失败回退；
+2. **CSS 社区**：GitHub 仓库作为存储与 review 边界，用户登录 GitHub 后以 pull request 投稿，不自建账号或审核后端；
+3. **阅读统计**：本地优先记录阅读时长、进度与连续阅读，先明确暂停、后台和跨设备语义；
+4. **离线词典**：先实现本地索引、查词与安全释义渲染，再用指定 MOBI / MDict 样本在 Android ARM 真机做基准；AGPL 兼容不替代词典内容版权与分发审查。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
@@ -44,6 +42,8 @@
 | CBZ JPEG / PNG | 自然序图片 section、ComicInfo 基础元数据、坏页继续、Windows WebView2 与 Android 16 KiB picker / 恢复 / PSS 门禁 | `docs/architecture/READER-CORE.md`、`docs/changes/android-cbz-vertical-slice.md` |
 | 离线书架体验 | 本地标题 / 作者搜索、严格进度二态、稳定排序、显式批量选择、响应式三列与 Windows / Android 正式门 | `docs/architecture/READER-CORE.md`、`docs/changes/weread-offline-library-ui.md` |
 | Markdown / TXT | 安全 Markdown 投影、遗留编码 TXT 章节、分组 sections、Android picker / 目录 / 搜索 / 恢复与十样本模拟器基线 | `docs/architecture/READER-CORE.md`、`docs/changes/android-markdown-txt-vertical-slice.md` |
+| Linux Tauri 目标 | Tauri / WebKitGTK 日常 GUI 门、平台协议 URL、WebDriver 截图与日志隐私检查；Android 改为发布前或移动专项门 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md` |
+| FB2 / FBZ | 有界流式 XML、单根成员 FBZ、metadata / 封面 / 目录 / 内部链接投影、稳定内容身份与 Linux Tauri GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/changes/android-fb2-vertical-slice.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 
 精确实施过程、历史验收数字和关闭收据由 Git 与 `project-workflow` 保存，不在路线图重复维护。

@@ -206,7 +206,10 @@ export async function removeBooksSerially(
 }
 
 export function coverUrl(id: string): string {
-  return `https://atha-cover.localhost/${id}`;
+  const root = globalThis.location?.protocol === "tauri:"
+    ? "atha-cover://localhost/"
+    : "https://atha-cover.localhost/";
+  return `${root}${id}`;
 }
 
 export function importFailureMessage(code: string): string {

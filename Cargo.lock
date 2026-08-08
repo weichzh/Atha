@@ -68,6 +68,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "atha-backend"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chardetng",
  "dom_query 0.27.0",
  "encoding_rs",
@@ -2550,6 +2551,7 @@ version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
+ "encoding_rs",
  "memchr",
 ]
 

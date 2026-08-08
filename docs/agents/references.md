@@ -22,16 +22,17 @@
 
 - 版本事实：`reader/app/package.json`、`reader/app/src-tauri/Cargo.toml`、`Cargo.lock`、`reader/app/src-tauri/tauri.android.conf.json` 与 `reader/app/src-tauri/gen/android/`；本项目 Android 门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36、min SDK 26，当前默认目标为 API 36 x86_64 16 KiB AVD。
 - 官方入口：[Tauri Android 前置条件](https://v2.tauri.app/start/prerequisites/#android)、[Tauri Dialog](https://v2.tauri.app/plugin/dialog/)、[`FilePath` Rust API](https://docs.rs/tauri-plugin-dialog/latest/tauri_plugin_dialog/enum.FilePath.html)、[Tauri File System](https://v2.tauri.app/plugin/file-system/)、[`FsExt` Rust API](https://docs.rs/tauri-plugin-fs/latest/tauri_plugin_fs/trait.FsExt.html)、[Android 16 KiB page size](https://developer.android.com/guide/practices/page-sizes)、[Android Auto Backup](https://developer.android.com/identity/data/autobackup)。
-- 项目快速用法：`tauri-plugin-dialog` 只选择文件；`platform_file::PickerInput` / `PickerOutput` 对普通路径直接转发，对 Android content URI 使用官方 fs plugin 流式复制到应用 `cache/Picker`。书籍 picker 先用 Tauri 内置 `app.path().file_name(content://...)` 经 PathPlugin / `ContentResolver` 取得显示文件名，只保留 `.epub` / `.cbz` / `.md` / `.markdown` / `.txt` 后缀；不得从 URI 字符串或正文猜格式。输入复用领域上限：单次至多 32 本书、archive / TXT 源文件至多 512 MiB、Markdown 至多 16 MiB、恢复制品至多 8 GiB。临时目录独占创建并由 RAII 与启动清理回收，路径、URI、标题和内容不得进入日志。
+- 项目快速用法：`tauri-plugin-dialog` 只选择文件；`platform_file::PickerInput` / `PickerOutput` 对普通路径直接转发，对 Android content URI 使用官方 fs plugin 流式复制到应用 `cache/Picker`。书籍 picker 先用 Tauri 内置 `app.path().file_name(content://...)` 经 PathPlugin / `ContentResolver` 取得显示文件名，只保留 `.epub` / `.cbz` / `.fb2` / `.fbz` / `.md` / `.markdown` / `.txt` 后缀；不得从 URI 字符串或正文猜格式。输入复用领域上限：单次至多 32 本书、archive / TXT 源文件至多 512 MiB、直接 FB2 至多 64 MiB、Markdown 至多 16 MiB、恢复制品至多 8 GiB。临时目录独占创建并由 RAII 与启动清理回收，路径、URI、标题和内容不得进入日志。
 - 最短检查：`pwsh -NoProfile -File scripts/check-android-reader.ps1 -BookPath <local-book> -CleanAppData`；Markdown / TXT 增加 `-VerifyMarkdownText`。入口默认验证 `Atha_API_36_16K`，需要复核历史 API 35 证据时再显式传 `-ExpectedAvd` / `-ExpectedApi`；它同时验证 APK badging、无宽泛存储权限、16 KiB ZIP / ELF 对齐、安装、冷启动、系统 picker 导入、打开、reader ready、强停重启、书架持久与固定日志。消息导出、全库备份 / 恢复仍按活动 change 独立 opt-in，不把模拟器结果称为 ARM 真机性能证据。
 - 必须重查：Tauri mobile / plugin release line、Android Gradle Plugin 与 SDK / NDK 兼容、SAF provider 的 open / truncate / failure 语义、release 签名、实体 ARM 设备的 I/O / 内存 / WebView 性能，以及 API 31+ `dataExtractionRules` 与设备厂商的备份 / 迁移行为。
 
 ## Linux GNOME 目标测试
 
 - 运行事实：主机别名、用户目录和实时工具路径只保存在用户级 `$CODEX_HOME/HOSTS.md`；仓库不硬编码地址。GNOME user manager 当前应包含 `WAYLAND_DISPLAY=wayland-0`、`DISPLAY=:0` 与 `XDG_RUNTIME_DIR=/run/user/1000`。
+- 官方入口：[Tauri WebDriver](https://v2.tauri.app/develop/tests/webdriver/)、[Tauri WebDriver 手动配置](https://v2.tauri.app/develop/tests/webdriver/manual-setup/)、[`WebviewWindowBuilder::use_https_scheme`](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewWindowBuilder.html#method.use_https_scheme)。
 - 项目快速用法：SSH 中的 CLI 构建直接运行；需要在远程 GNOME / RDP 桌面显示并在 SSH 断开后保留的 GUI 使用 `systemd-run --user --collect --unit=<唯一名> <program>`，例如 `systemd-run --user --collect --unit=gui-code code ~/Code/Atha`。不得用 `sudo` 启动 GUI，也不得依赖 SSH shell 临时导出的 Wayland 变量。
-- 测试策略：Android APK 与 Linux 桌面应用的后续正式检查优先在该主机运行；Windows 只在用户明确要求时使用。用户已批准通过安全通道把私有 `fixtures/local` 复制到目标仓库的忽略目录；样本仍只用于本地 opt-in，不提交、不写日志、不进入公开证据或分发包。
-- 最短检查：`systemctl --user show-environment | rg '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)='`，再用唯一 transient unit 启动目标 GUI；构建版本、APK 对齐、模拟器 / 实机、桌面 WebView 和证据等级分别记录。
+- 测试策略：日常格式与 GUI 开发直接使用 Linux Tauri / WebKitGTK；Android 模拟器只在发布前或移动端专项验收时启动，Windows 只在用户明确要求时使用。用户已批准通过安全通道把私有 `fixtures/local` 复制到目标仓库的忽略目录；样本仍只用于本地 opt-in，不提交、不写日志、不进入公开证据或分发包。
+- 最短检查：`systemctl --user show-environment | rg '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)='`；安装一次 `cargo install tauri-driver --version 2.0.6 --locked` 后运行 `pwsh -NoProfile -File scripts/check-fb2-source.ps1 -VerifyLinuxGui`。入口用唯一 transient unit 启动真实 Tauri 壳，隔离 XDG 应用数据，并把构建、WebKitGTK 交互、截图和日志隐私作为 Linux 目标证据。
 - 必须重查：SSH 别名、GNOME 会话是否仍存活、systemd user 环境、KVM / emulator、Rust Android targets、JDK / SDK / NDK、Linux WebKitGTK / Tauri prerequisites 与私有样本是否已显式放置。
 
 ## Markdown / TXT
@@ -41,6 +42,14 @@
 - 项目快速用法：`reader::text` 直接生成现有 ReaderManifest / BookRoot。Markdown raw HTML 转义，链接 / 图片只保留惰性文本；TXT 只在至少两个高置信整行标题时生成章节 TOC，并按约 1 MiB 合并物理 sections。相同字节的 Markdown / TXT 使用不同固定身份域；EPUB / CBZ 身份不变。
 - 最短检查：`cargo test --locked -p atha-backend --test text_import`、`pwsh -NoProfile -File scripts/check-text-source.ps1`；私有 TXT 只通过 `ATHA_LOCAL_TXT_SAMPLE` 显式 opt-in，不输出路径、标题、正文或哈希。
 - 必须重查：parser / decoder release line、`encoding_rs` 的复合 SPDX、章节规则与真实语料、ARM64 Android 性能、Markdown 新增活动资源能力及 ReaderManifest section / TOC 上限。
+
+## FB2 / FBZ、`quick-xml` 与 `base64`
+
+- 版本事实：`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `quick-xml 0.41`（`encoding` feature）、`base64 0.22.1`、`zip 8.6` 和 `imagesize 0.15.0`。
+- 官方入口：[`quick-xml` 0.41](https://docs.rs/quick-xml/0.41.0/quick_xml/)、[`base64` 0.22.1](https://docs.rs/base64/0.22.1/base64/)、[`zip` 8.6](https://docs.rs/zip/8.6.0/zip/)。
+- 项目快速用法：`reader::fb2` 对直接 FB2 或单根成员 FBZ 做两遍有界流式解析，只投影受支持正文、目录、内部链接和 JPEG / PNG binary，不解释源 stylesheet，不加载外部资源。同一 XML 的 FB2 / FBZ 共享固定格式域身份；picker 只按后缀分派，不嗅探正文。
+- 最短检查：`cargo test --locked -p atha-backend --test fb2_import`；Linux 真实 GUI 使用 `pwsh -NoProfile -File scripts/check-fb2-source.ps1 -VerifyLinuxGui`。
+- 必须重查：FB2 schema / encoding 语料、未知元素策略、binary 图片类型、FBZ 单成员大小、依赖许可证和 Android ARM 真机内存。
 
 ## Rust 文件锁与 `fs2`
 

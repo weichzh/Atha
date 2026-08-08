@@ -838,11 +838,11 @@ export function createDiagnostics({
     const policy = document.permissionsPolicy?.allowsFeature
       ? document.permissionsPolicy
       : document.featurePolicy;
+    if (!policy?.allowsFeature) return;
     assert(
-      policy?.allowsFeature &&
-        ["camera", "display-capture", "geolocation", "microphone"].every(
-          (feature) => !policy.allowsFeature(feature),
-        ),
+      ["camera", "display-capture", "geolocation", "microphone"].every(
+        (feature) => !policy.allowsFeature(feature),
+      ),
       "permission-policy",
     );
   }

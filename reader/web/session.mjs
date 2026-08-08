@@ -1,6 +1,10 @@
 const MAX_MANIFEST_SECTIONS = 1000;
 const MAX_RESOURCES = 10000;
 const MAX_TOC_ITEMS = 2000;
+const BOOK_ROOT_URL =
+  typeof location !== "undefined" && location.protocol === "tauri:"
+    ? "atha-book://localhost/"
+    : "https://atha-book.localhost/";
 
 export function createReadingSession({ params, content, render, onState, assert, fail }) {
   let manifest;
@@ -160,7 +164,7 @@ export function createReadingSession({ params, content, render, onState, assert,
     if (override) return new URL(override, location.href);
     const entry = params.get("entry");
     assert(entry, "missing-book-url");
-    return new URL(entry.replace(/^\/+/, ""), "https://atha-book.localhost/");
+    return new URL(entry.replace(/^\/+/, ""), BOOK_ROOT_URL);
   }
 
   async function loadManifest() {
@@ -193,9 +197,7 @@ export function createReadingSession({ params, content, render, onState, assert,
     } catch {
       fail("invalid-manifest");
     }
-    const sourceUrl = path.startsWith("/")
-      ? new URL(path, location.href)
-      : new URL(path, "https://atha-book.localhost/");
+    const sourceUrl = new URL(path.replace(/^\/+/, ""), BOOK_ROOT_URL);
     let value;
     try {
       const response = await fetch(sourceUrl);
