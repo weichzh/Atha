@@ -4,17 +4,16 @@
 
 核心阅读、EPUB3、本地书架和消息式阅读已经形成完整主循环，Android EPUB 纵切也已通过真实模拟器链路。当前目标是在保留现有 ReaderManifest、BookRoot、Locator 与内容安全边界的前提下，逐步补齐 Readest 已成熟支持的非 PDF 格式，再交付 CSS、统计和离线词典能力。
 
-## Now：CSS 编辑器与模块管理
+## Now：基于 GitHub PR 的 CSS 社区
 
-Readest 对应的非 PDF 输入格式已经归一到同一 ReaderManifest、BookRoot、Locator 与安全渲染边界。下一切片增强现有每书用户 CSS：默认使用字号、字体、行距、段距、页边距、主题与翻页等可视控件和实时预览，原始 CSS 只作为高级模式；样式模块可组合、排序、启停、搜索、分组、导入导出和失败回退，不建立第二套渲染器或通用扩展运行时。
+Readest 对应的非 PDF 输入格式与本地 CSS 编辑 / 模块管理已经归一到同一 ReaderManifest、BookRoot、Locator 与安全渲染边界。下一切片只在现有 schema 1 模块包之上增加社区交换：GitHub 仓库保存可审核模块，用户通过 GitHub 登录并创建 pull request 投稿，Atha 消费审核后的只读索引，不自建账号、审核后端、评分服务或任意插件运行时。
 
-日常目标端检查和 GUI 调试继续使用 Linux GNOME 会话与 Tauri / WebKitGTK；Windows 只在用户明确要求时使用，Android 模拟器只在发布前或移动端专项验收时启动。界面优先借鉴微信读书的沉浸阅读、固定工具分组、排版即时预览与渐进高级设置，不引入其社交、排行、付费、音频或悬浮 AI 入口。停止条件是同一 CSS 安全规则贯穿编辑、预览、模块组合、持久化和渲染，任一无效模块可定位、禁用并回退到上次有效组合。
+优先复用 GitHub OAuth / device flow、Contents / Pull Requests API、仓库 Actions 和 branch protection；先研究当前 GitHub 平台能力与匿名浏览边界，再接受具体 change。停止条件是浏览、安装、版本兼容、来源追踪和 PR 投稿端到端可验证，任何远程内容进入本地前仍通过同一模块 schema 与 CSSOM 安全校验。
 
 ## Next：按格式风险逐片交付
 
-1. **CSS 社区**：GitHub 仓库作为存储与 review 边界，用户登录 GitHub 后以 pull request 投稿，不自建账号或审核后端；
-2. **阅读统计**：本地优先记录阅读时长、进度与连续阅读，先明确暂停、后台和跨设备语义；
-3. **离线词典**：先实现本地索引、查词与安全释义渲染，再用指定 MOBI / MDict 样本在 Android ARM 真机做基准；AGPL 兼容不替代词典内容版权与分发审查。
+1. **阅读统计**：本地优先记录阅读时长、进度与连续阅读，先明确暂停、后台和跨设备语义；
+2. **离线词典**：先实现本地索引、查词与安全释义渲染，再用指定 MOBI / MDict 样本在 Linux 日常门与 Android ARM 真机专项做基准；AGPL 兼容不替代词典内容版权与分发审查。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
@@ -44,6 +43,7 @@ Readest 对应的非 PDF 输入格式已经归一到同一 ReaderManifest、Book
 | Linux Tauri 目标 | Tauri / WebKitGTK 日常 GUI 门、平台协议 URL、WebDriver 截图与日志隐私检查；Android 改为发布前或移动专项门 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md` |
 | FB2 / FBZ | 有界流式 XML、单根成员 FBZ、metadata / 封面 / 目录 / 内部链接投影、稳定内容身份与 Linux Tauri GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/changes/android-fb2-vertical-slice.md` |
 | MOBI / AZW / AZW3 | 固定 `boko 0.5.0` 的有界 adapter、PalmDOC / MOBI6 / 纯 KF8、图片 / 唯一目录投影、词典早拒绝、十次 release benchmark 与 Linux 真 GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/changes/kindle-format-vertical-slice.md` |
+| CSS 编辑与模块管理 | 可视排版、按需 CodeMirror 6、实时预览、32 个有界模块、筛选 / 排序 / 批量启停 / JSON 交换、旧状态迁移、失败回退与 Linux 真 GUI 门 | `docs/architecture/READER-CORE.md`、`docs/changes/css-editor-module-management.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 
 精确实施过程、历史验收数字和关闭收据由 Git 与 `project-workflow` 保存，不在路线图重复维护。

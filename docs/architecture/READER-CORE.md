@@ -26,11 +26,11 @@ Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持�
 
 ## 样式层
 
-默认样式提供稳定、克制的阅读体验。Preferences 把系统/浅色/纸张/深色主题、亮度、字号、字体、三档行距和点击/滑动翻页作为应用默认值，把书源样式开关与用户 CSS 作为本书覆盖；R5 起两层分别校验、恢复和持久化。四边距不是偏好：桌面阅读页固定使用上 144、右 32、下 144、左 32 设备像素；Android 只在顶部 / 底部安全区更大时扩大相应排版边距，不改变左右正文宽度。亮度只过滤阅读页，不改变壳层控件。
+默认样式提供稳定、克制的阅读体验。Preferences 把系统/浅色/纸张/深色主题、亮度、字号、字体、三档行距和点击/滑动翻页作为应用默认值，把书源样式开关、三档左右边距、段首缩进、段距和有序 CSS 模块作为本书覆盖。旧的单段 `userStylesheet` 恢复时迁移为 `legacy-user-css` 模块；旧应用记录中的四个自由边距字段继续忽略。上下正文安全区固定为 144 设备像素，Android 只在顶部 / 底部安全区更大时扩大对应排版边距；左右边距默认 32，可按书选择 24 / 32 / 48 设备像素。亮度只过滤阅读页，不改变壳层控件。
 
-书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、用户 CSS 排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。用户 CSS 可检查、启停和撤销，拒绝 `@import`、`url()` 与 Shadow 边界选择器；它不能修改应用壳。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
+书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、可视排版 CSS 与已启用用户模块排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。每书至多 32 个用户模块，新建或导入模块单个至多 32 KiB、启用组合至多 64 KiB；旧单段 CSS 仍按原 32768 UTF-16 字符上限完整迁移，超过组合上限时只保留为停用恢复副本。名称、分组、ID、顺序、启停和 schema 1 JSON 导入均严格校验。任一启用组合仍由同一 `CSSStyleSheet.replaceSync()` / `content.setStyles()` 边界拒绝 `@import`、子资源、转义和 Shadow 边界选择器；验证、重排或持久化失败统一恢复上次状态、渲染与 Locator。CodeMirror 只在模块页可见时按需增强隐藏 textarea 的编辑体验，不能修改应用壳或绕过 CSSOM。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
 
-应用内样式社区、评分、JavaScript 扩展和发布流程不属于阅读内核。远程共享的具体协议在确有需求时再确定。
+应用内样式社区、评分、JavaScript 扩展和发布流程不属于阅读内核。远程共享只消费通过后续 GitHub PR 审核形成的有界 CSS 模块 JSON，不在阅读内核加入账号、审核或任意插件执行能力。
 
 ## 本地书架与应用内导入
 
@@ -116,9 +116,9 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 长期验收样本位于本机忽略目录 `fixtures/local/`。当前清单包含三个既有单章节样本，以及从《数学及其历史 (2026)》固定哈希源文件重复导出的“1.1 算术与几何”“1.2 勾股数组”“1.3 圆上的有理点”三章节 R1 样本；源 EPUB 不修改，也不提交样本内容到仓库。`scripts/export_reader_sample.py` 支持导出单章节或带 manifest 的多章节样本，`scripts/check-reader-samples.ps1` 统一运行实际 Windows host 与明暗主题截图验收。
 
-阅读页填充 WebView 视口，内部画布尺寸等于视口 CSS 像素乘 `devicePixelRatio`。页内字号、固定边距、栏宽、公式和图形尺寸继续使用绝对设备像素；显示层以 `1 / devicePixelRatio` 抵消系统 DPI。Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素并遵循 DPI。窗口停止调整后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。控制层显隐不改变书页、正文列或 Locator 几何。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
+阅读页填充 WebView 视口，内部画布尺寸等于视口 CSS 像素乘 `devicePixelRatio`。页内字号、正文边距、栏宽、公式和图形尺寸继续使用绝对设备像素；显示层以 `1 / devicePixelRatio` 抵消系统 DPI。Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素并遵循 DPI。窗口停止调整或用户改变排版后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。控制层显隐不改变书页、正文列或 Locator 几何。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
 
-正式内容回归覆盖 780 × 1680、960 × 720 的 DPR 1 视口，以及 390 × 840 的 DPR 2 视口。780 × 1680 不再是产品页面的固定尺寸；benchmark 记录每次运行的真实内部设备像素尺寸，以免跨布局误判性能。阅读器的一页是有固定四边距的分页内容区，不是任意滚动位置的截图：不得裁切文字行、公式或图形。左右边距固定为 32 设备像素，上下边距固定为 144 设备像素，其中包含不会被系统缩放工具栏越过的页眉页脚安全区；用户设置不能修改这四项。首个字号基线为 32px、行距为 1.6，均可从阅读设置调整。
+正式内容回归覆盖 780 × 1680、960 × 720 的 DPR 1 视口，以及 390 × 840 的 DPR 2 视口。780 × 1680 不再是产品页面的固定尺寸；benchmark 记录每次运行的真实内部设备像素尺寸，以免跨布局误判性能。阅读器的一页是有受控边距的分页内容区，不是任意滚动位置的截图：不得裁切文字行、公式或图形。上下边距固定为 144 设备像素，其中包含不会被系统缩放工具栏越过的页眉页脚安全区；左右边距默认 32，并可按书选择 24 / 32 / 48。首个字号基线为 32px、行距为 1.6，均可从阅读设置调整。
 
 普通图片以读者可用宽高为上限等比缩放；表格与块级预格式化内容由 reader 注入的受控容器限制在单页，并保留双向滚动与既有安全预览。`countCutRects()` 继续进入 ready 遥测与 verify-sample / benchmark 门，但不再让普通首开、字号、窗口重排或延迟资源完成失败；真正的资源、安全、Locator 与持续布局不稳定错误仍阻断阅读。
 
@@ -146,7 +146,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### FB2 / FBZ 入口门槛
 
-`scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、三条目录、跨 section 跳转、全书搜索、进度恢复、非空截图和 AppLog 隐私。系统 picker 后缀只由 Rust 单元测试覆盖；该 GUI 门不伪装为原生对话框交互，也不替代 Android ARM 真机性能证据。
+`scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、三条目录、跨 section 跳转、全书搜索、可视排版、真实 CodeMirror 键入与 lint gutter、无效 CSS 和持久化失败回退、模块导入筛选、32 模块组合 benchmark、进度与样式重启恢复，以及宽屏 / 600 px 窄屏非空截图和 AppLog 隐私。系统 picker 后缀只由 Rust 单元测试覆盖；该 GUI 门不伪装为原生对话框交互，也不替代 Android ARM 真机性能证据。
 
 ### Kindle 入口门槛
 

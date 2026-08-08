@@ -701,7 +701,7 @@ pub(crate) fn validate_source(
         || snapshot.fragment_html.len() > 262_144
         || snapshot.reader_css.len() > 1_048_576
         || snapshot.book_css.len() > 1_048_576
-        || snapshot.user_css.len() > 32_768
+        || snapshot.user_css.len() > 65_536
         || snapshot.presentation_json.len() > 4_096
         || validate_snapshot_presentation(&snapshot.presentation_json).is_err()
     {

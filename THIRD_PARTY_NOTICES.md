@@ -9,6 +9,36 @@ Atha 包含以下第三方资产。它们保留各自的版权与许可证，不
 
 GPL-3.0-or-later 全文见 `LICENSES/GPL-3.0-or-later.txt`。
 
+## CodeMirror 6
+
+- 直接依赖：`codemirror 6.0.2`、`@codemirror/lang-css 6.3.1`、`@codemirror/language 6.12.4`、`@codemirror/lint 6.9.7`。
+- 锁定的配套包：`@codemirror/autocomplete 6.20.3`、`@codemirror/commands 6.10.4`、`@codemirror/search 6.7.1`、`@codemirror/state 6.7.1`、`@codemirror/view 6.43.8`，以及 `@lezer` parser packages。
+- 上游：<https://codemirror.net/>；许可证：MIT；本地修改：无，Atha 只在 CSS 模块页按需组合公开扩展 API。
+
+```text
+MIT License
+
+Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Markdown / TXT 直接依赖
 
 - `pulldown-cmark 0.13.4`：MIT；Copyright 2015 Google Inc.；上游：<https://crates.io/crates/pulldown-cmark/0.13.4>

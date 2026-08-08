@@ -136,7 +136,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   }
 
   function validateUserStylesheet(css) {
-    ensure(typeof css === "string" && css.length <= 32768, "invalid-user-style");
+    ensure(typeof css === "string" && new TextEncoder().encode(css).length <= 65536, "invalid-user-style");
     const previous = silentFailure;
     silentFailure = true;
     try {
@@ -855,6 +855,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     describeLink,
     setStyles,
     styleSnapshot,
+    validateStylesheet: validateUserStylesheet,
     warmRemaining,
   });
 }

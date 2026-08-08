@@ -906,6 +906,7 @@ fn source_snapshot_rejects_active_markup_unbound_assets_and_wrong_edition() {
         |snapshot: &mut SourceSnapshotInput| {
             snapshot.book_css = r"p { background: u\72l('a.png'); }".into()
         },
+        |snapshot: &mut SourceSnapshotInput| snapshot.user_css = "x".repeat(65_537),
     ] {
         let mut invalid = snapshot();
         change(&mut invalid);

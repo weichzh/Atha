@@ -83,6 +83,29 @@
 - 最短检查：`pnpm --dir reader/app check` 与 `pnpm --dir reader/app build`。
 - 必须重查：runes、生命周期、事件、组件绑定、编译器警告和升级兼容性。
 
+## CodeMirror 6
+
+- 版本事实：`reader/app/package.json` 与 `reader/app/pnpm-lock.yaml` 固定 `codemirror 6.0.2`、`@codemirror/lang-css 6.3.1`、`@codemirror/language 6.12.4` 和 `@codemirror/lint 6.9.7`。
+- 官方入口：[参考手册](https://codemirror.net/docs/ref/)、[基础编辑器](https://codemirror.net/examples/basic/)、[自动补全](https://codemirror.net/examples/autocompletion/)、[Lint](https://codemirror.net/examples/lint/)。
+- 项目快速用法：`CssEditor.svelte` 只在 CSS 模块页可见时按需加载 `basicSetup`、CSS language 和基于 syntax tree 的诊断；隐藏 textarea 仍是 `preferences.mjs` 的唯一状态入口。CodeMirror 只负责编辑体验，最终 CSS 安全与有效性仍由 `content.setStyles()` 的 CSSOM 边界判定。
+- 最短检查：`pnpm --dir reader/app check`、`pnpm --dir reader/app build`，再运行 `pwsh -NoProfile -File scripts/check-fb2-source.ps1 -VerifyLinuxGui` 验证 WebKitGTK 输入、回退和恢复。
+- 必须重查：升级后的包拆分、按需 chunk、WebKitGTK 输入法与无障碍、syntax tree 诊断、编辑器销毁和初始 bundle 变化。
+
+## 微信读书真机界面证据
+
+- 本地事实：PCT-AL10 原始截图、补充截图、逐图观察和 SHA-256 清单位于忽略目录 `fixtures/local/weread/`；Windows 目标副本位于 `E:\Code\Atha\fixtures\local\weread`。
+- 项目快速用法：设计结论必须引用本地 `README.md` 的 `WR-*` 编号，并先打开对应原图复核；子 agent 摘要、文字转述或缺图报告不能替代原图证据。证据目录缺失时只报告缺失，不从旧结论重建界面事实。
+- 最短检查：在证据目录运行 `sha256sum -c SHA256SUMS`；跨主机使用 PowerShell `Get-FileHash` 复核，不输出书架中的个人内容。
+- 必须重查：新增截图的设备、分辨率、原始文件名、哈希、界面状态和与既有结论的对应关系。
+
+## Readest 界面证据
+
+- 固定源码：[`readest/readest` 提交 `cf413b2b`](https://github.com/readest/readest/tree/cf413b2b9f1a205732062bf656e73c702f12ac02)；当前公开 Web 入口：[web.readest.com](https://web.readest.com/)，阅读与自定义能力以 [Reading](https://readest.com/docs/reading) 和 [Customization](https://readest.com/docs/customization) 为准。
+- 本地事实：固定提交内的 Android、macOS、桌面原图，2026-08-08 的公开 Web 实际截图、逐图观察和 SHA-256 清单位于忽略目录 `fixtures/local/readest/`。
+- 项目快速用法：设计结论必须引用本地 `README.md` 的 `RD-*` 编号并打开原图；Atha 采用 Readest 的安静图标工具、正文与侧栏并存、主题预览和设置渐进披露，不复制其 React / Tailwind 实现。
+- 最短检查：在证据目录运行 `sha256sum -c SHA256SUMS`；需要刷新 Web 界面时通过 `agent-browser` 重新采集带日期的截图，默认分支变化后使用新提交建立新快照，不覆盖既有证据。
+- 必须重查：默认分支提交、公开 Web 版本、商店截图与实际运行版本差异、屏幕尺寸、深浅主题、输入方式和与 Atha 当前设计结论的对应关系。
+
 ## Tiptap 3
 
 - 版本事实：`reader/app/package.json` 与 `reader/app/pnpm-lock.yaml`。

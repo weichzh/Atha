@@ -65,6 +65,22 @@ function Invoke-WebDriverScript {
     }).value
 }
 
+function Send-WebDriverText {
+    param([string] $BaseUrl, [string] $Session, [string] $Selector, [string] $Text)
+
+    $element = (Invoke-WebDriver -BaseUrl $BaseUrl -Method Post -Path "/session/$Session/element" -Body @{
+        using = 'css selector'
+        value = $Selector
+    }).value
+    $elementId = $element.'element-6066-11e4-a52e-4f735466cecf'
+    if (-not $elementId) { throw "WebDriver could not find $Selector." }
+    [void](Invoke-WebDriver -BaseUrl $BaseUrl -Method Post -Path "/session/$Session/element/$elementId/clear" -Body @{})
+    [void](Invoke-WebDriver -BaseUrl $BaseUrl -Method Post -Path "/session/$Session/element/$elementId/value" -Body @{
+        text = $Text
+        value = @($Text.ToCharArray() | ForEach-Object { [string]$_ })
+    })
+}
+
 function Wait-WebDriverScript {
     param(
         [string] $BaseUrl,
@@ -137,6 +153,7 @@ function Invoke-LinuxGuiGate {
     $session = $null
     $unitStarted = $false
     $screenshot = Join-Path $guiRoot 'reader.png'
+    $mobileScreenshot = Join-Path $guiRoot 'reader-mobile.png'
     try {
         Invoke-Checked 'systemd-run' @(
             '--user', '--collect', "--unit=$unit", "--working-directory=$repoRoot",
@@ -214,10 +231,280 @@ return {
 };
 '@ -Accepted { param($value) $value.results -eq 1 }
 
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.documentElement.setAttribute('data-reader-tools', '');
+document.querySelector('.reader-tool.preferences > summary').click();
+document.querySelector('[data-settings-target="layout"]').click();
+for (const [selector, value] of [
+  ['#paragraph-indent', 'two'],
+  ['#paragraph-spacing', 'comfortable'],
+  ['#page-margin', 'wide']
+]) {
+  const control = document.querySelector(selector);
+  control.value = value;
+  control.dispatchEvent(new Event('change', { bubbles: true }));
+}
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Visual CSS controls did not reflow.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  margin: document.querySelector('.reader').style.getPropertyValue('--page-left-margin'),
+  saved: [...Object.keys(localStorage)].some((key) => key.startsWith('atha.reader.book.') && localStorage.getItem(key).includes('"pageMargin":"wide"'))
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.margin -eq '48px' -and $value.saved })
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.querySelector('[data-settings-back]').click();
+document.querySelector('[data-settings-target="modules"]').click();
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Empty CSS module editor was not read-only.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  editor: Boolean(document.querySelector('.cm-editor')),
+  editable: document.querySelector('.cm-content')?.contentEditable || null
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.editor -and $value.editable -eq 'false' })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.querySelector('#add-style-module').click(); return true;")
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CSS module editor did not create a module.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  modules: document.querySelector('#style-module-list').options.length,
+  editor: Boolean(document.querySelector('.cm-editor')),
+  editable: document.querySelector('.cm-content')?.contentEditable || null
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.modules -eq 1 -and $value.editor -and $value.editable -eq 'true' })
+
+        Send-WebDriverText -BaseUrl $baseUrl -Session $session -Selector '.cm-content' -Text '@#$'
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CodeMirror lint gutter did not report invalid CSS.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  css: document.querySelector('#user-stylesheet').value,
+  lint: document.querySelectorAll('.cm-lint-marker-error, .cm-lintRange-error').length,
+  gutter: Boolean(document.querySelector('.cm-gutter-lint'))
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.css -eq '@#$' -and $value.lint -gt 0 -and $value.gutter })
+        Send-WebDriverText -BaseUrl $baseUrl -Session $session -Selector '.cm-content' -Text '.book { --atha-css-gate: applied; }'
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.querySelector('#style-module-name').value = 'Gate emphasis';
+document.querySelector('#style-module-group').value = 'Layout';
+document.querySelector('#save-style-module').click();
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Valid CSS module did not persist.' -Script @'
+const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+const saved = record ? JSON.parse(localStorage.getItem(record)) : null;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  message: document.querySelector('#preferences-status').textContent,
+  css: saved?.preferences?.styleModules?.[0]?.css || '',
+  name: saved?.preferences?.styleModules?.[0]?.name || ''
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.css -eq '.book { --atha-css-gate: applied; }' -and $value.name -eq 'Gate emphasis' })
+
+        Send-WebDriverText -BaseUrl $baseUrl -Session $session -Selector '.cm-content' -Text '.book { --atha-css-gate: draft; }'
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const enabled = document.querySelector('#style-module-enabled');
+enabled.checked = false;
+enabled.dispatchEvent(new Event('change', { bubbles: true }));
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Debounced CSS draft overwrote newer module metadata.' -Script @'
+const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+const module = record ? JSON.parse(localStorage.getItem(record))?.preferences?.styleModules?.[0] : null;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  css: module?.css || '',
+  enabled: module?.enabled
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.css -eq '.book { --atha-css-gate: draft; }' -and $value.enabled -eq $false })
+        Send-WebDriverText -BaseUrl $baseUrl -Session $session -Selector '.cm-content' -Text '.book { --atha-css-gate: applied; }'
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const enabled = document.querySelector('#style-module-enabled');
+enabled.checked = true;
+enabled.dispatchEvent(new Event('change', { bubbles: true }));
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CSS module did not restore after the debounce probe.' -Script @'
+const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+const module = record ? JSON.parse(localStorage.getItem(record))?.preferences?.styleModules?.[0] : null;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  css: module?.css || '',
+  enabled: module?.enabled
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.css -eq '.book { --atha-css-gate: applied; }' -and $value.enabled })
+
+        Send-WebDriverText -BaseUrl $baseUrl -Session $session -Selector '.cm-content' -Text '.book { --atha-css-gate: applied; font-size: 18px; }'
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.querySelector('#save-style-module').click(); return true;")
+        $renderedStyle = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Rendered CSS rollback probe did not persist.' -Script @'
+const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+const module = record ? JSON.parse(localStorage.getItem(record))?.preferences?.styleModules?.[0] : null;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  css: module?.css || '',
+  position: document.querySelector('#position').textContent
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.css -eq '.book { --atha-css-gate: applied; font-size: 18px; }' }
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const css = document.querySelector('#user-stylesheet');
+css.value = '.book { background: url(https://example.invalid/x); }';
+document.querySelector('#save-style-module').click();
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Unsafe CSS module did not roll back.' -Script @'
+const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+const saved = record ? JSON.parse(localStorage.getItem(record)) : null;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  rejected: document.querySelector('#preferences-status').dataset.error === 'true',
+  message: document.querySelector('#preferences-status').textContent,
+  css: saved?.preferences?.styleModules?.[0]?.css || ''
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.rejected -and $value.message -like '*Gate emphasis*' -and $value.css -eq '.book { --atha-css-gate: applied; font-size: 18px; }' })
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+globalThis.__athaSetItem = Object.getOwnPropertyDescriptor(Storage.prototype, 'setItem');
+Object.defineProperty(Storage.prototype, 'setItem', {
+  configurable: true,
+  value() { throw new DOMException('Gate quota', 'QuotaExceededError'); }
+});
+const css = document.querySelector('#user-stylesheet');
+document.querySelector('#preferences-status').textContent = '';
+document.querySelector('#preferences-status').dataset.error = 'false';
+css.value = '.book { --atha-css-gate: unsaved; font-size: 56px; }';
+document.querySelector('#save-style-module').click();
+return true;
+'@)
+        $rollback = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Failed persistence did not restore the previous CSS.' -Script @'
+const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+const saved = record ? JSON.parse(localStorage.getItem(record)) : null;
+const result = {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  rejected: document.querySelector('#preferences-status').dataset.error === 'true',
+  message: document.querySelector('#preferences-status').textContent,
+  savedCss: saved?.preferences?.styleModules?.[0]?.css || '',
+  editorCss: document.querySelector('#user-stylesheet').value,
+  position: document.querySelector('#position').textContent
+};
+if (result.rejected && globalThis.__athaSetItem) {
+  Object.defineProperty(Storage.prototype, 'setItem', globalThis.__athaSetItem);
+  delete globalThis.__athaSetItem;
+}
+return result;
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.rejected -and $value.message -like '*无法保存*' }
+        if (
+            $rollback.savedCss -ne '.book { --atha-css-gate: applied; font-size: 18px; }' -or
+            $rollback.editorCss -ne '.book { --atha-css-gate: applied; font-size: 18px; }' -or
+            $rollback.position -ne $renderedStyle.position
+        ) {
+            throw "Failed persistence restored stored='$($rollback.savedCss)' editor='$($rollback.editorCss)' position='$($rollback.position)'."
+        }
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.querySelector('#open-style-module-transfer').click();
+const transfer = document.querySelector('#style-module-transfer');
+transfer.value = JSON.stringify({ schema: 1, modules: [
+  { id: 'gate-one', name: 'Gate one', group: 'Layout', enabled: true, css: '.book { --atha-gate-one: 1; }' },
+  { id: 'gate-two', name: 'Gate two', group: 'Typography', enabled: true, css: '.book p { letter-spacing: .02em; }' }
+] });
+document.querySelector('#import-style-modules').click();
+return true;
+'@)
+        $styles = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CSS module import did not settle.' -Script @'
+const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+const saved = record ? JSON.parse(localStorage.getItem(record)) : null;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  modules: saved?.preferences?.styleModules?.length || 0,
+  margin: saved?.preferences?.pageMargin || '',
+  editorLoaded: Boolean(document.querySelector('.cm-editor'))
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.modules -eq 2 -and $value.margin -eq 'wide' -and $value.editorLoaded }
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.querySelector('#style-module-transfer-dialog').close();
+const preferences = document.querySelector('.reader-tool.preferences');
+preferences.open = true;
+document.querySelector('[data-settings-target="modules"]').click();
+const search = document.querySelector('#style-module-search');
+search.value = 'two';
+search.dispatchEvent(new Event('input', { bubbles: true }));
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CSS module search did not filter.' -Script "return { status: document.documentElement.dataset.status || null, error: document.documentElement.dataset.error || null, modules: document.querySelector('#style-module-list').options.length };" -Accepted { param($value) $value.status -eq 'pass' -and $value.modules -eq 1 })
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CSS module panel was not visible for screenshot evidence.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  open: document.querySelector('.reader-tool.preferences').open,
+  visible: !document.querySelector('[data-settings-page="modules"]').hidden,
+  width: document.querySelector('.preferences-panel').getBoundingClientRect().width,
+  searchWidth: document.querySelector('#style-module-search').getBoundingClientRect().width,
+  filterWidth: document.querySelector('#style-module-filter').getBoundingClientRect().width,
+  moduleRows: document.querySelectorAll('#style-module-list-view [data-module-id]').length,
+  toggleWidth: document.querySelector('.module-enabled-row .switch-track').getBoundingClientRect().width,
+  themeChoices: document.querySelectorAll('[data-preference-for="theme"]').length,
+  layoutChoices: document.querySelectorAll('[data-preference-for="page-margin"]').length
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.open -and $value.visible -and $value.width -gt 300 -and $value.searchWidth -gt 200 -and $value.filterWidth -gt 200 -and $value.moduleRows -eq 1 -and $value.toggleWidth -ge 40 -and $value.themeChoices -eq 4 -and $value.layoutChoices -eq 3 })
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.activeElement?.blur(); return true;")
+        Start-Sleep -Milliseconds 800
         $shot = Invoke-WebDriver -BaseUrl $baseUrl -Method Get -Path "/session/$session/screenshot" -Body $null
         [IO.File]::WriteAllBytes($screenshot, [Convert]::FromBase64String($shot.value))
         $colors = [int](& identify -format '%k' $screenshot)
         if ($LASTEXITCODE -ne 0 -or $colors -lt 10) { throw 'The Linux reader screenshot is blank.' }
+
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 600; height = 760 })
+        $mobileLayout = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CSS module panel did not enter the mobile viewport.' -Script @'
+const panel = document.querySelector('.preferences-panel');
+const rect = panel.getBoundingClientRect();
+const settings = document.querySelector('.module-settings');
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  mobile: matchMedia('(max-width: 640px)').matches,
+  left: rect.left,
+  right: innerWidth - rect.right,
+  overflow: settings.scrollWidth - settings.clientWidth,
+  columns: getComputedStyle(settings).gridTemplateColumns.split(' ').length
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.mobile }
+        if ([Math]::Abs($mobileLayout.left) -ge 1 -or [Math]::Abs($mobileLayout.right) -ge 1 -or $mobileLayout.overflow -gt 1 -or $mobileLayout.columns -ne 1) {
+            throw "CSS module mobile layout failed: $($mobileLayout | ConvertTo-Json -Compress)."
+        }
+        $mobileShot = Invoke-WebDriver -BaseUrl $baseUrl -Method Get -Path "/session/$session/screenshot" -Body $null
+        [IO.File]::WriteAllBytes($mobileScreenshot, [Convert]::FromBase64String($mobileShot.value))
+        $mobileColors = [int](& identify -format '%k' $mobileScreenshot)
+        if ($LASTEXITCODE -ne 0 -or $mobileColors -lt 10) { throw 'The mobile Linux reader screenshot is blank.' }
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const url = new URL(location.href);
+url.searchParams.set('style-module-probe', '1');
+location.href = url.href;
+return true;
+'@)
+        $styleBenchmark = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'CSS module benchmark did not pass.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  p95: Number(document.documentElement.dataset.styleModuleP95 || 0),
+  bytes: Number(document.documentElement.dataset.styleModuleBytes || 0)
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.p95 -gt 0 -and $value.p95 -lt 50 -and $value.bytes -le 65536 }
 
         [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Delete -Path "/session/$session" -Body $null)
         $session = $null
@@ -232,9 +519,14 @@ if (document.documentElement.dataset.status !== 'pass') {
 return {
   status: 'pass',
   restored: document.querySelector('#progress-position').textContent.includes('4/4') &&
-    document.querySelector('#progress-chapter').textContent === '\u6ce8\u91ca'
+    document.querySelector('#progress-chapter').textContent === '\u6ce8\u91ca' &&
+    document.querySelector('.reader').style.getPropertyValue('--page-left-margin') === '48px',
+  modules: (() => {
+    const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
+    return record ? JSON.parse(localStorage.getItem(record)).preferences.styleModules.length : 0;
+  })()
 };
-'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.restored }
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.restored -and $value.modules -eq 2 }
 
         [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Delete -Path "/session/$session" -Body $null)
         $session = $null
@@ -254,8 +546,13 @@ return {
             sections = 4
             toc_items = $reader.toc
             search_results = $search.results
+            css_modules = $styles.modules
+            css_editor = 'CodeMirror 6'
+            css_modules_p95_ms = $styleBenchmark.p95
+            css_modules_bytes = $styleBenchmark.bytes
             restored_section = 4
             screenshot_colors = $colors
+            mobile_screenshot_colors = $mobileColors
             evidence = 'Linux Tauri GUI'
         }
     }

@@ -516,7 +516,7 @@ fn validate_message_content(
                     WHERE length(CAST(fragment_html AS BLOB)) > 262144
                        OR length(CAST(reader_css AS BLOB)) > 1048576
                        OR length(CAST(book_css AS BLOB)) > 1048576
-                       OR length(CAST(user_css AS BLOB)) > 32768
+                       OR length(CAST(user_css AS BLOB)) > 65536
                        OR length(CAST(presentation_json AS BLOB)) > 4096
                 UNION ALL SELECT 1 FROM snapshot_resource
                     WHERE length(CAST(source_path AS BLOB)) > 4096

@@ -76,12 +76,33 @@ const preferences = createPreferences({
     fontSize: document.querySelector("#font-size"),
     fontFamily: document.querySelector("#font-family"),
     density: document.querySelector("#density"),
+    paragraphIndent: document.querySelector("#paragraph-indent"),
+    paragraphSpacing: document.querySelector("#paragraph-spacing"),
+    pageMargin: document.querySelector("#page-margin"),
     tapToPaginate: document.querySelector("#tap-to-paginate"),
     swipeToPaginate: document.querySelector("#swipe-to-paginate"),
     sourceStyles: document.querySelector("#source-styles"),
     userStylesEnabled: document.querySelector("#user-styles-enabled"),
     userStylesheet: document.querySelector("#user-stylesheet"),
-    applyUserStyle: document.querySelector("#apply-user-style"),
+    moduleSearch: document.querySelector("#style-module-search"),
+    moduleFilter: document.querySelector("#style-module-filter"),
+    moduleList: document.querySelector("#style-module-list"),
+    moduleListView: document.querySelector("#style-module-list-view"),
+    moduleName: document.querySelector("#style-module-name"),
+    moduleGroupName: document.querySelector("#style-module-group"),
+    moduleEnabled: document.querySelector("#style-module-enabled"),
+    moduleAdd: document.querySelector("#add-style-module"),
+    moduleSave: document.querySelector("#save-style-module"),
+    moduleDelete: document.querySelector("#delete-style-module"),
+    moduleUp: document.querySelector("#move-style-module-up"),
+    moduleDown: document.querySelector("#move-style-module-down"),
+    modulesEnable: document.querySelector("#enable-style-modules"),
+    modulesDisable: document.querySelector("#disable-style-modules"),
+    moduleTransferOpen: document.querySelector("#open-style-module-transfer"),
+    moduleTransferDialog: document.querySelector("#style-module-transfer-dialog"),
+    moduleTransfer: document.querySelector("#style-module-transfer"),
+    moduleImport: document.querySelector("#import-style-modules"),
+    moduleCopy: document.querySelector("#copy-style-modules"),
     resetApplication: document.querySelector("#reset-application-preferences"),
     resetBook: document.querySelector("#reset-book-preferences"),
     status: document.querySelector("#preferences-status"),
@@ -463,6 +484,12 @@ async function start() {
     await diagnostics.verify();
     await warmForVerification();
     fullLayoutCheck = true;
+  }
+  else if (params.has("style-module-probe")) {
+    const result = preferences.benchmarkStyleModules();
+    assert(result.modules === 32 && result.bytes <= 65536 && result.p95Ms < 50, "style-module-performance");
+    root.dataset.styleModuleP95 = result.p95Ms.toFixed(3);
+    root.dataset.styleModuleBytes = String(result.bytes);
   }
   if (benchmarkMode === "hot") {
     await diagnostics.benchmark();

@@ -234,22 +234,30 @@ export function createNavigation({
     return setPreferences("application", { fontSize: Number(value) });
   }
 
-  async function setPreferences(scope, patch) {
+  async function commitPreferences(scope, change) {
     const anchor = current();
-    const state = preferences.update(scope, patch);
-    await pagination.setFontSize(state.effective.fontSize, anchor.start.offset);
-    syncControls();
-    if (onPreferences(scope) === false) throw new Error("state-write");
-    return anchor;
+    const previous = preferences.snapshot();
+    try {
+      const state = change();
+      await pagination.setFontSize(state.effective.fontSize, anchor.start.offset);
+      syncControls();
+      if (onPreferences(scope) === false) throw new Error("state-write");
+      return anchor;
+    } catch (error) {
+      const restored = preferences.restore(previous);
+      await pagination.setFontSize(restored.effective.fontSize, anchor.start.offset);
+      preferences.restore(previous);
+      syncControls();
+      throw error;
+    }
+  }
+
+  async function setPreferences(scope, patch) {
+    return commitPreferences(scope, () => preferences.update(scope, patch));
   }
 
   async function resetPreferences(scope) {
-    const anchor = current();
-    const state = preferences.reset(scope);
-    await pagination.setFontSize(state.effective.fontSize, anchor.start.offset);
-    syncControls();
-    if (onPreferences(scope) === false) throw new Error("state-write");
-    return anchor;
+    return commitPreferences(scope, () => preferences.reset(scope));
   }
 
   async function resizeViewport() {

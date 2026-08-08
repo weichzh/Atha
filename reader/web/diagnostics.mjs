@@ -142,6 +142,50 @@ export function createDiagnostics({
       ),
       "sample-boundary",
     );
+    const legacyCss = ".book { --atha-legacy-style-probe: applied; }";
+    const migratedBook = preferences.restore({
+      application: initial.application,
+      book: {
+        sourceStyles: true,
+        userStylesEnabled: true,
+        userStylesheet: legacyCss,
+      },
+    });
+    assert(
+      migratedBook.book.styleModules.length === 1 &&
+        migratedBook.book.styleModules[0].id === "legacy-user-css" &&
+        migratedBook.book.styleModules[0].css === legacyCss,
+      "sample-boundary",
+    );
+    const legacyUnicodeCss = `/*${"汉".repeat(12000)}*/`;
+    const migratedUnicodeBook = preferences.restore({
+      application: initial.application,
+      book: {
+        sourceStyles: true,
+        userStylesEnabled: true,
+        userStylesheet: legacyUnicodeCss,
+      },
+    });
+    assert(
+      migratedUnicodeBook.book.styleModules[0].enabled &&
+        migratedUnicodeBook.book.styleModules[0].css === legacyUnicodeCss,
+      "sample-boundary",
+    );
+    const oversizedLegacyCss = `/*${"汉".repeat(22000)}*/`;
+    const migratedOversizedBook = preferences.restore({
+      application: initial.application,
+      book: {
+        sourceStyles: true,
+        userStylesEnabled: true,
+        userStylesheet: oversizedLegacyCss,
+      },
+    });
+    assert(
+      !migratedOversizedBook.book.styleModules[0].enabled &&
+        migratedOversizedBook.book.styleModules[0].css === oversizedLegacyCss,
+      "sample-boundary",
+    );
+    preferences.restore(initial);
     if (pagination.snapshot().pages > 1) await pagination.show(1);
     const compactAnchor = await navigation.setPreferences("application", {
       theme: "dark",
@@ -190,10 +234,23 @@ export function createDiagnostics({
     assert(pagination.isOffsetVisible(bookAnchor.start.offset), "sample-boundary");
     assert(!content.styleSnapshot().bookStyleApplied, "sample-boundary");
     const userCss = ".book { --atha-user-style-probe: applied; }";
-    await navigation.setPreferences("book", { userStylesheet: userCss });
+    const module = {
+      id: "diagnostic-module",
+      name: "Diagnostic",
+      group: "Gate",
+      enabled: true,
+      css: userCss,
+    };
+    await navigation.setPreferences("book", {
+      pageMargin: "wide",
+      paragraphIndent: "two",
+      paragraphSpacing: "comfortable",
+      styleModules: [module],
+    });
     assert(content.styleSnapshot().userStyleApplied, "sample-boundary");
     assert(
-      getComputedStyle(content.book).getPropertyValue("--atha-user-style-probe") === "applied",
+      getComputedStyle(content.book).getPropertyValue("--atha-user-style-probe").trim() === "applied" &&
+        reader.style.getPropertyValue("--page-left-margin") === "48px",
       "sample-boundary",
     );
     await navigation.setPreferences("book", { userStylesEnabled: false });
@@ -212,13 +269,23 @@ export function createDiagnostics({
     let unsafeRejected = false;
     try {
       await navigation.setPreferences("book", {
-        userStylesheet: ".book { background: url(https://example.com/x); }",
+        styleModules: [
+          { ...module, css: ".book { background: url(https://example.com/x); }" },
+        ],
       });
     } catch (error) {
       unsafeRejected = error instanceof Error && error.message === "css-subresource";
     }
     assert(unsafeRejected, "sample-boundary");
-    assert(preferences.snapshot().book.userStylesheet === userCss, "sample-boundary");
+    assert(preferences.snapshot().book.styleModules[0].css === userCss, "sample-boundary");
+
+    const styleBenchmark = preferences.benchmarkStyleModules();
+    assert(
+      styleBenchmark.modules === 32 &&
+        styleBenchmark.bytes <= 65536 &&
+        styleBenchmark.p95Ms < 50,
+      "style-module-performance",
+    );
 
     await navigation.resetPreferences("book");
     assert(content.styleSnapshot().bookStyleApplied, "sample-boundary");
@@ -246,6 +313,9 @@ export function createDiagnostics({
       userStylesToggled: true,
       unsafeStylesRejected: true,
       legacyMarginsDropped: true,
+      legacyCssMigrated: true,
+      moduleRollback: true,
+      styleBenchmark,
     };
   }
 
