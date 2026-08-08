@@ -224,11 +224,18 @@ export function importFailureMessage(code: string): string {
     case "markdown-section-too-large":
     case "txt-source-too-large":
     case "txt-section-too-large":
+    case "kindle-source-too-large":
+    case "kindle-text-too-large":
+    case "kindle-resource-too-large":
       return "文件过大";
     case "encrypted-epub":
       return "暂不支持受保护的 EPUB";
     case "encrypted-cbz":
       return "暂不支持受保护的 CBZ";
+    case "encrypted-kindle":
+      return "暂不支持受保护的 Kindle 书籍";
+    case "kindle-dictionary-unsupported":
+      return "这是 Kindle 词典，请在查词功能中使用";
     case "unsupported-epub":
       return "暂不支持这本 EPUB 的结构";
     case "unsupported-cbz":
@@ -240,6 +247,9 @@ export function importFailureMessage(code: string): string {
       return "Markdown 章节或目录项过多";
     case "too-many-txt-sections":
       return "TXT 章节过多";
+    case "too-many-kindle-sections":
+    case "too-many-kindle-toc-items":
+      return "Kindle 书籍的章节或目录项过多";
     case "invalid-cbz-image":
       return "CBZ 中包含无效或尺寸过大的图片";
     case "invalid-epub-source":
@@ -259,15 +269,25 @@ export function importFailureMessage(code: string): string {
       return "不是可读取的 TXT 文件";
     case "invalid-txt-encoding":
       return "无法识别 TXT 编码";
+    case "invalid-kindle-source":
+    case "invalid-kindle-structure":
+    case "invalid-kindle-encoding":
+    case "invalid-kindle-markup":
+    case "invalid-kindle-reference":
+    case "invalid-kindle-image":
+    case "unsupported-kindle":
+      return "不是可读取的 MOBI、AZW 或 AZW3 文件";
     case "epub-source-changed":
     case "cbz-source-changed":
     case "markdown-source-changed":
     case "txt-source-changed":
+    case "kindle-source-changed":
       return "文件在导入时发生了变化，请重试";
     case "epub-import-write-failed":
     case "cbz-import-write-failed":
     case "markdown-import-write-failed":
     case "txt-import-write-failed":
+    case "kindle-import-write-failed":
       return "无法保存导入的书籍";
     default:
       return "导入失败";

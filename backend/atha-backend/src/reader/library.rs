@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     cbz,
     epub::{ImportError, READER_MANIFEST, import_epub},
-    fb2,
+    fb2, kindle,
     resources::{BookRoot, Resource, ResourceError},
     text,
 };
@@ -70,6 +70,7 @@ pub enum LibraryError {
     Import(ImportError),
     Cbz(cbz::ImportError),
     Fb2(fb2::ImportError),
+    Kindle(kindle::ImportError),
     Text(text::ImportError),
     Resource(ResourceError),
 }
@@ -138,6 +139,18 @@ impl LocalLibrary {
             )
         } else if extension.eq_ignore_ascii_case("fb2") || extension.eq_ignore_ascii_case("fbz") {
             let imported = fb2::import_fb2(source, &self.imports).map_err(LibraryError::Fb2)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        } else if extension.eq_ignore_ascii_case("mobi")
+            || extension.eq_ignore_ascii_case("azw")
+            || extension.eq_ignore_ascii_case("azw3")
+        {
+            let imported =
+                kindle::import_kindle(source, &self.imports).map_err(LibraryError::Kindle)?;
             (
                 imported.content_version,
                 imported.title,
@@ -267,6 +280,7 @@ impl LibraryError {
             Self::Import(error) => error.code(),
             Self::Cbz(error) => error.code(),
             Self::Fb2(error) => error.code(),
+            Self::Kindle(error) => error.code(),
             Self::Text(error) => error.code(),
             Self::Resource(error) => error.code(),
         }

@@ -2,6 +2,13 @@
 
 Atha 包含以下第三方资产。它们保留各自的版权与许可证，不因 Atha 采用 AGPL-3.0-or-later 而被重新许可。
 
+## Kindle 直接依赖
+
+- `boko 0.5.0`：GPL-3.0-or-later；上游：<https://crates.io/crates/boko/0.5.0>；固定源码：<https://github.com/zacharydenton/boko/tree/8f412fb1a507399bce320d591feb517467cdb5f7>
+- Atha 以 `default-features = false` 使用未修改的 crates.io 发布包；PDB / MOBI 预检、安全预算、HTML / 资源投影与原子发布属于 Atha 自有 adapter，不是对 `boko` 源码的复制或修改。
+
+GPL-3.0-or-later 全文见 `LICENSES/GPL-3.0-or-later.txt`。
+
 ## Markdown / TXT 直接依赖
 
 - `pulldown-cmark 0.13.4`：MIT；Copyright 2015 Google Inc.；上游：<https://crates.io/crates/pulldown-cmark/0.13.4>

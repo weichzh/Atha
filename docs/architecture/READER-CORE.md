@@ -2,7 +2,7 @@
 
 ## 责任
 
-阅读内核负责把导入后的书籍内容以 HTML、CSS 和本地资源的形式呈现。它不以某个书籍封装格式为中心：EPUB、CBZ、FB2 / FBZ、Markdown 与 TXT 已在导入后投影为同一 ReaderManifest / BookRoot，MOBI、AZW 或其他来源也必须先归一到同一内容模型。
+阅读内核负责把导入后的书籍内容以 HTML、CSS 和本地资源的形式呈现。它不以某个书籍封装格式为中心：EPUB、CBZ、FB2 / FBZ、MOBI / AZW / AZW3、Markdown 与 TXT 都在导入后投影为同一 ReaderManifest / BookRoot，其他来源也必须先归一到同一内容模型。
 
 ## 兼容性契约
 
@@ -34,7 +34,7 @@ Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持�
 
 ## 本地书架与应用内导入
 
-Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB、CBZ、FB2 / FBZ、Markdown 或 TXT。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；已知 `.epub`、`.cbz`、`.fb2` / `.fbz`、`.md` / `.markdown`、`.txt` 严格分派到对应 importer。Android content URI 由 Tauri 内置 PathPlugin 经 `ContentResolver` 取得显示文件名，只保留允许列表后缀后复制到 Picker cache；provider 不返回可用后缀时稳定拒绝，不从 URI 或正文猜格式。EPUB / CBZ 保持原始文件 SHA-256，Markdown / TXT 使用各自格式域，FB2 / FBZ 使用解包后 FB2 XML 与固定格式域生成身份，因此同一书的直接与压缩封装复用内容版本；在平台 Library 目录为每书保存一份受限 JSON，在 ImportedBooks 下保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
+Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB、CBZ、FB2 / FBZ、MOBI / AZW / AZW3、Markdown 或 TXT。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；已知 `.epub`、`.cbz`、`.fb2` / `.fbz`、`.mobi` / `.azw` / `.azw3`、`.md` / `.markdown`、`.txt` 严格分派到对应 importer。Android content URI 由 Tauri 内置 PathPlugin 经 `ContentResolver` 取得显示文件名，只保留允许列表后缀后复制到 Picker cache；provider 不返回可用后缀时稳定拒绝，不从 URI 或正文猜格式。EPUB / CBZ 保持原始文件 SHA-256，Markdown / TXT 使用各自格式域，FB2 / FBZ 使用解包后 FB2 XML 与固定格式域生成身份，Kindle 三种后缀使用同一固定格式域，因此相同字节不会因封装后缀产生副本；在平台 Library 目录为每书保存一份受限 JSON，在 ImportedBooks 下保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
 
 EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；EPUB2 的 `meta name="cover"` 与 EPUB3 的 `cover-image` 最终投影为同一封面字段。CBZ 只消费可选 `ComicInfo.xml` 中有界的 `Title`、`Writer` 与唯一有效 `FrontCover`。FB2 从 `description/title-info` 有界投影书名、作者和封面引用。无效、冲突或超限的可选元数据不会扩大受信任内容边界；无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性和导入时间，不接收源路径、缓存路径或书籍内容。打开书籍后，宿主把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
 
@@ -52,6 +52,8 @@ Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `
 
 `reader::fb2` 用已有 `quick-xml 0.41` 的声明编码支持做两遍有界流式解析，并用 `base64 0.22.1` 解码书内二进制。它只接受直接 `.fb2` 或恰含一个根级 `.fb2` 成员的 `.fbz`，将正文、notes body、目录、内部锚点和 JPEG / PNG 图片投影为 Atha 控制的 XHTML 与 manifest；源 stylesheet、外链、DTD、处理指令、脚本、未知正文元素、未知二进制类型、损坏引用及超限输入均拒绝。直接 FB2 上限为 64 MiB；FBZ 复用共享 archive 边界，成员仍受 16 MiB 上限。
 
+`reader::kindle` 使用固定且关闭默认 features 的 `boko 0.5.0` 恢复 PalmDOC / MOBI6 与纯 KF8 / AZW3。进入依赖前，Atha 独立验证 256 MiB 源上限、PDB record 表、MOBI version、compression、encoding、encryption、词典索引和正文 / HUFF 预算；纯 KF8 按 header 路由，不信任 `.azw` 后缀。依赖输出继续经过 Atha XHTML 白名单、链接重写、JPEG / PNG / GIF magic 与尺寸检查、唯一目录目标和原子发布，DRM、字典、未知压缩 / 编码、活动内容、悬空资源与超限输入稳定拒绝。`boko` 的公共 raw API 当前不能加载 KF8 flow stylesheet，因此首版移除对应 link，不发布悬空 CSS；书内图片和安全 inline style 保留，源样式完整保真留待上游 API 或真实需求证明需要最小 fork 时再补。
+
 首版 EPUB 兼容边界是 UTF-8 XML、单 package、XHTML spine，以及 EPUB3 XHTML nav 或 EPUB2 NCX `navMap`。NCX 可无 DOCTYPE，或只包含精确 canonical NCX 声明；带声明时要求合法且唯一的 `playOrder`，不加载外部 DTD 或通用实体。正文和搜索在 `DOMParser` 前只白名单精确的 HTML5、XHTML 1.1 与兼容扩展 XHTML 1.0 Strict 声明，并先剥离声明；未知、重复或带 internal subset 的声明继续拒绝，脚本、事件处理器、表单和其他主动内容仍由既有边界拒绝。container 与 OPF 的 DOCTYPE 继续拒绝。章节可以没有书源样式表，此时只应用阅读器样式。EPUB / CBZ / FBZ 共用 `reader::archive` 的 512 MiB 源文件与声明解压总量、10000 成员、16 MiB 单成员、加密、重叠、symlink、重复 / Windows 歧义和路径边界；写入成员与 CBZ 页面另按实际读取量累计，container / OPF / navigation 等少量元数据只受单成员上限约束。`zip 8.6` 没有打开前的 `max_entries` 配置；Atha 先以标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，再在打开后校验实际条目数。该 hint 不是完整 ZIP parser，fallback / ZIP64 在 post-open 检查前的最坏预分配仍是受源文件上限约束的残余风险。外部 URL、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。UTF-16 XML、DTBook、OEBPS 文档、fallback 链、完整 EPUB2 Reading System、多 rendition、远程资源、字体、混淆、修复和多格式工厂尚未完成。
 
 `Section` 是一次只加载一份的顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 前必须释放上一 section 的 DOM、书源样式和缓存；关闭后不保留书籍 DOM。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
@@ -66,7 +68,7 @@ schema 1 Locator 是同一书籍内容版本内的内容坐标：起点由 secti
 
 ### 阅读状态与书签
 
-Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。所有导入入口的规范路径位于以内容版本命名的缓存目录，因此移动源文件不改变状态键；EPUB / CBZ 内容版本保持原始文件 SHA-256，FB2 / FBZ 共享解包 XML 的格式域身份，Markdown / TXT 以不同固定格式域隔离相同字节。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可访问时当前会话仍可继续。
+Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。所有导入入口的规范路径位于以内容版本命名的缓存目录，因此移动源文件不改变状态键；EPUB / CBZ 内容版本保持原始文件 SHA-256，FB2 / FBZ 共享解包 XML 的格式域身份，Kindle 三后缀共享一个格式域，Markdown / TXT 以不同固定格式域隔离相同字节。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可访问时当前会话仍可继续。
 
 稳定导航只在同一任务末尾合并写入一次小型进度记录，并在页面隐藏或离开时同步 flush。恢复顺序是有效偏好优先，再恢复同内容版本且可定位的进度；错版本进度不应用，错版本书签保留并显示为不可跳转。书签只提供当前位置创建、去重、跳转与删除；纯图片或只有不可见字符的页面通过当前 Locator 识别已有书签，不依赖可见文字偏移；书籍身份迁移、跨版本重锚、同步和历史记录不属于本层。
 
@@ -146,6 +148,10 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 `scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、三条目录、跨 section 跳转、全书搜索、进度恢复、非空截图和 AppLog 隐私。系统 picker 后缀只由 Rust 单元测试覆盖；该 GUI 门不伪装为原生对话框交互，也不替代 Android ARM 真机性能证据。
 
+### Kindle 入口门槛
+
+`scripts/check-kindle-source.ps1 -VerifyLinuxGui` 使用忽略目录内的两个普通 KF8 与一个词典样本，运行 importer 安全矩阵、10 次 release benchmark、词典早拒绝、Svelte / Tauri build 和真实 WebKitGTK。GUI 只把目录最完整的普通书种入隔离 `LocalLibrary`，验证书架、打开、204 条唯一目录、目录远跳、全文搜索、字号 / 主题重排、重启恢复、非空截图和 AppLog 隐私；脚本与报告只输出结构计数和性能，不输出路径、书名、作者、正文或内容哈希。该 Linux 证据不替代 Android ARM64 真机性能。
+
 ## 性能策略
 
 - 使用内容已知尺寸或缓存测量结果为重内容预留空间，减少重排。
@@ -159,11 +165,11 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ## 位置与版本
 
-阅读位置按书籍状态键与内容版本保存，样式变化后仍以内容 Locator 恢复到同一内容位置。EPUB / CBZ 状态键绑定源文件内容哈希缓存路径，FB2 / FBZ 绑定解包 XML 的格式域哈希缓存路径，均不绑定源文件位置；内容版本变化时不猜测旧位置。
+阅读位置按书籍状态键与内容版本保存，样式变化后仍以内容 Locator 恢复到同一内容位置。EPUB / CBZ 状态键绑定源文件内容哈希缓存路径，FB2 / FBZ 绑定解包 XML 的格式域哈希缓存路径，Kindle 绑定同一格式域下的源字节哈希缓存路径，均不绑定源文件位置；内容版本变化时不猜测旧位置。
 
 ## 非责任
 
-- 阅读页不定义书籍格式 parser；EPUB2 / EPUB3、CBZ 与 FB2 / FBZ 导入细节分别只属于后端 `reader::epub`、`reader::cbz` 与 `reader::fb2` module；
+- 阅读页不定义书籍格式 parser；EPUB2 / EPUB3、CBZ、FB2 / FBZ 与 Kindle 导入细节分别只属于后端 `reader::epub`、`reader::cbz`、`reader::fb2` 与 `reader::kindle` module；
 - 阅读内核只捕获与投影消息，不拥有 SQLite、AI 或同步协议；
 - 不替用户修复损坏书源；
 - 不预设跨机器性能数值，后续规格基于困难书籍样本决定。

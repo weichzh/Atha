@@ -4,18 +4,17 @@
 
 核心阅读、EPUB3、本地书架和消息式阅读已经形成完整主循环，Android EPUB 纵切也已通过真实模拟器链路。当前目标是在保留现有 ReaderManifest、BookRoot、Locator 与内容安全边界的前提下，逐步补齐 Readest 已成熟支持的非 PDF 格式，再交付 CSS、统计和离线词典能力。
 
-## Now：MOBI / AZW / KF8 / AZW3
+## Now：CSS 编辑器与模块管理
 
-FB2 / FBZ 已归一到同一 ReaderManifest、BookRoot、Locator 与安全渲染边界。下一格式切片研究并实现 MOBI、AZW、KF8 与 AZW3，先用包元数据、许可证和真实样本确认成熟 Rust 解析库的覆盖范围，再决定采用或补齐最小 adapter；不复制 Readest 的 AGPL 应用实现，不在 WebView 中维护第二套书籍模型。
+Readest 对应的非 PDF 输入格式已经归一到同一 ReaderManifest、BookRoot、Locator 与安全渲染边界。下一切片增强现有每书用户 CSS：默认使用字号、字体、行距、段距、页边距、主题与翻页等可视控件和实时预览，原始 CSS 只作为高级模式；样式模块可组合、排序、启停、搜索、分组、导入导出和失败回退，不建立第二套渲染器或通用扩展运行时。
 
-日常目标端检查和 GUI 调试使用现有 Linux GNOME 会话与 Tauri / WebKitGTK；Windows 只在用户明确要求时使用，Android 模拟器只在发布前或移动端专项验收时启动。停止条件是四类扩展名能稳定导入 Readest 对应的非 DRM 子集，共享目录、搜索、翻页和恢复，拒绝 DRM、活动内容、外部资源与超限输入；本地 GUI 通过后，再以指定 ARM 真机和私有样本记录内存、冷开、翻页与重排，不把 Linux 数字冒充移动端性能。
+日常目标端检查和 GUI 调试继续使用 Linux GNOME 会话与 Tauri / WebKitGTK；Windows 只在用户明确要求时使用，Android 模拟器只在发布前或移动端专项验收时启动。界面优先借鉴微信读书的沉浸阅读、固定工具分组、排版即时预览与渐进高级设置，不引入其社交、排行、付费、音频或悬浮 AI 入口。停止条件是同一 CSS 安全规则贯穿编辑、预览、模块组合、持久化和渲染，任一无效模块可定位、禁用并回退到上次有效组合。
 
 ## Next：按格式风险逐片交付
 
-1. **CSS 编辑器与模块管理**：每书覆盖、可组合模块、预览、撤销、导入导出和失败回退；
-2. **CSS 社区**：GitHub 仓库作为存储与 review 边界，用户登录 GitHub 后以 pull request 投稿，不自建账号或审核后端；
-3. **阅读统计**：本地优先记录阅读时长、进度与连续阅读，先明确暂停、后台和跨设备语义；
-4. **离线词典**：先实现本地索引、查词与安全释义渲染，再用指定 MOBI / MDict 样本在 Android ARM 真机做基准；AGPL 兼容不替代词典内容版权与分发审查。
+1. **CSS 社区**：GitHub 仓库作为存储与 review 边界，用户登录 GitHub 后以 pull request 投稿，不自建账号或审核后端；
+2. **阅读统计**：本地优先记录阅读时长、进度与连续阅读，先明确暂停、后台和跨设备语义；
+3. **离线词典**：先实现本地索引、查词与安全释义渲染，再用指定 MOBI / MDict 样本在 Android ARM 真机做基准；AGPL 兼容不替代词典内容版权与分发审查。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
@@ -44,6 +43,7 @@ FB2 / FBZ 已归一到同一 ReaderManifest、BookRoot、Locator 与安全渲染
 | Markdown / TXT | 安全 Markdown 投影、遗留编码 TXT 章节、分组 sections、Android picker / 目录 / 搜索 / 恢复与十样本模拟器基线 | `docs/architecture/READER-CORE.md`、`docs/changes/android-markdown-txt-vertical-slice.md` |
 | Linux Tauri 目标 | Tauri / WebKitGTK 日常 GUI 门、平台协议 URL、WebDriver 截图与日志隐私检查；Android 改为发布前或移动专项门 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md` |
 | FB2 / FBZ | 有界流式 XML、单根成员 FBZ、metadata / 封面 / 目录 / 内部链接投影、稳定内容身份与 Linux Tauri GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/changes/android-fb2-vertical-slice.md` |
+| MOBI / AZW / AZW3 | 固定 `boko 0.5.0` 的有界 adapter、PalmDOC / MOBI6 / 纯 KF8、图片 / 唯一目录投影、词典早拒绝、十次 release benchmark 与 Linux 真 GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/changes/kindle-format-vertical-slice.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 
 精确实施过程、历史验收数字和关闭收据由 Git 与 `project-workflow` 保存，不在路线图重复维护。

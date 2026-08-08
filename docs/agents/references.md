@@ -22,7 +22,7 @@
 
 - 版本事实：`reader/app/package.json`、`reader/app/src-tauri/Cargo.toml`、`Cargo.lock`、`reader/app/src-tauri/tauri.android.conf.json` 与 `reader/app/src-tauri/gen/android/`；本项目 Android 门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36、min SDK 26，当前默认目标为 API 36 x86_64 16 KiB AVD。
 - 官方入口：[Tauri Android 前置条件](https://v2.tauri.app/start/prerequisites/#android)、[Tauri Dialog](https://v2.tauri.app/plugin/dialog/)、[`FilePath` Rust API](https://docs.rs/tauri-plugin-dialog/latest/tauri_plugin_dialog/enum.FilePath.html)、[Tauri File System](https://v2.tauri.app/plugin/file-system/)、[`FsExt` Rust API](https://docs.rs/tauri-plugin-fs/latest/tauri_plugin_fs/trait.FsExt.html)、[Android 16 KiB page size](https://developer.android.com/guide/practices/page-sizes)、[Android Auto Backup](https://developer.android.com/identity/data/autobackup)。
-- 项目快速用法：`tauri-plugin-dialog` 只选择文件；`platform_file::PickerInput` / `PickerOutput` 对普通路径直接转发，对 Android content URI 使用官方 fs plugin 流式复制到应用 `cache/Picker`。书籍 picker 先用 Tauri 内置 `app.path().file_name(content://...)` 经 PathPlugin / `ContentResolver` 取得显示文件名，只保留 `.epub` / `.cbz` / `.fb2` / `.fbz` / `.md` / `.markdown` / `.txt` 后缀；不得从 URI 字符串或正文猜格式。输入复用领域上限：单次至多 32 本书、archive / TXT 源文件至多 512 MiB、直接 FB2 至多 64 MiB、Markdown 至多 16 MiB、恢复制品至多 8 GiB。临时目录独占创建并由 RAII 与启动清理回收，路径、URI、标题和内容不得进入日志。
+- 项目快速用法：`tauri-plugin-dialog` 只选择文件；`platform_file::PickerInput` / `PickerOutput` 对普通路径直接转发，对 Android content URI 使用官方 fs plugin 流式复制到应用 `cache/Picker`。书籍 picker 先用 Tauri 内置 `app.path().file_name(content://...)` 经 PathPlugin / `ContentResolver` 取得显示文件名，只保留 `.epub` / `.cbz` / `.fb2` / `.fbz` / `.mobi` / `.azw` / `.azw3` / `.md` / `.markdown` / `.txt` 后缀；不得从 URI 字符串或正文猜格式。输入复用领域上限：单次至多 32 本书、archive / TXT 源文件至多 512 MiB、直接 FB2 至多 64 MiB、Kindle 源文件至多 256 MiB、Markdown 至多 16 MiB、恢复制品至多 8 GiB。临时目录独占创建并由 RAII 与启动清理回收，路径、URI、标题和内容不得进入日志。
 - 最短检查：`pwsh -NoProfile -File scripts/check-android-reader.ps1 -BookPath <local-book> -CleanAppData`；Markdown / TXT 增加 `-VerifyMarkdownText`。入口默认验证 `Atha_API_36_16K`，需要复核历史 API 35 证据时再显式传 `-ExpectedAvd` / `-ExpectedApi`；它同时验证 APK badging、无宽泛存储权限、16 KiB ZIP / ELF 对齐、安装、冷启动、系统 picker 导入、打开、reader ready、强停重启、书架持久与固定日志。消息导出、全库备份 / 恢复仍按活动 change 独立 opt-in，不把模拟器结果称为 ARM 真机性能证据。
 - 必须重查：Tauri mobile / plugin release line、Android Gradle Plugin 与 SDK / NDK 兼容、SAF provider 的 open / truncate / failure 语义、release 签名、实体 ARM 设备的 I/O / 内存 / WebView 性能，以及 API 31+ `dataExtractionRules` 与设备厂商的备份 / 迁移行为。
 
@@ -50,6 +50,14 @@
 - 项目快速用法：`reader::fb2` 对直接 FB2 或单根成员 FBZ 做两遍有界流式解析，只投影受支持正文、目录、内部链接和 JPEG / PNG binary，不解释源 stylesheet，不加载外部资源。同一 XML 的 FB2 / FBZ 共享固定格式域身份；picker 只按后缀分派，不嗅探正文。
 - 最短检查：`cargo test --locked -p atha-backend --test fb2_import`；Linux 真实 GUI 使用 `pwsh -NoProfile -File scripts/check-fb2-source.ps1 -VerifyLinuxGui`。
 - 必须重查：FB2 schema / encoding 语料、未知元素策略、binary 图片类型、FBZ 单成员大小、依赖许可证和 Android ARM 真机内存。
+
+## MOBI / AZW / AZW3、`boko`
+
+- 版本事实：`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `boko 0.5.0`，关闭默认 features；`imagesize 0.15.0` 同时启用 JPEG / PNG / GIF。
+- 官方入口：[`boko 0.5.0`](https://docs.rs/boko/0.5.0/boko/)、[固定源码](https://github.com/zacharydenton/boko/tree/8f412fb1a507399bce320d591feb517467cdb5f7)。
+- 项目快速用法：`reader::kindle` 先独立检查 PDB record、MOBI version、compression、encoding、encryption、词典索引及正文 / HUFF 预算，再按真实 header 将纯 KF8 交给 `Format::Azw3`、其余交给 `Format::Mobi`。`boko` 只恢复只读正文、目录与图片，结果仍经 Atha XHTML / CSS / 资源白名单、唯一 TOC、ReaderManifest / BookRoot 和原子发布；同字节跨 `.mobi` / `.azw` / `.azw3` 共享 `atha/kindle/boko-0.5.0-importer-v1` 身份域。当前丢弃 `boko` 公共 raw API 无法加载的 KF8 flow stylesheet，不发布悬空 CSS 引用。
+- 最短检查：`cargo test --locked -p atha-backend --test kindle_import`；私有普通 KF8 与词典样本、10 次 release benchmark 及 Linux 真 GUI 使用 `pwsh -NoProfile -File scripts/check-kindle-source.ps1 -VerifyLinuxGui`。
+- 必须重查：`boko` release line / 公共 CSS flow API、HUFF 全书预算、combo / MOBI7 / Windows-1252 / 压缩字体真实语料、源样式保真、Android ARM64 内存与许可证分发材料。
 
 ## Rust 文件锁与 `fs2`
 

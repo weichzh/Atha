@@ -240,8 +240,10 @@ async fn import_library_books(
         .dialog()
         .file()
         .add_filter(
-            "EPUB / CBZ / FB2 / FBZ / Markdown / TXT",
-            &["epub", "cbz", "fb2", "fbz", "md", "markdown", "txt"],
+            "EPUB / CBZ / FB2 / FBZ / MOBI / AZW / AZW3 / Markdown / TXT",
+            &[
+                "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
+            ],
         )
         .blocking_pick_files()
     else {

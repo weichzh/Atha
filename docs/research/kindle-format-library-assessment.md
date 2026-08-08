@@ -6,14 +6,14 @@ description: 评估 Atha 导入 MOBI、AZW、KF8 与 AZW3 时可复用的解析�
 
 ## 结论
 
-截至 2026-08-08，**没有一个现成实现可以原样成为 Atha 的 Kindle 信任边界**。固定本地样本 benchmark 已经把候选收敛为：
+截至 2026-08-08，**没有一个现成实现可以单独成为 Atha 的 Kindle 信任边界，但也没有证据支持复制整套 parser**。固定本地样本 benchmark 已经把候选收敛为：
 
 1. [`boko 0.5.0`](https://crates.io/crates/boko/0.5.0)：Rust 原生，已经实现经典 MOBI、PalmDOC、HUFF/CDIC、纯 KF8、MOBI/KF8 combo、FDST/SKEL/FRAG、INDX/CNCX/NCX、CSS、图片和字体。两个普通 KF8 样本都成功重构，10 次热缓存全量投影 P95 分别为 213 ms 和 21 ms，峰值 RSS P95 分别约为 25 MiB 和 13 MiB；但版本年轻、公开 MOBI/KF8 样本覆盖还小，现有总解压预算由整个文件大小放大，且未知压缩会按原始字节继续处理。它适合作为 Atha 专用实现的 Rust 底稿，不能原样进入信任边界。
 2. [`libmobi 0.12`](https://github.com/bfabiszewski/libmobi/tree/85dcfe803fc2a21020ddcf15c3eb66b93d388add)：格式覆盖和维护历史更成熟，两个普通 KF8 样本的全量源码重构 P95 分别为 94 ms 和 29 ms；但 99 MiB HUFF 词典压力样本 120 秒仍未完成。它继续作为 parity 与性能 oracle，不承担 Atha 运行时的 C FFI、系统库、内存边界和跨平台成本。
 
 Readest 的真实生产路径也不是 `mobi 0.8.x` 全功能 Rust reader。固定的 [Readest v0.11.18](https://github.com/readest/readest/releases/tag/v0.11.18) 在阅读时调用其生产 fork `foliate-js`；Rust [`mobi = "0.8"`](https://github.com/readest/readest/blob/4af203755d807ae317c9ffe4922f5f1e7989a66b/apps/readest-app/src-tauri/Cargo.toml) 只做部分指纹和封面快速路径。Readest 的采用证明了 foliate 路线具有真实产品覆盖，但固定 fork 的 README 同时明确说 API 尚未稳定，MOBI6 会一次解压全部文本，KF8 的 HUFF/CDIC 实现仍可能慢。因此，**生产采用度不是性能结论，必须在 Atha 的指定本地样本上测量。**
 
-最小可交付方案是一个具体的 `reader::kindle` adapter，不引入通用格式工厂，也不在 WebView 中运行 foliate 或保留第二套书籍模型。实现优先复用或移植 `boko` 已验证的 PDB、PalmDOC、HUFF/CDIC 与 KF8 恢复算法，只保留 Atha 阅读导入需要的部分，并重写独立总生成正文预算、未知压缩拒绝和逐章落盘；不从零重新发明格式，也不引入 `boko` 的 KFX、导出、通用 IR、CSS cascade 和 CLI。支持无 DRM 的 `.mobi`、`.azw`、`.azw3`，按文件头和 MOBI/KF8 结构决定内容类型，再投影到现有 `ReaderManifest` / `BookRoot` / `Locator`。日常功能和性能入口使用 Linux Tauri / WebKitGTK；Android 模拟器保持关闭，Android 只在发布前或移动端专项时使用 ARM64 真机验证。
+最终采用固定 `boko = 0.5.0`、`default-features = false` 加一个具体的 `reader::kindle` adapter，不复制或 fork 5.9 万行上游源码，不引入通用格式工厂，也不在 WebView 中运行 foliate 或保留第二套书籍模型。Atha 在调用依赖前独立检查源大小、PDB record、MOBI version、compression、encoding、encryption、词典索引和 HUFF 预算，因而消除了本地样本暴露的未知压缩放行与词典膨胀路径；依赖只恢复经过验证的 PalmDOC / MOBI6 与纯 KF8 内容，结果再投影到现有 `ReaderManifest` / `BookRoot` / `Locator`。只有当 `boko` 的公共能力实测阻塞必要保真或性能时才最小 fork；当前唯一确认的限制是 raw API 无法读取 KF8 flow stylesheet，首版删除对应 link 而不发布悬空 CSS。日常功能和性能入口使用 Linux Tauri / WebKitGTK；Android 模拟器保持关闭，Android 只在发布前或移动端专项时使用 ARM64 真机验证。
 
 ## 固定本地样本基准
 
@@ -291,16 +291,13 @@ Android 模拟器不属于日常 gate，保持关闭，也不为 Kindle 切片�
 
 Linux 数字不能表述为 ARM 性能证据；x86_64 模拟器也不能替代真机。没有 ARM 样本证据时可以关闭 Linux 功能切片，但不能声称移动端性能已经验收。
 
-## 进入实现的停止条件
+## 实施决策回填
 
-满足以下条件后，研究才能转为 `accepted` change：
+本轮以两个普通纯 KF8、一个词典压力样本和动态 PalmDOC fixture 收敛首版范围，结论如下：
 
-- 指定本地样本矩阵齐全，权利边界明确；
-- `boko` 与 `libmobi` 在同一矩阵上的结构 parity、错误分类、P95 和 RSS 已形成可复查报告；
-- `boko` 的生成正文硬上限与未知 compression 拒绝已有可固定的上游提交或最小补丁；
-- 已决定第一版资源支持表，尤其是 CSS、GIF/SVG 和压缩字体是支持还是确定性拒绝；
-- Linux Tauri/WebKitGTK gate 的功能、日志、网络和 benchmark 采样点写入 change；
-- DRM、KFX、AZW4/PDF、`.prc` / `.kf8` 扩展和字典语义仍明确在范围外；
-- Android 只保留发布前 ARM64 真机门，不启动日常模拟器。
+- 普通样本与 `boko` / `libmobi` 的正文、目录和图片结构完成对照；Atha 使用 `boko` 官方 TOC position 修复，并按 ReaderManifest 契约去重相同最终目标；
+- Atha 的调用前预检替代上游补丁：未知 compression / encoding、非零 encryption、词典索引、非法 record 和超过固定正文 / HUFF 预算的输入均在依赖展开前拒绝；
+- 首版资源支持 JPEG、PNG、GIF 与安全 inline style；KF8 flow stylesheet、SVG、字体、音视频、KFX、AZW4 / PDF、`.prc` / `.kf8` 后缀、DRM 和字典查询语义不在本切片；
+- 正式脚本固定 10 次 warm-cache release benchmark、词典早拒绝与 Linux Tauri / WebKitGTK 功能、截图和隐私门；Android 只保留发布前 ARM64 真机门。
 
-在这些前置条件完成前，不把任何候选加入正式 `Cargo.toml`，也不以 README 的格式清单或许可证兼容性替代本地样本证据。
+未补齐经典 HUFF MOBI7、combo、Windows-1252、压缩字体和复杂跨章节链接真实语料，因此当前交付是 Readest 对应扩展名的安全首版，不外推为全部历史 Kindle 变体兼容。若这些语料证明 `boko` 公共 API 不足，再按用户批准借鉴固定成熟实现做最小 fork，而不是预先复制整库。
