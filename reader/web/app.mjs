@@ -222,6 +222,7 @@ annotations = createAnnotations({
   locator,
   controls: {
     selectionActions: document.querySelector("#selection-actions"),
+    lookup: document.querySelector("#lookup-selection"),
     copy: document.querySelector("#copy-selection"),
     highlight: document.querySelector("#highlight-selection"),
     update: document.querySelector("#update-selection"),

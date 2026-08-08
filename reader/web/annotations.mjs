@@ -3,6 +3,16 @@ const ANNOTATION_MAX_NOTE_LENGTH = 2000;
 const ANNOTATION_CONTEXT_LENGTH = 32;
 const HIGHLIGHT_NAME = "atha-annotations";
 
+export function dispatchDictionaryLookup(selection, target = globalThis) {
+  if (!selection) return false;
+  target.dispatchEvent(
+    new CustomEvent("atha:dictionary-lookup", {
+      detail: Object.freeze({ query: selection.toString() }),
+    }),
+  );
+  return true;
+}
+
 export function createAnnotations({
   store,
   content,
@@ -558,6 +568,10 @@ export function createAnnotations({
       });
     });
     controls.selectionActions.addEventListener("pointerdown", (event) => event.preventDefault());
+    controls.lookup.addEventListener("click", () => {
+      if (!dispatchDictionaryLookup(pendingSelection)) return fail("annotation-selection");
+      finishSelection();
+    });
     controls.copy.addEventListener("click", copySelection);
     controls.highlight.addEventListener("click", async () => {
       if ((await addSelection("")).ok) hideSelectionActions();

@@ -10,6 +10,7 @@
 </section>
 
 <div id="selection-actions" class="selection-actions" role="toolbar" aria-label="选中文字操作" hidden>
+  <button id="lookup-selection" type="button">查词</button>
   <button id="copy-selection" type="button">复制</button>
   <button id="highlight-selection" type="button">标注</button>
   <button id="update-selection" type="button" hidden>更新</button>

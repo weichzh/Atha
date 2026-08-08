@@ -9,6 +9,13 @@ Atha 包含以下第三方资产。它们保留各自的版权与许可证，不
 
 GPL-3.0-or-later 全文见 `LICENSES/GPL-3.0-or-later.txt`。
 
+## 离线词典
+
+- `mdict-rs 0.1.4`：AGPL-3.0-only；上游：<https://crates.io/crates/mdict-rs/0.1.4>；固定源码：<https://github.com/Initsnow/mdict-rs/tree/d4bc67d1128e9561a27b714f085ad970dfed6c09>；Atha 启用其 `lzo` feature，未修改上游源码。
+- `reader::dictionary` 的经典 Kindle HUFF/CDIC 解压与尾部数据裁剪改编自 `boko 0.5.0`，保留 GPL-3.0-or-later；该模块的 INDX/TAGX 行为还参考了 `libmobi 0.12`，未复制其源码。固定参考源码：<https://github.com/bfabiszewski/libmobi/tree/85dcfe803fc2a21020ddcf15c3eb66b93d388add>。
+
+`mdict-rs` 与 Atha 的 AGPL-3.0 许可全文见根目录 `LICENSE`；`boko` 的 GPL-3.0-or-later 全文见 `LICENSES/GPL-3.0-or-later.txt`。
+
 ## CodeMirror 6
 
 - 直接依赖：`codemirror 6.0.2`、`@codemirror/lang-css 6.3.1`、`@codemirror/language 6.12.4`、`@codemirror/lint 6.9.7`。

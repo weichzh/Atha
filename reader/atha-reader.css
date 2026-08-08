@@ -1334,6 +1334,54 @@ textarea:focus-visible,
   max-height: none;
 }
 
+.dictionary-panel {
+  top: auto;
+  right: 12px;
+  bottom: calc(60px + var(--safe-area-bottom));
+  left: auto;
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(68dvh, calc(100dvh - 76px - var(--safe-area-top) - var(--safe-area-bottom)));
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px var(--ui-shadow);
+}
+
+.dictionary-panel > .panel-heading {
+  grid-template-columns: 48px minmax(0, 1fr) 96px;
+}
+
+.dictionary-source,
+.dictionary-source select {
+  width: 100%;
+  min-width: 0;
+}
+
+.dictionary-query {
+  margin: 0;
+  color: var(--ui-muted);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.dictionary-result {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dictionary-result p {
+  margin: 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.dictionary-status {
+  min-height: 1.4em;
+  color: var(--ui-muted);
+  font-size: 0.88rem;
+}
+
 .directory-panel,
 .notes-panel {
   z-index: 2;
@@ -2308,7 +2356,8 @@ textarea:focus-visible,
 }
 
 @media (max-width: 640px) {
-  .preferences-panel {
+  .preferences-panel,
+  .dictionary-panel {
     right: 0;
     bottom: 0;
     left: 0;

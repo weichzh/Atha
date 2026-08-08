@@ -56,6 +56,12 @@ Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `
 
 首版 EPUB 兼容边界是 UTF-8 XML、单 package、XHTML spine，以及 EPUB3 XHTML nav 或 EPUB2 NCX `navMap`。NCX 可无 DOCTYPE，或只包含精确 canonical NCX 声明；带声明时要求合法且唯一的 `playOrder`，不加载外部 DTD 或通用实体。正文和搜索在 `DOMParser` 前只白名单精确的 HTML5、XHTML 1.1 与兼容扩展 XHTML 1.0 Strict 声明，并先剥离声明；未知、重复或带 internal subset 的声明继续拒绝，脚本、事件处理器、表单和其他主动内容仍由既有边界拒绝。container 与 OPF 的 DOCTYPE 继续拒绝。章节可以没有书源样式表，此时只应用阅读器样式。EPUB / CBZ / FBZ 共用 `reader::archive` 的 512 MiB 源文件与声明解压总量、10000 成员、16 MiB 单成员、加密、重叠、symlink、重复 / Windows 歧义和路径边界；写入成员与 CBZ 页面另按实际读取量累计，container / OPF / navigation 等少量元数据只受单成员上限约束。`zip 8.6` 没有打开前的 `max_entries` 配置；Atha 先以标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，再在打开后校验实际条目数。该 hint 不是完整 ZIP parser，fallback / ZIP64 在 post-open 检查前的最坏预分配仍是受源文件上限约束的残余风险。外部 URL、未知 spine 类型，以及缺失的 spine、navigation 或受支持资源均明确失败。内联 SVG `image href` 只有在指向 manifest 已声明的同书资源时才加载；其他 SVG 外部引用继续拒绝。UTF-16 XML、DTBook、OEBPS 文档、fallback 链、完整 EPUB2 Reading System、多 rendition、远程资源、字体、混淆、修复和多格式工厂尚未完成。
 
+## 离线词典
+
+`reader::dictionary::LocalDictionaries` 独立于普通书籍导入器，在应用数据根的 `Dictionaries` 目录事务导入、列出和移除词典。MDict v2 的 MDX 与最多四个 MDD 固定交给 `mdict-rs 0.1.4`，MDX 精确查询最多跟随八层链接；MDD 先查资源范围和 32 MiB 上限，再按块读取。经典 Kindle 只支持当前样本所需的 MOBI6、CP1252、HUFF/CDIC 与正排 INDX 精确查询，按稀疏首键二分后只解压目标正文 records；ORDT、自定义排序、names / keys 屈折变化、KF8 词典、DRM、全文和模糊查询稳定拒绝或不命中。
+
+词典源、查询、词头、释义和资源均属于私有内容。Tauri 只把词典 ID、查询和安全结果送入固定 command，后台 lookup 使用 blocking worker，日志只保留操作、格式、资源数、结果数、耗时与稳定错误码。释义先移除脚本、样式、表单、嵌入和媒体节点，再归一为空白受限纯文本；Svelte 面板不使用 `{@html}`，MDD 富资源首版不渲染。选区“查词”只发送当前正文选区，不建立 provider、缓存、网络或插件接口。
+
 `Section` 是一次只加载一份的顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 前必须释放上一 section 的 DOM、书源样式和缓存；关闭后不保留书籍 DOM。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
 
 ### Locator 与导航
@@ -153,6 +159,10 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 ### Kindle 入口门槛
 
 `scripts/check-kindle-source.ps1 -VerifyLinuxGui` 使用忽略目录内的两个普通 KF8 与一个词典样本，运行 importer 安全矩阵、10 次 release benchmark、词典早拒绝、Svelte / Tauri build 和真实 WebKitGTK。GUI 只把目录最完整的普通书种入隔离 `LocalLibrary`，验证书架、打开、204 条唯一目录、目录远跳、全文搜索、字号 / 主题重排、重启恢复、非空截图和 AppLog 隐私；脚本与报告只输出结构计数和性能，不输出路径、书名、作者、正文或内容哈希。该 Linux 证据不替代 Android ARM64 真机性能。
+
+### 离线词典入口门槛
+
+`scripts/check-dictionary-source.ps1` 运行公共边界测试、私有 MDict / MDD 与经典 Kindle 精确查词、release benchmark 和 workspace 回归；选区按钮的事件生产由 Node 契约测试固定，`-VerifyLinuxGui` 复用正式 Linux Tauri / WebKitGTK 门验证词典列表、事件消费、纯文本命中、宽窄视口和日志隐私。当前 Linux WebKitGTK 不提供闭合 Shadow DOM 的可用选区对象，因此该门不冒充真实选区点击。`-VerifyAndroid -Device <serial>` 只向显式 PCT-AL10 推送匿名 fixture 与 arm64 release 原生测试二进制，记录查词 P95 和进程 RSS 后立即清理；它不安装应用，也不替代 Tauri / WebView 交互或应用 PSS。
 
 ## 性能策略
 

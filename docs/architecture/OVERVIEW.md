@@ -33,7 +33,7 @@ Atha 是本地优先的高保真个人阅读系统，Windows 是当前稳定基�
 | --- | --- | --- | --- |
 | Svelte 产品壳 `reader/app/src/` | 书架、工具栏、面板、dialog 与受信任用户操作 | `library.ts`、`messages.ts` 的受限 Tauri client | 不拥有书籍 DOM、分页热状态、SQL 或消息事实 |
 | 浏览器阅读内核 `reader/web/` | 内容校验、会话、Locator、分页、导航、偏好、状态、搜索、标注 / 消息投影与诊断 | 各 `create*` 返回的冻结小对象；`app.mjs` 只组合 | 不访问文件系统、SQLite 或任意宿主 API；书内文档没有 command interface |
-| Tauri 平台 adapter `reader/app/src-tauri/` | 桌面 / mobile 启动、窗口、应用目录、受控协议、dialog、SAF cache bridge、capability、固定字段本地日志与 IPC DTO 映射；阅读消息与全库消息维护分别由 `message_commands`、`message_maintenance` 集中，library / telemetry / protocol adapter 暂仍与 composition root 同文件 | 已注册的 Tauri command、`atha-book` / `atha-cover` 与 `platform_file::PickerInput` / `PickerOutput` | 不实现消息、书籍格式、Locator 或分页不变量；新增规则不再进入 `lib.rs` |
+| Tauri 平台 adapter `reader/app/src-tauri/` | 桌面 / mobile 启动、窗口、应用目录、受控协议、dialog、SAF cache bridge、capability、固定字段本地日志与 IPC DTO 映射；离线词典、阅读消息与全库消息维护分别由 `dictionary_commands`、`message_commands`、`message_maintenance` 集中，library / telemetry / protocol adapter 暂仍与 composition root 同文件 | 已注册的 Tauri command、`atha-book` / `atha-cover` 与 `platform_file::PickerInput` / `PickerOutput` | 不实现消息、书籍格式、Locator 或分页不变量；新增规则不再进入 `lib.rs` |
 | 阅读应用模块 `backend::reader` | EPUB / CBZ 导入、共享 ZIP 信任边界、受控书根、本地书架和遥测输入校验 | `import_epub`、`import_cbz`、`LocalLibrary`、`BookRoot`、`parse_reader_event` | 不依赖 Tauri、Svelte 或 WebView 对象 |
 | 消息事实模块 `backend::messages` | schema、迁移、事务、查询、修订、引用、快照资产恢复、Outbox、交换导出与全库备份 / 恢复 | concrete `MessageStore` 及领域 DTO / 稳定错误 | 唯一 SQLite / 快照资产所有者；调用方不得复制消息事实或拼接 SQL |
 | Windows 验证 host `reader/atha-reader-host` | 两个 host 共用的启动、窗口尺寸和诊断；保留直接 Wry/Tao 回归 adapter | `launch`、`diagnostics` 与旧 `run` | 不接受新产品能力；Tauri 达到等价覆盖后单独评估删除 |

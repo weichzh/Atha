@@ -37,15 +37,15 @@ present
 - Drivers / quality scenarios: `A-DICT-01` 要求不可信词典不能越界、全量展开或把正文写入日志；`A-DICT-02` 要求精确查词在 Linux 与 PCT-AL10 满足交互预算。
 - Modules / interfaces: 后端 `dictionary` 模块拥有本地词典目录、静态格式分派与净化；Tauri command 只传词典 ID、查询和安全结果；`annotations.mjs` 只发送当前选区；Svelte 面板只负责管理与文本投影。
 - Candidate and tradeoffs: MDict 直接使用一个固定依赖；Kindle 只借鉴 `libmobi 0.12` 的 INDX/TAGX 行为和 `boko 0.5.0` 的 HUFF/CDIC 算法，不引入 C FFI 或第二套运行时。打开 MDX 每次约 0.1 ms，先不做句柄缓存。
-- Evidence / review trigger: 公共合成边界测试、私有样本 opt-in benchmark、Linux GUI 选词链路、PCT-AL10 release 查词与 PSS、独立 Spec / Standards review。只有 Android 数据证明重复打开或索引解析超预算时才增加缓存或 sidecar。
+- Evidence / review trigger: 公共合成边界测试、私有样本 opt-in benchmark、Linux GUI 事件消费与面板、PCT-AL10 release 查词 / 真实选区 / PSS、独立 Spec / Standards review。只有 Android 数据证明重复打开或索引解析超预算时才增加缓存或 sidecar。
 
 ## Acceptance Criteria
 
-- [ ] 用户可导入、列出和移除 MDict；重复导入幂等，损坏、超限、未来 schema 与半写入不会破坏既有词典；
-- [ ] MDict v2 `encrypt=2` 私有样本可精确命中、miss、跟随有限深度链接，并对配套 MDD 做单资源范围读取；
-- [ ] 经典 Kindle 私有样本可精确命中词典头、中、尾部条目，只读取索引、HUFF/CDIC 表和覆盖目标定义的文本记录；
+- [x] 用户可导入、列出和移除 MDict；重复导入幂等，损坏、超限、未来 schema 与半写入不会破坏既有词典；
+- [x] MDict v2 `encrypt=2` 私有样本可精确命中、miss、跟随有限深度链接，并对配套 MDD 做单资源范围读取；
+- [x] 经典 Kindle 私有样本可精确命中词典头、中、尾部条目，只读取索引、HUFF/CDIC 表和覆盖目标定义的文本记录；
 - [ ] 阅读器选词后可查词，桌面与窄视口面板不遮挡关键控制、可滚动、可关闭，结果使用文本节点且不会发起网络请求；
-- [ ] 日志只记录格式、匿名词典 ID、阶段、耗时、结果数量与错误码，不记录查询、释义、路径或资源；
+- [x] 日志只记录格式、匿名词典 ID、阶段、耗时、结果数量与错误码，不记录查询、释义、路径或资源；
 - [ ] Linux release 热精确查词 P95 不高于 100 ms、冷查词 P95 不高于 500 ms、额外 RSS 不高于 64 MiB；PCT-AL10 使用相同预算并记录 PSS；
 - [ ] Rust、Node、Svelte、Linux GUI、PCT-AL10、AutoCorrect、文档 gate 与独立 review 通过。
 
@@ -59,7 +59,7 @@ present
 ## Checks
 
 - `cargo test -p atha-backend --test dictionary_lookup`；
-- `node --test reader/web/reader-state.test.mjs` 与相关 reader 单测；
+- `node --test reader/web/annotations.test.mjs`、`node --test reader/web/reader-state.test.mjs` 与相关 reader 单测；
 - `pnpm --dir reader/app check`、`pnpm --dir reader/app build`；
 - `pwsh -NoProfile -File scripts/check-dictionary-source.ps1 -PrivateFixtures fixtures/local -VerifyLinuxGui`；
 - `pwsh -NoProfile -File scripts/check-dictionary-source.ps1 -PrivateFixtures fixtures/local -VerifyAndroid -Device 5ENDU19917001679`；
@@ -75,12 +75,16 @@ present
 
 ## Result
 
-待实施。
+已实现独立 `LocalDictionaries` 数据域、固定 MDict / Kindle 格式分派、事务导入、精确查词、安全纯文本释义、Tauri 管理 command、选区“查词”与词典面板。MDict 使用固定 `mdict-rs 0.1.4`；经典 Kindle 只实现当前私有样本需要的 MOBI6、CP1252、HUFF/CDIC 与正排 INDX，不增加 provider、缓存、sidecar 或网络接口。
 
 ## Review
 
-待实施后独立评审。
+独立 Standards review 提出的导入竞态、连续查询陈旧结果、command 归属、预期拒绝日志、零 RSS 假通过和隐私扫描六项问题均已修复并复审关闭；Spec 复审没有新的 P1 / P2。切片最终关闭仍等待 PCT-AL10 应用内真实选区查词与 PSS；Linux WebKitGTK 闭合 Shadow DOM 的选区能力不再被误报为已通过。
 
 ## Evidence And Residual Risks
 
-当前只有引擎研究、Linux x86_64 P0 和 ADB 链路证据。MDict P0 三次精确查词 P95 为 1.653 ms、三次 MDD 流式读取 P95 为 1.452 ms、峰值 RSS 为 3308 KiB；尚不是产品链路、Linux GUI 或 PCT-AL10 结果。经典 Kindle 精确查词、旧 names / keys 屈折变化与所有 Android 预算仍未通过。
+公共与私有 Rust 测试、选区查词事件 Node 契约测试、workspace Rust、Node 阅读统计、Svelte check / build 和 Linux Tauri / WebKitGTK 正式门已通过。Linux release 单次精确查词冷 / 热 P95：经典 Kindle 9.889 / 5.202 ms、MDict 0.855 / 0.866 ms、MDD 0.460 / 0.454 ms；进程峰值 RSS 29,444 KiB。这里的冷查词是导入后首次产品 lookup，不宣称清除了内核页缓存。Linux GUI 验证词典列表、事件消费、MDX 命中、非空纯文本结果和宽窄视口面板边界；AppLog 扫描私有根路径、源文件名、词典 ID / 标题、查询、词头和释义均未命中。
+
+当前 Linux WebKitGTK 实测不提供 `ShadowRoot.getSelection()`，`document.getSelection()` 也不能取得 Atha 闭合 Shadow DOM 内的选区；WebKit 的跨 ShadowRoot Selection 历史问题及新 `getComposedRanges()` 能力见 [WebKit 163921](https://bugs.webkit.org/show_bug.cgi?id=163921) 与 [MDN](https://developer.mozilla.org/docs/Web/API/Selection/getComposedRanges)。本切片不为测试改造内容根或引入第二套选区实现：按钮事件生产由 Node 固定，真实平台选区交互留给 Android Blink 应用门。
+
+PCT-AL10 的 arm64-v8a release 原生测试二进制已在实体设备运行：单次精确查词冷 / 热 P95 为经典 Kindle 38.158 / 31.573 ms、MDict 2.644 / 2.498 ms、MDD 1.098 / 1.015 ms，峰值 RSS 17,092 KiB，均在查词与 64 MiB RSS 预算内。该证据不包含 Tauri 应用、系统 WebView 或应用 PSS；华为安装确认停在锁屏图案认证，用户提供的数字凭据不能代替图案。未修改设备安全设置，也未把 native RSS 记作应用 PSS。旧 names / keys 屈折变化、ORDT、自定义排序、KF8 词典和富 MDD 资源仍属于明确非目标。

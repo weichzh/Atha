@@ -16,6 +16,16 @@ commands.allow = [
 ]
 
 [[permission]]
+identifier = "allow-dictionary-commands"
+description = "允许主阅读窗口管理本地离线词典并查询当前选区。"
+commands.allow = [
+  "list_local_dictionaries",
+  "import_local_dictionary",
+  "lookup_local_dictionary",
+  "remove_local_dictionary",
+]
+
+[[permission]]
 identifier = "allow-message-commands"
 description = "允许主阅读窗口管理当前书籍的标注、笔记和引用。"
 commands.allow = [

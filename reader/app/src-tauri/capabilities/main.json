@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Atha 应用壳允许本地 EPUB 选择、书架管理、消息管理和受限阅读事件。",
+  "description": "Atha 应用壳允许本地书籍与词典选择、书架管理、消息管理和受限阅读事件。",
   "windows": ["main"],
   "permissions": [
     "allow-reader-event",
     "allow-library-commands",
+    "allow-dictionary-commands",
     "allow-message-commands"
   ]
 }

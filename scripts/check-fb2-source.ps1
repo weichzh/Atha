@@ -2,7 +2,8 @@
 
 [CmdletBinding()]
 param(
-    [switch]$VerifyLinuxGui
+    [switch]$VerifyLinuxGui,
+    [string]$DictionaryFixtureRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,7 +98,7 @@ function Wait-WebDriverScript {
         if ($value.status -eq 'fail') { throw "$Failure Error: $($value.error)" }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw $Failure
+    throw "$Failure State: $($value | ConvertTo-Json -Depth 4 -Compress)"
 }
 
 function New-TauriSession {
@@ -117,7 +118,12 @@ function New-TauriSession {
 }
 
 function Invoke-LinuxGuiGate {
-    param([string] $Application, [string] $DataRoot)
+    param(
+        [string] $Application,
+        [string] $DataRoot,
+        [string] $DictionaryQuery,
+        [string[]] $DictionaryPrivateTokens
+    )
 
     if (-not $IsLinux) { throw 'The FB2 Linux GUI gate requires Linux.' }
     foreach ($command in @('systemctl', 'systemd-run', 'WebKitWebDriver', 'identify')) {
@@ -200,6 +206,42 @@ return {
 '@ -Accepted { param($value) $value.status -eq 'pass' }
         if (-not $reader.href.StartsWith('tauri://localhost/index.html?', [StringComparison]::Ordinal) -or $reader.toc -ne 3) {
             throw 'The Linux reader did not load the expected FB2 manifest.'
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($DictionaryQuery)) {
+            $queryLiteral = ConvertTo-Json $DictionaryQuery -Compress
+            [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Offline dictionary list did not become ready.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  dictionaries: document.querySelectorAll('.dictionary-source option').length,
+  message: document.querySelector('.dictionary-status')?.textContent || ''
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.dictionaries -eq 1 })
+            [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @"
+globalThis.dispatchEvent(new CustomEvent('atha:dictionary-lookup', { detail: { query: $queryLiteral } }));
+return true;
+"@)
+            $dictionary = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Offline dictionary lookup did not finish.' -Script @'
+const panel = document.querySelector('.dictionary-panel');
+const rect = panel?.getBoundingClientRect();
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  dictionaries: document.querySelectorAll('.dictionary-source option').length,
+  title: document.querySelector('.dictionary-source option:checked')?.textContent || '',
+  headword: document.querySelector('.dictionary-result h3')?.textContent || '',
+  definition: document.querySelector('.dictionary-result p')?.textContent || '',
+  message: document.querySelector('.dictionary-status')?.textContent || '',
+  tools: document.documentElement.hasAttribute('data-reader-tools'),
+  open: document.querySelector('.reader-tool.dictionary').open,
+  contained: Boolean(rect && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight)
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.dictionaries -eq 1 -and $value.headword -and $value.definition -and $value.tools -and $value.open }
+            if (-not $dictionary.contained -or $dictionary.message) {
+                throw 'Offline dictionary panel overflowed or reported an error.'
+            }
+            [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.querySelector('.reader-tool.dictionary > summary').click(); return true;")
         }
 
         [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
@@ -658,10 +700,18 @@ return {
         $unitStarted = $false
 
         $privatePattern = 'Atha FB2 Gate|Ada Lin|第一章|正文|重点|注释正文|fb2-gate\.fb2|5cec82bcb5514780'
+        $privateTokens = @($DictionaryPrivateTokens) + @(
+            $DictionaryQuery,
+            $dictionary.title,
+            $dictionary.headword,
+            $dictionary.definition
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         $logs = Join-Path $DataRoot 'com.atha.reader/logs'
         foreach ($log in @(Get-ChildItem -LiteralPath $logs -File -ErrorAction SilentlyContinue)) {
-            if ((Get-Content -LiteralPath $log.FullName -Raw) -match $privatePattern) {
-                throw 'The Linux AppLog contains private FB2 fixture data.'
+            $logText = Get-Content -LiteralPath $log.FullName -Raw
+            if ($logText -match $privatePattern -or
+                ($privateTokens | Where-Object { $logText.Contains($_, [StringComparison]::Ordinal) })) {
+                throw 'The Linux AppLog contains private fixture data.'
             }
         }
 
@@ -726,6 +776,40 @@ try {
     finally {
         Remove-Item Env:ATHA_FB2_GATE_LIBRARY_ROOT -ErrorAction SilentlyContinue
     }
+    $dictionaryQuery = $null
+    $dictionaryPrivateTokens = @()
+    if (-not [string]::IsNullOrWhiteSpace($DictionaryFixtureRoot)) {
+        if (-not $VerifyLinuxGui) { throw 'DictionaryFixtureRoot requires VerifyLinuxGui.' }
+        $resolvedDictionaryFixtures = (Resolve-Path -LiteralPath $DictionaryFixtureRoot).Path
+        $dictionaryQueryPath = Join-Path $guiRoot 'dictionary-query.json'
+        $env:ATHA_PRIVATE_DICTIONARY_ROOT = $resolvedDictionaryFixtures
+        $env:ATHA_DICTIONARY_GATE_DATA_ROOT = Join-Path $guiRoot 'data/com.atha.reader'
+        $env:ATHA_DICTIONARY_GATE_QUERY_PATH = $dictionaryQueryPath
+        try {
+            Invoke-CheckedCargo @(
+                'test', '--locked', '-p', 'atha-backend',
+                'reader::dictionary::tests::seed_private_dictionary_gui_gate', '--lib', '--', '--ignored', '--exact'
+            ) 'Dictionary Linux GUI seed failed.'
+        }
+        finally {
+            Remove-Item Env:ATHA_PRIVATE_DICTIONARY_ROOT -ErrorAction SilentlyContinue
+            Remove-Item Env:ATHA_DICTIONARY_GATE_DATA_ROOT -ErrorAction SilentlyContinue
+            Remove-Item Env:ATHA_DICTIONARY_GATE_QUERY_PATH -ErrorAction SilentlyContinue
+        }
+        $dictionaryQuery = Get-Content -LiteralPath $dictionaryQueryPath -Raw | ConvertFrom-Json
+        if ($dictionaryQuery -isnot [string] -or $dictionaryQuery.Length -eq 0 -or $dictionaryQuery.Length -gt 128) {
+            throw 'Dictionary GUI seed produced an invalid private query.'
+        }
+        $dictionaryPrivateTokens += $resolvedDictionaryFixtures
+        $dictionaryPrivateTokens += Get-ChildItem -LiteralPath $resolvedDictionaryFixtures -Recurse -File |
+            Where-Object { $_.Extension -in @('.mdx', '.mdd') } |
+            ForEach-Object { $_.FullName; $_.Name }
+        $dictionaryRecord = Get-ChildItem -LiteralPath (Join-Path $guiRoot 'data/com.atha.reader/Dictionaries') -Directory |
+            Select-Object -First 1 |
+            ForEach-Object { Get-Content -LiteralPath (Join-Path $_.FullName 'dictionary.json') -Raw | ConvertFrom-Json }
+        if (-not $dictionaryRecord) { throw 'Dictionary GUI seed produced no dictionary record.' }
+        $dictionaryPrivateTokens += @($dictionaryRecord.id, $dictionaryRecord.title)
+    }
 
     $fixtureSha256 = (Get-FileHash -LiteralPath $fixturePath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($fixtureSha256 -ne $expectedFixtureSha256) {
@@ -758,7 +842,11 @@ try {
     }
     $sourceEvidence | Format-List
     if ($VerifyLinuxGui) {
-        Invoke-LinuxGuiGate -Application (Join-Path $repoRoot 'target/debug/atha-reader-app') -DataRoot (Join-Path $guiRoot 'data') | Format-List
+        Invoke-LinuxGuiGate `
+            -Application (Join-Path $repoRoot 'target/debug/atha-reader-app') `
+            -DataRoot (Join-Path $guiRoot 'data') `
+            -DictionaryQuery $dictionaryQuery `
+            -DictionaryPrivateTokens $dictionaryPrivateTokens | Format-List
     }
 }
 finally {

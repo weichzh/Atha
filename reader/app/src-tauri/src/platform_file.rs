@@ -22,6 +22,7 @@ pub(crate) fn cleanup(app: &AppHandle) -> io::Result<()> {
 
 pub(crate) struct PickerInput {
     path: PickerPath,
+    suffix: &'static str,
     title_hint: Option<String>,
 }
 
@@ -35,6 +36,7 @@ impl PickerInput {
         if let Ok(path) = selected.clone().into_path() {
             return Ok(Self {
                 path: PickerPath::Direct(path),
+                suffix,
                 title_hint: None,
             });
         }
@@ -51,6 +53,7 @@ impl PickerInput {
         target.sync_all()?;
         Ok(Self {
             path: PickerPath::Temporary(temporary),
+            suffix,
             title_hint: None,
         })
     }
@@ -74,12 +77,36 @@ impl PickerInput {
         Ok(input)
     }
 
+    pub(crate) fn open_dictionary(
+        app: &AppHandle,
+        selected: FilePath,
+        max_bytes: u64,
+    ) -> io::Result<Self> {
+        let file_name = selected
+            .clone()
+            .into_path()
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned)
+            })
+            .or_else(|| app.path().file_name(&selected.to_string()))
+            .ok_or_else(invalid_dictionary_name)?;
+        let suffix = dictionary_source_suffix(&file_name).ok_or_else(invalid_dictionary_name)?;
+        Self::open(app, selected, suffix, max_bytes)
+    }
+
     pub(crate) fn path(&self) -> &Path {
         self.path.as_ref()
     }
 
     pub(crate) fn title_hint(&self) -> Option<&str> {
         self.title_hint.as_deref()
+    }
+
+    pub(crate) const fn suffix(&self) -> &'static str {
+        self.suffix
     }
 }
 
@@ -211,6 +238,23 @@ fn invalid_book_name() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, "unsupported book file name")
 }
 
+fn dictionary_source_suffix(file_name: &str) -> Option<&'static str> {
+    if file_name.is_empty() || file_name.contains(['/', '\\', '\0']) {
+        return None;
+    }
+    let extension = Path::new(file_name).extension()?.to_str()?;
+    ["mdx", "mdd", "mobi"]
+        .into_iter()
+        .find(|candidate| extension.eq_ignore_ascii_case(candidate))
+}
+
+fn invalid_dictionary_name() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "unsupported dictionary file name",
+    )
+}
+
 fn copy_limited(
     source: &mut impl Read,
     target: &mut impl Write,
@@ -289,5 +333,20 @@ mod tests {
         let error =
             copy_limited(&mut oversized, &mut Vec::new(), 4).expect_err("reject input over limit");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn dictionary_source_names_accept_only_mdict_files() {
+        assert_eq!(dictionary_source_suffix("dictionary.MDX"), Some("mdx"));
+        assert_eq!(dictionary_source_suffix("resources.mdd"), Some("mdd"));
+        assert_eq!(dictionary_source_suffix("classic.mobi"), Some("mobi"));
+        for name in [
+            "dictionary",
+            "dictionary.azw3",
+            "dictionary.mdx.exe",
+            ".mdx",
+        ] {
+            assert_eq!(dictionary_source_suffix(name), None);
+        }
     }
 }

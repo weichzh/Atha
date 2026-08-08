@@ -67,6 +67,14 @@
 - 最短检查：`cargo test --locked -p atha-backend --test kindle_import`；私有普通 KF8 与词典样本、10 次 release benchmark 及 Linux 真 GUI 使用 `pwsh -NoProfile -File scripts/check-kindle-source.ps1 -VerifyLinuxGui`。
 - 必须重查：`boko` release line / 公共 CSS flow API、HUFF 全书预算、combo / MOBI7 / Windows-1252 / 压缩字体真实语料、源样式保真、Android ARM64 内存与许可证分发材料。
 
+## MDict / Kindle 离线词典
+
+- 版本事实：`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `mdict-rs 0.1.4` 并启用 `lzo`；经典 Kindle 词典只在 `reader::dictionary` 内实现 MOBI6、CP1252、HUFF/CDIC 与正排 INDX 的有界按需读取。
+- 官方入口：[`mdict-rs 0.1.4`](https://docs.rs/mdict-rs/0.1.4/mdict_rs/)、[固定源码](https://github.com/Initsnow/mdict-rs/tree/d4bc67d1128e9561a27b714f085ad970dfed6c09)、[`libmobi 0.12` 固定参考源码](https://github.com/bfabiszewski/libmobi/tree/85dcfe803fc2a21020ddcf15c3eb66b93d388add)。
+- 项目快速用法：`LocalDictionaries` 在应用数据根的 `Dictionaries` 目录事务导入 MDX / MDD 或经典 MOBI6 词典，按固定格式域去重，只做精确查询；MDX 链接深度有限，MDD 先解析范围与大小再流式读取，最终释义只投影净化后的纯文本。Tauri command 和日志不接收或记录源路径、查询、词头、释义或资源内容。
+- 最短检查：`cargo test --locked -p atha-backend --test dictionary_lookup`；私有样本、release benchmark 与 Linux 真 GUI 使用 `pwsh -NoProfile -File scripts/check-dictionary-source.ps1 -PrivateFixtures fixtures/local -VerifyLinuxGui`；PCT-AL10 原生专项增加 `-VerifyAndroid -Device <serial>`，该结果不是应用 PSS。
+- 必须重查：`mdict-rs` release line / AGPL-3.0-only 分发、MDict v1 / 加密变体、Kindle ORDT / keys / names 屈折索引、富 MDD 资源、ARM64 真机性能和任何模糊或跨词典查询需求。
+
 ## Rust 文件锁与 `fs2`
 
 - 版本事实：`rust-toolchain.toml` 固定 Rust 1.97.1，`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `fs2 = 0.4.3`。

@@ -13,6 +13,7 @@ use atha_backend::{
     messages::{EditionInput, MessageStore},
     reader::{
         MAX_SOURCE_BYTES, READER_PAGE,
+        dictionary::LocalDictionaries,
         epub::READER_MANIFEST,
         library::{LibraryBook, LibraryError, LocalLibrary},
         resources::{BookRoot, Resource, ResourceError},
@@ -34,6 +35,7 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
+mod dictionary_commands;
 mod message_commands;
 mod message_maintenance;
 mod platform_file;
@@ -65,6 +67,7 @@ struct ReaderRuntime {
     hold_after_verify: bool,
     current_book: Arc<RwLock<Option<BookRoot>>>,
     current_edition: RwLock<Option<EditionInput>>,
+    dictionaries: LocalDictionaries,
     library: LocalLibrary,
     messages: MessageStore,
 }
@@ -475,6 +478,10 @@ fn try_run() -> Result<(), Box<dyn Error>> {
             import_library_books,
             open_library_book,
             remove_library_book,
+            dictionary_commands::list_local_dictionaries,
+            dictionary_commands::import_local_dictionary,
+            dictionary_commands::lookup_local_dictionary,
+            dictionary_commands::remove_local_dictionary,
             message_maintenance::backup_message_store,
             message_maintenance::restore_message_store,
             message_commands::message_roots,
@@ -520,6 +527,13 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                         error.code()
                     );
                 })?;
+                let dictionaries = LocalDictionaries::open(&data_root).inspect_err(|error| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=state outcome=failed code={}",
+                        error.code()
+                    );
+                })?;
                 let messages = MessageStore::open(&data_root).inspect_err(|error| {
                     log::error!(
                         target: "atha::startup",
@@ -534,6 +548,7 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                     hold_after_verify,
                     current_book,
                     current_edition: RwLock::new(current_edition),
+                    dictionaries,
                     library,
                     messages,
                 });
