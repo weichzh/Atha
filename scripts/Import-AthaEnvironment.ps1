@@ -17,6 +17,3 @@ foreach ($name in @('ATHA_CARGO', 'ATHA_CMAKE', 'ATHA_CTEST', 'ATHA_NODE', 'ATHA
         throw "Environment variable $name must name an existing executable in env/local.ps1."
     }
 }
-
-$env:RUSTUP_DIST_SERVER = 'https://rsproxy.cn'
-$env:RUSTUP_UPDATE_ROOT = 'https://rsproxy.cn/rustup'
