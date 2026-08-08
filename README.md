@@ -47,7 +47,7 @@ Windows 开发机复制 `env/example.ps1` 为 `env/local.ps1`，并填写本机�
 
 Tauri 阅读器的完整本地检查入口是 `pwsh -NoProfile -File .\scripts\check-tauri-reader.ps1`。旧 `atha-reader-host` 暂时保留为 Wry/Tao 性能与安全基线，不是新的产品界面入口。
 
-Android 本地门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36 与 min SDK 26。启动 API 35、x86_64、16 KiB 页面的 `Atha_API_35_16K` AVD 后运行：
+Android 本地门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36 与 min SDK 26。启动 API 36、x86_64、16 KiB 页面的 `Atha_API_36_16K` AVD 后运行：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\check-android-reader.ps1 -BookPath 'C:\path\to\book.epub' -CleanAppData

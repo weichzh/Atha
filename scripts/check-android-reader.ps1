@@ -12,9 +12,9 @@ param(
     [switch]$VerifyMarkdownText,
     [ValidateRange(0, 10)]
     [int]$TextBenchmarkSample = 0,
-    [string]$ExpectedAvd = 'Atha_API_35_16K',
+    [string]$ExpectedAvd = 'Atha_API_36_16K',
     [ValidateSet(35, 36)]
-    [int]$ExpectedApi = 35
+    [int]$ExpectedApi = 36
 )
 
 $ErrorActionPreference = 'Stop'
@@ -434,6 +434,24 @@ function Get-AppLogDurationMs {
         $matches[$matches.Count - 1].Groups[1].Value,
         [Globalization.CultureInfo]::InvariantCulture
     )
+}
+
+function Get-ReaderReadyTelemetry {
+    param([Parameter(Mandatory)][string]$ProcessId)
+
+    $logs = (Invoke-Adb logcat '-d' "--pid=$ProcessId" '-v' 'brief' | Out-String)
+    $matches = [regex]::Matches(
+        $logs,
+        '(?m)^[^\r\n]*atha::reader[^\r\n]*\bevent=reader_ready\b[^\r\n]*\bpages=(\d+)\b[^\r\n]*\bcuts=(\d+)\b[^\r\n]*\r?$'
+    )
+    if ($matches.Count -eq 0) {
+        throw 'Android reader-ready telemetry is missing or malformed.'
+    }
+    $match = $matches[$matches.Count - 1]
+    [pscustomobject]@{
+        Pages = [int]$match.Groups[1].Value
+        Cuts = [int]$match.Groups[2].Value
+    }
 }
 
 function Get-TextImportTelemetry {
@@ -931,6 +949,7 @@ if ($null -ne $resolvedBook) {
     $firstStableMs = Wait-AppLog -ProcessId $firstLaunch.ProcessId -Pattern 'atha::reader.*event=reader_metric stage=first_stable'
     $firstStableDurationMs = Get-AppLogDurationMs -ProcessId $firstLaunch.ProcessId -Pattern 'atha::reader.*event=reader_metric stage=first_stable' -Required:$VerifyMarkdownText
     $readyMs = Wait-AppLog -ProcessId $firstLaunch.ProcessId -Pattern 'atha::reader.*event=reader_ready'
+    $readyTelemetry = Get-ReaderReadyTelemetry -ProcessId $firstLaunch.ProcessId
     Assert-AppHealthy -ExpectedProcessId $firstLaunch.ProcessId
 
     $afterDirectoryJump = $null
@@ -1183,6 +1202,7 @@ if ($null -ne $resolvedBook) {
     $secondStableMs = Wait-AppLog -ProcessId $secondLaunch.ProcessId -Pattern 'atha::reader.*event=reader_metric stage=first_stable'
     $secondStableDurationMs = Get-AppLogDurationMs -ProcessId $secondLaunch.ProcessId -Pattern 'atha::reader.*event=reader_metric stage=first_stable' -Required:$VerifyMarkdownText
     $secondReadyMs = Wait-AppLog -ProcessId $secondLaunch.ProcessId -Pattern 'atha::reader.*event=reader_ready'
+    $secondReadyTelemetry = Get-ReaderReadyTelemetry -ProcessId $secondLaunch.ProcessId
     if ($VerifyEpub2NcxFixture) {
         $null = Wait-ReaderViewportState -Section 2 -Page $afterDirectoryJump.Page
         $restartLocatorResult = 'passed'
@@ -1380,6 +1400,8 @@ if ($null -ne $resolvedBook) {
             first_stable_duration_ms = $firstStableDurationMs
             reader_ready = 'passed'
             reader_ready_wait_ms = [long]$readyMs
+            reader_ready_pages = $readyTelemetry.Pages
+            reader_ready_cuts_diagnostic = $readyTelemetry.Cuts
             directory_second_item_jump = $directoryJumpResult
             directory_first_middle_last = $directoryTargetResult
             directory_wait_ms = $directoryTargetWaitMs
@@ -1402,6 +1424,8 @@ if ($null -ne $resolvedBook) {
             restart_first_stable_wait_ms = [long]$secondStableMs
             restart_first_stable_duration_ms = $secondStableDurationMs
             restart_reader_ready_wait_ms = [long]$secondReadyMs
+            restart_reader_ready_pages = $secondReadyTelemetry.Pages
+            restart_reader_ready_cuts_diagnostic = $secondReadyTelemetry.Cuts
             restart_restore_wait_ms = [long]$restartRestoreMs
             picker_cache_clean = $true
         }

@@ -973,6 +973,7 @@ textarea:focus-visible,
   background: var(--page-bg);
   color: var(--page-text);
   overflow: visible;
+  overflow-wrap: anywhere;
 }
 
 .book img.atha-resource-pending {
@@ -1051,6 +1052,11 @@ textarea:focus-visible,
 }
 
 .book img:not(.math-inline):not(.math-display) {
+  box-sizing: border-box;
+  max-width: 100% !important;
+  max-height: calc(var(--content-height) - 8px) !important;
+  object-fit: contain;
+  break-inside: avoid;
   filter: none;
 }
 
@@ -1064,11 +1070,27 @@ textarea:focus-visible,
   break-inside: avoid;
 }
 
-.book figure,
-.book table,
-.book tr,
-.book blockquote {
+.book tr {
   break-inside: avoid;
+}
+
+.book figure {
+  break-inside: avoid;
+  box-sizing: border-box;
+  max-width: 100% !important;
+  max-height: calc(var(--content-height) - 8px) !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+}
+
+.book .atha-structured-overflow {
+  box-sizing: border-box !important;
+  display: block !important;
+  max-width: 100% !important;
+  max-height: calc(var(--content-height) - 8px) !important;
+  overflow: auto !important;
+  break-inside: avoid;
+  overscroll-behavior: contain;
 }
 
 .book.atha-markdown-section pre,
@@ -1077,7 +1099,7 @@ textarea:focus-visible,
 }
 
 .book.atha-markdown-section pre {
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 .book h1,

@@ -73,7 +73,7 @@
 - 上一页和下一页可跨 section；manifest TOC 与已有书签继续共用隐藏的原生 `select` 数据源，壳层把它投影为全屏目录按钮，书签紧随对应章节并通过 Locator 跳转；用户点击章节或书签后等待导航稳定并返回沉浸阅读；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
 - 应用默认拥有系统/浅色/纸张/深色主题、亮度、字号、字体、紧凑/标准/舒展密度和点击/滑动翻页；亮度只过滤阅读页，四边距不属于用户偏好，旧记录中的边距字段在恢复时忽略；本书覆盖只拥有书源样式和安全用户 CSS，两层分别校验和持久化；书签与进度按 host 提供的书籍状态键分区，位置高频写与低频状态分离；
 - 公式按源尺寸随字号缩放，行间公式使用独立 `1.5` 倍率并在逻辑内容列中居中；
-- 阅读页内部设备像素尺寸跟随 WebView 视口与 DPR，使用 CSS 多栏并以 `1 / devicePixelRatio` 隔离系统 DPI；移动阅读壳层默认沉浸，48 CSS px 工具栏只覆盖固定 144 设备像素的页眉页脚安全区且不参与分页；文字、公式和原子内容均有布局后裁切检查；
+- 阅读页内部设备像素尺寸跟随 WebView 视口与 DPR，使用 CSS 多栏并以 `1 / devicePixelRatio` 隔离系统 DPI；移动阅读壳层默认沉浸，48 CSS px 工具栏只覆盖固定 144 设备像素的页眉页脚安全区且不参与分页；普通图片按页内可用面积等比限幅，表格 / 代码在页内滚动，几何 cut 进入诊断与 verify-sample / benchmark 门而不阻断普通阅读；
 - Windows 窗口与壳层控件使用系统逻辑像素，默认内部尺寸为 430 × 820，最小为 360 × 640，可自由调整和最大化；窗口变化经 Navigation 队列恢复 Locator；
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
 - Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，书架只对受限 DTO 做本地标题 / 作者搜索、严格进度二态、稳定排序与显式批量选择；Vite 直接拼接十八份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
@@ -82,7 +82,7 @@
 ### Android EPUB 纵切
 
 - Tauri mobile crate output、mobile entry point 与 target-gated Windows host 已接通；Windows 仍使用 `%LOCALAPPDATA%\Atha`，Android 使用 Tauri `app_local_data_dir`，两端共用 LocalLibrary、MessageStore 与 reader kernel；
-- Android 工程固定 min SDK 26、compile / target SDK 36；本机 gate 固定 Node 24.1.0、JDK 21、NDK 28.2.13676358，并运行 `Atha_API_35_16K`（API 35、x86_64、16,384-byte page）AVD；APK 通过 16 KiB ZIP alignment 与全部 x86_64 ELF `LOAD 0x4000` 检查；
+- Android 工程固定 min SDK 26、compile / target SDK 36；本机 gate 固定 Node 24.1.0、JDK 21、NDK 28.2.13676358，默认运行 `Atha_API_36_16K`（API 36、x86_64、16,384-byte page）AVD，并保留参数复核历史 API 35 证据；APK 通过 16 KiB ZIP alignment 与全部 x86_64 ELF `LOAD 0x4000` 检查；
 - `platform_file::PickerInput` / `PickerOutput` 对普通路径零复制，对 SAF content URI 使用锁文件已有的官方 `tauri-plugin-fs` 流式复制到应用 `cache/Picker`；导入仍限制单次 32 本和单本 512 MiB，恢复仍限制 8 GiB，消息导出和备份仍由 backend 限制为 512 MiB 与 8 GiB；每个 cache 目录独占创建，Drop 与启动均清理；
 - 系统 picker 链路已在模拟器手工验证 EPUB 导入 / 打开 / 重启恢复、消息导出及全库备份 / 恢复，完成后 Picker cache 为空；manifest 不请求宽泛存储权限，设置 `allowBackup=false` 并以 API 31+ `dataExtractionRules` 排除 cloud backup 与 device transfer；
 - Android app storage 实测 hard link 返回 `PermissionDenied`。非 Android 备份继续用 hard link 提供 no-replace 发布；Android 只在 Tauri adapter 新建的独占 Picker cache 目录内使用相邻 rename。`rename` 本身不保证 no-replace，当前正确性依赖该独占目录前置条件；只有后续出现其他 Android backend 调用方或实测竞态，才研究 `renameat2` 等替代；

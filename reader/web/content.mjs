@@ -209,6 +209,13 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     element.setAttribute("aria-label", caption ? `查看表格：${caption.slice(0, 160)}` : table ? "查看表格" : "查看代码");
   }
 
+  function wrapStructuredOverflow(element) {
+    const overflow = element.ownerDocument.createElement("div");
+    overflow.className = "atha-structured-overflow";
+    element.replaceWith(overflow);
+    overflow.append(element);
+  }
+
   function isControlledCbzSection(documentNode, url = bookUrl) {
     const page = documentNode?.body?.firstElementChild;
     return (
@@ -307,6 +314,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     }
     for (const element of documentNode.querySelectorAll("table, pre")) {
       setStructuredInteraction(element);
+      wrapStructuredOverflow(element);
     }
   }
 
@@ -535,6 +543,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     const [table, code, linkedCode] = structuredMarkup.querySelectorAll("table, pre");
     for (const element of structuredMarkup.querySelectorAll("table, pre")) {
       setStructuredInteraction(element);
+      wrapStructuredOverflow(element);
     }
     ensure(
       table.getAttribute("tabindex") === "0" &&
@@ -543,7 +552,10 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         code.getAttribute("tabindex") === "0" &&
         code.getAttribute("aria-label") === "查看代码" &&
         !code.hasAttribute("aria-disabled") &&
-        !linkedCode.hasAttribute("tabindex"),
+        !linkedCode.hasAttribute("tabindex") &&
+        [table, code, linkedCode].every(
+          (element) => element.parentElement?.className === "atha-structured-overflow",
+        ),
       "active-content",
     );
     const cbzPage = document.createElement("main");

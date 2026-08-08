@@ -316,7 +316,6 @@ export function createPagination({
       await waitForStableLayout("初次分页");
       await relayoutAtOffset(0, "初次分页");
     }
-    assert(countCutRects(true) === 0, "layout-cut", "初次分页");
   }
 
   function verifyFormulaLayout() {
@@ -411,7 +410,6 @@ export function createPagination({
       "locator-offset",
       "字号与布局重排",
     );
-    assert(countCutRects(true) === 0, "layout-cut", "字号与布局重排");
   }
 
   async function resizeViewport(anchor) {
@@ -421,7 +419,6 @@ export function createPagination({
       await waitForStableLayout("窗口尺寸重排");
       await relayoutAtOffset(anchor, "窗口尺寸重排");
     }
-    assert(countCutRects(true) === 0, "layout-cut", "窗口尺寸重排");
   }
 
   async function verifySizes() {
@@ -441,7 +438,6 @@ export function createPagination({
     if ((await onPageShown(true)) > 0) {
       await waitForStableLayout(operationStage);
       await relayoutAtOffset(restoreOffset, operationStage);
-      assert(countCutRects(true) === 0, "layout-cut", operationStage);
     }
   }
 

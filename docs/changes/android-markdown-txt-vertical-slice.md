@@ -86,9 +86,11 @@ Markdown 与 TXT 已作为两个具体 adapter 接入现有 LocalLibrary、Reade
 
 Android edge-to-edge 同步修复为一套 native inset 事实：书架和工具面板避开系统栏，阅读态隐藏状态栏但左上章节标题仍在 cutout 下方；工具打开时标题隐藏、正文从工具栏下方开始。README 中的长 PowerShell 代码块已通过 Readest 同型换行规则和可跨页布局消除重叠，不增加 per-device 参数。
 
+分页 `countCutRects()` 已从普通首开、字号、窗口重排和延迟资源错误链移出，只保留为 diagnostics / verify-sample / benchmark 指标；Android 正式入口把 ready 的 cut 数写入本地证据但不阻断阅读。普通图片在页内等比限幅，表格与代码进入受控页内滚动容器，长词按浏览器换行。Linux API 36 AVD 的 360×640 CSS viewport 探针证明原失败来自下一栏 `H2` 的 Range 矩形比安全的元素盒向上多出 4.75 CSS px，而非内容盒实际越界；这类浏览器测量差不再阻断整本阅读，安全、Locator 与持续不稳定布局错误保持不变。
+
 ## Review
 
-- Blocking: 独立 Standards 复审未发现 P0 / P1；独立 Spec 复审指出无 TOC 前言标签与最终目标证据两项 P1。前言已按首个 TOC section 前的语义修正并加入自检；目标证据不复用修复前记录，改由 Linux 最终候选重跑后关闭。
+- Blocking: 最终独立 Spec / Standards 复审均为 P0 0、P1 0。复审要求把 ready cut 明确保存为非阻断诊断、给真实超大媒体 / 结构内容提供局部恢复、固定研究中的 Atha 修复前基线，并保留作者图片尺寸；均已在当前候选关闭。
 - Non-blocking: 修复前的 API 36 x86_64 16 KiB AVD 候选曾出现一次 Android 16 x86_64 / WebView 平台 renderer 进程崩溃；相同 APK 与链路立即重试后完成历史十样本。当前只记录为模拟器基础设施残余，不将其归因产品，也不当作最终候选或 ARM64 证据。
 - Out-of-scope: 其他非 PDF 格式、CSS 编辑 / 模块 / 社区、阅读统计与离线词典继续按路线图后续分片。
 
@@ -97,6 +99,7 @@ Android edge-to-edge 同步修复为一套 native inset 事实：书架和工具
 - 本地 importer 证据：Markdown / TXT、EPUB / CBZ 回归、身份域、编码 / 分块、章节规则、raw HTML / 链接 / 图片、大小 / 数量 / 源变化边界均由 `cargo test --locked -p atha-backend` 覆盖；正向 TXT ignored gate 只在本机显式 opt-in，得到 7,362,028 bytes、GBK、12 sections、1,134 TOC，不输出书名、路径、正文或哈希。
 - Android Markdown 历史目标证据：复审修复前的 API 36 x86_64 16 KiB AVD 候选曾从干净数据对仓库 `README.md` 完成系统 picker、6 项目录首 / 中 / 末、完整搜索、翻页、强停恢复、Picker cache、PSS、健康和双日志隐私门；CDP 几何探针得到跨元素文字重叠 0。搜索遥测与 fixture 清理改变后不把这份 artifacts 当最终候选证据，Linux 重跑前仅用于说明链路曾打通。
 - Android TXT 历史相对基线：同一修复前候选在 API 36 x86_64 16 KiB AVD 的 10 个成功样本中，冷导入 P50 / P95 为 3,142 / 3,216 ms，首稳 277.6 / 309.2 ms，全文搜索 741.5 / 896 ms，强停恢复 13,051.5 / 17,957 ms；首屏 app PSS 为 171,424.5 / 171,950 KiB，末屏为 171,577.5 / 184,101 KiB。renderer 进程不能唯一归因，因此显式留空；最终候选在 Linux 重跑前不继承这组数值。
+- Linux Markdown 分页误报修复候选在 `Atha_API_36_16K`（API 36、x86_64、16 KiB、720×1280、320 dpi、WebView 133.0.6943.137）从干净数据通过系统 picker、导入、首稳 / ready、6 项目录首 / 中 / 末、全 section 搜索、翻页、强停恢复、Picker cache、应用健康及 `logcat` + `Atha.log*` 隐私门；书架 / 目录绑定 / 末页 / 恢复 app PSS 分别为 124,804 / 148,970 / 149,639 / 146,235 KiB，renderer 仍因无法唯一归因而留空。该次运行早于媒体限幅、结构滚动容器与 ready cut 证据字段，不能替代当前最终候选重跑。2 GiB AVD 首次运行曾由系统 low-memory killer 回收后台 app 与 WebView renderer；4 GiB 功能门随后稳定通过，该事件保留为 ARM64 真机低内存复核项，不归因于 `layout-cut` 修复，也不把 4 GiB 模拟器称为低端性能证据。
 - `pulldown-cmark` 需要有界的完整 UTF-8 输入，因此 Markdown 保留 16 MiB 上限；TXT detector 对无 BOM 遗留编码只能 best effort，无 BOM UTF-16 不在承诺内。
 - Tauri `2.11.5` 内置 PathPlugin 会经 Android `ContentResolver` 读 content URI 文件名；provider 未返回可用的允许列表后缀时会被拒绝，不自建 Kotlin / plugin，不用内容猜测换取更高召回率。
 - 真实 TXT 的 7.36 MiB 规模保留三遍顺序读取；backend detect P50 / P95 为 2,017 / 2,082 ms，是当前冷导入主项，但 3.2 秒内稳定完成且不建立正文副本或 offset 索引。只有 ARM64 / 低端真机证明该路径不可接受时才升级。

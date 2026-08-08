@@ -26,7 +26,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/web/message-store.mjs` | 正式根 Message 到标注/笔记投影的适配，以及旧 localStorage 记录迁移 |
 | `reader/web/conversations.mjs` | 对话浮层、本条/本章/本书记录、时间/书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
 | `reader/web/navigation.mjs` | 章节标题、目录选择、全书近似进度和进度拖动 |
-| `reader/web/pagination.mjs` | 视口设备像素换算、分页、尺寸变化、进度和公式尺寸 |
+| `reader/web/pagination.mjs` | 视口设备像素换算、分页、尺寸变化、进度和公式尺寸；几何 cut 只供诊断与 verify-sample / benchmark 门使用，不作为普通阅读的全局失败条件 |
 | `reader/assets/bookmark-24-regular.svg` | 右上角书签图标，来自 Microsoft Fluent System Icons；固定来源与 MIT 文本见根 `THIRD_PARTY_NOTICES.md` |
 | `reader/app/src-tauri/src/lib.rs` | Tauri 窗口、受控书籍协议、导航限制和遥测 command |
 | `reader/atha-reader-host/src/windows/launch.rs` | 两个 host 共用的 Windows 窗口尺寸、CLI 与阅读 URL |
@@ -68,6 +68,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 ## 尺寸与缩放
 
 - `.reader` 填满当前 WebView；`pagination.mjs` 把内部宽高设置为视口 CSS 像素乘 `devicePixelRatio`，再用 `1 / devicePixelRatio` 设置 `--page-scale`。
+- 普通图片在单页可用宽高内等比缩放；表格与代码由 reader 注入的 `.atha-structured-overflow` 容器限制在单页并允许双向滚动，避免书源样式把内容静默裁掉。
 - 例如 4K 屏幕采用 200% 系统缩放且视口为 390 × 840 CSS 像素时，内部书页为 780 × 1680 设备像素；同一窗口放大后会按新的设备像素宽高重新分页。
 - `.top-toolbar` 与 `.toolbar` 固定为 48 CSS px；`.tool-panel` 和普通表单控件同样不跟随 `--page-scale`，而是遵循系统 CSS 像素和系统缩放。
 - 上下正文安全区最小为 144 设备像素；在 DPR 2 下正文为 y=72–768 CSS px，工具栏为 y=0–48 与 y=792–840，因此控制层只进入页眉页脚。
