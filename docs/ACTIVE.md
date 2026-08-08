@@ -2,6 +2,6 @@
 
 本文件只登记当前可执行工作的路由，不保存完成摘要、验收流水或候选需求。
 
-- `change`：Android CBZ 图片序列纵切 → `docs/changes/android-cbz-vertical-slice.md`
-- `now`：把受控 ZIP 图片序列归一到现有 ReaderManifest，并在 Android 正式入口验证 picker、逐页阅读、坏页继续、恢复和内存证据。
-- `Context Bundle`：`docs/product/OVERVIEW.md`、`docs/roadmap/ROADMAP.md`、`docs/codebase/MAP.md`；只有问题触及系统边界时再读 `docs/architecture/OVERVIEW.md`。
+- `fast`：Markdown / TXT 格式研究 → `docs/research/markdown-txt-format-assessment.md`
+- `now`：用仓库现有 Markdown 文档与 `fixtures/local` 的用户 TXT 样本锁定成熟解析库、章节边界、安全转换和 Android 验收方案，不新造正向书籍样本。
+- `Context Bundle`：`docs/product/OVERVIEW.md`、`docs/roadmap/ROADMAP.md`、`docs/codebase/MAP.md`、`docs/agents/references.md`；只有问题触及系统边界时再读 `docs/architecture/OVERVIEW.md`。
