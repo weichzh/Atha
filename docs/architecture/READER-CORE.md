@@ -28,9 +28,9 @@ Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持�
 
 默认样式提供稳定、克制的阅读体验。Preferences 把系统/浅色/纸张/深色主题、亮度、字号、字体、三档行距和点击/滑动翻页作为应用默认值，把书源样式开关、三档左右边距、段首缩进、段距和有序 CSS 模块作为本书覆盖。旧的单段 `userStylesheet` 恢复时迁移为 `legacy-user-css` 模块；旧应用记录中的四个自由边距字段继续忽略。上下正文安全区固定为 144 设备像素，Android 只在顶部 / 底部安全区更大时扩大对应排版边距；左右边距默认 32，可按书选择 24 / 32 / 48 设备像素。亮度只过滤阅读页，不改变壳层控件。
 
-书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、可视排版 CSS 与已启用用户模块排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。每书至多 32 个用户模块，新建或导入模块单个至多 32 KiB、启用组合至多 64 KiB；旧单段 CSS 仍按原 32768 UTF-16 字符上限完整迁移，超过组合上限时只保留为停用恢复副本。名称、分组、ID、顺序、启停和 schema 1 JSON 导入均严格校验。任一启用组合仍由同一 `CSSStyleSheet.replaceSync()` / `content.setStyles()` 边界拒绝 `@import`、子资源、转义和 Shadow 边界选择器；验证、重排或持久化失败统一恢复上次状态、渲染与 Locator。CodeMirror 只在模块页可见时按需增强隐藏 textarea 的编辑体验，不能修改应用壳或绕过 CSSOM。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
+书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、可视排版 CSS 与已启用用户模块排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。每书至多 32 个用户模块，新建或导入模块单个至多 32 KiB、启用组合至多 64 KiB；旧单段 CSS 仍按原 32768 UTF-16 字符上限完整迁移，超过组合上限时只保留为停用恢复副本。名称、分组、ID、顺序、启停和 schema 1 JSON 导入均严格校验。`style-module-package.mjs` 独立拥有模块包解析、序列化和结构限制，并注入 `content.validateStylesheet()` 复用同一 CSSOM 边界；Preferences 只拥有 UI、每书状态、按模块隔离的预览 timer 和组合。手动保存只取消同模块的待处理预览，删除、导入和重置清理失效任务。任一启用组合仍拒绝 `@import`、子资源、转义和 Shadow 边界选择器；验证、重排或持久化失败统一恢复上次状态、渲染与 Locator。CodeMirror 只在模块页可见时按需增强隐藏 textarea 的编辑体验，不能修改应用壳或绕过 CSSOM。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
 
-应用内样式社区、评分、JavaScript 扩展和发布流程不属于阅读内核。远程共享只消费通过后续 GitHub PR 审核形成的有界 CSS 模块 JSON，不在阅读内核加入账号、审核或任意插件执行能力。
+应用内样式社区、评分、JavaScript 扩展和发布流程不属于阅读内核。完整 GitHub 社区已暂缓；未来任何数据源只能把文本交给同一个 schema 1 模块包 codec，不在阅读内核加入账号、网络、审核或任意插件执行能力。
 
 ## 本地书架与应用内导入
 

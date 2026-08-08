@@ -314,6 +314,7 @@ try {
         'reader/web/reader-state.mjs',
         'reader/web/bookmarks.mjs',
         'reader/web/search.mjs',
+        'reader/web/style-module-package.mjs',
         'reader/web/annotation-store.mjs',
         'reader/web/annotations.mjs',
         'reader/web/conversations.mjs',

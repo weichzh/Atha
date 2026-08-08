@@ -39,6 +39,7 @@ pub(super) fn app_response(request: Request<Vec<u8>>) -> Response<Cow<'static, [
                 [
                     include_bytes!("../../../web/content.mjs").as_slice(),
                     include_bytes!("../../../web/locator.mjs").as_slice(),
+                    include_bytes!("../../../web/style-module-package.mjs").as_slice(),
                     include_bytes!("../../../web/preferences.mjs").as_slice(),
                     include_bytes!("../../../web/pagination.mjs").as_slice(),
                     include_bytes!("../../../web/session.mjs").as_slice(),

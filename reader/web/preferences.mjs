@@ -21,10 +21,9 @@ const BOOK_DEFAULTS = Object.freeze({
   paragraphSpacing: "book",
   styleModules: Object.freeze([]),
 });
-const STYLE_MODULE_KEYS = Object.freeze(["css", "enabled", "group", "id", "name"]);
-const MAX_STYLE_MODULES = 32;
-const MAX_STYLE_MODULE_BYTES = 32768;
-const MAX_COMBINED_STYLE_BYTES = 65536;
+const MAX_STYLE_MODULES = STYLE_MODULE_LIMITS.modules;
+const MAX_STYLE_MODULE_BYTES = STYLE_MODULE_LIMITS.moduleBytes;
+const MAX_COMBINED_STYLE_BYTES = STYLE_MODULE_LIMITS.combinedBytes;
 const UTF8 = new TextEncoder();
 const LINE_HEIGHT_RATIOS = Object.freeze({ compact: 1.45, standard: 1.6, comfortable: 1.8 });
 const PAGE_MARGINS = Object.freeze({ narrow: 24, standard: 32, wide: 48 });
@@ -33,6 +32,8 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   let application = { ...APPLICATION_DEFAULTS };
   let book = { ...BOOK_DEFAULTS };
   let selectedModuleId = null;
+  const modulePackages = createStyleModulePackageCodec((css) => content.validateStylesheet(css));
+  const { validateModules } = modulePackages;
   const darkScheme = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
   const systemBars = globalThis.AthaSystemBars;
 
@@ -102,62 +103,6 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         typeof normalized.swipeToPaginate === "boolean",
     );
     return normalized;
-  }
-
-  function validateModule(value, allowLegacyOversize = false) {
-    ensure(exact(value, STYLE_MODULE_KEYS));
-    const cssBytes = typeof value.css === "string" ? UTF8.encode(value.css).length : Infinity;
-    ensure(
-      typeof value.id === "string" &&
-        /^[a-z0-9][a-z0-9-]{0,63}$/.test(value.id) &&
-        typeof value.name === "string" &&
-        value.name === value.name.trim() &&
-        value.name.length > 0 &&
-        value.name.length <= 64 &&
-        !/[\u0000-\u001f\u007f]/u.test(value.name) &&
-        typeof value.group === "string" &&
-        value.group === value.group.trim() &&
-        value.group.length <= 32 &&
-        !/[\u0000-\u001f\u007f]/u.test(value.group) &&
-        typeof value.enabled === "boolean" &&
-        typeof value.css === "string" &&
-        (cssBytes <= MAX_STYLE_MODULE_BYTES ||
-          (allowLegacyOversize &&
-            value.id === "legacy-user-css" &&
-            value.css.length <= MAX_STYLE_MODULE_BYTES)),
-    );
-    return Object.freeze({ ...value });
-  }
-
-  function validateModules(values, allowLegacyOversize = false) {
-    ensure(Array.isArray(values) && values.length <= MAX_STYLE_MODULES);
-    const ids = new Set();
-    let total = 0;
-    const modules = [];
-    for (const [index, value] of values.entries()) {
-      let module;
-      try {
-        module = validateModule(value, allowLegacyOversize);
-        const cssBytes = UTF8.encode(module.css).length;
-        if (cssBytes <= MAX_COMBINED_STYLE_BYTES) content.validateStylesheet(module.css);
-        else ensure(allowLegacyOversize && module.id === "legacy-user-css" && !module.enabled);
-        ensure(!ids.has(module.id));
-        const nextTotal = total + (module.enabled ? cssBytes : 0);
-        ensure(nextTotal <= MAX_COMBINED_STYLE_BYTES);
-        ids.add(module.id);
-        total = nextTotal;
-      } catch (error) {
-        const detail = error instanceof Error ? error : new Error("invalid-user-style");
-        detail.moduleIndex = index;
-        if (module?.id) detail.moduleId = module.id;
-        if (typeof value?.name === "string" && value.name.trim()) {
-          detail.moduleName = value.name.trim().slice(0, 64);
-        }
-        throw detail;
-      }
-      modules.push(module);
-    }
-    return Object.freeze(modules);
   }
 
   function validateBook(value) {
@@ -518,6 +463,15 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       );
     });
 
+    const previewTimers = new Map();
+    const cancelPreview = (moduleId) => {
+      clearTimeout(previewTimers.get(moduleId));
+      previewTimers.delete(moduleId);
+    };
+    const cancelPreviews = () => {
+      for (const timer of previewTimers.values()) clearTimeout(timer);
+      previewTimers.clear();
+    };
     const currentDraft = () => ({
       id: selectedModuleId,
       name: controls.moduleName.value.trim(),
@@ -535,16 +489,24 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       );
       return run(() => onUpdate("book", { styleModules }), message);
     };
-    let previewTimer = null;
+    const saveNow = (message) => {
+      const draft = currentDraft();
+      cancelPreview(draft.id);
+      return saveCurrent(message, draft);
+    };
     controls.userStylesheet.addEventListener("input", () => {
-      clearTimeout(previewTimer);
       const draft = { id: selectedModuleId, css: controls.userStylesheet.value };
-      previewTimer = setTimeout(() => void saveCurrent("", draft), 180);
+      cancelPreview(draft.id);
+      const timer = setTimeout(() => {
+        previewTimers.delete(draft.id);
+        void saveCurrent("", draft);
+      }, 180);
+      previewTimers.set(draft.id, timer);
     });
-    controls.moduleSave.addEventListener("click", () => void saveCurrent("模块已保存"));
-    controls.moduleName.addEventListener("change", () => void saveCurrent("模块已保存"));
-    controls.moduleGroupName.addEventListener("change", () => void saveCurrent("模块已保存"));
-    controls.moduleEnabled.addEventListener("change", () => void saveCurrent("模块已更新"));
+    controls.moduleSave.addEventListener("click", () => void saveNow("模块已保存"));
+    controls.moduleName.addEventListener("change", () => void saveNow("模块已保存"));
+    controls.moduleGroupName.addEventListener("change", () => void saveNow("模块已保存"));
+    controls.moduleEnabled.addEventListener("change", () => void saveNow("模块已更新"));
     controls.moduleList.addEventListener("change", () => {
       selectedModuleId = controls.moduleList.value || null;
       syncModuleControls();
@@ -578,6 +540,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.moduleDelete.addEventListener("click", () => {
       const selected = selectedModule();
       if (!selected || !globalThis.confirm(`删除“${selected.name}”？`)) return;
+      cancelPreview(selected.id);
       selectedModuleId = null;
       void run(
         () => onUpdate("book", { styleModules: book.styleModules.filter((module) => module.id !== selected.id) }),
@@ -608,18 +571,13 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.modulesEnable.addEventListener("click", () => setVisible(true));
     controls.modulesDisable.addEventListener("click", () => setVisible(false));
     controls.moduleTransferOpen.addEventListener("click", () => {
-      controls.moduleTransfer.value = JSON.stringify(
-        { schema: 1, modules: book.styleModules },
-        null,
-        2,
-      );
+      controls.moduleTransfer.value = modulePackages.stringify(book.styleModules);
       controls.moduleTransferDialog.showModal();
     });
     controls.moduleImport.addEventListener("click", () => {
       void run(() => {
-        const value = JSON.parse(controls.moduleTransfer.value);
-        ensure(exact(value, ["modules", "schema"]) && value.schema === 1);
-        const modules = validateModules(value.modules);
+        const modules = modulePackages.parse(controls.moduleTransfer.value);
+        cancelPreviews();
         selectedModuleId = modules[0]?.id ?? null;
         return onUpdate("book", { styleModules: modules });
       }, "模块已导入");
@@ -638,6 +596,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       void run(() => onReset("application"), "已恢复应用默认");
     });
     controls.resetBook.addEventListener("click", () => {
+      cancelPreviews();
       selectedModuleId = null;
       void run(() => onReset("book"), "已恢复本书样式");
     });

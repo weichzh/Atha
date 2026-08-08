@@ -12,6 +12,7 @@ const resolvedRuntimeId = `\0${runtimeId}`;
 const runtimeSources = [
   "content.mjs",
   "locator.mjs",
+  "style-module-package.mjs",
   "preferences.mjs",
   "pagination.mjs",
   "session.mjs",
