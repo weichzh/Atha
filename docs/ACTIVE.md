@@ -2,6 +2,6 @@
 
 本文件只登记当前可执行工作的路由，不保存完成摘要、验收流水或候选需求。
 
-- `audit`：本地阅读统计的计时语义、数据边界与现有生命周期入口。
-- `now`：核对前台阅读、失焦、暂停、休眠、跨日、异常退出和重开的现有信号，确定不虚增时长且不影响翻页 / 排版的最小记录与日 / 周 / 书籍投影，再建立 accepted change。
+- `change`：`docs/changes/local-reading-statistics.md`。
+- `now`：在现有阅读状态边界实现有界本地计时，接入失焦、隐藏、闲置、休眠与跨日语义，并把今日 / 近 7 天 / 本书 / 连续阅读投影到进度面板后完成 Linux 真壳验证。
 - `Context Bundle`：`docs/product/OVERVIEW.md`、`docs/roadmap/ROADMAP.md`、`docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`、`docs/codebase/READER-MOBILE-UI.md`、`docs/agents/references.md`。

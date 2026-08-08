@@ -18,6 +18,14 @@
 - 最短检查：运行 `scripts/check-tauri-reader.ps1` 后检查平台 AppLog 同时包含启动、打开和 reader 固定阶段事件，并确认不含 fixture 路径或内容。
 - 必须重查：插件 release line、Android 日志目录 / logcat 行为、target filter、轮转语义和敏感字段。
 
+## Web 页面生命周期与单调计时
+
+- 版本事实：阅读页由当前 Tauri WebView 承载；浏览器行为以目标 WebKitGTK / WebView2 实测为准。
+- 官方入口：[Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API)、[`visibilitychange`](https://developer.mozilla.org/en-US/docs/Web/API/Document/visibilitychange_event)、[`pagehide`](https://developer.mozilla.org/en-US/docs/Web/API/Window/pagehide_event)、[High precision timing](https://developer.mozilla.org/en-US/docs/Web/API/Performance_API/High_precision_timing)、[Tauri window focus](https://v2.tauri.app/reference/javascript/api/namespacewindow/#onfocuschanged)。
+- 项目快速用法：阅读时长只在稳定排版、文档可见、窗口聚焦且未闲置时使用 `performance.now()` 的短区间累计；`visibilitychange` 到 hidden 和 `blur` 立即暂停并提交，`pagehide` 只作补充。超过心跳上限的区间视为休眠或调度中断并丢弃，不能用 `Date.now()` 补时；墙钟只用于把已接受时长分配到本地日期。
+- 最短检查：Node 状态机测试覆盖隐藏、失焦、闲置、长间隔与跨午夜，再由 Linux Tauri / WebKitGTK 真壳验证原生窗口失焦、恢复和重开。
+- 必须重查：WebKitGTK / WebView2 的 visibility 与 focus 行为、移动端 activity suspend / resume、系统时区或墙钟跳变、多窗口并发以及任何跨设备同步语义。
+
 ## Tauri Android、SAF 与平台文件
 
 - 版本事实：`reader/app/package.json`、`reader/app/src-tauri/Cargo.toml`、`Cargo.lock`、`reader/app/src-tauri/tauri.android.conf.json` 与 `reader/app/src-tauri/gen/android/`；本项目 Android 门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36、min SDK 26，当前默认目标为 API 36 x86_64 16 KiB AVD。
