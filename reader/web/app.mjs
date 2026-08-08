@@ -126,6 +126,7 @@ const pagination = createPagination({
 let annotations;
 let conversations;
 let bookmarks;
+let readingStatistics;
 async function renderCachedSource() {
   await content.renderCached();
   await pagination.renderFromStart();
@@ -143,6 +144,7 @@ const session = createReadingSession({
   render: renderCachedSource,
   onState(state) {
     document.documentElement.dataset.sessionState = state;
+    readingStatistics?.setStable(state === "layout-stable");
   },
   assert,
   fail,
@@ -173,6 +175,7 @@ const navigation = createNavigation({
   onPreferences: (scope) => readerState?.savePreferences(scope),
   onStable() {
     readerState?.scheduleProgress();
+    readingStatistics?.activity();
     bookmarks?.syncCurrent();
     syncDirectorySelection();
   },
@@ -388,26 +391,7 @@ document.querySelectorAll("[data-close-reader-tools]").forEach((button) => {
   button.addEventListener("click", closeReaderTools);
 });
 bindSettingsNavigation();
-const diagnostics = createDiagnostics({
-  params,
-  content,
-  pagination,
-  session,
-  locator,
-  navigation,
-  preferences,
-  interaction,
-  contentActions,
-  structuredActions,
-  readerState,
-  bookmarks,
-  search,
-  annotations,
-  reader,
-  renderCachedSource,
-  emit,
-  assert,
-});
+let diagnostics;
 
 pagination.initialize();
 
@@ -415,6 +399,40 @@ async function start() {
   await content.initialize();
   const firstStableStarted = performance.now();
   await session.open();
+  readingStatistics = createReadingStatistics({
+    storage: durableStorage(),
+    keyPrefix,
+    contentVersion: session.describe().contentVersion,
+    controls: {
+      today: document.querySelector("#statistics-today"),
+      week: document.querySelector("#statistics-week"),
+      book: document.querySelector("#statistics-book"),
+      streak: document.querySelector("#statistics-streak"),
+    },
+  });
+  readingStatistics.setStable(true);
+  readingStatistics.bind();
+  diagnostics = createDiagnostics({
+    params,
+    content,
+    pagination,
+    session,
+    locator,
+    navigation,
+    preferences,
+    interaction,
+    contentActions,
+    structuredActions,
+    readerState,
+    readingStatistics,
+    bookmarks,
+    search,
+    annotations,
+    reader,
+    renderCachedSource,
+    emit,
+    assert,
+  });
   if (messageMode) {
     conversations = createConversations({
       store: annotationStore,

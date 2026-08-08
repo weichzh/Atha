@@ -68,9 +68,11 @@ schema 1 Locator 是同一书籍内容版本内的内容坐标：起点由 secti
 
 ### 阅读状态与书签
 
-Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。所有导入入口的规范路径位于以内容版本命名的缓存目录，因此移动源文件不改变状态键；EPUB / CBZ 内容版本保持原始文件 SHA-256，FB2 / FBZ 共享解包 XML 的格式域身份，Kindle 三后缀共享一个格式域，Markdown / TXT 以不同固定格式域隔离相同字节。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可访问时当前会话仍可继续。
+Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。所有导入入口的规范路径位于以内容版本命名的缓存目录，因此移动源文件不改变状态键；EPUB / CBZ 内容版本保持原始文件 SHA-256，FB2 / FBZ 共享解包 XML 的格式域身份，Kindle 三后缀共享一个格式域，Markdown / TXT 以不同固定格式域隔离相同字节。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区应用偏好、本书偏好与书签、进度三个 schema 1 记录；另有一个应用级 schema 1 阅读统计记录，以内容版本区分书籍。输入有严格结构、长度与书签、日期、书籍数量上限；损坏状态被安全丢弃或在定位时回落，存储不可访问时当前会话仍可继续。
 
 稳定导航只在同一任务末尾合并写入一次小型进度记录，并在页面隐藏或离开时同步 flush。恢复顺序是有效偏好优先，再恢复同内容版本且可定位的进度；错版本进度不应用，错版本书签保留并显示为不可跳转。书签只提供当前位置创建、去重、跳转与删除；纯图片或只有不可见字符的页面通过当前 Locator 识别已有书签，不依赖可见文字偏移；书籍身份迁移、跨版本重锚、同步和历史记录不属于本层。
+
+阅读统计只在排版稳定、沉浸阅读、页面可见、窗口聚焦且最近 5 分钟有键盘、指针、滚轮或导航活动时累计。打开工具层、隐藏、失焦和闲置都会暂停；15 秒心跳使用单调时钟，超过 30 秒的间隔按休眠或调度中断丢弃，墙钟只负责把已接受的短区间按本地午夜拆分。原子 localStorage 记录最多保留最近 400 天和 2048 本书，总长仍受 512 KiB 上限约束；写入失败只降级为当前会话内存统计，不阻断阅读，也不写入产品日志。进度面板从同一记录投影今日、近 7 天、本书累计和每天至少 1 分钟的连续阅读；多窗口并发、账户同步、趋势图和导出不属于当前边界。
 
 ### 书内搜索
 
@@ -146,7 +148,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### FB2 / FBZ 入口门槛
 
-`scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、三条目录、跨 section 跳转、全书搜索、可视排版、真实 CodeMirror 键入与 lint gutter、无效 CSS 和持久化失败回退、模块导入筛选、32 模块组合 benchmark、进度与样式重启恢复，以及宽屏 / 600 px 窄屏非空截图和 AppLog 隐私。系统 picker 后缀只由 Rust 单元测试覆盖；该 GUI 门不伪装为原生对话框交互，也不替代 Android ARM 真机性能证据。
+`scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、三条目录、跨 section 跳转、全书搜索、可视排版、真实 CodeMirror 键入与 lint gutter、无效 CSS 和持久化失败回退、模块导入筛选、32 模块组合 benchmark、阅读统计前台 / 最小化 / 重启与心跳 benchmark、进度和样式重启恢复，以及宽屏 / 600 px 窄屏非空截图和 AppLog 隐私。系统 picker 后缀只由 Rust 单元测试覆盖；该 GUI 门不伪装为原生对话框交互，也不替代 Android ARM 真机性能证据。
 
 ### Kindle 入口门槛
 

@@ -2,6 +2,24 @@
   <h2 id="progress-heading">阅读进度</h2>
   <output id="progress-chapter" class="progress-chapter" aria-live="polite">加载中</output>
   <output id="progress-book" class="progress-book">全书约 0%</output>
+  <dl class="reading-statistics" aria-label="阅读统计">
+    <div>
+      <dt>今日</dt>
+      <dd id="statistics-today">0 分钟</dd>
+    </div>
+    <div>
+      <dt>近 7 天</dt>
+      <dd id="statistics-week">0 分钟</dd>
+    </div>
+    <div>
+      <dt>本书</dt>
+      <dd id="statistics-book">0 分钟</dd>
+    </div>
+    <div>
+      <dt>连续阅读</dt>
+      <dd id="statistics-streak">0 天</dd>
+    </div>
+  </dl>
   <div class="progress-scrubber">
     <button id="previous" class="icon-button" type="button" aria-label="上一页">
       <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>

@@ -293,6 +293,7 @@ $themeProbe = @'
   if (!result.contentActions.selectionCopied || !result.contentActions.sameSection || !result.contentActions.tailFragmentRecovered || !result.contentActions.missingTargetRecovered || !result.contentActions.unknownSectionRecovered || !result.contentActions.auxiliaryActivation || !result.contentActions.externalBlocked || !result.contentActions.footnoteDialog || !result.contentActions.dialogInputProtected || !result.contentActions.focusRestored) throw new Error('content-actions');
   if (expectedSections > 1 && !result.contentActions.crossSection) throw new Error('content-link-section');
   if (!result.readerState.available || !result.readerState.durable || !result.readerState.restored || result.readerState.pending || !result.readerState.coalesced || !result.readerState.lifecycleFlushed || !result.readerState.versionRejected) throw new Error('reader-state');
+  if (!result.readingStatistics.available || !result.readingStatistics.durable || result.readingStatistics.lastFallback || result.readingStatistics.todayMs < 0 || result.readingStatistics.weekMs < 0 || result.readingStatistics.bookMs < 0 || result.readingStatistics.streakDays < 0) throw new Error('reading-statistics');
   if (!result.bookmarks.created || !result.bookmarks.toggled || !result.bookmarks.jumped || !result.bookmarks.deleted || result.bookmarks.items.length !== 0) throw new Error('bookmarks');
   if (!result.search.replaced || !result.search.canceled || !result.search.errorIsolated || !result.search.activeContentRejected) throw new Error('search');
   if (!result.annotations.sourceAnchor || !result.annotations.noteUpdated || !result.annotations.rangeUpdated || !result.annotations.writeFailureRejected || !result.annotations.softDeleted || !result.annotations.reanchored || !result.annotations.ambiguousRejected || !result.annotations.missingRejected || !result.annotations.missingSectionRejected || !result.annotations.corruptHashRejected || !result.annotations.freshSelectionClearsAnnotation) throw new Error('annotations');
@@ -330,6 +331,7 @@ try {
     foreach ($module in $readerModules) {
         Invoke-Checked 'node' @('--check', $module)
     }
+    Invoke-Checked 'node' @('--test', 'reader/web/reader-state.test.mjs')
     $bundleCheck = Join-Path $repoRoot '.tmp/atha-reader-bundle-check.mjs'
     [IO.File]::WriteAllText(
         $bundleCheck,

@@ -28,6 +28,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/web/message-store.mjs` | 正式根 Message 到标注/笔记投影的适配，以及旧 localStorage 记录迁移 |
 | `reader/web/conversations.mjs` | 对话浮层、本条/本章/本书记录、时间/书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
 | `reader/web/navigation.mjs` | 章节标题、目录选择、全书近似进度和进度拖动 |
+| `reader/web/reader-state.mjs` | 应用 / 本书偏好、书签、进度与有界本地阅读统计；统计只消费页面生命周期和既有导航稳定状态 |
 | `reader/web/pagination.mjs` | 视口设备像素换算、分页、尺寸变化、进度和公式尺寸；几何 cut 只供诊断与 verify-sample / benchmark 门使用，不作为普通阅读的全局失败条件 |
 | `reader/assets/bookmark-24-regular.svg` | 右上角书签图标，来自 Microsoft Fluent System Icons；固定来源与 MIT 文本见根 `THIRD_PARTY_NOTICES.md` |
 | `reader/app/src-tauri/src/lib.rs` | Tauri 窗口、受控书籍协议、导航限制和遥测 command |
@@ -92,7 +93,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 阅读对话 | `.message-conversation`、`.message-view-controls`、`.message-segmented`、`.message-source-context`、`.message-feed-source`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
 | 消息输入 | `.message-editor`、`.message-editor-toolbar-primary`、`.message-editor-toolbar-secondary`、`.message-editor-mode-switch`、`.message-editor-markdown` |
 | 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
-| 进度 | `.progress-panel`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
+| 进度与统计 | `.progress-panel`、`.reading-statistics`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
 | 更多菜单 | `.preferences-panel`、`.settings-list`、`.settings-view`、`.module-settings`、`.css-editor-*` |
 | 主题 | `reader/atha-reader.css` 顶部语义令牌及 `data-theme="light|paper|dark"` 覆盖 |
 
@@ -107,6 +108,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - `#density` 调整行距；`#page-margin` 按书选择 24 / 32 / 48 设备像素左右边距，`#paragraph-indent` 与 `#paragraph-spacing` 生成受控可视 CSS。上下 144 设备像素安全区固定不变，旧应用记录中的四个自由边距字段仍会被忽略。
 - CSS 模块页直接复用每书偏好：最多 32 个模块，支持搜索、分组、排序、批量启停和 schema 1 JSON 导入导出；独立 codec 统一解析、序列化、字段、大小、重复 ID 与 CSSOM 校验，不包含网络或 provider registry。新模块单个 32 KiB、启用组合 64 KiB，超限旧 CSS 只作为停用恢复副本保留。CodeMirror 在页面首次可见时按需加载，100 ms 显示 lint，180 ms 后通过同一 textarea 触发预览；输入草稿绑定原模块，任一验证、重排或持久化失败均恢复上次有效状态、渲染与 Locator。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
+- 进度面板在进度摘要和拖动条之间投影今日、近 7 天、本书与连续阅读。桌面为四列，600 px 及以下为 2 × 2；指标使用分隔线而非嵌套卡片。统计在工具层打开时暂停，关闭后由同一阅读状态接口恢复。
 - 原生正文选区在 `pointerup` 或键盘选择完成后的下一帧投影 `#selection-actions`；复制只触发浏览器 copy，标注和笔记在 Tauri 产品中写入同一根 Message。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存会追加 SourceAnchor/SourceSnapshot，笔记动作追加修订，删除写入墓碑。全屏 `#annotations` 支持章节和全文筛选；点击项目打开对话浮层，独立编辑和删除按钮不触发跳转。
 - `#message-conversation` 默认从底部占约半屏，拖动顶部把手可连续调高，轻点把手或标题栏全屏按钮可进入全屏；标题栏不提供收起、导出或共享。顶部可切换本条、本章和本书：本条显示当前 Conversation 的原文短预览、回复与更多；本章和本书是只读聚合记录，可按创建时间或根 Message Locator 的书内位置排列，点击“打开”后进入对应本条对话再写入。被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记页仍可导出本书消息。
 - `.message-editor` 随内容增高，到达紧凑上限后出现全屏按钮。全屏编辑顶部使用两层工具栏：第一层切换可视/Markdown 输入并保留撤销、重做与返回紧凑输入，第二层显示标题、粗体、斜体、列表、引用和安全链接。Markdown 转换按需加载，切回可视模式或发送前必须通过同一正文 schema；不支持的格式保留原文并显示错误，不静默丢失。
@@ -121,6 +123,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - 当前使用 Lucide Svelte 图标、原生表单控件和按需加载的 Tiptap 消息编辑器；尚未引入通用 UI 组件库或动效框架。
 - 当前只实现 Atha 默认聊天主题；微信、Telegram、QQ 风格模拟、主题选择和用户自定义界面等待消息主循环验收后单独设计。
 - 对话字号和密度已使用较紧凑默认值；类似 Telegram 的界面字号、密度与主题设置等待当前布局稳定后再增加，不预留持久化字段。
+- 阅读统计暂不提供趋势图、目标、导出、账户或同步，也不为这些方向预留页面和 schema。
 
 ## 截图证据
 
@@ -133,5 +136,9 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - `reader-shell-05-settings-menu.png`。
 - `message-scope-mark-430x820.png`；
 - `message-scope-chapter-430x820.png`。
+- `atha-reading-statistics-linux.png`；
+- `atha-reading-statistics-linux-mobile.png`。
 
 微信读书源图与实现的同图对照位于 `artifacts/local/audits/reader-shell-usability/`。根目录 `design-qa.md` 记录尺寸归一、交互证据和修复历史；最终没有 P0、P1 或 P2 问题。
+
+Readest 原图、逐图观察和本次 Linux 统计实现副本位于忽略目录 `fixtures/local/readest/`；统计设计复核使用 WR-05 与 RD-03，不以文字报告替代原图。

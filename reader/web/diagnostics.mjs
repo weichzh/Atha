@@ -12,6 +12,7 @@ export function createDiagnostics({
   contentActions,
   structuredActions,
   readerState,
+  readingStatistics,
   bookmarks,
   search,
   annotations,
@@ -729,6 +730,7 @@ export function createDiagnostics({
       },
       resources: content.resourceSnapshot(),
       readerState: { ...readerState.snapshot(), ...stateEvidence },
+      readingStatistics: readingStatistics.snapshot(),
       bookmarks: { items: bookmarks.snapshot(), ...bookmarkEvidence },
       search: { ...search.snapshot(), ...searchEvidence },
       annotations: { ...annotations.snapshot(), ...annotationEvidence },
@@ -935,7 +937,7 @@ export function createDiagnostics({
     emit(`ready|${state.pages}|${inline}|${display}|${cuts}`);
   }
 
-  if (params.has("verify") || params.has("search-probe")) {
+  if (params.has("verify") || params.has("search-probe") || params.has("statistics-probe")) {
     Object.defineProperty(globalThis, "__athaReaderDiagnostics", {
       value: Object.freeze({
         armCopyProbe: contentActions.armCopyProbe,
@@ -943,6 +945,7 @@ export function createDiagnostics({
         focusMedia,
         mediaPoint,
         previewState,
+        readingStatisticsBenchmark: readingStatistics.benchmark,
         selectionProbe: contentActions.selectionProbe,
         snapshot: visualSnapshot,
         wheelProbe,

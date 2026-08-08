@@ -154,6 +154,8 @@ function Invoke-LinuxGuiGate {
     $unitStarted = $false
     $screenshot = Join-Path $guiRoot 'reader.png'
     $mobileScreenshot = Join-Path $guiRoot 'reader-mobile.png'
+    $statisticsScreenshot = Join-Path $guiRoot 'reading-statistics.png'
+    $statisticsMobileScreenshot = Join-Path $guiRoot 'reading-statistics-mobile.png'
     try {
         Invoke-Checked 'systemd-run' @(
             '--user', '--collect', "--unit=$unit", "--working-directory=$repoRoot",
@@ -198,6 +200,43 @@ return {
 '@ -Accepted { param($value) $value.status -eq 'pass' }
         if (-not $reader.href.StartsWith('tauri://localhost/index.html?', [StringComparison]::Ordinal) -or $reader.toc -ne 3) {
             throw 'The Linux reader did not load the expected FB2 manifest.'
+        }
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const url = new URL(location.href);
+url.searchParams.set('statistics-probe', '1');
+location.href = url.href;
+return true;
+'@)
+        $statisticsBaseline = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Reading statistics did not become ready.' -Script @'
+const diagnostics = globalThis.__athaReaderDiagnostics;
+const snapshot = diagnostics?.snapshot().readingStatistics;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  ready: Boolean(diagnostics && snapshot),
+  bookMs: snapshot?.bookMs || 0,
+  benchmark: diagnostics?.readingStatisticsBenchmark() || null
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.ready -and $value.benchmark.samples -eq 20 }
+        if ($statisticsBaseline.benchmark.p95Ms -ge 5) {
+            throw "Reading statistics heartbeat benchmark exceeded 5 ms: $($statisticsBaseline.benchmark.p95Ms)."
+        }
+        Start-Sleep -Seconds 16
+        $statisticsActive = Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script 'return globalThis.__athaReaderDiagnostics.snapshot().readingStatistics;'
+        $activeDelta = [double]$statisticsActive.bookMs - [double]$statisticsBaseline.bookMs
+        if ($activeDelta -lt 10000 -or $activeDelta -gt 25000) {
+            throw "Foreground reading statistics advanced by an unexpected $activeDelta ms."
+        }
+
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/minimize" -Body @{})
+        Start-Sleep -Seconds 16
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/maximize" -Body @{})
+        Start-Sleep -Milliseconds 500
+        $statisticsFocused = Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script 'return globalThis.__athaReaderDiagnostics.snapshot().readingStatistics;'
+        $backgroundDelta = [double]$statisticsFocused.bookMs - [double]$statisticsActive.bookMs
+        if ($backgroundDelta -lt 0 -or $backgroundDelta -gt 3000) {
+            throw "Background reading statistics advanced by $backgroundDelta ms."
         }
 
         [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
@@ -506,6 +545,84 @@ return {
 };
 '@ -Accepted { param($value) $value.status -eq 'pass' -and $value.p95 -gt 0 -and $value.p95 -lt 50 -and $value.bytes -le 65536 }
 
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 1200; height = 900 })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const progress = document.querySelector('#progress-range');
+globalThis.__athaStatisticsScreenshotProgress = progress.value;
+progress.value = '0';
+progress.dispatchEvent(new Event('change', { bubbles: true }));
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Reading statistics desktop context did not settle.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  desktop: matchMedia('(min-width: 601px)').matches,
+  first: document.querySelector('#progress-position').textContent.includes('1/4')
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.desktop -and $value.first })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.documentElement.setAttribute('data-reader-tools', '');
+document.querySelector('.reader-tool.progress > summary').click();
+return true;
+'@)
+        $statisticsLayout = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Reading statistics panel did not become visible.' -Script @'
+const panel = document.querySelector('.progress-panel');
+const metrics = document.querySelector('.reading-statistics');
+const rect = panel.getBoundingClientRect();
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  open: document.querySelector('.reader-tool.progress').open,
+  columns: getComputedStyle(metrics).gridTemplateColumns.split(' ').length,
+  overflow: metrics.scrollWidth - metrics.clientWidth,
+  inside: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
+  values: [...metrics.querySelectorAll('dd')].map((value) => value.textContent)
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.open -and $value.columns -eq 4 -and $value.overflow -le 1 -and $value.inside -and $value.values.Count -eq 4 }
+        Start-Sleep -Milliseconds 200
+        $statisticsShot = Invoke-WebDriver -BaseUrl $baseUrl -Method Get -Path "/session/$session/screenshot" -Body $null
+        [IO.File]::WriteAllBytes($statisticsScreenshot, [Convert]::FromBase64String($statisticsShot.value))
+        $statisticsColors = [int](& identify -format '%k' $statisticsScreenshot)
+        if ($LASTEXITCODE -ne 0 -or $statisticsColors -lt 10) { throw 'The reading statistics screenshot is blank.' }
+
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 600; height = 760 })
+        $statisticsMobileLayout = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Reading statistics did not enter the mobile layout.' -Script @'
+const panel = document.querySelector('.progress-panel');
+const metrics = document.querySelector('.reading-statistics');
+const rect = panel.getBoundingClientRect();
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  mobile: matchMedia('(max-width: 600px)').matches,
+  columns: getComputedStyle(metrics).gridTemplateColumns.split(' ').length,
+  overflow: Math.max(panel.scrollWidth - panel.clientWidth, metrics.scrollWidth - metrics.clientWidth),
+  inside: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.mobile -and $value.columns -eq 2 -and $value.overflow -le 1 -and $value.inside }
+        $statisticsMobileShot = Invoke-WebDriver -BaseUrl $baseUrl -Method Get -Path "/session/$session/screenshot" -Body $null
+        [IO.File]::WriteAllBytes($statisticsMobileScreenshot, [Convert]::FromBase64String($statisticsMobileShot.value))
+        $statisticsMobileColors = [int](& identify -format '%k' $statisticsMobileScreenshot)
+        if ($LASTEXITCODE -ne 0 -or $statisticsMobileColors -lt 10) { throw 'The mobile reading statistics screenshot is blank.' }
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const progress = document.querySelector('#progress-range');
+progress.value = globalThis.__athaStatisticsScreenshotProgress;
+progress.dispatchEvent(new Event('change', { bubbles: true }));
+delete globalThis.__athaStatisticsScreenshotProgress;
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'FB2 reading position did not return after statistics screenshots.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  restored: document.querySelector('#progress-position').textContent.includes('4/4')
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.restored })
+        $artifactRoot = Join-Path $repoRoot 'artifacts/local/screenshots'
+        [void](New-Item -ItemType Directory -Path $artifactRoot -Force)
+        Copy-Item -LiteralPath $statisticsScreenshot -Destination (Join-Path $artifactRoot 'atha-reading-statistics-linux.png') -Force
+        Copy-Item -LiteralPath $statisticsMobileScreenshot -Destination (Join-Path $artifactRoot 'atha-reading-statistics-linux-mobile.png') -Force
+
         [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Delete -Path "/session/$session" -Body $null)
         $session = $null
         $created = New-TauriSession -BaseUrl $baseUrl -Application $Application
@@ -524,9 +641,16 @@ return {
   modules: (() => {
     const record = Object.keys(localStorage).find((key) => key.startsWith('atha.reader.book.'));
     return record ? JSON.parse(localStorage.getItem(record)).preferences.styleModules.length : 0;
+  })(),
+  statistics: (() => {
+    const value = JSON.parse(localStorage.getItem('atha.reader.statistics.v1') || 'null');
+    return {
+      stored: value?.books?.some((book) => book.durationMs > 0) || false,
+      visible: document.querySelector('#statistics-book').textContent !== '0 \u5206\u949f'
+    };
   })()
 };
-'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.restored -and $value.modules -eq 2 }
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.restored -and $value.modules -eq 2 -and $value.statistics.stored -and $value.statistics.visible }
 
         [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Delete -Path "/session/$session" -Body $null)
         $session = $null
@@ -550,9 +674,14 @@ return {
             css_editor = 'CodeMirror 6'
             css_modules_p95_ms = $styleBenchmark.p95
             css_modules_bytes = $styleBenchmark.bytes
+            reading_statistics_p95_ms = $statisticsBaseline.benchmark.p95Ms
+            foreground_duration_ms = $activeDelta
+            background_duration_ms = $backgroundDelta
             restored_section = 4
             screenshot_colors = $colors
             mobile_screenshot_colors = $mobileColors
+            statistics_screenshot_colors = $statisticsColors
+            statistics_mobile_screenshot_colors = $statisticsMobileColors
             evidence = 'Linux Tauri GUI'
         }
     }
@@ -577,6 +706,7 @@ try {
     foreach ($path in @($fixturePath, $importsRoot, $guiRoot)) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
+    Invoke-Checked 'node' @('--test', 'reader/web/reader-state.test.mjs') 'Reading statistics tests failed.'
     Invoke-CheckedCargo @('fmt', '--all', '--check') 'FB2 formatting check failed.'
     Invoke-CheckedCargo @('clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings') 'FB2 clippy check failed.'
     Invoke-CheckedCargo @('test', '--workspace', '--all-targets', '--locked') 'FB2 Rust tests failed.'

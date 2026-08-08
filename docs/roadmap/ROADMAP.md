@@ -4,15 +4,15 @@
 
 核心阅读、EPUB3、本地书架和消息式阅读已经形成完整主循环，Android EPUB 纵切也已通过真实模拟器链路。当前目标是在保留现有 ReaderManifest、BookRoot、Locator 与内容安全边界的前提下，逐步补齐 Readest 已成熟支持的非 PDF 格式，再交付 CSS、统计和离线词典能力。
 
-## Now：阅读统计
+## Now：离线词典
 
-Readest 对应的非 PDF 输入格式与本地 CSS 编辑 / 模块管理已经归一到同一 ReaderManifest、BookRoot、Locator 与安全渲染边界。下一切片本地优先记录阅读时长、进度与连续阅读，先明确前台阅读、暂停、后台、跨日和重开语义，再选择最小持久化与界面投影。
+先复核指定 MOBI / MDict 本地样本、当前 Kindle 词典早拒绝和已成熟 parser / 索引方案，再选择最小可维护边界。首个可交付纵切只做本地索引、查词和安全释义渲染，不把普通书导入器、词典内容或网络查询混成同一接口。
 
-统计保持本地、可解释且不上传；停止条件是时长计量在失焦、休眠、异常退出和重启后不虚增，日 / 周 / 书籍投影可验证，并且记录开销不影响翻页、排版或 Locator 恢复。
+日常功能与界面门继续使用 Linux Tauri / WebKitGTK；指定样本 benchmark 先在 Linux 固定环境形成可重复基线，Android 仅在需要验证 ARM 真机性能时运行专项门。停止条件是索引和首查 / 热查开销受控、释义不越过内容安全边界，并且阅读翻页、排版与 Locator 恢复不回退。
 
-## Next：按格式风险逐片交付
+## Next：候选收尾
 
-1. **离线词典**：先实现本地索引、查词与安全释义渲染，再用指定 MOBI / MDict 样本在 Linux 日常门与 Android ARM 真机专项做基准；AGPL 兼容不替代词典内容版权与分发审查。
+离线词典关闭后，汇总本轮非 PDF 格式、CSS、统计和词典的固定基准，完成独立评审、事实文档与项目关闭；不在收尾阶段顺带实现 CSS 社区、同步或新格式。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
@@ -45,6 +45,7 @@ Readest 对应的非 PDF 输入格式与本地 CSS 编辑 / 模块管理已经�
 | MOBI / AZW / AZW3 | 固定 `boko 0.5.0` 的有界 adapter、PalmDOC / MOBI6 / 纯 KF8、图片 / 唯一目录投影、词典早拒绝、十次 release benchmark 与 Linux 真 GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/changes/kindle-format-vertical-slice.md` |
 | CSS 编辑与模块管理 | 可视排版、按需 CodeMirror 6、实时预览、32 个有界模块、筛选 / 排序 / 批量启停 / JSON 交换、旧状态迁移、失败回退与 Linux 真 GUI 门 | `docs/architecture/READER-CORE.md`、`docs/changes/css-editor-module-management.md` |
 | CSS 社区模块边界 | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md` |
+| 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/changes/local-reading-statistics.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 
 精确实施过程、历史验收数字和关闭收据由 Git 与 `project-workflow` 保存，不在路线图重复维护。
