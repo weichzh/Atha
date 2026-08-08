@@ -2,6 +2,6 @@
 
 本文件只登记当前可执行工作的路由，不保存完成摘要、验收流水或候选需求。
 
-- `change`：Kindle 格式纵切 → `docs/changes/kindle-format-vertical-slice.md`
-- `now`：以 `boko 0.5.0` 的成熟只读算法为来源，实现 Atha 有界 MOBI / AZW / AZW3 / KF8 importer、私有样本基准与 Linux Tauri GUI 纵切；词典只做大规模展开前的稳定拒绝，查询语义留给后续本地词典切片。
-- `Context Bundle`：`docs/product/OVERVIEW.md`、`docs/roadmap/ROADMAP.md`、`docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`、`docs/research/kindle-format-library-assessment.md`、`docs/agents/references.md`。
+- `change`：CSS 编辑器与模块管理 → `docs/changes/css-editor-module-management.md`
+- `now`：在现有每书 CSS 与同一浏览器安全边界上，交付可视排版、CodeMirror 渐进增强、实时预览和有界模块组合；旧状态无损迁移，任一无效组合回退到上次有效状态。
+- `Context Bundle`：`docs/product/OVERVIEW.md`、`docs/roadmap/ROADMAP.md`、`docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`、`docs/codebase/READER-MOBILE-UI.md`、`docs/agents/references.md`。
