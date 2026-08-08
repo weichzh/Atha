@@ -8,8 +8,8 @@ use atha_backend::reader::{
     READER_PAGE,
     resources::{BookRoot, ResourceError},
     telemetry::{
-        FailureStage, MetricStage, ReaderEvent, ReaderFailure, TelemetryError, parse_reader_event,
-        safe_event,
+        FailureStage, MetricStage, ReaderEvent, ReaderFailure, Search, TelemetryError,
+        parse_reader_event, safe_event,
     },
 };
 
@@ -134,6 +134,15 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
     );
     assert_eq!(safe_event("state-persistence"), "state-persistence");
     assert_eq!(safe_event("E:/private/book.xhtml"), "invalid-event");
+    assert_eq!(
+        parse_reader_event(READER_PAGE, "search|0|0|12|741.5"),
+        Ok(ReaderEvent::Search(Search {
+            results: 0,
+            truncated: false,
+            sections_scanned: 12,
+            duration_ms: 741.5,
+        }))
+    );
 
     for (origin, message, expected) in [
         (
@@ -171,6 +180,13 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
             "error|book-load|E:/private/book.xhtml",
             TelemetryError::InvalidMessage,
         ),
+        (READER_PAGE, "search|2001|0|1|1", TelemetryError::OutOfRange),
+        (
+            READER_PAGE,
+            "search|0|false|1|1",
+            TelemetryError::InvalidMessage,
+        ),
+        (READER_PAGE, "search|0|0|2001|1", TelemetryError::OutOfRange),
     ] {
         assert_eq!(parse_reader_event(origin, message), Err(expected));
     }

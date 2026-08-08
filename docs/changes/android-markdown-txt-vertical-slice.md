@@ -21,7 +21,7 @@ Atha 已在 Windows 与 Android 共用同一 ReaderManifest、BookRoot、Locator
 - 正向 Markdown 只使用版本控制中的 `README.md` 与 `docs/research/epub2-ncx-library-assessment.md`；正向 TXT 只使用用户放入 `fixtures/local` 的真实网文。不复制、截取、派生或提交本地书籍；最小合成输入仅用于 raw HTML、脚本 / 链接 / 图片越界、非法编码、超长行和数量 / 大小上限等信任边界，不冒充正向样书。
 - Markdown 排版直接采用 Readest 已验证的最小规则：代码保留等宽字体并以 `pre-wrap` / `overflow-wrap` 换行，表格有可见边框，引用有内联缩进；多行代码块允许跨页，不作为不可分割原子元素。该样式固定写入 importer 生成的 XHTML，不复制 Readest UI 或 Markdown DOM 管线。
 - Android edge-to-edge 复用 Readest 的 native inset 事实，但不复制其沉浸式导航栏策略：`MainActivity` 在 UI 线程观察 `systemBars | displayCutout`，bridge 只读缓存并控制阅读态状态栏显隐 / 图标明暗，Web 端只消费一套自有 safe-area 变量。左上章节标题在隐藏状态栏时仍位于 cutout 下方；工具打开时隐藏标题并让顶部栏完整避让状态栏，不做按设备参数微调。
-- 日志复用现有 `log` + `tauri-plugin-log` 与 `atha::` target，只增加固定枚举 / 数字字段：`format`、`input_bytes`、TXT `encoding`、`sections`、各阶段 `*_ms`、`search_results`、`search_truncated` 和稳定 stage / code。不记录标题、作者、正文、搜索词、路径、URI、URL、内容哈希或 detector 探测字节。
+- 日志复用现有 `log` + `tauri-plugin-log` 与 `atha::` target，只增加固定枚举 / 数字字段：`format`、`input_bytes`、TXT `encoding`、`sections`、各阶段 `*_ms`、`search_results`、`search_truncated`、`sections_scanned` 和稳定 stage / code。不记录标题、作者、正文、搜索词、路径、URI、URL、内容哈希或 detector 探测字节。
 
 ## Non-Goals
 
@@ -48,10 +48,10 @@ present
 - [x] 仓库现有 Markdown 文档经 `LocalLibrary::import` 得到正确的前言 / H1 sections、嵌套 TOC 和可读 XHTML；raw HTML 不执行，链接不导航，图片不读本机 / 网络，16 MiB 与 section / TOC 超限返回稳定错误。
 - [x] `fixtures/local` 真实 TXT 由锁定 `chardetng` + `encoding_rs` 流式解码，保留 1,134 条章节 TOC、一个无 TOC 的前言，并按 1 MiB 软上限生成 2–16 个 XHTML sections；每个 TOC fragment 都可定位，Android gate 从运行结果记录实测 `sections` / `toc_items` 并断言该语义，不记录标题。编码标签由本地 gate 锁定；跨块多字节、CRLF / CR、BOM、非法序列、单个疑似标题、1,001–2,000 章与超限均通过信任边界检查；不提交或派生真实样本。
 - [x] backend 和 reader runtime 都接受至多 1,000 个已验证 sections 与至多 2,000 个 TOC items；EPUB 仍在 1,000 sections、CBZ 仍在 1,000 pages 稳定拒绝，不出现第三个无名上限。
-- [x] Markdown 与 TXT 分别在固定 API 36 x86_64 16 KiB AVD 上从干净数据完成系统 picker、导入、打开、目录首 / 中 / 末定位、全书搜索、翻页、强停重启和 Locator 恢复，Picker cache 为空，无脚本执行、网络、panic、OOM、ANR 或 renderer gone。
-- [x] 真实 TXT 在固定 build / AVD 预热后对冷导入、缓存打开、首稳、目录首 / 中 / 末定位、翻页、强停恢复和全书搜索各取 10 个样本，记录 median / nearest-rank P95；在书架、导入完成、1,134 项 TOC 绑定后、首 / 中 / 末 section 与恢复后记录 app PSS，renderer 不可唯一归因时显式留空。任一 10 次流程未完成、超过正式 timeout 或出现 OOM / ANR / renderer gone 即 no-go，不用 TOC 虚拟化或并行搜索遮蔽结构问题。
+- [ ] Markdown 与 TXT 分别在固定 API 36 x86_64 16 KiB AVD 上从干净数据完成系统 picker、导入、打开、目录首 / 中 / 末定位、全书搜索、翻页、强停重启和 Locator 恢复，Picker cache 为空，无脚本执行、网络、panic、OOM、ANR 或 renderer gone。Windows 上的候选曾通过；搜索遥测、严格后缀和 fixture 清理修复后的最终候选改在 Linux 重跑。
+- [ ] 真实 TXT 在固定 build / AVD 预热后对冷导入、缓存打开、首稳、目录首 / 中 / 末定位、翻页、强停恢复和全书搜索各取 10 个样本，记录 median / nearest-rank P95；在书架、导入完成、1,134 项 TOC 绑定后、首 / 中 / 末 section 与恢复后记录 app PSS，renderer 不可唯一归因时显式留空。Windows 上的修复前候选已有十样本；最终候选在 Linux 重跑前不继承该性能证据。
 - [ ] 至少一台 ARM64 Android 真机使用同一 release-like build 重跑真实 TXT 功能、10 样本阶段耗时与 PSS 口径；在此之前只可声明 AVD 功能 / 同环境回归通过，不可声明 Android 性能完成。
-- [x] 导入、搜索、重启和失败日志只含固定 stage / code、格式、编码枚举、计数、耗时与布尔值；logcat 与全部 `Atha.log*` 不含标题、正文、搜索词、路径、URI、URL 或内容哈希。
+- [ ] 导入、搜索、重启和失败日志只含固定 stage / code、格式、编码枚举、计数、耗时与布尔值；logcat 与全部 `Atha.log*` 不含标题、正文、搜索词、路径、URI、URL 或内容哈希。静态白名单已复核，最终 Linux AVD 仍需重跑双日志门。
 - [ ] 锁文件与第三方 notices 复核上述精确版本和许可；Rust fmt / Clippy / tests、Svelte / Tauri check / build、AutoCorrect、required docs gate 与独立 Spec / Standards review 通过。用户已要求本 change 关闭后不再在 Windows 运行目标测试，后续 APK / 桌面门迁到 Linux；ARM64 真机仍由上一项单独跟踪。
 
 ## Files And Steps
@@ -88,18 +88,18 @@ Android edge-to-edge 同步修复为一套 native inset 事实：书架和工具
 
 ## Review
 
-- Blocking: 待最终候选的独立 Spec / Standards review。
-- Non-blocking: API 36 x86_64 16 KiB AVD 上曾出现一次 Android 16 x86_64 / WebView 平台 renderer 进程崩溃；相同 APK 与链路立即重试通过，最终十样本全部完成。当前只记录为模拟器基础设施残余，不将其归因产品，也不当作 ARM64 证据。
+- Blocking: 独立 Standards 复审未发现 P0 / P1；独立 Spec 复审指出无 TOC 前言标签与最终目标证据两项 P1。前言已按首个 TOC section 前的语义修正并加入自检；目标证据不复用修复前记录，改由 Linux 最终候选重跑后关闭。
+- Non-blocking: 修复前的 API 36 x86_64 16 KiB AVD 候选曾出现一次 Android 16 x86_64 / WebView 平台 renderer 进程崩溃；相同 APK 与链路立即重试后完成历史十样本。当前只记录为模拟器基础设施残余，不将其归因产品，也不当作最终候选或 ARM64 证据。
 - Out-of-scope: 其他非 PDF 格式、CSS 编辑 / 模块 / 社区、阅读统计与离线词典继续按路线图后续分片。
 
 ## Evidence And Residual Risks
 
 - 本地 importer 证据：Markdown / TXT、EPUB / CBZ 回归、身份域、编码 / 分块、章节规则、raw HTML / 链接 / 图片、大小 / 数量 / 源变化边界均由 `cargo test --locked -p atha-backend` 覆盖；正向 TXT ignored gate 只在本机显式 opt-in，得到 7,362,028 bytes、GBK、12 sections、1,134 TOC，不输出书名、路径、正文或哈希。
-- Android Markdown 真实目标证据：最终 API 36 x86_64 16 KiB AVD 从干净数据对仓库 `README.md` 完成系统 picker、6 项目录首 / 中 / 末、完整搜索、翻页、强停恢复、Picker cache、PSS、健康和双日志隐私门；CDP 几何探针在修复后得到跨元素文字重叠 0，最终正式 gate 再次通过。该证据只保存在忽略的本机 artifacts。
-- Android TXT 相对基线：同一 API 36 x86_64 16 KiB AVD 的 10 个成功样本中，冷导入 P50 / P95 为 3,142 / 3,216 ms，首稳 277.6 / 309.2 ms，全文搜索 741.5 / 896 ms，强停恢复 13,051.5 / 17,957 ms；首屏 app PSS 为 171,424.5 / 171,950 KiB，末屏为 171,577.5 / 184,101 KiB。renderer 进程不能唯一归因，因此显式留空；这些数字只用于同 AVD 回归。
+- Android Markdown 历史目标证据：复审修复前的 API 36 x86_64 16 KiB AVD 候选曾从干净数据对仓库 `README.md` 完成系统 picker、6 项目录首 / 中 / 末、完整搜索、翻页、强停恢复、Picker cache、PSS、健康和双日志隐私门；CDP 几何探针得到跨元素文字重叠 0。搜索遥测与 fixture 清理改变后不把这份 artifacts 当最终候选证据，Linux 重跑前仅用于说明链路曾打通。
+- Android TXT 历史相对基线：同一修复前候选在 API 36 x86_64 16 KiB AVD 的 10 个成功样本中，冷导入 P50 / P95 为 3,142 / 3,216 ms，首稳 277.6 / 309.2 ms，全文搜索 741.5 / 896 ms，强停恢复 13,051.5 / 17,957 ms；首屏 app PSS 为 171,424.5 / 171,950 KiB，末屏为 171,577.5 / 184,101 KiB。renderer 进程不能唯一归因，因此显式留空；最终候选在 Linux 重跑前不继承这组数值。
 - `pulldown-cmark` 需要有界的完整 UTF-8 输入，因此 Markdown 保留 16 MiB 上限；TXT detector 对无 BOM 遗留编码只能 best effort，无 BOM UTF-16 不在承诺内。
 - Tauri `2.11.5` 内置 PathPlugin 会经 Android `ContentResolver` 读 content URI 文件名；provider 未返回可用的允许列表后缀时会被拒绝，不自建 Kotlin / plugin，不用内容猜测换取更高召回率。
 - 真实 TXT 的 7.36 MiB 规模保留三遍顺序读取；backend detect P50 / P95 为 2,017 / 2,082 ms，是当前冷导入主项，但 3.2 秒内稳定完成且不建立正文副本或 offset 索引。只有 ARM64 / 低端真机证明该路径不可接受时才升级。
-- 1,134 项 TOC 仍会增加 Android 目录 DOM 与内存压力，但物理 sections 分组后不再把每章变成一次全书搜索协议请求；十样本已无功能失败、超时、OOM、ANR 或 renderer gone。具体跨设备性能门槛仍只能在 ARM64 真机基线后冻结。
+- 1,134 项 TOC 仍会增加 Android 目录 DOM 与内存压力，但物理 sections 分组后不再把每章变成一次全书搜索协议请求；修复前 Windows / AVD 历史十样本未见功能失败、超时、OOM、ANR 或 renderer gone，不作最终候选证据。具体跨设备性能门槛仍只能在 ARM64 真机基线后冻结。
 - 本地书籍的标题、正文、搜索词、路径与哈希不进入 Git、公共 CI、日志或分发包；证据只保留格式、输入字节数、编码枚举、section / 结果计数、布尔值和阶段耗时。
 - 用户已决定本 change 关闭后的 APK 与桌面目标测试迁到 Linux GNOME 主机，Windows 只按明确要求使用；Linux 工具链与仓库副本在独立任务配置，不把尚未执行的 Linux gate 写成本 change 证据。

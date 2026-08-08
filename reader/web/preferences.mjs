@@ -28,15 +28,18 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   function syncSafeAreaInsets() {
     try {
       const insets = JSON.parse(systemBars?.getSafeAreaInsets?.() ?? "null");
+      const deviceScale = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
+      const readerPixels = (cssPixels) => cssPixels * deviceScale;
       for (const edge of ["top", "right", "bottom", "left"]) {
         if (Number.isFinite(insets?.[edge])) {
-          root.style.setProperty(`--safe-area-${edge}`, `${insets[edge] / devicePixelRatio}px`);
+          root.style.setProperty(`--safe-area-${edge}`, `${insets[edge] / deviceScale}px`);
         }
       }
-      root.style.setProperty("--reader-chapter-top", `${insets.top + 12 * devicePixelRatio}px`);
-      root.style.setProperty("--reader-chapter-size", `${14 * devicePixelRatio}px`);
-      root.style.setProperty("--reader-content-top", `${insets.top + 64 * devicePixelRatio}px`);
-      root.style.setProperty("--reader-content-bottom", `${insets.bottom + 48 * devicePixelRatio}px`);
+      // Pagination measures the reader canvas in device pixels, then scales it once for display.
+      root.style.setProperty("--reader-chapter-top", `${insets.top + readerPixels(12)}px`);
+      root.style.setProperty("--reader-chapter-size", `${readerPixels(14)}px`);
+      root.style.setProperty("--reader-content-top", `${insets.top + readerPixels(64)}px`);
+      root.style.setProperty("--reader-content-bottom", `${insets.bottom + readerPixels(48)}px`);
     } catch {
       // The native bridge is optional on desktop.
     }
@@ -138,7 +141,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     else content.book.dataset.fontFamily = application.fontFamily;
     reader.style.setProperty(
       "--reader-line-height",
-      `${application.fontSize * LINE_HEIGHT_RATIOS[application.density] * (systemBars ? 1.25 : 1)}px`,
+      `${application.fontSize * LINE_HEIGHT_RATIOS[application.density]}px`,
     );
     syncControls();
     return snapshot();

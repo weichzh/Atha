@@ -250,6 +250,7 @@ const search = createSearch({
     status: document.querySelector("#search-status"),
   },
   assert,
+  emit,
 });
 const contentActions = createContentActions({
   content,

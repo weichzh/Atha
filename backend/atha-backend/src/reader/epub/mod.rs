@@ -7,7 +7,7 @@ use std::{
     error::Error,
     fmt, fs,
     fs::File,
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -99,22 +99,6 @@ impl From<ArchiveError> for ImportError {
             ArchiveError::WriteFailed => Self::WriteFailed,
         }
     }
-}
-
-pub(crate) fn recognizes(source: &Path) -> bool {
-    let Ok(mut source) = File::open(source) else {
-        return false;
-    };
-    let mut prefix = [0_u8; 58];
-    source.read_exact(&mut prefix).is_ok()
-        && prefix[..4] == *b"PK\x03\x04"
-        && prefix[8..10] == [0, 0]
-        && prefix[18..22] == [20, 0, 0, 0]
-        && prefix[22..26] == [20, 0, 0, 0]
-        && prefix[26..28] == [8, 0]
-        && prefix[28..30] == [0, 0]
-        && prefix[30..38] == *b"mimetype"
-        && prefix[38..] == *b"application/epub+zip"
 }
 
 pub fn import_epub(

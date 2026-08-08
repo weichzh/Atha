@@ -176,6 +176,16 @@ async fn reader_event(
                 return Err(code.into());
             }
         },
+        ReaderEvent::Search(search) => {
+            log::info!(
+                target: "atha::reader",
+                "event=reader_search search_results={} search_truncated={} sections_scanned={} duration_ms={:.3}",
+                search.results,
+                search.truncated,
+                search.sections_scanned,
+                search.duration_ms
+            );
+        }
         ReaderEvent::Error(failure) => {
             log::error!(
                 target: "atha::reader",

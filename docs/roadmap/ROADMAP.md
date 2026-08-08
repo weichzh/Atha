@@ -8,7 +8,7 @@
 
 把后续 APK 与桌面应用构建、目标端检查和 GUI 调试迁到用户现有 Linux GNOME 会话；Windows 只在用户明确要求时使用。先补齐用户级 Rust / Android / JDK / Node 工具链和仓库副本，再以 CLI 构建、`systemd-run --user --collect` 启动 GUI，通过现有远程桌面观察，不用 `sudo` 启动 GUI。
 
-停止条件：Linux 上能从干净仓库复现 workspace / Svelte 检查、APK 构建与 16 KiB 对齐、Android 模拟器链路和 Tauri 桌面壳；GUI 确实进入当前 GNOME Wayland 会话并在 SSH 断开后保留。私有 `fixtures/local` 不随仓库复制，真实样本仍由用户在目标端 opt-in 提供。
+停止条件：Linux 上能从干净仓库复现 workspace / Svelte 检查、APK 构建与 16 KiB 对齐、Android 模拟器链路和 Tauri 桌面壳；GUI 确实进入当前 GNOME Wayland 会话并在 SSH 断开后保留。用户批准的私有 `fixtures/local` 只经安全通道复制到目标仓库的忽略目录，仍不得提交、记录或分发。
 
 ## Next：按格式风险逐片交付
 

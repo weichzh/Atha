@@ -39,6 +39,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   let cachedBody;
   let cachedCss;
   let cachedCbzPage = false;
+  let cachedMarkdownSection = false;
   let sourceStyles = true;
   let userStylesEnabled = true;
   let userStylesheet = "";
@@ -217,6 +218,14 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       page.children.length === 1 &&
       page.firstElementChild?.matches("img[src]") &&
       page.textContent.trim() === ""
+    );
+  }
+
+  function isControlledMarkdownSection(documentNode, url = bookUrl) {
+    return (
+      /^\/\.atha-text\/section-\d{4}\.xhtml$/u.test(url?.pathname || "") &&
+      documentNode?.body?.classList.contains("atha-text") &&
+      documentNode.body.classList.contains("atha-markdown")
     );
   }
 
@@ -566,6 +575,21 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     book.classList.remove("atha-cbz-section");
     const ordinaryImage = document.createElement("img");
     ensure(!replaceFailedCbzImage(ordinaryImage), "image-load");
+    const markdownDocument = new DOMParser().parseFromString(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body class='atha-text atha-markdown'><pre>code</pre></body></html>",
+      "application/xhtml+xml",
+    );
+    ensure(
+      isControlledMarkdownSection(
+        markdownDocument,
+        new URL("https://atha-book.localhost/.atha-text/section-0001.xhtml"),
+      ) &&
+        !isControlledMarkdownSection(
+          markdownDocument,
+          new URL("https://atha-book.localhost/chapter.xhtml"),
+        ),
+      "active-content",
+    );
     for (const css of [
       "@import 'x.css';",
       "p{background:url(x)}",
@@ -628,6 +652,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     const source = parseSafeXhtml(markup);
     validateMarkup(source);
     cachedCbzPage = isControlledCbzSection(source);
+    cachedMarkdownSection = isControlledMarkdownSection(source);
     const styleSources = detachSourceStyles(source);
     const stylesheets = await Promise.all(
       styleSources.map(async ({ css, url }) => {
@@ -667,6 +692,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     bookStyle.textContent = sourceStyles ? cachedCss : "";
     userStyle.textContent = userStylesEnabled ? userStylesheet : "";
     book.classList.toggle("atha-cbz-section", cachedCbzPage);
+    book.classList.toggle("atha-markdown-section", cachedMarkdownSection);
     const imported = document.importNode(cachedBody, true);
     pendingImages.clear();
     const deferredImages = imported.querySelectorAll(
@@ -715,7 +741,8 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     cachedBody = undefined;
     cachedCss = undefined;
     cachedCbzPage = false;
-    book.classList.remove("atha-cbz-section");
+    cachedMarkdownSection = false;
+    book.classList.remove("atha-cbz-section", "atha-markdown-section");
     inlineStyles = [];
     deferredImageCount = 0;
     eagerSvgCount = 0;

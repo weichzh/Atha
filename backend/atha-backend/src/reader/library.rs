@@ -1,4 +1,4 @@
-//! Content-addressed local library over imported EPUB reader roots.
+//! Content-addressed local library over imported reader roots.
 
 use std::{
     error::Error,
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     cbz,
-    epub::{self, ImportError, READER_MANIFEST, import_epub},
+    epub::{ImportError, READER_MANIFEST, import_epub},
     resources::{BookRoot, Resource, ResourceError},
     text,
 };
@@ -65,6 +65,7 @@ pub enum LibraryError {
     MissingCover,
     ReadFailed,
     WriteFailed,
+    UnsupportedSource,
     Import(ImportError),
     Cbz(cbz::ImportError),
     Text(text::ImportError),
@@ -151,22 +152,8 @@ impl LocalLibrary {
                 imported.authors,
                 imported.cover_path,
             )
-        } else if epub::recognizes(source) {
-            let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
         } else {
-            let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
+            return Err(LibraryError::UnsupportedSource);
         };
         let path = self.record_path(&content_version)?;
         if path.exists() {
@@ -266,6 +253,7 @@ impl LibraryError {
             Self::MissingCover => "missing-library-cover",
             Self::ReadFailed => "library-read-failed",
             Self::WriteFailed => "library-write-failed",
+            Self::UnsupportedSource => "invalid-library-source",
             Self::Import(error) => error.code(),
             Self::Cbz(error) => error.code(),
             Self::Text(error) => error.code(),

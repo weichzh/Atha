@@ -476,6 +476,41 @@ function Get-TextImportTelemetry {
     }
 }
 
+function Get-SearchTelemetry {
+    param([Parameter(Mandatory)][string]$ProcessId)
+
+    $logs = (Invoke-Adb logcat '-d' "--pid=$ProcessId" '-v' 'brief' | Out-String)
+    $matches = [regex]::Matches($logs, '(?m)^[^\r\n]*atha::reader[^\r\n]*\bevent=reader_search\b[^\r\n]*\r?$')
+    if ($matches.Count -eq 0) {
+        throw 'Android reader search telemetry is missing or malformed.'
+    }
+    $line = $matches[$matches.Count - 1].Value
+    $readUnsigned = {
+        param([Parameter(Mandatory)][string]$Name)
+
+        $fieldMatches = [regex]::Matches($line, "(?:^|\s)$([regex]::Escape($Name))=(\d+)(?=\s|$)")
+        if ($fieldMatches.Count -ne 1) {
+            throw 'Android reader search telemetry is missing or malformed.'
+        }
+        [int]::Parse($fieldMatches[0].Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+    }
+    $truncatedMatches = [regex]::Matches($line, '(?:^|\s)search_truncated=(true|false)(?=\s|$)')
+    $durationMatches = [regex]::Matches($line, '(?:^|\s)duration_ms=([0-9]+(?:\.[0-9]+)?)(?=\s|$)')
+    if ($truncatedMatches.Count -ne 1 -or $durationMatches.Count -ne 1) {
+        throw 'Android reader search telemetry is missing or malformed.'
+    }
+
+    [pscustomobject]@{
+        Results = & $readUnsigned 'search_results'
+        Truncated = $truncatedMatches[0].Groups[1].Value -eq 'true'
+        SectionsScanned = & $readUnsigned 'sections_scanned'
+        DurationMs = [double]::Parse(
+            $durationMatches[0].Groups[1].Value,
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+    }
+}
+
 function Get-AthaPrivacyLogs {
     param([Parameter(Mandatory)][string]$ProcessId)
 
@@ -811,6 +846,7 @@ $firstLaunch = Start-AthaReader
 if ($null -ne $resolvedBook) {
     $remoteName = "Atha-validation$bookExtension"
     $remoteFixture = "/sdcard/Download/$remoteName"
+    try {
     $null = & $adb -s $serial push $resolvedBook $remoteFixture 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the local book fixture to the Android gate AVD.' }
     Invoke-Adb shell touch $remoteFixture | Out-Null
@@ -1051,6 +1087,15 @@ if ($null -ne $resolvedBook) {
             Invoke-CdpClick -Connection $textWebView -Selector '#search-form button[type="submit"]'
             Wait-CdpCondition -Connection $textWebView -JavaScript "document.querySelector('#search-status')?.textContent === '找到 0 条'" -TimeoutSeconds 120
             $searchWaitMs = [long]$searchWatch.ElapsedMilliseconds
+            $null = Wait-AppLog -ProcessId $firstLaunch.ProcessId -Pattern 'atha::reader.*event=reader_search' -TimeoutSeconds 120
+            $searchTelemetry = Get-SearchTelemetry -ProcessId $firstLaunch.ProcessId
+            if (
+                $searchTelemetry.Results -ne 0 -or
+                $searchTelemetry.Truncated -or
+                $searchTelemetry.SectionsScanned -ne $observedSectionCount
+            ) {
+                throw 'Android full-search telemetry did not match the completed zero-result scan.'
+            }
             $searchResult = 'passed-full-scan-zero-results'
             $restartLocatorResult = 'pending'
             Assert-AppHealthy -ExpectedProcessId $firstLaunch.ProcessId
@@ -1322,9 +1367,9 @@ if ($null -ne $resolvedBook) {
             sections = if ($VerifyMarkdownText) { [int]$observedSectionCount } else { $null }
             toc_items = if ($VerifyMarkdownText) { [int]$tocItemCount } else { $null }
             full_search = $searchResult
-            full_search_results = if ($VerifyMarkdownText) { 0 } else { $null }
-            full_search_truncated = if ($VerifyMarkdownText) { $false } else { $null }
-            full_search_sections_scanned = if ($VerifyMarkdownText) { [int]$observedSectionCount } else { $null }
+            full_search_results = if ($VerifyMarkdownText) { [int]$searchTelemetry.Results } else { $null }
+            full_search_truncated = if ($VerifyMarkdownText) { [bool]$searchTelemetry.Truncated } else { $null }
+            full_search_sections_scanned = if ($VerifyMarkdownText) { [int]$searchTelemetry.SectionsScanned } else { $null }
             full_search_wait_ms = $searchWaitMs
             page_turns = if ($VerifyCbzFixture -or $VerifyMarkdownText) { 'passed' } else { 'not-requested' }
             page_turn_wait_ms = @($pageTurnWaitMs)
@@ -1498,6 +1543,10 @@ if ($null -ne $resolvedBook) {
     }
     else {
         Write-Host 'Android book picker, open, reader-ready, restart, and shelf persistence slice passed; structured evidence recorded.'
+    }
+    }
+    finally {
+        $null = & $adb -s $serial shell rm '-f' $remoteFixture 2>&1
     }
 }
 

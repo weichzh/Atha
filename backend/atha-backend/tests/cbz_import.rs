@@ -286,32 +286,28 @@ fn rejects_representative_unsafe_duplicate_and_epub_archives() {
         );
     }
 
-    let opaque_epub = root.0.join("damaged-epub.book");
-    write_members(
-        &opaque_epub,
-        &[("mimetype", b"application/epub+zip"), ("page.png", PNG_1X1)],
-    );
-    let library = LocalLibrary::open(root.0.join("opaque-epub-library")).expect("open library");
-    assert_eq!(
-        library
-            .import(&opaque_epub)
-            .expect_err("damaged opaque EPUB must not fall back to CBZ")
-            .code(),
-        "invalid-epub-archive"
-    );
-}
-
-#[test]
-fn imports_content_recognized_cbz_with_opaque_extension() {
-    let root = TestRoot::new();
-    let source = root.0.join("opaque.book");
-    write_cbz(&source);
-    let library = LocalLibrary::open(root.0.join("library")).expect("open library");
-
-    let imported = library.import(&source).expect("recognize CBZ content");
-
-    assert_eq!(imported.title, "opaque");
-    assert!(imported.has_cover);
+    for (name, members) in [
+        (
+            "damaged-epub.book",
+            vec![
+                ("mimetype", b"application/epub+zip".as_slice()),
+                ("page.png", PNG_1X1),
+            ],
+        ),
+        ("opaque.book", vec![("page.png", PNG_1X1)]),
+    ] {
+        let source = root.0.join(name);
+        write_members(&source, &members);
+        let library =
+            LocalLibrary::open(root.0.join(format!("{name}-library"))).expect("open library");
+        assert_eq!(
+            library
+                .import(&source)
+                .expect_err("unknown book suffix must be rejected")
+                .code(),
+            "invalid-library-source"
+        );
+    }
 }
 
 #[test]

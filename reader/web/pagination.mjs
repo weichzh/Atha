@@ -219,7 +219,7 @@ export function createPagination({
   }
 
   function layout() {
-    book.style.fontSize = `${state.fontSize * (globalThis.AthaSystemBars ? 1.25 : 1)}px`;
+    book.style.fontSize = `${state.fontSize}px`;
     book.style.transform = "none";
     applyFormulaScale();
     const style = getComputedStyle(book);

@@ -3,7 +3,7 @@ const MAX_RESULTS = 2000;
 const MAX_SECTION_LENGTH = 16 * 1024 * 1024;
 const HIDDEN_SENTINEL = "\0";
 
-export function createSearch({ session, navigation, pagination, locator, controls, assert }) {
+export function createSearch({ session, navigation, pagination, locator, controls, assert, emit }) {
   let active = null;
   let results = [];
   let status = "idle";
@@ -22,7 +22,17 @@ export function createSearch({ session, navigation, pagination, locator, control
         best = { label: item.label, offset: itemOffset };
       }
     }
-    return best?.label || section.id;
+    if (best) return best.label;
+    if (description.toc.some((item) => item.href.split("#", 1)[0] === section.href)) {
+      return "前言";
+    }
+    const sectionIndex = description.sections.indexOf(section);
+    const firstTocHref = description.toc[0]?.href.split("#", 1)[0];
+    const firstTocSectionIndex = description.sections.findIndex(
+      (candidate) => candidate.href === firstTocHref,
+    );
+    if (sectionIndex >= 0 && firstTocSectionIndex > sectionIndex) return "前言";
+    return sectionIndex >= 0 ? `第 ${sectionIndex + 1} 节` : "正文";
   }
 
   function sectionData(source) {
@@ -49,16 +59,24 @@ export function createSearch({ session, navigation, pagination, locator, control
     }
     let text = "";
     const fragments = new Map();
-    const walker = documentNode.createTreeWalker(documentNode.body, NodeFilter.SHOW_TEXT);
+    const walker = documentNode.createTreeWalker(
+      documentNode.body,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+    );
     while (walker.nextNode()) {
-      const value = walker.currentNode.textContent || "";
+      const node = walker.currentNode;
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = /** @type {Element} */ (node);
+        if (element.id && !fragments.has(element.id)) fragments.set(element.id, text.length);
+        continue;
+      }
+      const value = node.textContent || "";
       let hidden = false;
       for (
-        let element = walker.currentNode.parentElement;
+        let element = node.parentElement;
         element && element !== documentNode.body;
         element = element.parentElement
       ) {
-        if (element.id && !fragments.has(element.id)) fragments.set(element.id, text.length);
         const inlineStyle = element.style;
         if (
           element.localName === "noscript" ||
@@ -137,6 +155,8 @@ export function createSearch({ session, navigation, pagination, locator, control
     }
 
     const controller = new AbortController();
+    const started = performance.now();
+    let sectionsScanned = 0;
     active = controller;
     status = "searching";
     sync();
@@ -147,6 +167,7 @@ export function createSearch({ session, navigation, pagination, locator, control
         const response = await fetch(section.url, { signal: controller.signal });
         if (!response.ok) throw new Error("search-section");
         const { text, fragments } = sectionData(await response.text());
+        sectionsScanned += 1;
         for (const match of text.matchAll(pattern)) {
           if (controller.signal.aborted) throw new DOMException("aborted", "AbortError");
           const start = match.index;
@@ -178,6 +199,9 @@ export function createSearch({ session, navigation, pagination, locator, control
       active = null;
       status = "complete";
       sync();
+      emit(
+        `search|${results.length}|${truncated ? 1 : 0}|${sectionsScanned}|${(performance.now() - started).toFixed(3)}`,
+      );
       return snapshot();
     } catch (error) {
       if (active !== controller || (error instanceof DOMException && error.name === "AbortError")) {
@@ -253,7 +277,7 @@ export function createSearch({ session, navigation, pagination, locator, control
       "sample-boundary",
     );
     const grouped = sectionData(
-      "<html xmlns='http://www.w3.org/1999/xhtml'><body><h1 id='one'>One</h1><p>first</p><h1 id='two'>Two</h1><p>target</p></body></html>",
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><h1 id='one'>One</h1><p>first</p><a id='two'></a><h1>Two</h1><p>target</p></body></html>",
     );
     const groupedSection = { id: "group", href: "text/group.xhtml" };
     assert(
@@ -268,6 +292,17 @@ export function createSearch({ session, navigation, pagination, locator, control
         grouped.text.indexOf("target"),
         grouped.fragments,
       ) === "Two",
+      "sample-boundary",
+    );
+    const prefaceSection = { id: "preface", href: "text/preface.xhtml" };
+    assert(
+      sectionLabel(
+        {
+          sections: [prefaceSection, groupedSection],
+          toc: [{ label: "One", href: "text/group.xhtml#one" }],
+        },
+        prefaceSection,
+      ) === "前言",
       "sample-boundary",
     );
     let activeRejected = false;

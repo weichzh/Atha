@@ -30,7 +30,7 @@
 
 - 运行事实：主机别名、用户目录和实时工具路径只保存在用户级 `$CODEX_HOME/HOSTS.md`；仓库不硬编码地址。GNOME user manager 当前应包含 `WAYLAND_DISPLAY=wayland-0`、`DISPLAY=:0` 与 `XDG_RUNTIME_DIR=/run/user/1000`。
 - 项目快速用法：SSH 中的 CLI 构建直接运行；需要在远程 GNOME / RDP 桌面显示并在 SSH 断开后保留的 GUI 使用 `systemd-run --user --collect --unit=<唯一名> <program>`，例如 `systemd-run --user --collect --unit=gui-code code ~/Code/Atha`。不得用 `sudo` 启动 GUI，也不得依赖 SSH shell 临时导出的 Wayland 变量。
-- 测试策略：Android APK 与 Linux 桌面应用的后续正式检查优先在该主机运行；Windows 只在用户明确要求时使用。私有 `fixtures/local` 不随仓库迁移，目标端真实样本另行 opt-in 提供。
+- 测试策略：Android APK 与 Linux 桌面应用的后续正式检查优先在该主机运行；Windows 只在用户明确要求时使用。用户已批准通过安全通道把私有 `fixtures/local` 复制到目标仓库的忽略目录；样本仍只用于本地 opt-in，不提交、不写日志、不进入公开证据或分发包。
 - 最短检查：`systemctl --user show-environment | rg '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)='`，再用唯一 transient unit 启动目标 GUI；构建版本、APK 对齐、模拟器 / 实机、桌面 WebView 和证据等级分别记录。
 - 必须重查：SSH 别名、GNOME 会话是否仍存活、systemd user 环境、KVM / emulator、Rust Android targets、JDK / SDK / NDK、Linux WebKitGTK / Tauri prerequisites 与私有样本是否已显式放置。
 

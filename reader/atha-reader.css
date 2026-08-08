@@ -1071,12 +1071,12 @@ textarea:focus-visible,
   break-inside: avoid;
 }
 
-.book pre,
-.book code {
+.book.atha-markdown-section pre,
+.book.atha-markdown-section code {
   white-space: pre-wrap !important;
 }
 
-.book pre {
+.book.atha-markdown-section pre {
   overflow-wrap: break-word;
 }
 

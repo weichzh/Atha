@@ -33,6 +33,14 @@ pub struct Ready {
     pub cuts: u16,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Search {
+    pub results: u16,
+    pub truncated: bool,
+    pub sections_scanned: u16,
+    pub duration_ms: f64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FailureStage {
     Initialization,
@@ -52,6 +60,7 @@ pub struct ReaderFailure {
 pub enum ReaderEvent {
     Metric(Metric),
     Ready(Ready),
+    Search(Search),
     Error(ReaderFailure),
 }
 
@@ -109,6 +118,24 @@ pub fn parse_reader_event(origin: &str, message: &str) -> Result<ReaderEvent, Te
             display_formulas: parse_range(display, 0_u16, 10_000)?,
             cuts: parse_range(cuts, 0_u16, 10_000)?,
         })),
+        ["search", results, truncated, sections_scanned, duration_ms] => {
+            let duration_ms = duration_ms
+                .parse::<f64>()
+                .map_err(|_| TelemetryError::InvalidMessage)?;
+            if !duration_ms.is_finite() || !(0.0..=600_000.0).contains(&duration_ms) {
+                return Err(TelemetryError::OutOfRange);
+            }
+            Ok(ReaderEvent::Search(Search {
+                results: parse_range(results, 0_u16, 2_000)?,
+                truncated: match *truncated {
+                    "0" => false,
+                    "1" => true,
+                    _ => return Err(TelemetryError::InvalidMessage),
+                },
+                sections_scanned: parse_range(sections_scanned, 1_u16, 2_000)?,
+                duration_ms,
+            }))
+        }
         ["error", code, stage] => match (allowed_error(code), FailureStage::parse(stage)) {
             (Some(code), Some(stage)) => Ok(ReaderEvent::Error(ReaderFailure { code, stage })),
             _ => Err(TelemetryError::InvalidMessage),
