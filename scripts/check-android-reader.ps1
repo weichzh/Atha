@@ -7,7 +7,8 @@ param(
     [string]$BookPath,
     [switch]$CleanAppData,
     [switch]$VerifyEpub2NcxFixture,
-    [switch]$VerifyCbzFixture
+    [switch]$VerifyCbzFixture,
+    [switch]$VerifyLibraryShelfUi
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,6 +40,9 @@ if ($VerifyEpub2NcxFixture -and $VerifyCbzFixture) {
 }
 if ($VerifyCbzFixture -and -not $CleanAppData) {
     throw 'VerifyCbzFixture requires -CleanAppData on the dedicated gate AVD.'
+}
+if ($VerifyLibraryShelfUi -and ([string]::IsNullOrWhiteSpace($BookPath) -or -not $CleanAppData)) {
+    throw 'VerifyLibraryShelfUi requires -BookPath and -CleanAppData on the dedicated gate AVD.'
 }
 if (-not [string]::IsNullOrWhiteSpace($BookPath)) {
     $resolvedBook = (Resolve-Path -LiteralPath $BookPath).Path
@@ -123,6 +127,21 @@ function Invoke-Adb {
     Invoke-Checked $adb (@('-s', $serial) + $Arguments)
 }
 
+function Save-UiScreenshot {
+    param([Parameter(Mandatory)][string]$Name)
+
+    $directory = Join-Path $repoRoot 'artifacts\local\screenshots'
+    $remote = "/data/local/tmp/$Name.png"
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    try {
+        Invoke-Adb shell screencap '-p' $remote | Out-Null
+        Invoke-Adb pull $remote (Join-Path $directory "$Name.png") | Out-Null
+    }
+    finally {
+        Invoke-Adb shell rm '-f' $remote | Out-Null
+    }
+}
+
 function Get-AppProcessId {
     $output = & $adb -s $serial shell pidof $package
     if ($LASTEXITCODE -ne 0) { return $null }
@@ -173,6 +192,19 @@ function Wait-AppLog {
     throw 'Timed out waiting for an Android reader application event.'
 }
 
+function Get-AthaPrivacyLogs {
+    param([Parameter(Mandatory)][string]$ProcessId)
+
+    $processLogcat = (Invoke-Adb logcat '-d' "--pid=$ProcessId" '-v' 'brief' | Out-String)
+    $persistentAppLog = @(
+        ((Invoke-Adb exec-out run-as $package find logs '-maxdepth' 1 '-type' f '-name' 'Atha.log*' | Out-String) -split "`r?`n") |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ } |
+            ForEach-Object { Invoke-Adb exec-out run-as $package cat $_ }
+    ) -join "`n"
+    "$processLogcat`n$persistentAppLog"
+}
+
 function Get-UiHierarchy {
     for ($attempt = 0; $attempt -lt 12; $attempt++) {
         try {
@@ -218,6 +250,26 @@ function Invoke-UiNode {
     $x = ([int]$bounds.Groups[1].Value + [int]$bounds.Groups[3].Value) / 2
     $y = ([int]$bounds.Groups[2].Value + [int]$bounds.Groups[4].Value) / 2
     Invoke-Adb shell input tap ([int]$x) ([int]$y) | Out-Null
+}
+
+function Assert-UiNodeTouchTarget {
+    param([Parameter(Mandatory)][string]$XPath)
+
+    $node = Wait-UiNode -XPath $XPath
+    $bounds = [regex]::Match($node.bounds, '^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$')
+    if (-not $bounds.Success) { throw 'Android UI node returned invalid bounds.' }
+    $left = [int]$bounds.Groups[1].Value
+    $top = [int]$bounds.Groups[2].Value
+    $right = [int]$bounds.Groups[3].Value
+    $bottom = [int]$bounds.Groups[4].Value
+    $minimumPixels = [Math]::Ceiling(44 * $displayDensityDpi / 160)
+    if (
+        $left -lt 0 -or $top -lt 0 -or
+        $right -gt $displayWidth -or $bottom -gt $displayHeight -or
+        ($right - $left) -lt $minimumPixels -or ($bottom - $top) -lt $minimumPixels
+    ) {
+        throw 'Android shelf control is clipped or smaller than 44 CSS px.'
+    }
 }
 
 function Get-ReaderViewportState {
@@ -331,6 +383,15 @@ if ($actualAvd -ne $avdName) { throw "Expected AVD $avdName, found $actualAvd." 
 if ($actualApi -ne '35') { throw "Expected Android API 35, found $actualApi." }
 if ($actualAbi -ne 'x86_64') { throw "Expected x86_64 ABI, found $actualAbi." }
 if ($pageSize -ne '16384') { throw "Expected 16384-byte pages, found $pageSize." }
+
+$densityMatches = [regex]::Matches((Invoke-Adb shell wm density | Out-String), '(?m)^(?:Physical|Override) density:\s*(\d+)\s*$')
+$sizeMatches = [regex]::Matches((Invoke-Adb shell wm size | Out-String), '(?m)^(?:Physical|Override) size:\s*(\d+)x(\d+)\s*$')
+if ($densityMatches.Count -eq 0 -or $sizeMatches.Count -eq 0) {
+    throw 'Android display density or bounds are not observable.'
+}
+$displayDensityDpi = [int]$densityMatches[$densityMatches.Count - 1].Groups[1].Value
+$displayWidth = [int]$sizeMatches[$sizeMatches.Count - 1].Groups[1].Value
+$displayHeight = [int]$sizeMatches[$sizeMatches.Count - 1].Groups[2].Value
 
 $webviewState = (Invoke-Adb shell dumpsys webviewupdate | Out-String)
 $webviewMatch = [regex]::Match(
@@ -522,7 +583,6 @@ if ($null -ne $resolvedBook) {
 
     $pickerCache = (Invoke-Adb shell run-as $package ls '-A' 'cache/Picker' | Out-String).Trim()
     if ($pickerCache.Length -ne 0) { throw 'Android picker cache was not cleaned after book import.' }
-    $athaLogs = (Invoke-Adb logcat '-d' "--pid=$($firstLaunch.ProcessId)" '-v' 'brief' | Out-String)
     $privateLogPattern = "(?i)content://|/sdcard/|$([regex]::Escape($remoteName))"
     if ($VerifyEpub2NcxFixture) {
         $privateLogPattern += '|Example EPUB2|Legacy Author|Part One|Nested Two|fixture-body-(?:one|two)-7cb4'
@@ -530,6 +590,33 @@ if ($null -ne $resolvedBook) {
     elseif ($VerifyCbzFixture) {
         $privateLogPattern += "|ComicInfo|pages[/\\](?:1|2|3|10)\.(?:png|jpe?g)|$([regex]::Escape($cbzFixtureTitle))|$([regex]::Escape($cbzFixtureWriter))|$([regex]::Escape($cbzFixtureImageToken))"
     }
+    if ($VerifyLibraryShelfUi) {
+        $libraryRecordPaths = @(
+            ((Invoke-Adb exec-out run-as $package find Library '-maxdepth' 1 '-type' f | Out-String) -split "`r?`n") |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ }
+        )
+        if ($libraryRecordPaths.Count -ne 1) {
+            throw 'Clean Android shelf verification requires exactly one local library record.'
+        }
+        try {
+            $libraryRecord = (Invoke-Adb exec-out run-as $package cat $libraryRecordPaths[0] | Out-String) |
+                ConvertFrom-Json
+        }
+        catch {
+            throw 'Android local library record could not be parsed for privacy verification.'
+        }
+        $privateRecordValues = @([string]$libraryRecord.id, [string]$libraryRecord.title) + @(
+            $libraryRecord.authors | ForEach-Object { [string]$_ }
+        )
+        if ([string]::IsNullOrWhiteSpace([string]$libraryRecord.title)) {
+            throw 'Android local library record has no title for privacy verification.'
+        }
+        foreach ($privateRecordValue in $privateRecordValues.Where({ -not [string]::IsNullOrWhiteSpace($_) })) {
+            $privateLogPattern += "|$([regex]::Escape($privateRecordValue))"
+        }
+    }
+    $athaLogs = Get-AthaPrivacyLogs -ProcessId $firstLaunch.ProcessId
     if ($athaLogs -match $privateLogPattern) {
         throw 'Android application logs exposed picker or book content details.'
     }
@@ -551,9 +638,82 @@ if ($null -ne $resolvedBook) {
     }
     Assert-AppHealthy -ExpectedProcessId $secondLaunch.ProcessId
     $restoredPssKiB = if ($bookFormat -eq 'cbz') { Get-AppPssKiB -ProcessId $secondLaunch.ProcessId } else { $null }
-    $secondAthaLogs = (Invoke-Adb logcat '-d' "--pid=$($secondLaunch.ProcessId)" '-v' 'brief' | Out-String)
+    $secondAthaLogs = Get-AthaPrivacyLogs -ProcessId $secondLaunch.ProcessId
     if ($secondAthaLogs -match $privateLogPattern) {
         throw 'Restarted Android application logs exposed picker or book content details.'
+    }
+
+    $libraryShelfUiResult = 'not-requested'
+    $libraryShelfOrderingResult = 'not-requested'
+    if ($VerifyLibraryShelfUi) {
+        $shelfLaunch = Start-AthaReader
+        Wait-UiNode -XPath $bookXPath | Out-Null
+        Assert-AppHealthy -ExpectedProcessId $shelfLaunch.ProcessId
+
+        $searchXPath = "//node[@package='$package' and @class='android.widget.EditText' and @clickable='true']"
+        Assert-UiNodeTouchTarget -XPath $searchXPath
+        Invoke-UiNode -XPath $searchXPath
+        $searchToken = ([Guid]::NewGuid().ToString('N')).Substring(0, 12)
+        Invoke-Adb shell input text $searchToken | Out-Null
+        Wait-UiNode -XPath "//node[@package='$package' and @text='没有找到书籍']" | Out-Null
+        Invoke-Adb shell input keyevent 123 | Out-Null
+        for ($index = 0; $index -lt $searchToken.Length; $index++) {
+            Invoke-Adb shell input keyevent 67 | Out-Null
+        }
+        Invoke-Adb shell input keyevent 111 | Out-Null
+        Wait-UiNode -XPath $bookXPath | Out-Null
+
+        foreach ($viewName in @('默认', '进度', '书名', '作者')) {
+            $viewXPath = "//node[@package='$package' and @class='android.widget.Button' and @text='$viewName' and @clickable='true']"
+            Assert-UiNodeTouchTarget -XPath $viewXPath
+            Invoke-UiNode -XPath $viewXPath
+            if ($viewName -eq '进度') {
+                Wait-UiNode -XPath "//node[@package='$package' and @text='在读']" | Out-Null
+                Wait-UiNode -XPath "//node[@package='$package' and @text='未开始']" | Out-Null
+                Start-Sleep -Seconds 2
+                Save-UiScreenshot -Name 'library-android-progress'
+            }
+            Assert-AppHealthy -ExpectedProcessId $shelfLaunch.ProcessId
+        }
+
+        $defaultViewXPath = "//node[@package='$package' and @class='android.widget.Button' and @text='默认' and @clickable='true']"
+        Invoke-UiNode -XPath $defaultViewXPath
+        Wait-UiNode -XPath $bookXPath | Out-Null
+        Start-Sleep -Seconds 2
+        Save-UiScreenshot -Name 'library-android-default'
+
+        $selectXPath = "//node[@package='$package' and @class='android.widget.Button' and @text='选择' and @clickable='true']"
+        $selectAllXPath = "//node[@package='$package' and @class='android.widget.Button' and @text='全选' and @clickable='true']"
+        $cancelXPath = "//node[@package='$package' and @class='android.widget.Button' and @text='取消' and @clickable='true']"
+        Assert-UiNodeTouchTarget -XPath $selectXPath
+        Invoke-UiNode -XPath $selectXPath
+        Wait-UiNode -XPath "//node[@package='$package' and @text='选择书籍']" | Out-Null
+        Assert-UiNodeTouchTarget -XPath $selectAllXPath
+        Invoke-UiNode -XPath $selectAllXPath
+        Wait-UiNode -XPath "//node[@package='$package' and @text='取消全选']" | Out-Null
+        Wait-UiNode -XPath "//node[@package='$package' and @text='已选择 1 本']" | Out-Null
+        Start-Sleep -Seconds 2
+        Save-UiScreenshot -Name 'library-android-selection'
+        Assert-UiNodeTouchTarget -XPath $cancelXPath
+        Invoke-UiNode -XPath $cancelXPath
+        Wait-UiNode -XPath $selectXPath | Out-Null
+
+        Invoke-UiNode -XPath $selectXPath
+        Invoke-UiNode -XPath $selectAllXPath
+        $removeXPath = "//node[@package='$package' and @class='android.widget.Button' and @text='移出书架' and @clickable='true']"
+        Assert-UiNodeTouchTarget -XPath $removeXPath
+        Invoke-UiNode -XPath $removeXPath
+        Invoke-UiNode -XPath "//node[@resource-id='android:id/button1' and @clickable='true']"
+        Wait-UiNode -XPath "//node[@package='$package' and @text='开始你的书架']" | Out-Null
+        Assert-AppHealthy -ExpectedProcessId $shelfLaunch.ProcessId
+
+        $shelfLogs = Get-AthaPrivacyLogs -ProcessId $shelfLaunch.ProcessId
+        $shelfPrivateLogPattern = "$privateLogPattern|$([regex]::Escape($searchToken))"
+        if ($shelfLogs -match $shelfPrivateLogPattern) {
+            throw 'Android shelf UI logs exposed picker, book, or search details.'
+        }
+        $libraryShelfUiResult = 'passed'
+        $libraryShelfOrderingResult = 'not-asserted-single-book-emulator'
     }
 
     $evidenceDirectory = Join-Path $repoRoot 'artifacts\local\android'
@@ -585,8 +745,16 @@ if ($null -ne $resolvedBook) {
             cold_start_ready = $true
             startup_wait_ms = [long]$firstLaunch.StartupMs
         }
-        privacy = 'passed'
+        privacy = [ordered]@{
+            application_process_applog_logcat = 'passed'
+            boundary = 'process-scoped logcat plus persistent logs/Atha.log*; system picker process logs excluded'
+        }
         health = 'passed'
+        library_shelf_ui = [ordered]@{
+            requested = [bool]$VerifyLibraryShelfUi
+            result = $libraryShelfUiResult
+            ordering = $libraryShelfOrderingResult
+        }
         book = [ordered]@{
             format = $bookFormat
             fixture_sha256 = if ($VerifyEpub2NcxFixture -or $VerifyCbzFixture) { $bookSha256 } else { 'not-requested' }

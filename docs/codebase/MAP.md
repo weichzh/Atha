@@ -11,11 +11,11 @@
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
 | `backend/atha-backend/` | 正式后端库、书根资源边界、EPUB3、EPUB2 / NCX 子集与 CBZ JPEG / PNG 导入、本地书架、消息数据库与阅读遥测校验 | 本地已验证 |
-| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、应用壳、能力清单、受控协议和打包配置 | 已验证 |
+| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；离线搜索 / 进度 / 排序 / 批量选择书架、应用壳、能力清单、受控协议和打包配置 | Windows / Android 已验证 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry、固定字段平台日志与 protocol adapter | 已验证 |
 | `reader/app/src-tauri/src/platform_file.rs` | 普通路径与 Android SAF content URI 共用的流式 Picker cache bridge；RAII / 启动清理和输入大小边界 | Android 模拟器已验证 |
 | `reader/app/src-tauri/src/runtime_diagnostics.rs` | Windows Recorder 与移动端交互诊断的目标平台选择；固定事件 token 由 backend 统一校验 | Windows / Android 已验证 |
-| `reader/app/src-tauri/gen/android/`、`tauri.android.conf.json` | Tauri 官方 Android 工程、min SDK 26、compile / target SDK 36、manifest 与应用图标 | x86_64 debug 已验证 |
+| `reader/app/src-tauri/gen/android/`、`tauri.android.conf.json` | Tauri 官方 Android 工程、min SDK 26、compile / target SDK 36、manifest、应用图标与暗色系统栏样式 | x86_64 debug 已验证 |
 | `reader/app/src-tauri/src/message_commands.rs` | 消息 IPC adapter；统一阅读路由校验、DTO 转发、稳定错误和原生导出 dialog | 已验证 |
 | `reader/app/src-tauri/src/message_maintenance.rs` | 全库消息维护 IPC adapter；统一资料库根路由、备份 / 恢复 dialog 与 blocking worker | 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
@@ -35,11 +35,11 @@
 | `scripts/check-reader-wheel.ps1` | 真实浏览器媒体滚轮、连续离散输入接受率与输入到稳定页 P95 快速检查 | 已通过 |
 | `scripts/check-reader-gate.ps1` | 组合四样本、大书搜索、进程树内存、强杀恢复和固定 P95 性能门槛 | M2 R8 已通过 |
 | `scripts/check-tauri-reader.ps1` | Svelte production build、workspace Rust 检查、Tauri build、普通 EPUB 消息模式启动、导入探针与性能门槛 | 已通过 |
-| `scripts/check-android-reader.ps1` | 固定 16 KiB x86_64 AVD 的 APK 构建、badging / permission、ZIP / ELF 对齐、安装、冷启动，以及 opt-in 的干净数据 picker 导入 / 打开 / 重启持久检查 | 模拟器 EPUB 纵切已通过 |
+| `scripts/check-android-reader.ps1` | 固定 16 KiB x86_64 AVD 的 APK 构建、对齐、安装、冷启动，以及 opt-in picker / 阅读恢复、书架搜索 / 视图 / 选择 / 移出、截图与双日志隐私检查 | 模拟器 EPUB / CBZ / 书架纵切已通过 |
 | `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build、Tauri/host 测试及 command / permission 映射 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/check-cbz-source.ps1` | 动态原创 CBZ、workspace Rust 检查、导入形状与 Windows WebView2 import probe | Windows 已通过 |
-| `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 无参数启动与移动书架 UI | M4 已通过 |
+| `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 无参数启动，以及四视口搜索 / 视图 / 菜单 / 触控 / 安全区 UI 检查 | Windows 已通过 |
 | `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
 | `scripts/Measure-Workflow.ps1` | schema v1/v2 本机流程日志、兼容汇总与自检 | 本地已验证 |
 | `docs/agents/workflow.md`、`docs/agents/references.md` | 全局工作流的项目契约，以及外部技术的官方入口和快速用法 | 已配置 |
@@ -74,7 +74,7 @@
 - 阅读页内部设备像素尺寸跟随 WebView 视口与 DPR，使用 CSS 多栏并以 `1 / devicePixelRatio` 隔离系统 DPI；移动阅读壳层默认沉浸，48 CSS px 工具栏只覆盖固定 144 设备像素的页眉页脚安全区且不参与分页；文字、公式和原子内容均有布局后裁切检查；
 - Windows 窗口与壳层控件使用系统逻辑像素，默认内部尺寸为 430 × 820，最小为 360 × 640，可自由调整和最大化；窗口变化经 Navigation 队列恢复 Locator；
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
-- Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，Vite 直接拼接十八份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
+- Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，书架只对受限 DTO 做本地标题 / 作者搜索、严格进度二态、稳定排序与显式批量选择；Vite 直接拼接十八份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle；
 - Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle、固定字段平台日志与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目，不返回源路径或内容；`message_commands` adapter 统一校验当前阅读窗口并转发受限 DTO，`message_maintenance` adapter 只接受资料库根路由并在 blocking worker 执行全库备份 / 恢复；动态 `atha-book` 提供当前正文，独立 `atha-cover` 只读提供已登记封面；阅读器遥测复用后端白名单解析和共享 diagnostics，reader failure 额外携带固定阶段；官方日志插件只持久化 `atha::` target 的启动、导入 / 打开、reader 首稳 / ready / failure 和 protocol 5xx 数值事件，1 MiB 轮转并保留三份，不记录书籍或消息内容；消息专项检查精确核对 handler 注册与 permission；
 
 ### Android EPUB 纵切
@@ -87,6 +87,7 @@
 - Android `ACTION_CREATE_DOCUMENT` 会先创建 provider 文档；完整 cache 制品向 content URI 复制时若失败，provider 可能留下不完整目标。Atha 会报告失败并清空自身 cache，但不能对所有 provider 承诺删除外部残留；
 - 当前最高证据是 x86_64 模拟器功能链路，不覆盖 ARM 真机的内存、I/O、WebView 或词典性能，也不是签名发布证据。
 - CBZ 共用同一 Android picker、私有数据根、reader runtime 和 Locator 恢复链路；`-VerifyCbzFixture` 已验证逐页、坏页继续、日志隐私与 app PSS，并在 renderer 不能唯一归因时明确不生成数值。
+- 离线书架的 opt-in AVD 门使用真实本地 EPUB，在干净数据上覆盖导入后的本地搜索、默认 / 进度 / 书名 / 作者、选择 / 全选 / 取消 / 批量移出、返回空态、44 CSS px 触控、应用健康和 logcat / `Atha.log*` 隐私扫描；受限原生 bridge 按黑色书架与阅读主题同步系统栏图标明暗。证据仍是单书模拟器链路，不冒充多书排序、ARM 真机或大书架性能。
 
 ## 已实现能力
 
@@ -123,6 +124,7 @@
 | 后端 | `scripts/check-backend.ps1` | Windows 本地构建、lint、测试与文档 |
 | 阅读内核 | `scripts/check-reader-samples.ps1`、`scripts/check-reader-gate.ps1` | 真实 Windows WebView2 困难样本、恢复、内存与性能门槛 |
 | 产品入口 | `scripts/check-tauri-reader.ps1`、`scripts/check-library-shelf.ps1` | 真实 Windows Tauri / WebView2 本地链路 |
+| 离线书架 | `node --test reader/app/tests/library.test.ts`、`scripts/check-library-shelf.ps1`、`scripts/check-android-reader.ps1 -VerifyLibraryShelfUi` | 搜索 / 排序 / 严格进度 / 部分失败逻辑，Windows 真壳与四视口渲染，以及 API 35 x86_64 16 KiB AVD 单书交互、截图和双日志隐私检查 |
 | 消息与数据 | `scripts/check-message-reading.ps1`、`scripts/check-tauri-reader.ps1` | 真实 Windows Tauri / WebView2 消息闭环，以及本地集成测试、前端构建、Tauri seam 与权限检查 |
 | Android EPUB 纵切 | `scripts/check-android-reader.ps1`；活动 change 记录的消息 SAF opt-in 链路 | API 35 x86_64 16 KiB 模拟器上的构建、安装、冷启动、系统 picker 导入 / 打开 / 重启持久，以及消息 export / backup / restore；不是 ARM 真机性能证据 |
 | EPUB2 / NCX 子集 | `cargo test -p atha-backend --test epub_import`、EPUBCheck 5.3.0、`scripts/check-android-reader.ps1 -VerifyEpub2NcxFixture` | 动态原创 fixture 通过规范 oracle；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证目录跳转和强停后同一 section / page 恢复 |
@@ -136,7 +138,7 @@
 
 | 类别 | 当前缺口 |
 | --- | --- |
-| 产品回流 | 书架没有文件关联、拖放、分组、排序设置或最近阅读；尚未用日常使用验收确认哪些真的阻塞主循环 |
+| 产品回流 | 书架没有文件关联、拖放、分组或最近阅读；尚无多书 Android 排序、超大书架滚动与虚拟化性能证据 |
 | 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；CBZ 首版只有 JPEG / PNG，不含 RTL / spread / 区域标注；未完成 UTF-16、DTBook、完整 fallback、其他格式来源、跨内容版本 Locator 重锚定或富文本迁移 |
 | 数据与设备 | 没有加密、checkpoint、全应用备份或跨设备同步 |
 | 交付 | 没有 CI、Windows 安装包或签名 Android 发布包；Android 当前只验证 x86_64 debug APK 与模拟器 |

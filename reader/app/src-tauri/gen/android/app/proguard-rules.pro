@@ -12,6 +12,10 @@
 #   public *;
 #}
 
+-keepclassmembers class com.atha.reader.SystemBarsBridge {
+    public void setDarkBackground(boolean);
+}
+
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable

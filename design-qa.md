@@ -72,3 +72,28 @@
 - [x] 两层工具栏与 Markdown/可视双向切换通过真实 WebView2 检查。
 
 final result: passed
+
+---
+
+# 离线书架设计 QA
+
+## 输入与归一
+
+- 参考：`fixtures/local/weread/bookshelf-grid.jpg`、`bookshelf-progress.jpg`、`bookshelf-selection.jpg`，均为 582 × 1280；
+- 实现：`artifacts/local/screenshots/library-android-default.png`、`library-android-progress.png`、`library-android-selection.png`，来自 `Atha_API_35_16K` 的 1344 × 2992 真实应用帧；
+- 对比：`library-compare-default.png`、`library-compare-progress.png`、`library-compare-selection.png` 将两侧统一为 1280 px 高并排检查；
+- 系统栏复验：`reader-system-bars-themes-contact.png` 并排记录同一最终 APK 的 light、paper、dark、system-dark 与 system-light 阅读态；
+- 状态对应为默认书架、进度页和已选择一本。实现只使用用户本机书籍，不把书名、作者、路径或内容写入验收记录。
+
+## 可见差异与处理
+
+- P1：首轮 Android 暗色页仍使用深色系统状态栏图标。已用受限的原生 bridge 按黑色书架及 system / light / paper / dark 阅读主题同步系统栏图标明暗，复验后时间、网络和电量图标均清晰可见；
+- P2：冷启动后的第一张模拟器 `screencap` 偶尔早于 WebView 合成完成。正式门改为先走完实际视图交互、回到对应状态并等待两秒再取证；最终三态帧完整；
+- 参考中的书城、推荐、更新、分类、私密阅读、分享、有声书和底部在线导航按产品范围删除；实现保留本地搜索、默认 / 进度 / 书名 / 作者、导入、选择和批量移出；
+- 参考使用满书架，验收使用一个真实本地样本。三列尺寸、留白、文字层级、蓝色激活态、选中标记和底部危险操作的位置仍可直接比较。
+
+## 结论
+
+默认、进度、选择三态未发现未关闭的 P0、P1 或 P2。360 × 800、412 × 915、768 × 1024、1280 × 900 的本地渲染门和 Android 1344 × 2992 真应用门均通过；交互、触控、安全区、状态栏和空态由正式脚本覆盖。
+
+final result: passed

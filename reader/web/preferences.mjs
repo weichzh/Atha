@@ -22,6 +22,17 @@ const LINE_HEIGHT_RATIOS = Object.freeze({
 export function createPreferences({ root, reader, content, controls, assert }) {
   let application = { ...APPLICATION_DEFAULTS };
   let book = { ...BOOK_DEFAULTS };
+  const darkScheme = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
+
+  function syncSystemBars() {
+    globalThis.AthaSystemBars?.setDarkBackground?.(
+      application.theme === "dark" || (application.theme === "system" && darkScheme?.matches),
+    );
+  }
+
+  darkScheme?.addEventListener?.("change", () => {
+    if (application.theme === "system") syncSystemBars();
+  });
 
   function ensure(condition) {
     if (!condition) throw new Error("invalid-preference");
@@ -98,6 +109,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       root.dataset.theme = application.theme;
       content.book.dataset.theme = application.theme;
     }
+    syncSystemBars();
     root.style.setProperty("--reader-brightness", String(application.brightness / 100));
     if (application.fontFamily === "book") delete content.book.dataset.fontFamily;
     else content.book.dataset.fontFamily = application.fontFamily;

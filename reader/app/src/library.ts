@@ -18,11 +18,148 @@ export interface ImportReport {
   failures: ImportFailure[];
 }
 
+export type LibraryViewMode = "default" | "progress" | "title" | "author";
+
+export interface BatchRemoveResult {
+  books: LibraryBook[] | null;
+  removedIds: string[];
+  remainingIds: string[];
+}
+
 interface ReaderLaunch {
   href: string;
 }
 
-export const libraryAvailable = Boolean(window.__TAURI_INTERNALS__);
+type StorageReader = Pick<Storage, "getItem">;
+
+const MAX_STATE_LENGTH = 524_288;
+const MAX_LOCATOR_LENGTH = 2_048;
+const MAX_TEXT_OFFSET = 2_147_483_647;
+const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+
+export const libraryAvailable =
+  typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+
+function normalized(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase();
+}
+
+function exactKeys(value: object, expected: string[]): boolean {
+  const keys = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return keys.length === wanted.length && keys.every((key, index) => key === wanted[index]);
+}
+
+function validPoint(value: unknown): value is { section: string; offset: number } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      exactKeys(value, ["offset", "section"]) &&
+      typeof Reflect.get(value, "section") === "string" &&
+      /^[a-z0-9][a-z0-9._-]{0,63}$/.test(Reflect.get(value, "section") as string) &&
+      Number.isInteger(Reflect.get(value, "offset")) &&
+      (Reflect.get(value, "offset") as number) >= 0 &&
+      (Reflect.get(value, "offset") as number) <= MAX_TEXT_OFFSET,
+  );
+}
+
+function validLocator(serialized: unknown, contentVersion: string): boolean {
+  if (
+    typeof serialized !== "string" ||
+    serialized.length === 0 ||
+    serialized.length > MAX_LOCATOR_LENGTH
+  ) {
+    return false;
+  }
+  try {
+    const value: unknown = JSON.parse(serialized);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const hasEnd = Object.hasOwn(value, "end");
+    if (!exactKeys(value, hasEnd ? ["contentVersion", "end", "schema", "start"] : ["contentVersion", "schema", "start"])) {
+      return false;
+    }
+    if (Reflect.get(value, "schema") !== 1 || Reflect.get(value, "contentVersion") !== contentVersion) {
+      return false;
+    }
+    const start = Reflect.get(value, "start");
+    if (!validPoint(start)) return false;
+    if (!hasEnd) return true;
+    const end = Reflect.get(value, "end");
+    return validPoint(end) && end.section === start.section && end.offset >= start.offset;
+  } catch {
+    return false;
+  }
+}
+
+function validProgress(raw: string | null, contentVersion: string): boolean {
+  if (raw === null || raw.length > MAX_STATE_LENGTH) return false;
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        exactKeys(value, ["contentVersion", "locator", "schema"]) &&
+        Reflect.get(value, "schema") === 1 &&
+        Reflect.get(value, "contentVersion") === contentVersion &&
+        validLocator(Reflect.get(value, "locator"), contentVersion),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function filterLibraryBooks(
+  books: LibraryBook[],
+  query: string,
+  view: LibraryViewMode,
+): LibraryBook[] {
+  const term = normalized(query.trim());
+  const result = term
+    ? books.filter((book) =>
+        normalized(`${book.title}\n${book.authors.join("\n")}`).includes(term),
+      )
+    : [...books];
+  if (view === "title") {
+    result.sort((left, right) => collator.compare(left.title, right.title));
+  } else if (view === "author") {
+    result.sort((left, right) => {
+      const leftAuthor = left.authors.join(" / ");
+      const rightAuthor = right.authors.join(" / ");
+      if (!leftAuthor) return rightAuthor ? 1 : 0;
+      if (!rightAuthor) return -1;
+      return collator.compare(leftAuthor, rightAuthor);
+    });
+  }
+  return result;
+}
+
+export function readStartedBookIds(
+  books: LibraryBook[],
+  storage?: StorageReader | null,
+): Set<string> | null {
+  try {
+    const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+    if (!target) return null;
+    const result = new Set<string>();
+    for (const book of books) {
+      if (!/^[a-f0-9]{64}$/.test(book.id)) continue;
+      const key = `atha.reader.progress.${book.id.slice(0, 16)}.v1`;
+      if (validProgress(target.getItem(key), book.id)) result.add(book.id);
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+export function groupLibraryBooksByProgress(books: LibraryBook[], startedIds: Set<string>) {
+  return {
+    reading: books.filter((book) => startedIds.has(book.id)),
+    unread: books.filter((book) => !startedIds.has(book.id)),
+  };
+}
 
 export async function listBooks(): Promise<LibraryBook[]> {
   if (!libraryAvailable) return [];
@@ -49,6 +186,23 @@ export async function openBook(id: string): Promise<void> {
 
 export function removeBook(id: string): Promise<LibraryBook[]> {
   return invoke<LibraryBook[]>("remove_library_book", { id });
+}
+
+export async function removeBooksSerially(
+  ids: string[],
+  removeOne: (id: string) => Promise<LibraryBook[]> = removeBook,
+): Promise<BatchRemoveResult> {
+  const removedIds: string[] = [];
+  let books: LibraryBook[] | null = null;
+  for (const [index, id] of ids.entries()) {
+    try {
+      books = await removeOne(id);
+      removedIds.push(id);
+    } catch {
+      return { books, removedIds, remainingIds: ids.slice(index) };
+    }
+  }
+  return { books, removedIds, remainingIds: [] };
 }
 
 export function coverUrl(id: string): string {
