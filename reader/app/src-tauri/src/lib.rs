@@ -626,7 +626,7 @@ fn interactive_diagnostics() -> Result<RuntimeDiagnostics, Box<dyn Error>> {
 
 #[cfg(not(windows))]
 fn interactive_diagnostics() -> Result<RuntimeDiagnostics, Box<dyn Error>> {
-    Ok(RuntimeDiagnostics::default())
+    Ok(RuntimeDiagnostics)
 }
 
 #[cfg(windows)]

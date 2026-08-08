@@ -1,0 +1,6 @@
+# Description: Project-managed development tool versions.
+
+[tools]
+java = "temurin-21.0.12+8.0.LTS"
+node = "24.1.0"
+pnpm = "11.19.0"

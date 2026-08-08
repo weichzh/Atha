@@ -43,11 +43,28 @@ pwsh -NoProfile -File .\scripts\Invoke-Atha.ps1 report
 
 ## 本地开发环境
 
-Windows 开发机复制 `env/example.ps1` 为 `env/local.ps1`，并填写本机的 `cargo`、`cmake`、`ctest`、`node`、`pnpm` 和 `sqlite3` 路径；Android 开发还需填写 JDK、Android SDK 与 NDK 路径。`env/local.ps1` 已被 Git 忽略；检查脚本统一加载它，不依赖当前 Shell 的 `PATH`。Linux 测试主机的实时路径、SSH 别名与 GNOME Wayland 启动约定以用户级 `$CODEX_HOME/HOSTS.md` 为准，不写死在仓库。
+Linux / macOS 的 Bash 开发机使用项目根 `.mise.toml` 管理 Node、pnpm 和 JDK，先运行：
+
+```bash
+mise install
+mise exec -- pnpm --dir reader/app install --frozen-lockfile
+mise exec -- pnpm --dir reader/app check
+mise exec -- cargo build --workspace --locked
+```
+
+Rust 版本继续由 `rust-toolchain.toml` 固定。Windows 开发机复制 `env/example.ps1` 为 `env/local.ps1`，并填写本机的 `cargo`、`cmake`、`ctest`、`node`、`pnpm` 和 `sqlite3` 路径；Android 开发还需填写 JDK、Android SDK 与 NDK 路径。`env/local.ps1` 已被 Git 忽略；检查脚本统一加载它，不依赖当前 Shell 的 `PATH`。Linux 测试主机的实时路径、SSH 别名与 GNOME Wayland 启动约定以用户级 `$CODEX_HOME/HOSTS.md` 为准，不写死在仓库。
 
 Tauri 阅读器的完整本地检查入口是 `pwsh -NoProfile -File .\scripts\check-tauri-reader.ps1`。旧 `atha-reader-host` 暂时保留为 Wry/Tao 性能与安全基线，不是新的产品界面入口。
 
 Android 本地门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36 与 min SDK 26。启动 API 36、x86_64、16 KiB 页面的 `Atha_API_36_16K` AVD 后运行：
+
+```bash
+JAVA_HOME="$(mise where java)" \
+ANDROID_HOME="$HOME/Android/Sdk" \
+ANDROID_SDK_ROOT="$HOME/Android/Sdk" \
+ANDROID_NDK_HOME="$HOME/Android/Sdk/ndk/28.2.13676358" \
+mise exec -- pnpm --dir reader/app tauri android build --debug --target x86_64 --apk --ci
+```
 
 ```powershell
 pwsh -NoProfile -File .\scripts\check-android-reader.ps1 -BookPath 'C:\path\to\book.epub' -CleanAppData

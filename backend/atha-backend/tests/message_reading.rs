@@ -71,6 +71,16 @@ fn link_directory(target: &Path, link: &Path) {
 }
 
 #[cfg(windows)]
+fn remove_directory_link(link: &Path) {
+    fs::remove_dir(link).expect("remove directory junction");
+}
+
+#[cfg(unix)]
+fn remove_directory_link(link: &Path) {
+    fs::remove_file(link).expect("remove directory symlink");
+}
+
+#[cfg(windows)]
 fn link_file(target: &Path, link: &Path) {
     std::os::windows::fs::symlink_file(target, link).expect("create file symlink");
 }
@@ -855,7 +865,7 @@ fn message_store_rejects_linked_assets_directory() {
         MessageStore::open(&root.0),
         Err(atha_backend::messages::MessageError::InvalidRoot)
     ));
-    fs::remove_dir(&assets).expect("remove linked assets directory");
+    remove_directory_link(&assets);
 }
 
 #[test]
