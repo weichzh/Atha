@@ -1,219 +1,186 @@
 ---
-description: 评估 Atha 离线词典引擎、样本兼容性、Android 性能验证与版权边界。
+description: 评估 Atha 离线词典引擎候选、样本兼容性、模块边界与性能验证方案。
 ---
 
-# 词典引擎评估
+# 离线词典引擎评估
 
-> 调研日期：2026-08-07。本文只处理离线词典导入、查词与性能边界，不决定通用阅读格式解析方案。
+> 调研更新：2026-08-09。本文只处理 Kindle 词典与 MDict 的技术选型，不决定在线词典、系统词典或通用阅读格式解析方案。
 
-## 结论
+## 执行结论
 
-1. 不应从零实现 MOBI 的 HUFF/CDIC、INDX/INFL，也不应先建立统一转换框架。MOBI 首选用 `libmobi 0.12` 做 Android 实机 P0：它覆盖经典 MOBI、KF8、HUFF/CDIC 和词典索引，且明确支持 Android。Atha 只保留一层很薄的 Rust/FFI 边界。是否进入产品取决于样本上的内存、随机查词延迟、崩溃隔离和 LGPL 分发审查。
-2. Merriam-Webster 样本不是 MOBI，而是 MDict v2 的 `.mdx + .mdd` 配对。技术上最贴近 Atha 后端的是 Rust 的 `mdict-rs`，但它在 2026 年 4 月才进入早期公开版本，许可证是 AGPL-3.0-only 或商业许可。Readest 已用其 `js-mdict` 分支证明“按需范围读取 + MDict encrypt=2 + MDD 资源”路线可行，但该代码同样受 AGPL 约束。Atha 在许可证明确前只能做隔离 P0，不能复制或链接这些实现进入产品。
-3. Android 应先于桌面成为性能门槛。查词热路径必须保持“原生索引定位 → 只读目标压缩块 → 解析一个词条 → 按需取资源”，不能把约 204 MiB 的 Bing 解压文本常驻内存。优先利用操作系统页缓存、单个已打开的 reader 和有上限的块缓存；只有实测证明必要时再增加转换索引或缓存依赖。
-4. 两个本地样本都有较高版权风险，且没有随文件提供的可再分发许可证。它们可以作为用户本机、显式启用、不输出正文的兼容性与性能样本；不能加入 Git、公共 CI、测试产物或日志，也不能从中截取“小样本”提交。公开测试应使用自制的结构型词条或来源及数据许可证都明确的开放词典。
-5. Bing 样本只覆盖 MOBI6 经典词典，不覆盖 KF8 词典；Merriam-Webster 样本覆盖 MDict v2、encrypt=2 和配套资源。两者通过不等于“所有 MOBI/KF8/MDict 均受支持”。
+1. **MDict 首个真实切片采用 `mdict-rs 0.1.4`。** 本机 P0 已覆盖匿名 MDict v2、`encrypt=2`、三次精确查词、miss 和 MDD 范围流式读取，性能与内存明显低于首轮预算；实施时直接使用这一个固定依赖，不再增加 provider 接口、工厂或 sidecar。
+2. **Kindle 词典没有一个可以原样接入且同时满足成熟度、随机访问和移动端内存目标的现成库。** `boko 0.5.0` 已能解析普通 MOBI/KF8 和 HUFF/CDIC，但没有实现词典 `orth/infl/names/keys` 语义；`libmobi 0.12` 的词典覆盖最成熟，却以完整 RawML 重建为中心，已不符合当前样本的交互式查词热路径。首个 Kindle 切片应在 Atha 中建立独立、最小的解析模块，复用既有 PalmDB 边界检查，并只借鉴成熟实现中的 INDX/TAGX 与 HUFF/CDIC 算法。
+3. **成熟度问题通过窄范围与真实预算控制，不通过抽象层掩盖。** MDict 先只承诺当前样本证明的 v2 路径；Kindle 先只承诺经典 MOBI6 词典的精确查词。Readest、GoldenDict-ng 和 `libmobi` 是固定版本的行为 oracle，不作为新的运行时栈。许可证只记录，不作为本项目的淘汰条件；决定因素是正确性、范围读取、内存和维护风险。
+4. **日常回归以 Linux GUI 为主，PCT-AL10 是后续真实设备性能门槛。** 2026-08-09 已恢复该机的 ADB 访问，当前只证明 USB/ADB 链路可用，尚没有应用安装、查词或 PSS 通过结论。Linux 结果仍不能代替 ARM 真机验收。
+5. **本地词典样本只作为匿名、显式启用的私有 fixture。** 文档、日志、截图、benchmark 产物和公共 CI 不记录原文件名、路径、哈希、查询词、正文或资源内容。
 
-本文中的“事实”来自官方文档、项目源码/文档或本机只读探针；“推断”是由这些证据得到但尚未经过 Atha 运行验证的判断；“建议”是下一阶段的实现选择。
+本文区分四类证据：**官方事实**来自项目固定版本的源码、包元数据或官方文档；**源码观察**是对固定源码的直接阅读；**当前实测**来自 Atha 本机探针；**建议**是尚待实现和验证的工程选择。
 
-## 本地样本证据
+## 当前样本与证据边界
 
-本节探针只读取文件头、记录表、公开元数据、大小与哈希；没有转换、解包、复制或读取词条正文。
-
-### 样本清单
-
-| 样本 | 实际形态 | 大小 | SHA-256 | 本机只读探针结论 |
-| --- | --- | ---: | --- | --- |
-| `fixtures/local/concise-bing.mobi` | 单个 Palm Database / `BOOKMOBI` 文件 | 99,081,920 B（94.49 MiB） | `BDCCCE6252118D65873BBDC02578647A7A8C16108B6062FC368004E2E8F66DC7` | MOBI6、HUFF/CDIC、Windows-1252、无 DRM、经典词典索引 |
-| `Webster's Third New International Dictionary of the English Language.mdx` | MDict v2 主词典 | 39,801,145 B（37.96 MiB） | `4BC4391042D2401AF8DEFC965BDB6F21BCE807E515A0343C68C9260A432F1777` | HTML、UTF-8、`Encrypted=2`、`StripKey=Yes` |
-| 同名 `.mdd` | MDict v2 资源包 | 18,472,829 B（17.62 MiB） | `E41284757741BE37043E52CACD274D9CBAD0CE8176B119853CD14AD8BB81B0D6` | 与 MDX 配套的资源容器、`Encrypted=2` |
-
-Merriam-Webster 目录共两个文件，合计 58,273,974 B（55.57 MiB）。标题元数据显示为 *Webster's Third New International Dictionary, Unabridged*，生成/要求引擎版本均为 2.0，创建日期为 2009-12-28。这些值只是文件自报元数据，不证明来源、正版状态或授权范围。
-
-### Bing MOBI 的结构证据
-
-事实：
-
-- PalmDB 名称为 `Concise_Bing_Dictionary`，类型/创建者为 `BOOKMOBI`，记录数为 53,467。
-- Record 0 声明 MOBI 格式版本 6、压缩类型 HUFF/CDIC、52,436 个文本记录、每个文本记录 4,096 B，未压缩文本总长 214,196,224 B（204.27 MiB），加密类型为 0。
-- 正字索引记录号为 52,437；现代 `infl_index` 字段为 `0xFFFFFFFF`，但 `names` 与 `keys` 索引均存在。
-- 词典输入 LCID 为 `0x0409`（en-US），输出 LCID 为 `0x0004`（中文中性区域）；封面/资源区域与 HUFF 数据记录也存在。
-
-推断：这是经典 MOBI6 词典，可能使用 `libmobi` 所称的旧版 v1 屈折变化重建路径，而不是现代显式 `infl_index`。它很适合暴露大记录表、HUFF/CDIC 解压、Windows-1252 解码、正字索引与旧式屈折索引问题；但它不是 KF8 覆盖证据。
-
-### Merriam-Webster MDict 的结构证据
-
-事实：
-
-- MDX 与 MDD 都以 MDict v2 的 UTF-16LE XML 头开始；MDX 声明 `Format=Html`、`Encoding=UTF-8`、`Encrypted=2`，MDD 也声明 `Encrypted=2`。
-- 两个文件同名配对。MDX 是键与词条数据，MDD 是图片、样式等资源的伴随容器。
-- `Encrypted=2` 是候选实现所称的关键字索引混淆/加密模式，不等同于要求用户口令的词条记录加密（通常称 encrypt=1）。
-
-推断：该样本适合验证 MDict v2、加密关键字索引、HTML 词条和 MDD 懒加载资源；目前没有在 Atha 或候选库中执行实际查词，因此不能声称已经兼容。
-
-## 格式事实与成熟实现
-
-### MOBI/KF8 词典
-
-Amazon 的官方词典制作文档定义的是源内容标记：每个词条由 `<idx:entry>` 包围，查找标签用 `<idx:orth>`，不可见的屈折形式用嵌套的 `<idx:infl>` 与 `<idx:iform>`；旧的 `<idx:key>` 已被弃用。Amazon 还明确提醒，给所有词都增加大量屈折形式会扩大索引并降低查找速度。[Amazon KDP 词典指南](https://kdp.amazon.com/en_US/help/topic/G2HXJS944GL88DNV)、[Kindle Publishing Guidelines](https://s3.amazonaws.com/kindlegen/AmazonKindlePublishingGuidelines.pdf)
-
-官方文档没有公开描述最终 MOBI 二进制中的 INDX/TAGX/ORDT 编排。对二进制兼容的判断必须以成熟开源解析器和真实样本测试为准，不能把源标记规范直接当作二进制解析规范。
-
-`libmobi` 是当前首选候选：
-
-- C 实现，许可证为 LGPL-3.0-or-later；0.12 版本发布于 2024-06-17。
-- 项目声明支持 PalmDoc、MOBI、KF8/AZW3/AZW4、HUFF/CDIC、索引以及 Linux、macOS、Windows、Android 等目标。
-- 源码/生成文档提供词典正字和屈折索引检查、词条偏移/长度导出，以及经典旧式词典屈折结构的重建路径。
-- 它处理不可信二进制的边界仍在 C 内，项目历史也包含损坏输入的整数、空指针与泄漏修复。Atha 必须在 FFI 前做文件大小/记录边界限制，并把崩溃、越界与峰值内存列入 P0，而不是只验证“能打开”。
-
-来源：[libmobi 仓库](https://github.com/bfabiszewski/libmobi)、[MOBI header 文档](https://www.fabiszewski.net/libmobi/structMOBIMobiHeader.html)、[索引实现文档](https://www.fabiszewski.net/libmobi/index_8c.html)、[导出 API](https://www.fabiszewski.net/libmobi/group__mobi__export.html)、[RawML/词典重建](https://www.fabiszewski.net/libmobi/parse__rawml_8c.html)
-
-需要特别验证 `libmobi` 的加载模型。其 API 以 `MOBIData` 原始记录和 `MOBIRawml` 为中心，但仅凭 API 不能断言运行时只做范围读取。P0 必须记录打开阶段的实际读取字节数与 PSS；如果打开一个 94.49 MiB 文件就复制或展开绝大部分数据，则不能直接作为 Android 常驻 reader。
-
-### MDict 与 Readest
-
-本次没有找到格式所有者发布的 MDict v2 二进制规范。候选库的兼容性来自开源实现、测试语料和 Readest 的产品实践，因此 Atha 必须用本地样本验证，不能按扩展名承诺兼容。
-
-Readest 的自定义词典实现提供了值得复用的架构证据：
-
-- MDict 使用 Readest 的 `js-mdict` 分支；文件扫描器通过 `Blob.slice(...).arrayBuffer()` 做按需范围读取，并补全 encrypt=2 的 RIPEMD-128 解密路径。
-- StarDict 不把整个 `.idx` 展成大量 JavaScript 字符串，而是保存紧凑字节偏移数组并二分查找；DictZip 也只解压目标块。
-- Readest 随后在移动端增加系统词典集成；Android 路径使用只读的 `ACTION_PROCESS_TEXT`，可作为可选降级，但它不能替代用户导入的离线文件。
-
-来源：[Readest 自定义 MDict/StarDict PR](https://github.com/readest/readest/pull/4012)、[Readest 系统词典 PR](https://github.com/readest/readest/pull/4219)、[Android `ACTION_PROCESS_TEXT`](https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT)
-
-这些是“架构证据”，不是可直接复制的代码。Atha 已采用 `AGPL-3.0-or-later`，但 Readest 与上游 `js-mdict` 的精确 `-only` / `-or-later`、版权与修改说明仍需单独核对；项目采用 AGPL 不等于可以无出处复制。
-
-`mdict-rs` 是更符合 Rust 后端的候选。项目文档声明其为 clean-room、按需读取的 MDX/MDD v2 实现，支持加密关键字索引、MDD 资源、zlib、可选 LZO、多种文本编码、边界校验和模糊测试；但 0.1.0 到 0.1.4 都发布于 2026 年 4 月，项目自称早期公开版本，许可证为 AGPL-3.0-only 或商业许可。[mdict-rs 0.1.4](https://docs.rs/crate/mdict-rs/0.1.4)、[mdict-rs API](https://docs.rs/mdict-rs/latest/mdict_rs/)
-
-因此对 MDict 的结论是：技术方向明确，生产依赖尚未批准。`mdict-rs` 的 `AGPL-3.0-only` 与 Atha 的 `AGPL-3.0-or-later` 不能仅凭名称相近自动判定兼容；生产接入前必须完成精确组合许可判断，否则询价商业许可或重新检索可兼容且能通过本样本的实现。不能为了绕开许可证而照着 AGPL 源码重写。
-
-### 候选矩阵
-
-| 候选 | 覆盖与优势 | 主要限制 | 决策 |
+| 匿名样本 | 当前实测 | 能证明什么 | 不能证明什么 |
 | --- | --- | --- | --- |
-| [`libmobi`](https://github.com/bfabiszewski/libmobi) | MOBI/KF8、HUFF/CDIC、词典索引、Android；项目成熟度最高 | C FFI；LGPL 分发义务；范围读取和峰值内存需实测 | MOBI Android P0 首选 |
-| [`kindling`](https://github.com/ciscoriordan/kindling) | MIT Rust；可构建词典、检查 MOBI 二进制和模拟查词；覆盖 INDX/ORDT/屈折结构 | 2026 年新项目；更偏构建/验证；未证明能解析本样本的 HUFF/CDIC | 用作自制 fixture 生成器和结构 oracle，不作首版运行时 |
-| [`mobi` crate](https://docs.rs/mobi/latest/mobi/) | MIT、纯 Rust、基础 MOBI 读取 | 公开实现只看到 PalmDOC 解压，未提供完整 HUFF/CDIC 词典索引查找 | 不用于 Bing 样本运行时 |
-| [`KindleUnpack`](https://github.com/kevinhendricks/KindleUnpack) | 长期使用的 Python/GPL 反向工程与解包工具 | 桌面 Python 工具，不适合 Android 运行时；GPL | 仅作开发期交叉验证 |
-| [`mdict-rs`](https://docs.rs/crate/mdict-rs/0.1.4) | 纯 Rust、懒读取、MDX/MDD v2、encrypt=2、安全边界 | 很新；AGPL-3.0-only 或商业许可 | 许可证获批后的 MDict P0 首选 |
-| [Readest `js-mdict` 路线](https://github.com/readest/readest/pull/4012) | 已在同类阅读器实现懒读取、encrypt=2 与资源解析 | JS/Blob 边界；AGPL；不符合 Atha 后端事实所有权 | 学习架构与行为，不复制实现 |
+| `KINDLE-D` | MOBI6、HUFF/CDIC、Windows-1252，存在正字索引 | 经典 Kindle 词典头部探测和旧式索引路径需要被覆盖 | KF8、DRM、现代显式 INFL 或实际查词已兼容 |
+| `MDX-A` / `MDD-A` | MDict v2，`encrypt=2`，主词典与资源包配对 | v2 加密关键字索引和资源解析是首个 MDict 验收面 | MDict v1、口令/记录加密或所有压缩组合 |
 
-`Calibre`/`ebook-meta` 与 KindleUnpack 可以在开发机上做元数据和导出结果的交叉检查，但不能作为移动端依赖或性能基线。工具“能完整导出”也不代表它适合低延迟、低内存的交互式查词。
+已有性能证据也必须正确解读：
 
-## 建议的首版架构
+- `KINDLE-D` 的格式早期拒绝路径做过 10 次运行，P95 为 3.1 ms、RSS 为 6148 KiB。这只证明分派和拒绝足够便宜，不是查词性能。
+- 既有普通书籍模型曾把该词典展开为约 130 万节并达到约 1.7 GiB 内存；`libmobi` 完整源码重建在 120 秒观察窗口内没有完成。两项结果都支持“不能先展开整本词典”，但不代表最小随机访问解析一定达不到目标。
+- `mdict-rs 0.1.4` 的 Linux x86_64 release P0 做了 10 次 open 和 20 次匿名查询：MDX open P50/P95 为 0.127/0.462 ms，三次精确查词 P50/P95 为 1.583/1.653 ms；MDD open P50/P95 为 0.027/0.074 ms，三次资源流式读取 P50/P95 为 0.901/1.452 ms；进程峰值 RSS 为 3308 KiB。该结果足以进入产品实现，但不是 Linux GUI 或 Android 验收。
+- PCT-AL10 的 ADB 链路已经可用，尚未执行安装、查词、PSS、Perfetto 或 UI 链路验证。
 
-### 导入与存储
+## Readest 现状
 
-1. Android 通过 Storage Access Framework 选择文件；后台流式复制到应用私有目录并同时计算内容哈希。复制一次可以获得稳定的随机访问和生命周期，不在每次查词时依赖外部 URI 权限或云盘提供者延迟。
-2. 先检查魔数、头部、记录边界与声明大小，再相信扩展名。MDX 可以独立导入；发现同名 MDD 时作为可选资源配对，缺失资源不能让纯文本词条完全不可用。
-3. SQLite 首版只保存词典注册信息：内容哈希、应用内相对路径、格式、标题、输入/输出语言、启用状态、排序、文件大小、解析器版本和导入状态。不要预先把所有正文复制到统一表，也不要先建立通用 provider 插件框架。
-4. 运行时按已支持的具体格式分派，例如 `Mobi` 与 `MdxMdd`。等 StarDict 真正进入范围时再加第三个分支；此时一个薄的查词结果类型已经足够，不需要提前设计动态插件 ABI。
-5. DRM MOBI、MDict encrypt=1、越界记录、解压炸弹和未知脚本/外链必须明确拒绝。失败应保留原导入文件或安全回滚临时副本，不能产生半注册词典。
+调研固定在 Readest `v0.12.1` 对应提交 `f3e1df7`，不把浮动主分支当作可复现证据。[Readest 固定源码](https://github.com/readest/readest/tree/f3e1df7e0572c0119cbb420e1e27ca9af859f91c)
 
-若 `libmobi` 的打开阶段内存不合格，第二选择才是“导入时用成熟解析器转换”：SQLite B-tree 保存规范化词头与词条位置/正文，别名表保存屈折映射。FTS5 只在确实要做全文搜索时启用；精确词头查找不需要 FTS。是否复制或压缩正文由 Android 磁盘、导入时间和 PSS benchmark 决定。
+### 现有能力
 
-### 查词热路径
+**官方事实：** Readest 当前词典服务已包括内置网络词典、Wikipedia、Wiktionary、系统词典，以及用户导入的 StarDict、DICT、SLOB、BGL 和 MDict。它不是只做 MDX 的单一实现。[词典服务](https://github.com/readest/readest/blob/f3e1df7e0572c0119cbb420e1e27ca9af859f91c/apps/readest-app/src/services/dictionaries/dictionaryService.ts)
 
-建议的最短路径是：
+**源码观察：** MDict provider 使用 Readest 自己的 `js-mdict` 分支，并以 `MDX.create(blob, { lazy: true })` 打开主词典。该分支固定在提交 `d01bf62`，包版本为 `7.0.0`，核心依赖很少。[Readest MDict provider](https://github.com/readest/readest/blob/f3e1df7e0572c0119cbb420e1e27ca9af859f91c/apps/readest-app/src/services/dictionaries/providers/mdictProvider.ts)、[`js-mdict` 固定源码](https://github.com/readest/js-mdict/tree/d01bf62af872b1fbeacb2f18446460960e7400de)
 
-1. 保留原查询，仅执行格式要求的 Unicode/大小写规范化，不做语言无关的激进词干化。
-2. 使用格式原生索引做精确命中。
-3. 精确未命中时查询格式原生别名/屈折结构：MOBI 的 orth/infl 或旧 names/keys、MDict 的链接/键规则、未来 StarDict 的 `.syn`。
-4. 只读取并解压包含目标词条的块；解析一个结果，而不是完整词典。
-5. 资源在定义真正引用时再从 MDD/MOBI 资源记录读取。
-6. 返回最小结果：词典 ID、命中词头、命中类型、隔离后的定义 HTML 和受控资源定位符。
+其最值得 Atha 借鉴的是读取模型，而不是语言或框架：
 
-缓存按下面顺序增加：
+- 文件扫描器通过 `Blob.slice(start, end).arrayBuffer()` 做有界范围读取；MDX lazy 模式避免打开时解码和排序所有 key block。[文件扫描器](https://github.com/readest/js-mdict/blob/d01bf62af872b1fbeacb2f18446460960e7400de/src/file-scanner.ts)、[MDict 基础实现](https://github.com/readest/js-mdict/blob/d01bf62af872b1fbeacb2f18446460960e7400de/src/mdict-base.ts)
+- lazy 模式只适合精确定位；前缀、包含、模糊、建议和全量枚举需要 eager 数据。Atha 首版因此不应承诺模糊检索或全文检索。[MDX API](https://github.com/readest/js-mdict/blob/d01bf62af872b1fbeacb2f18446460960e7400de/src/mdict.ts)
+- Readest 对 MDX 使用 lazy，但 MDD 保持 eager。源码说明这是为避免 MDD 键排序和 JavaScript `localeCompare` 不一致导致资源漏查。该选择会把 MDD 初始化时间与内存重新带回风险面，必须在 PCT-AL10 上单独测量。[Readest MDict provider](https://github.com/readest/readest/blob/f3e1df7e0572c0119cbb420e1e27ca9af859f91c/apps/readest-app/src/services/dictionaries/providers/mdictProvider.ts)
+- Readest 支持多个 MDD、CSS、图片、常见音频以及 `entry://`、`bword://` 链接重写。Atha 首版只需精确查词、条目链接和实际引用的图片/CSS，不要一次复制全部能力。
+- Readest 有 MDict 初始化诊断测试，但诊断结果本身不是跨设备性能门槛。[初始化诊断测试](https://github.com/readest/readest/blob/f3e1df7e0572c0119cbb420e1e27ca9af859f91c/apps/readest-app/src/__tests__/services/dictionaries/mdict-init-diagnostic.test.ts)
 
-- 首先依赖操作系统文件页缓存，并保持当前启用词典的 reader 句柄打开。
-- 然后增加按“压缩块字节数”限制的解压块缓存；上限必须能响应 Android 内存压力和词典移除/版本变化。
-- 最后才考虑最近结果缓存。结果缓存也按字节而不是固定条数计量，避免一篇含大量 HTML 的词条挤爆内存。
-- 首版不为 LRU 单独引入依赖；小型、可测的固定容量缓存足够。只有命中率和 CPU/IO 证据表明需要时才升级策略。
+Readest 的 HTML 边界不应照搬。它会把定义写入 `innerHTML`，再修正部分资源和点击行为；Atha 应在后端或独立净化层删除脚本、事件属性、表单和外部网络地址，并只暴露受控资源定位符。格式解析成熟不等于词条 HTML 可信。
 
-禁止缓存完整 204.27 MiB 解压语料。多个词典并行查找应有取消与并发上限，翻页时产生的新选词应取消已经过期的查找。
+## Kindle 词典候选
 
-### 定义渲染的信任边界
+### `boko 0.5.0`
 
-MDX 与 MOBI 定义都是不可信 HTML。不能把原始正文直接插入阅读器 DOM。建议复用 Atha 对不可信书籍的边界：
+**官方事实：** Atha 当前固定的 `boko 0.5.0` 源码提交为 `8f412fb`。它包含 PalmDB/MOBI header、通用 KF8 `INDX/TAGX/CNCX` 和 HUFF/CDIC 实现。[固定源码](https://github.com/zacharydenton/boko/tree/8f412fb1a507399bce320d591feb517467cdb5f7)、[crates.io 元数据](https://crates.io/crates/boko/0.5.0)
 
-- 用没有 `allow-scripts` 的 sandboxed iframe 或独立受控文档渲染；设置 `default-src 'none'` 的 CSP。
-- 移除脚本、表单、事件处理器、弹窗与导航；禁止网络请求。
-- 把图片、CSS、音频等 URL 重写到受控的词典资源协议；后端检查词典 ID、规范化路径、MIME、单资源大小和总解压大小，拒绝 `..`、绝对路径与协议跳转。
-- CSS 作用域限制在定义容器内，不能污染阅读器主题。资源失败只影响该资源，不应使词条或阅读进度崩溃。
+**源码观察：** `MobiHeader` 没有暴露词典 `orth/infl/names/keys` 字段，索引代码服务于 skeleton、division、NCX 和 guide，并没有词典正字与屈折语义。[MOBI header](https://github.com/zacharydenton/boko/blob/8f412fb1a507399bce320d591feb517467cdb5f7/src/mobi/headers.rs)、[索引实现](https://github.com/zacharydenton/boko/blob/8f412fb1a507399bce320d591feb517467cdb5f7/src/mobi/index.rs)、[HUFF/CDIC](https://github.com/zacharydenton/boko/blob/8f412fb1a507399bce320d591feb517467cdb5f7/src/mobi/huffcdic.rs)
 
-## Android 性能验证
+**决策：** 继续让 `boko` 负责普通书籍，不向其普通章节模型塞入词典。后续词典适配器可以复用 Atha 已有的文件边界和 HUFF/CDIC 能力，但词典索引必须走独立路径。
 
-AndroidX Benchmark 官方文档要求在物理设备上测量；Microbenchmark 会处理 warmup、降温/重试并输出带设备信息的 JSON，Macrobenchmark 可覆盖完整用户流、帧时序和自定义 trace section。当前稳定线为 1.4.x。[Microbenchmark 概览](https://developer.android.com/topic/performance/benchmarking/microbenchmark-overview)、[编写 Microbenchmark](https://developer.android.com/topic/performance/benchmarking/microbenchmark-write)、[Macrobenchmark metrics](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-metrics)、[AndroidX Benchmark releases](https://developer.android.com/jetpack/androidx/releases/benchmark)
+### `libmobi 0.12`
 
-### 设备与构建
+**官方事实：** `libmobi 0.12` 固定提交为 `85dcfe8`。它的 `index.c` 明确覆盖 INDX/TAGX/ORDT、orth 位置与长度、现代和旧式屈折结构以及屈折规则重建，并暴露词典词条偏移与长度。[固定源码](https://github.com/bfabiszewski/libmobi/tree/85dcfe803fc2a21020ddcf15c3eb66b93d388add)、[词典索引实现](https://github.com/bfabiszewski/libmobi/blob/85dcfe803fc2a21020ddcf15c3eb66b93d388add/src/index.c)、[索引结构](https://github.com/bfabiszewski/libmobi/blob/85dcfe803fc2a21020ddcf15c3eb66b93d388add/src/index.h)、[RawML 解析](https://github.com/bfabiszewski/libmobi/blob/85dcfe803fc2a21020ddcf15c3eb66b93d388add/src/parse_rawml.c)
 
-- 至少一台 4–6 GB 内存的中低端 arm64 真机作为合并门槛；高端电脑和模拟器只用于快速回归。
-- 使用 release-like、不可调试、与发布一致的 ABI/AOT 设置；记录提交、构建变体、Android、WebView、ABI、电量和温度。
-- 冷启动场景在每轮前终止进程；热路径由同一进程重复查找。不要把首次复制/导入与普通查词混成一个数字。
+**判断：** 它是当前最成熟的 Kindle 二进制行为 oracle，但不是首选运行时依赖。现有全量重建实验已经触发停止条件；直接 FFI 还会引入 C 内存安全、崩溃隔离和跨平台构建面。更稳妥的路线是以其固定源码为主要算法参考，只实现样本要求的窄路径。
 
-### 场景矩阵
+### KindleUnpack 与 Kindling
 
-两个本地样本都执行以下场景，查询词由本机私有清单提供，报告只保留类别和命中布尔值：
+KindleUnpack 是长期使用的 Python 解包实现，适合交叉验证 INDX、ORDT 和现代 inflection；但其源码明确拒绝旧式 tag `0x07` 屈折方案，不能单独覆盖 `KINDLE-D` 暗示的旧 `names/keys` 路径。[KindleUnpack 固定源码](https://github.com/kevinhendricks/KindleUnpack/tree/bf0ca6ece4e73494625e7950be3e259b6260774c)、[词典实现](https://github.com/kevinhendricks/KindleUnpack/blob/bf0ca6ece4e73494625e7950be3e259b6260774c/lib/mobi_dict.py)
 
-| 场景 | 目的 |
+Kindling 是较新的 Rust 词典构建器和 Kindle 查词模拟器。它的 ORDT、排序和多文字测试很有价值，也适合生成 Atha 自有的开放 fixture；但它构造的是正字别名路线，查词模拟读取整文件并收集索引，不是通用旧 Kindle 词典运行时。[Kindling 固定源码](https://github.com/ciscoriordan/kindling/tree/828e32ec18c3e9e25864b38ac219ca6cc2b5a57b)、[查词模拟](https://github.com/ciscoriordan/kindling/blob/828e32ec18c3e9e25864b38ac219ca6cc2b5a57b/src/lookup.rs)
+
+### Kindle 决策矩阵
+
+| 候选 | 格式成熟度 | 运行时模型 | 移动端风险 | 用途 |
+| --- | --- | --- | --- | --- |
+| `boko 0.5.0` | 普通 MOBI/KF8 成熟，词典语义缺失 | 普通书籍展开 | 对大词典内存不合格 | 复用已有基础能力，不直接查词 |
+| `libmobi 0.12` | 词典覆盖最完整，含旧式 inflection | 偏完整解析/RawML | 全量重建、C FFI | 主行为 oracle 和窄算法来源 |
+| KindleUnpack | 解包与现代 inflection 成熟 | 桌面 Python 全量工具 | 不适合嵌入，旧 tag 7 缺失 | 交叉验证 |
+| Kindling | 构建、排序和结构测试有价值 | 构建侧/模拟器 | 不是通用解析器 | 开放 fixture 与排序 oracle |
+
+**后续实施建议：** 只有在真正开始词典引擎 change 时，才新增 `KindleDictionary`。首个实现范围限制为 `KINDLE-D` 已证明的 MOBI6、orth、旧 names/keys、HUFF/CDIC 和 Windows-1252；一次查词只定位索引、读取覆盖目标定义的文本记录并按需解压。不要先实现 KF8、DRM、全文搜索、通用词形学或整本转换。
+
+## MDict 候选
+
+### `mdict-rs 0.1.4`
+
+**官方事实：** 候选是 `Initsnow/mdict-rs`，固定提交 `d4bc67d`，不是同名的旧 Web 项目。0.1.4 是纯 Rust、禁止 unsafe 的 MDict v2 reader，支持 MDX/MDD、`encrypt=2`、按需查找、zlib、可选 LZO、常见文本编码和边界校验；明确不支持 v1、写入器、HTML/CSS 重写或持久化 sidecar。[固定源码](https://github.com/Initsnow/mdict-rs/tree/d4bc67d1128e9561a27b714f085ad970dfed6c09)、[包元数据](https://docs.rs/crate/mdict-rs/0.1.4)、[解析核心](https://github.com/Initsnow/mdict-rs/blob/d4bc67d1128e9561a27b714f085ad970dfed6c09/src/core.rs)、[资源限制](https://github.com/Initsnow/mdict-rs/blob/d4bc67d1128e9561a27b714f085ad970dfed6c09/src/limits.rs)
+
+**当前实测与决策：** 它与当前匿名样本的功能交集最好，接入成本最低。独立 release P0 已通过 MDict v2、`encrypt=2`、精确查词、miss 和 MDD 资源范围读取，并以 1.653 ms 的三次查词 P95 和 3308 KiB 峰值 RSS 留出足够预算。因此首个真实切片锁定 `mdict-rs 0.1.4`；适配层只补 Atha 更紧的文件、压缩块、解压块、条目和资源预算，不 fork、不建 sidecar。
+
+### Readest `js-mdict`
+
+Readest 的固定分支已经在同类阅读器中采用 lazy MDX、`encrypt=2`、多 MDD 与资源重写，是最接近 Atha 产品场景的行为基线。它的问题不是“JavaScript 一定慢”，而是 MDD eager 策略、主线程调度和 Blob/JS 对象分配必须在目标设备实测。Atha 没有必要为了复用它而引入第二套 JS 后端；它更适合作为同一匿名查询清单的交叉结果 oracle。
+
+### GoldenDict-ng 与 Medict
+
+GoldenDict-ng 固定在 `v26.9.0_alpha` 对应提交 `8e1079d`。其 MDict 代码长期维护，覆盖 v1/v2、`encrypt=2`、无压缩/LZO/zlib、Adler32 校验和多个 MDD，并在导入时建立持久 B-tree sidecar，查询时只解压目标 record block。[GoldenDict-ng 固定源码](https://github.com/xiaoyifang/goldendict-ng/tree/8e1079d781c41c5efab64c304109504aecb2b3a4)、[MDict parser](https://github.com/xiaoyifang/goldendict-ng/blob/8e1079d781c41c5efab64c304109504aecb2b3a4/src/dict/mdictparser.cc)、[索引与资源实现](https://github.com/xiaoyifang/goldendict-ng/blob/8e1079d781c41c5efab64c304109504aecb2b3a4/src/dict/mdx.cc)
+
+它是最成熟的 MDict 兼容性与索引架构参考，但代码深度依赖 Qt、GoldenDict B-tree、折叠规则和自身存储层。直接嵌入或大规模移植都会扩大 Atha 的维护面。只有 lazy 原文件读取在真机上不合格时，才借鉴其“导入时生成紧凑 sidecar，正文仍留在原块”的模式。
+
+Medict 固定提交 `04f572a`，拥有 Go MDict parser、MDX/MDD 资源服务和 LevelDB 索引，是另一份可交叉验证的成熟产品实现；但 Go runtime、LevelDB 和其内存模型都不适合直接进入 Atha 的 Rust/Tauri 核心。[Medict 固定源码](https://github.com/terasum/medict/tree/04f572a6258997125d6382486598e4c7d5018ea7)、[Go MDict 实现](https://github.com/terasum/medict/tree/04f572a6258997125d6382486598e4c7d5018ea7/internal/libs/go-mdict)
+
+### MDict 决策矩阵
+
+| 候选 | 成熟度 | 性能架构 | 接入代价 | 决策 |
+| --- | --- | --- | --- | --- |
+| `mdict-rs 0.1.4` | 新、实现窄、安全边界清楚 | lazy，单 key/record block 缓存 | 最低，纯 Rust | P0 已通过，首个产品适配器 |
+| Readest `js-mdict 7.0.0` | 已有同类产品使用 | MDX lazy、MDD eager | 需要 JS 后端与额外隔离 | 行为和结果 oracle |
+| GoldenDict-ng | 长期维护，覆盖最广 | 持久 B-tree + 目标块解压 | Qt/C++ 依赖很深 | 兼容性和 sidecar 架构 oracle |
+| Medict | 产品级 Go 实现 | LevelDB 索引 | Go/LevelDB 运行时过重 | 辅助交叉验证 |
+
+**实施顺序：** 直接把 `mdict-rs 0.1.4` 接入后端，完成精确查词、miss、链接深度限制、定义净化和实际引用的 MDD 资源；Linux GUI 通过后再跑 PCT-AL10。只有真机证据显示原文件 lazy 读取不合格时，才重新评估 GoldenDict 风格 sidecar。
+
+## 最小产品边界
+
+首个产品切片只实现已经有真实需求和样本证据的行为：
+
+- 不返回原始文件路径，不让前端自行读取 MDX/MDD/MOBI。
+- 查词结果只包含词典 ID、命中词头、命中类型、净化后的定义和受控资源引用。
+- MDict 直接调用 `mdict-rs`；Kindle 使用独立解析模块。上层用一个静态 `match` 分派即可，不定义只有一个实现的 trait。
+- 打开、查词和资源读取都有明确预算；实现不得隐藏全量预加载。
+- 首版不做动态插件 ABI、provider 注册表、通用转换流水线、全文索引、模糊查找或跨词典并行搜索。
+
+这已经足以完成“导入词典 → 阅读器选词 → 显示安全定义”的端到端链路。未来格式出现时再增加静态枚举分支，不为未知需求预留框架。
+
+## 性能与验证计划
+
+### Linux GUI 日常回归
+
+Linux 是开发主入口。真实引擎开始实施后，每次变更先跑 release 构建的微基准，再在 Linux Tauri/WebKitGTK 中验证“选词 → 弹出定义 → 打开条目链接/资源”。记录匿名场景，不记录查询内容。
+
+| 场景 | 记录指标 |
 | --- | --- |
-| 首次导入/建索引 | 总耗时、吞吐、临时/最终磁盘、峰值 PSS、取消与恢复 |
-| 进程冷启动后的第一次精确查词 | reader 打开、索引初始化、首次 IO 与解压 |
-| 热精确查词 | 交互主路径与缓存收益 |
-| 屈折/别名命中 | MOBI 旧式 inflection、MDict 链接/键规则 |
-| 不存在的词 | 最坏索引扫描与错误路径 |
-| 含图片/CSS 的词条 | MDD/MOBI 资源按需读取和渲染 |
-| 词典头部/中部/尾部命中 | 排除只对局部记录快速的假象 |
-| 两本词典交替查找 | reader 保活策略与缓存互相挤压 |
+| open | 耗时、读取字节、RSS 增量、是否建立 sidecar |
+| cold exact | 第一次精确命中的 p50/p95、CPU、块读取 |
+| warm exact | 重复与随机词头的 p50/p95、缓存命中 |
+| inflection/alias | 命中类型、p50/p95、额外索引读取 |
+| miss | 最坏索引查找时间与读取量 |
+| resource | 图片/CSS 单资源延迟、字节预算、MIME |
+| alternating | 两本词典交替查询后的缓存与 RSS |
 
-每个场景记录 p50/p95/max 墙钟时间、CPU 时间、读取字节数、分配量、PSS/RSS、缓存命中、UI frame timing，以及导入后的索引/副本大小。用 Macrobenchmark 驱动“选词 → 弹出定义”的用户流，并在 `open/index/read/decompress/resolve/sanitize/render` 阶段放自定义 trace section；Microbenchmark 只测可重复调用的解析/索引热循环。Rust/C 代码通过很薄的 JNI 测试入口进入；性能退化后再用 [Simpleperf](https://developer.android.com/ndk/guides/simpleperf.html) 定位 native CPU，用 [Perfetto](https://developer.android.com/tools/perfetto) 查看 IO、调度和跨线程等待。
+GUI 检查同时覆盖定义净化、禁网、主题隔离、滚动、键盘/鼠标选择、窗口窄宽状态、控制台与网络错误。Linux 的结果用于快速发现回归，不作为 Android 性能结论。
 
-### 首轮建议门槛
+### PCT-AL10 真机门槛
 
-这些是产品预算，不是现有实现已达到的事实；第一轮基线后可在 change 中收紧，但不能因为高端设备很快而放宽：
+PCT-AL10 已经恢复 ADB 访问。使用 release arm64 构建，在固定电量、温度和屏幕状态下执行同一匿名场景清单。至少记录冷/热精确查词、旧式 inflection、miss、MDD 资源和词典交替，并使用 `dumpsys meminfo`；出现退化时再用 Perfetto 或 Simpleperf 定位，不先堆测量依赖。
 
-- 中低端真机热精确查词 p95 不高于 100 ms，屈折/别名查词 p95 不高于 150 ms。
-- 冷进程第一次查词 p95 不高于 500 ms；耗时更长时必须有可取消的加载状态，且不阻塞阅读器滚动。
-- 单本词典打开后的额外 PSS 目标不高于 64 MiB，且不能随查询次数持续增长；任何接近完整 204.27 MiB 解压大小的常驻增长直接判定失败。
-- 查词期间不得产生可感知卡顿；Macrobenchmark 的慢帧应与无查词基线相当。导入必须在后台运行并可取消。
-- 损坏、截断和超大声明记录必须返回结构化错误，不能崩溃、越界读取或写到应用私有词典目录之外。
+首轮预算是待实测校准的产品目标：
 
-停止条件：如果 `libmobi` 在 Bing 样本上无法满足峰值内存或只为一次查词构建完整 RawML，就停止直接运行时集成，评估“导入时转换为 SQLite 偏移索引”；如果 `mdict-rs`/许可路径不能在 Merriam 样本上完成 encrypt=2 键查询和 MDD 资源读取，就停止 UI 集成并重新检索实现，不自行补写完整 MDict 解析器。
+- 热精确查词 P95 不高于 100 ms；inflection/alias P95 不高于 150 ms。
+- 冷进程第一次查词 P95 不高于 500 ms。
+- 打开单本词典后的额外 PSS 不高于 64 MiB，连续查词不得单调增长。
+- 查词只读取目标索引和压缩块；任何接近整本解压文本的常驻展开都直接失败。
+- 选词到弹窗不得阻塞阅读滚动，过期请求可取消，定义渲染不得发起网络请求。
 
-### 可观测性
+停止条件也应提前固定：
 
-发布构建默认只记录格式、匿名词典 ID/哈希短前缀、阶段耗时、读取字节、缓存命中、结果数量和结构化错误码。不要记录查询词、定义正文、完整本机路径、资源内容或用户选中的原文。开发 trace 可按显式开关增加阶段细节，但仍不得把受版权保护的正文写入 benchmark JSON、截图或 CI artifact。
+- Kindle 适配器若需要完整 RawML、完整正文转换或无法有界读取，则停止当前运行时方案。
+- `mdict-rs` 若无法正确覆盖 `MDX-A/MDD-A` 的 `encrypt=2`、资源与连续内存曲线，先限定修复；连续两轮仍不达标再评估 sidecar。
+- 任一候选若需要在同一 change 中扩展到未取样的 MDict v1、DRM、记录加密、KF8 或全文搜索，则缩回范围并重新立项。
 
-## Fixture 与版权边界
+## 安全、隐私与 fixture
 
-### 技术可用性
+词典是外部不可信输入，解析和渲染边界必须同时成立：
 
-| 样本 | 本地自动化 | 公共仓库/CI | 覆盖缺口 |
-| --- | --- | --- | --- |
-| Bing MOBI | 可做 opt-in 兼容、损坏输入衍生测试之外的性能测试；测试前核对大小/哈希 | 不可提交原文件、解包内容、派生数据库、词头/定义 dump | 不覆盖 KF8、DRM、现代显式 INFL |
-| Merriam MDX/MDD | 可做 opt-in encrypt=2、HTML 与资源查找测试；两文件独立核对哈希 | 不可提交原文件、正文切片、资源、截图或派生索引 | 不覆盖 encrypt=1、MDict v1、无资源词典 |
+- 文件头、记录表、索引偏移、压缩/解压大小、词条大小、资源大小和递归链接深度都有显式上限。
+- MDX/MOBI 定义先净化，再进入无脚本、无表单、无外网的隔离视图；CSS 只能作用于定义容器。
+- `entry://` 和资源引用只解析到当前词典或明确配对的资源包，拒绝绝对路径、`..`、协议跳转和未知 MIME。
+- 日志只记录格式、匿名 source ID、阶段耗时、读取字节、缓存命中和错误码，不记录查询词、定义正文、原文件名、完整路径或资源内容。
 
-测试入口应从未提交的本机配置或环境变量接收路径，文件不存在时明确 `skip`，不能硬编码 `C:\Users\nick\...`。日志用上表的哈希核对样本身份即可，不输出内容。即使只抽取几个词条，仍然是受保护内容的复制，不能把它伪装成“小型 fixture”。
+私有 fixture 通过未提交的本机配置显式启用，缺失时测试应明确 `skip`。公共测试使用 Atha 自有文本生成的结构型 Kindle 词典，以及数据许可明确的 MDict fixture；不能从私有样本切出词条、图片、CSS 或派生数据库提交到仓库。
 
-公开的 MOBI 结构测试可以用 Kindling 从 Atha 自己编写的无版权词头/定义生成；MDict 测试优先使用所选解析库明确授权且数据来源清楚的测试资产，或使用独立许可的开放词典。上游代码的开源许可证不自动证明其仓库中第三方词典文件也可再分发，每个数据文件仍需单独确认来源。
+## 最终选择
 
-### 法律判断的限制
+当前路线的正确收束是：**接入通过 P0 的 `mdict-rs 0.1.4`，并为经典 Kindle 词典实现独立的最小随机访问模块；不造 provider 框架，不启动 Android 模拟器。**
 
-以下只是工程风险边界，不是法律意见：
+未来实际实施时按以下顺序推进：
 
-- 微软服务协议把 Bing Dictionary 列为涵盖服务，并限制未经授权的下载、复制、再分发和用其内容构建产品；但本机文件的真实来源与具体许可未知，因此只能把该协议作为风险信号，不能据此证明文件合法或非法。[Microsoft Services Agreement](https://www.microsoft.com/en-us/servicesagreement)
-- Merriam-Webster 的站点条款说明其内容受版权保护并限制发布/分发；该网站条款也不能证明本机 2009 年 MDX 的来源或授权。[Merriam-Webster Terms of Use](https://www.merriam-webster.com/i/terms-of-use)
-- 拥有一个文件副本不等于拥有内容版权；向公共仓库上传还会产生复制与分发。GitHub 要求上传者拥有发布内容所需权利，且公开仓库会授予 GitHub 与其他用户查看、复制和 fork 所需权利。[美国版权法第 202 条](https://www.copyright.gov/title17/92chap2.html)、[美国版权局数字版权 FAQ](https://www.copyright.gov/help/faq/faq-digital.html)、[GitHub Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)
+1. MDict：直接依赖已经通过样本 P0 的 `mdict-rs 0.1.4`，完成精确查词与 MDD 按需资源链路。
+2. Kindle：以 `libmobi 0.12` 为主 oracle，`KindleUnpack` 和 Kindling 交叉验证，在 Atha 独立模块中实现样本驱动的最小随机访问路径。
+3. Linux GUI 完成功能与回归验证后，再在 PCT-AL10 做性能和内存验收；ADB 可用不等于 Android 应用已经通过。
 
-因此，在没有来源证明和明确测试/再分发授权前，两个样本都只能保留在用户控制的本机位置并由测试显式引用。允许提交的只有不还原内容的结构元数据、哈希、错误类别和聚合性能数字。
-
-## 实施顺序与未决项
-
-1. Atha 项目许可证已定为 `AGPL-3.0-or-later`；下一许可门槛是 LGPL 动态 / 静态链接材料与 `AGPL-3.0-only` / 商业依赖的精确组合边界，未解决时只做隔离实验，不把候选源码并入主产品。
-2. 为 `libmobi` 建立最薄 Android P0：只做打开、精确查词、旧式屈折查词和词条范围读取；用 Bing 样本执行上述 benchmark，并对损坏头/截断记录做无正文的合成测试。
-3. 为获准的 MDict 候选建立独立 P0：验证 Merriam 样本的 encrypt=2 键索引、精确/不存在查询、一个 MDD 资源和内存曲线。没有许可证或样本失败时不进入 UI。
-4. 两个 P0 达标后再接入统一的最小查词结果和安全定义视图；最后增加字典排序、启停和可选 Android 系统词典动作。
-5. 另行取得可公开再分发的 KF8 词典 fixture，或用自有内容生成；没有该证据时产品声明必须写“经典 MOBI6 词典”，不能笼统写“MOBI/KF8 全支持”。
-
-仍需真实验证的事项包括：`libmobi` 在本样本上的 RSS/读取模型、其 Android NDK 构建与异常边界、Merriam 样本是否包含候选库不支持的压缩块、MDD 的实际资源 MIME 与大小分布、以及 Android WebView 中定义 CSS 的隔离效果。代码阅读、桌面元数据读取和 Readest 的成功经验都不能替代这些真机结果。
+这种顺序优先复用成熟知识，避免把不适合移动端的完整库硬塞入运行时，也避免在证据不足时重造两个完整格式。
