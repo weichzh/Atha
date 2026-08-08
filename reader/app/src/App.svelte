@@ -18,9 +18,9 @@
 
 {#if readerRoute}
   <main class="reader-shell" aria-label="分页阅读器">
+    <ReaderChrome />
     <ReaderCanvas />
     <p id="error" class="error" role="alert" hidden>无法安全打开这份内容。</p>
-    <ReaderChrome />
     <ContentDialog />
   </main>
 {:else}

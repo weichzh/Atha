@@ -59,7 +59,25 @@
     visibleBooks.length > 0 && visibleBooks.every((book) => selectedIds.has(book.id));
 
   onMount(async () => {
-    Reflect.get(globalThis, "AthaSystemBars")?.setDarkBackground?.(true);
+    const systemBars = Reflect.get(globalThis, "AthaSystemBars");
+    systemBars?.setReadingMode?.(false, true);
+    const syncSafeAreaInsets = () => {
+      try {
+        const insets = JSON.parse(systemBars?.getSafeAreaInsets?.() ?? "null");
+        for (const edge of ["top", "right", "bottom", "left"] as const) {
+          if (Number.isFinite(insets?.[edge])) {
+            document.documentElement.style.setProperty(
+              `--safe-area-${edge}`,
+              `${insets[edge] / devicePixelRatio}px`,
+            );
+          }
+        }
+      } catch {
+        // The native bridge is optional on desktop.
+      }
+    };
+    syncSafeAreaInsets();
+    globalThis.addEventListener("atha-safe-area-change", syncSafeAreaInsets);
     try {
       books = await listBooks();
       refreshProgress();
@@ -82,7 +100,7 @@
   async function chooseBooks() {
     if (busy) return;
     if (!libraryAvailable) {
-      status = "请在 Atha 应用中选择 EPUB 或 CBZ。";
+      status = "请在 Atha 应用中选择 EPUB、CBZ、Markdown 或 TXT。";
       return;
     }
     busy = true;
@@ -362,7 +380,7 @@
     <section class="library-empty">
       <BookOpen aria-hidden="true" />
       <h2>开始你的书架</h2>
-      <p>选择 EPUB 或 CBZ，导入后即可随时继续阅读。</p>
+      <p>选择 EPUB、CBZ、Markdown 或 TXT，导入后即可随时继续阅读。</p>
       <button type="button" onclick={chooseBooks} disabled={busy}>选择书籍</button>
     </section>
   {:else if visibleBooks.length === 0}

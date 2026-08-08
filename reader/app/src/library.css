@@ -1,4 +1,8 @@
 :root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
   color-scheme: dark;
   background: #050505;
 }
@@ -39,8 +43,8 @@ summary {
   --library-accent: #1888d8;
   box-sizing: border-box;
   min-height: 100vh;
-  padding: 0 max(16px, env(safe-area-inset-right)) max(36px, env(safe-area-inset-bottom))
-    max(16px, env(safe-area-inset-left));
+  padding: 0 max(16px, var(--safe-area-right)) max(36px, var(--safe-area-bottom))
+    max(16px, var(--safe-area-left));
   overflow-x: hidden;
   background: var(--library-bg);
   color: var(--library-text);
@@ -49,7 +53,7 @@ summary {
 }
 
 .library-shell.library-selecting {
-  padding-bottom: calc(104px + env(safe-area-inset-bottom));
+  padding-bottom: calc(104px + var(--safe-area-bottom));
 }
 
 .library-header {
@@ -58,7 +62,7 @@ summary {
   top: 0;
   max-width: 1180px;
   margin: 0 auto;
-  padding: max(18px, env(safe-area-inset-top)) 0 0;
+  padding: max(18px, var(--safe-area-top)) 0 0;
   background: rgb(5 5 5 / 95%);
   backdrop-filter: blur(18px);
 }
@@ -505,7 +509,7 @@ summary {
   min-height: 76px;
   align-items: center;
   justify-content: center;
-  padding: 6px 20px max(6px, env(safe-area-inset-bottom));
+  padding: 6px 20px max(6px, var(--safe-area-bottom));
   border-top: 1px solid var(--library-border);
   background: #1b1b1d;
 }
@@ -534,7 +538,7 @@ summary {
   position: fixed;
   z-index: 9;
   right: 16px;
-  bottom: max(18px, env(safe-area-inset-bottom));
+  bottom: max(18px, var(--safe-area-bottom));
   left: 16px;
   max-width: 520px;
   box-sizing: border-box;
@@ -549,7 +553,7 @@ summary {
 }
 
 .library-selecting .library-status {
-  bottom: calc(88px + env(safe-area-inset-bottom));
+  bottom: calc(88px + var(--safe-area-bottom));
 }
 
 .library-shell button:disabled,
@@ -567,8 +571,8 @@ summary {
 
 @media (min-width: 620px) {
   .library-shell {
-    padding-right: max(32px, env(safe-area-inset-right));
-    padding-left: max(32px, env(safe-area-inset-left));
+    padding-right: max(32px, var(--safe-area-right));
+    padding-left: max(32px, var(--safe-area-left));
   }
 
   .library-grid {
@@ -579,8 +583,8 @@ summary {
 
 @media (min-width: 960px) {
   .library-shell {
-    padding-right: max(48px, env(safe-area-inset-right));
-    padding-left: max(48px, env(safe-area-inset-left));
+    padding-right: max(48px, var(--safe-area-right));
+    padding-left: max(48px, var(--safe-area-left));
   }
 
   .library-grid {
@@ -590,8 +594,8 @@ summary {
 
 @media (max-width: 379px) {
   .library-shell {
-    padding-right: max(14px, env(safe-area-inset-right));
-    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, var(--safe-area-right));
+    padding-left: max(14px, var(--safe-area-left));
   }
 
   .library-management summary {

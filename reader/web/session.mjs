@@ -1,4 +1,4 @@
-const MAX_SECTIONS = 1000;
+const MAX_MANIFEST_SECTIONS = 1000;
 const MAX_RESOURCES = 10000;
 const MAX_TOC_ITEMS = 2000;
 
@@ -48,7 +48,7 @@ export function createReadingSession({ params, content, render, onState, assert,
     manifestAssert(
       Array.isArray(value.sections) &&
         value.sections.length > 0 &&
-        value.sections.length <= MAX_SECTIONS,
+        value.sections.length <= MAX_MANIFEST_SECTIONS,
     );
     manifestAssert(Array.isArray(value.resources) && value.resources.length <= MAX_RESOURCES);
 
@@ -125,6 +125,7 @@ export function createReadingSession({ params, content, render, onState, assert,
   }
 
   function validatorSelfCheck() {
+    assert(MAX_MANIFEST_SECTIONS === 1000, "invalid-manifest-section-limit");
     const valid = {
       schema: 1,
       contentVersion: "a".repeat(64),

@@ -398,9 +398,11 @@ export function createAnnotations({
       ...description.sections.map((section, index) => {
         const option = document.createElement("option");
         option.value = section.id;
+        const labels = description.toc
+          .filter((item) => item.href.split("#", 1)[0] === section.href)
+          .map((item) => item.label);
         option.textContent =
-          description.toc.find((item) => item.href.split("#", 1)[0] === section.href)?.label ||
-          `第 ${index + 1} 节`;
+          labels.length > 1 ? `${labels[0]} – ${labels.at(-1)}` : labels[0] || `第 ${index + 1} 节`;
         return option;
       }),
     );

@@ -219,7 +219,7 @@ export function createPagination({
   }
 
   function layout() {
-    book.style.fontSize = `${state.fontSize}px`;
+    book.style.fontSize = `${state.fontSize * (globalThis.AthaSystemBars ? 1.25 : 1)}px`;
     book.style.transform = "none";
     applyFormulaScale();
     const style = getComputedStyle(book);
@@ -244,6 +244,8 @@ export function createPagination({
       return column >= state.page && column <= state.page + 1;
     };
     const tolerance = 0.75;
+    const isCut = (rect) =>
+      rect.top < pageRect.top - tolerance || rect.bottom > pageRect.bottom + tolerance;
     let cuts = 0;
     const walker = document.createTreeWalker(book, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
@@ -251,22 +253,14 @@ export function createPagination({
       const range = document.createRange();
       range.selectNodeContents(walker.currentNode);
       for (const rect of range.getClientRects()) {
-        if (
-          relevant(rect) &&
-          rect.height &&
-          (rect.top < pageRect.top - tolerance || rect.bottom > pageRect.bottom + tolerance)
-        ) {
+        if (relevant(rect) && rect.height && isCut(rect)) {
           cuts += 1;
         }
       }
     }
-    for (const atomic of book.querySelectorAll("img, table, pre, figure")) {
+    for (const atomic of book.querySelectorAll("img, table, figure")) {
       const rect = atomic.getBoundingClientRect();
-      if (
-        relevant(rect) &&
-        rect.height &&
-        (rect.top < pageRect.top - tolerance || rect.bottom > pageRect.bottom + tolerance)
-      ) {
+      if (relevant(rect) && rect.height && isCut(rect)) {
         cuts += 1;
       }
     }

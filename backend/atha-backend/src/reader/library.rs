@@ -15,6 +15,7 @@ use super::{
     cbz,
     epub::{self, ImportError, READER_MANIFEST, import_epub},
     resources::{BookRoot, Resource, ResourceError},
+    text,
 };
 
 const LIBRARY_SCHEMA: u8 = 1;
@@ -66,6 +67,7 @@ pub enum LibraryError {
     WriteFailed,
     Import(ImportError),
     Cbz(cbz::ImportError),
+    Text(text::ImportError),
     Resource(ResourceError),
 }
 
@@ -100,45 +102,72 @@ impl LocalLibrary {
     }
 
     pub fn import(&self, source: impl AsRef<Path>) -> Result<LibraryBook, LibraryError> {
+        self.import_with_title_hint(source, None)
+    }
+
+    pub fn import_with_title_hint(
+        &self,
+        source: impl AsRef<Path>,
+        title_hint: Option<&str>,
+    ) -> Result<LibraryBook, LibraryError> {
         let source = source.as_ref();
         let extension = source
             .extension()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
-        let (content_version, title, authors, cover_path) =
-            if extension.eq_ignore_ascii_case("epub") {
-                let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
-                (
-                    imported.content_version,
-                    imported.title,
-                    imported.authors,
-                    imported.cover_path,
-                )
-            } else if extension.eq_ignore_ascii_case("cbz") {
-                let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
-                (
-                    imported.content_version,
-                    imported.title,
-                    imported.authors,
-                    imported.cover_path,
-                )
-            } else if epub::recognizes(source) {
-                let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
-                (
-                    imported.content_version,
-                    imported.title,
-                    imported.authors,
-                    imported.cover_path,
-                )
-            } else {
-                let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
-                (
-                    imported.content_version,
-                    imported.title,
-                    imported.authors,
-                    imported.cover_path,
-                )
-            };
+        let (content_version, title, authors, cover_path) = if extension
+            .eq_ignore_ascii_case("epub")
+        {
+            let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        } else if extension.eq_ignore_ascii_case("cbz") {
+            let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        } else if extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+        {
+            let imported =
+                text::import_markdown(source, &self.imports).map_err(LibraryError::Text)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        } else if extension.eq_ignore_ascii_case("txt") {
+            let imported = text::import_txt(source, &self.imports).map_err(LibraryError::Text)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        } else if epub::recognizes(source) {
+            let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        } else {
+            let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
+            (
+                imported.content_version,
+                imported.title,
+                imported.authors,
+                imported.cover_path,
+            )
+        };
         let path = self.record_path(&content_version)?;
         if path.exists() {
             return Ok(read_record(&path)?.public());
@@ -146,6 +175,8 @@ impl LocalLibrary {
         let title = title
             .as_deref()
             .map(normalize_text)
+            .filter(|value| !value.is_empty())
+            .or_else(|| title_hint.map(normalize_text))
             .filter(|value| !value.is_empty())
             .or_else(|| {
                 source
@@ -237,6 +268,7 @@ impl LibraryError {
             Self::WriteFailed => "library-write-failed",
             Self::Import(error) => error.code(),
             Self::Cbz(error) => error.code(),
+            Self::Text(error) => error.code(),
             Self::Resource(error) => error.code(),
         }
     }
@@ -332,7 +364,21 @@ fn valid_cover_path(value: &str) -> bool {
 }
 
 fn normalize_text(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
+    value
+        .chars()
+        .filter_map(|character| {
+            if character.is_whitespace() {
+                Some(' ')
+            } else if character.is_control() {
+                None
+            } else {
+                Some(character)
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn truncate(value: &str, limit: usize) -> String {

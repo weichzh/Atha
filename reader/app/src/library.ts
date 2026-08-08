@@ -217,6 +217,10 @@ export function importFailureMessage(code: string): string {
     case "epub-archive-too-large":
     case "cbz-source-too-large":
     case "cbz-archive-too-large":
+    case "markdown-source-too-large":
+    case "markdown-section-too-large":
+    case "txt-source-too-large":
+    case "txt-section-too-large":
       return "文件过大";
     case "encrypted-epub":
       return "暂不支持受保护的 EPUB";
@@ -228,6 +232,11 @@ export function importFailureMessage(code: string): string {
       return "CBZ 中没有可读取的 JPEG 或 PNG 页面";
     case "too-many-cbz-pages":
       return "CBZ 页数过多";
+    case "too-many-markdown-sections":
+    case "too-many-markdown-toc-items":
+      return "Markdown 章节或目录项过多";
+    case "too-many-txt-sections":
+      return "TXT 章节过多";
     case "invalid-cbz-image":
       return "CBZ 中包含无效或尺寸过大的图片";
     case "invalid-epub-source":
@@ -239,11 +248,23 @@ export function importFailureMessage(code: string): string {
     case "invalid-cbz-archive":
     case "unsafe-cbz-path":
       return "不是可读取的 CBZ 文件";
+    case "invalid-markdown-source":
+      return "不是可读取的 Markdown 文件";
+    case "invalid-markdown-encoding":
+      return "Markdown 不是有效的 UTF-8 文本";
+    case "invalid-txt-source":
+      return "不是可读取的 TXT 文件";
+    case "invalid-txt-encoding":
+      return "无法识别 TXT 编码";
     case "epub-source-changed":
     case "cbz-source-changed":
+    case "markdown-source-changed":
+    case "txt-source-changed":
       return "文件在导入时发生了变化，请重试";
     case "epub-import-write-failed":
     case "cbz-import-write-failed":
+    case "markdown-import-write-failed":
+    case "txt-import-write-failed":
       return "无法保存导入的书籍";
     default:
       return "导入失败";

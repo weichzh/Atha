@@ -4,11 +4,11 @@
 
 核心阅读、EPUB3、本地书架和消息式阅读已经形成完整主循环，Android EPUB 纵切也已通过真实模拟器链路。当前目标是在保留现有 ReaderManifest、BookRoot、Locator 与内容安全边界的前提下，逐步补齐 Readest 已成熟支持的非 PDF 格式，再交付 CSS、统计和离线词典能力。
 
-## Now：Markdown / TXT
+## Now：Linux 目标测试迁移
 
-复用现有 ReaderManifest / BookRoot / Locator，把 Markdown 与纯文本转换为受控 section，不建立第二套 reader 或通用格式 factory。正向兼容和性能验收直接使用用户放入 `fixtures/local` 的本机书籍，不再为每种格式另造书籍样本；最小恶意输入只用于可重复的信任边界测试，不提交本地书籍或其派生内容。
+把后续 APK 与桌面应用构建、目标端检查和 GUI 调试迁到用户现有 Linux GNOME 会话；Windows 只在用户明确要求时使用。先补齐用户级 Rust / Android / JDK / Node 工具链和仓库副本，再以 CLI 构建、`systemd-run --user --collect` 启动 GUI，通过现有远程桌面观察，不用 `sudo` 启动 GUI。
 
-停止条件：`fixtures/local` 中代表性的 Markdown / TXT 能在 Android 系统 picker 中导入、排版、搜索、定位并在强停后恢复；转换层保持有界且不放行原始 HTML 主动内容。成熟 Markdown parser 已覆盖语法时不自写 parser。
+停止条件：Linux 上能从干净仓库复现 workspace / Svelte 检查、APK 构建与 16 KiB 对齐、Android 模拟器链路和 Tauri 桌面壳；GUI 确实进入当前 GNOME Wayland 会话并在 SSH 断开后保留。私有 `fixtures/local` 不随仓库复制，真实样本仍由用户在目标端 opt-in 提供。
 
 ## Next：按格式风险逐片交付
 
@@ -43,6 +43,7 @@
 | EPUB2 / NCX 子集 | OPF2 `spine@toc`、有界 NCX 前序目录、legacy cover、XHTML 1.1 与 Android 目录 / 位置恢复 | `docs/architecture/READER-CORE.md`、`docs/changes/android-epub2-ncx-compatibility.md` |
 | CBZ JPEG / PNG | 自然序图片 section、ComicInfo 基础元数据、坏页继续、Windows WebView2 与 Android 16 KiB picker / 恢复 / PSS 门禁 | `docs/architecture/READER-CORE.md`、`docs/changes/android-cbz-vertical-slice.md` |
 | 离线书架体验 | 本地标题 / 作者搜索、严格进度二态、稳定排序、显式批量选择、响应式三列与 Windows / Android 正式门 | `docs/architecture/READER-CORE.md`、`docs/changes/weread-offline-library-ui.md` |
+| Markdown / TXT | 安全 Markdown 投影、遗留编码 TXT 章节、分组 sections、Android picker / 目录 / 搜索 / 恢复与十样本模拟器基线 | `docs/architecture/READER-CORE.md`、`docs/changes/android-markdown-txt-vertical-slice.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 
 精确实施过程、历史验收数字和关闭收据由 Git 与 `project-workflow` 保存，不在路线图重复维护。

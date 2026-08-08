@@ -23,9 +23,32 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   let application = { ...APPLICATION_DEFAULTS };
   let book = { ...BOOK_DEFAULTS };
   const darkScheme = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
+  const systemBars = globalThis.AthaSystemBars;
+
+  function syncSafeAreaInsets() {
+    try {
+      const insets = JSON.parse(systemBars?.getSafeAreaInsets?.() ?? "null");
+      for (const edge of ["top", "right", "bottom", "left"]) {
+        if (Number.isFinite(insets?.[edge])) {
+          root.style.setProperty(`--safe-area-${edge}`, `${insets[edge] / devicePixelRatio}px`);
+        }
+      }
+      root.style.setProperty("--reader-chapter-top", `${insets.top + 12 * devicePixelRatio}px`);
+      root.style.setProperty("--reader-chapter-size", `${14 * devicePixelRatio}px`);
+      root.style.setProperty("--reader-content-top", `${insets.top + 64 * devicePixelRatio}px`);
+      root.style.setProperty("--reader-content-bottom", `${insets.bottom + 48 * devicePixelRatio}px`);
+    } catch {
+      // The native bridge is optional on desktop.
+    }
+  }
+  syncSafeAreaInsets();
+  globalThis.addEventListener?.("atha-safe-area-change", syncSafeAreaInsets);
+  globalThis.addEventListener?.("resize", syncSafeAreaInsets);
+  document.addEventListener?.("visibilitychange", syncSafeAreaInsets);
 
   function syncSystemBars() {
-    globalThis.AthaSystemBars?.setDarkBackground?.(
+    systemBars?.setReadingMode?.(
+      true,
       application.theme === "dark" || (application.theme === "system" && darkScheme?.matches),
     );
   }
@@ -115,7 +138,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     else content.book.dataset.fontFamily = application.fontFamily;
     reader.style.setProperty(
       "--reader-line-height",
-      `${application.fontSize * LINE_HEIGHT_RATIOS[application.density]}px`,
+      `${application.fontSize * LINE_HEIGHT_RATIOS[application.density] * (systemBars ? 1.25 : 1)}px`,
     );
     syncControls();
     return snapshot();

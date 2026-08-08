@@ -12,14 +12,20 @@ export function createSearch({ session, navigation, pagination, locator, control
   let lastError = null;
   let lastJump = null;
 
-  function sectionLabel(description, section) {
-    return (
-      description.toc.find((item) => item.href.split("#", 1)[0] === section.href)?.label ||
-      section.id
-    );
+  function sectionLabel(description, section, offset = 0, fragments = new Map()) {
+    let best = null;
+    for (const item of description.toc) {
+      const [href, fragment] = item.href.split("#");
+      if (href !== section.href) continue;
+      const itemOffset = fragment === undefined ? 0 : fragments.get(fragment);
+      if (itemOffset !== undefined && itemOffset <= offset && (!best || itemOffset >= best.offset)) {
+        best = { label: item.label, offset: itemOffset };
+      }
+    }
+    return best?.label || section.id;
   }
 
-  function sectionText(source) {
+  function sectionData(source) {
     if (source.length > MAX_SECTION_LENGTH) throw new Error("search-section-size");
     const documentNode = parseSafeXhtml(source);
     if (
@@ -42,6 +48,7 @@ export function createSearch({ session, navigation, pagination, locator, control
       element.remove();
     }
     let text = "";
+    const fragments = new Map();
     const walker = documentNode.createTreeWalker(documentNode.body, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const value = walker.currentNode.textContent || "";
@@ -51,6 +58,7 @@ export function createSearch({ session, navigation, pagination, locator, control
         element && element !== documentNode.body;
         element = element.parentElement
       ) {
+        if (element.id && !fragments.has(element.id)) fragments.set(element.id, text.length);
         const inlineStyle = element.style;
         if (
           element.localName === "noscript" ||
@@ -67,7 +75,11 @@ export function createSearch({ session, navigation, pagination, locator, control
       }
       text += hidden ? HIDDEN_SENTINEL.repeat(value.length) : value;
     }
-    return text;
+    return { text, fragments };
+  }
+
+  function sectionText(source) {
+    return sectionData(source).text;
   }
 
   function excerpt(text, start, end) {
@@ -134,7 +146,7 @@ export function createSearch({ session, navigation, pagination, locator, control
       sections: for (const section of description.sections) {
         const response = await fetch(section.url, { signal: controller.signal });
         if (!response.ok) throw new Error("search-section");
-        const text = sectionText(await response.text());
+        const { text, fragments } = sectionData(await response.text());
         for (const match of text.matchAll(pattern)) {
           if (controller.signal.aborted) throw new DOMException("aborted", "AbortError");
           const start = match.index;
@@ -143,7 +155,7 @@ export function createSearch({ session, navigation, pagination, locator, control
             Object.freeze({
               id: String(results.length),
               section: section.id,
-              sectionLabel: sectionLabel(description, section),
+              sectionLabel: sectionLabel(description, section, start, fragments),
               excerpt: excerpt(text, start, end),
               locator: locator.serialize(
                 description,
@@ -238,6 +250,24 @@ export function createSearch({ session, navigation, pagination, locator, control
       hiddenText.length === "beforexxxxxxafter".length &&
         hiddenText.indexOf("after") === "beforexxxxxx".length &&
         !hiddenText.includes("before      after"),
+      "sample-boundary",
+    );
+    const grouped = sectionData(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><h1 id='one'>One</h1><p>first</p><h1 id='two'>Two</h1><p>target</p></body></html>",
+    );
+    const groupedSection = { id: "group", href: "text/group.xhtml" };
+    assert(
+      sectionLabel(
+        {
+          toc: [
+            { label: "One", href: "text/group.xhtml#one" },
+            { label: "Two", href: "text/group.xhtml#two" },
+          ],
+        },
+        groupedSection,
+        grouped.text.indexOf("target"),
+        grouped.fragments,
+      ) === "Two",
       "sample-boundary",
     );
     let activeRejected = false;

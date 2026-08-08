@@ -475,7 +475,7 @@ function Invoke-LibraryBrowserCheck {
             '--session', $session, 'find', 'role', 'button', 'click', '--name', '选择书籍'
         )
         Invoke-Checked 'agent-browser' @(
-            '--session', $session, 'wait', '--text', '请在 Atha 应用中选择 EPUB 或 CBZ。'
+            '--session', $session, 'wait', '--text', '请在 Atha 应用中选择 EPUB、CBZ、Markdown 或 TXT。'
         )
 
         $pageErrors = (@(& agent-browser --session $session errors --json) -join "`n") | ConvertFrom-Json

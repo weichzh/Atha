@@ -4,9 +4,11 @@
 param(
     [string]$BookRoot,
     [string]$Entry = 'EPUB/text/ch012.xhtml',
+    [string]$Manifest,
     [string]$HostPackage = 'atha-reader-host',
     [string]$HostPath,
     [switch]$BenchmarkOnly,
+    [switch]$VerifyImportOnly,
     [ValidateSet('default', 'formula-heavy')]
     [string]$BenchmarkProfile = 'default'
 )
@@ -17,9 +19,39 @@ if ([string]::IsNullOrWhiteSpace($BookRoot)) {
     $BookRoot = Join-Path $repoRoot 'fixtures/local/logic-1-2'
 }
 $BookRoot = (Resolve-Path -LiteralPath $BookRoot).Path
-$entryPath = Join-Path $BookRoot ($Entry -replace '/', [IO.Path]::DirectorySeparatorChar)
-if (-not (Test-Path -LiteralPath $entryPath -PathType Leaf)) {
-    throw "Reader entry does not exist: $Entry"
+$entryWasSpecified = $PSBoundParameters.ContainsKey('Entry')
+$manifestWasSpecified = $PSBoundParameters.ContainsKey('Manifest')
+if ($entryWasSpecified -and $manifestWasSpecified) {
+    throw '-Entry and -Manifest are mutually exclusive.'
+}
+if ($VerifyImportOnly -and -not $manifestWasSpecified) {
+    throw '-VerifyImportOnly requires -Manifest.'
+}
+if ($manifestWasSpecified) {
+    if ([string]::IsNullOrWhiteSpace($Manifest)) {
+        throw '-Manifest must name a manifest inside BookRoot.'
+    }
+    $readerInputArguments = @('--manifest', $Manifest)
+    $bookRootPrefix = $BookRoot.TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    ) + [IO.Path]::DirectorySeparatorChar
+    $readerInputPath = [IO.Path]::GetFullPath(
+        (Join-Path $BookRoot ($Manifest -replace '/', [IO.Path]::DirectorySeparatorChar))
+    )
+    if (-not $readerInputPath.StartsWith($bookRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Reader manifest must stay inside BookRoot.'
+    }
+    if (-not (Test-Path -LiteralPath $readerInputPath -PathType Leaf)) {
+        throw 'Reader manifest does not exist inside BookRoot.'
+    }
+}
+else {
+    $readerInputArguments = @('--entry', $Entry)
+    $readerInputPath = Join-Path $BookRoot ($Entry -replace '/', [IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $readerInputPath -PathType Leaf)) {
+        throw "Reader entry does not exist: $Entry"
+    }
 }
 
 . (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
@@ -44,7 +76,10 @@ if ($BenchmarkProfile -eq 'formula-heavy') {
 }
 
 function Invoke-ReaderHost {
-    param([string[]]$Arguments)
+    param(
+        [string[]]$Arguments,
+        [ValidateRange(1000, 300000)][int]$TimeoutMs = 60000
+    )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
     $startInfo.UseShellExecute = $false
@@ -53,7 +88,7 @@ function Invoke-ReaderHost {
         [void]$startInfo.ArgumentList.Add($argument)
     }
     $process = [Diagnostics.Process]::Start($startInfo)
-    if (-not $process.WaitForExit(60000)) {
+    if (-not $process.WaitForExit($TimeoutMs)) {
         $process.Kill($true)
         $process.WaitForExit()
         throw 'Reader host timed out.'
@@ -108,24 +143,34 @@ try {
         throw 'Reader host build failed.'
     }
 
+    if ($VerifyImportOnly) {
+        Invoke-ReaderHost -Arguments (@(
+            '--book-root', $BookRoot
+        ) + $readerInputArguments + @(
+            '--verify-import'
+        )) -TimeoutMs 180000
+        Write-Host 'Reader manifest import verification passed.'
+        return
+    }
+
     for ($sample = 1; $sample -le 10; $sample++) {
-        Invoke-ReaderHost -Arguments @(
-            '--book-root', $BookRoot,
-            '--entry', $Entry,
+        Invoke-ReaderHost -Arguments (@(
+            '--book-root', $BookRoot
+        ) + $readerInputArguments + @(
             '--verify-sample',
             '--benchmark-run', $runId,
             '--sample', [string]$sample,
             '--benchmark', 'cold'
-        )
+        ))
     }
-    Invoke-ReaderHost -Arguments @(
-        '--book-root', $BookRoot,
-        '--entry', $Entry,
+    Invoke-ReaderHost -Arguments (@(
+        '--book-root', $BookRoot
+    ) + $readerInputArguments + @(
         '--verify-sample',
         '--benchmark-run', $runId,
         '--sample', '1',
         '--benchmark', 'hot'
-    )
+    ))
 
     $rawFiles = @(Get-ChildItem -LiteralPath $benchmarkRoot -Filter "$runId-*.csv" -File)
     if ($rawFiles.Count -ne 11) {

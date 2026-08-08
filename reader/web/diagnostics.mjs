@@ -369,6 +369,31 @@ export function createDiagnostics({
       clientY: rect.top + 80,
     });
     assert(document.documentElement.hasAttribute("data-reader-tools"), "sample-boundary");
+    assert(
+      document.querySelector(".reader-controls").compareDocumentPosition(document.querySelector(".reader")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      "sample-boundary",
+    );
+    if (globalThis.AthaSystemBars?.getSafeAreaInsets) {
+      const nativeInsets = JSON.parse(globalThis.AthaSystemBars.getSafeAreaInsets());
+      const pageBox = document.querySelector("#page").getBoundingClientRect();
+      const toolbar = document.querySelector(".top-toolbar");
+      const toolbarBox = toolbar.getBoundingClientRect();
+      const chapter = document.querySelector(".chapter-label");
+      const chapterStyle = getComputedStyle(chapter);
+      const pageScale = Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--page-scale"),
+      );
+      assert(chapterStyle.visibility === "hidden", "sample-boundary");
+      assert(pageBox.top >= toolbarBox.bottom + 8, "sample-boundary");
+      assert(!getComputedStyle(toolbar).backgroundColor.startsWith("rgba("), "sample-boundary");
+      document.documentElement.removeAttribute("data-reader-tools");
+      assert(
+        chapter.getBoundingClientRect().top >= nativeInsets.top / devicePixelRatio + 8 &&
+          Number.parseFloat(chapterStyle.fontSize) * pageScale >= 12,
+        "sample-boundary",
+      );
+    }
     document.documentElement.removeAttribute("data-reader-tools");
     const walker = document.createTreeWalker(content.book, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) =>

@@ -215,7 +215,10 @@ async fn import_library_books(
     let Some(paths) = app
         .dialog()
         .file()
-        .add_filter("EPUB / CBZ", &["epub", "cbz"])
+        .add_filter(
+            "EPUB / CBZ / Markdown / TXT",
+            &["epub", "cbz", "md", "markdown", "txt"],
+        )
         .blocking_pick_files()
     else {
         return Ok(None);
@@ -238,7 +241,7 @@ async fn import_library_books(
                 .into_path()
                 .map_or_else(|_| "书籍".into(), |path| display_name(&path));
             let input =
-                match platform_file::PickerInput::open(&app, selected, "book", MAX_SOURCE_BYTES) {
+                match platform_file::PickerInput::open_book(&app, selected, MAX_SOURCE_BYTES) {
                     Ok(input) => input,
                     Err(_) => {
                         log::warn!(
@@ -253,7 +256,7 @@ async fn import_library_books(
                         continue;
                     }
                 };
-            if let Err(error) = library.import(input.path()) {
+            if let Err(error) = library.import_with_title_hint(input.path(), input.title_hint()) {
                 log::warn!(
                     target: "atha::library",
                     "operation=import stage=backend outcome=failed code={}",

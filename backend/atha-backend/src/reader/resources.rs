@@ -7,7 +7,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-const MAX_RESOURCE_BYTES: u64 = 16 * 1024 * 1024;
+use super::MAX_MANIFEST_SECTIONS;
+
+pub(super) const MAX_RESOURCE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct BookRoot {
@@ -106,7 +108,7 @@ fn manifest_xhtml_paths(root: &Path) -> HashSet<PathBuf> {
     else {
         return HashSet::new();
     };
-    if sections.len() > 1_000 {
+    if sections.len() > MAX_MANIFEST_SECTIONS {
         return HashSet::new();
     }
     sections

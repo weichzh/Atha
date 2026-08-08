@@ -2,7 +2,7 @@
 
 ## 责任
 
-阅读内核负责把导入后的书籍内容以 HTML、CSS 和本地资源的形式呈现。它不以某个书籍封装格式为中心：EPUB 与 CBZ 已在导入后投影为同一 ReaderManifest / BookRoot，MOBI、AZW 或其他来源也必须先归一到同一内容模型。
+阅读内核负责把导入后的书籍内容以 HTML、CSS 和本地资源的形式呈现。它不以某个书籍封装格式为中心：EPUB、CBZ、Markdown 与 TXT 已在导入后投影为同一 ReaderManifest / BookRoot，MOBI、AZW 或其他来源也必须先归一到同一内容模型。
 
 ## 兼容性契约
 
@@ -20,11 +20,13 @@ WebView2 是当前唯一阅读渲染技术。宿主只提供窗口、受控资�
 
 产品入口采用 Tauri 2 与 Svelte 5，但仍只有一个 WebView2。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。
 
-Tauri 复用后端书根、EPUB / CBZ 导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限，reader 完成前会从真实文档策略复核关键能力确实不可用。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
+Tauri 复用后端书根、全部已支持格式导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限，reader 完成前会从真实文档策略复核关键能力确实不可用。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
+
+Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持的 CSS `safe-area`。`MainActivity` 在 UI 线程观察 `systemBars | displayCutout`，只缓存四边物理像素并原样下传 insets；boolean-only bridge 负责阅读态状态栏显隐与图标明暗，Web 层把同一组值转换为 CSS 像素后只消费自有变量。书架与工具面板避开状态栏 / 导航栏，阅读态隐藏状态栏时左上章节标题仍在 cutout 安全区下方；工具打开时隐藏章节标题并把内容区放到顶部工具栏之下。native 不给 WebView 再加 padding，也不叠加 `env(safe-area-inset-*)`，避免新旧 WebView 双重避让。
 
 ## 样式层
 
-默认样式提供稳定、克制的阅读体验。Preferences 把系统/浅色/纸张/深色主题、亮度、字号、字体、三档行距和点击/滑动翻页作为应用默认值，把书源样式开关与用户 CSS 作为本书覆盖；R5 起两层分别校验、恢复和持久化。四边距不是偏好：阅读页固定使用上 144、右 32、下 144、左 32 设备像素，系统缩放不改变这些排版值；上下安全区使 48 CSS px 工具栏在最高 300% 系统缩放下也只进入页眉页脚。亮度只过滤阅读页，不改变壳层控件。
+默认样式提供稳定、克制的阅读体验。Preferences 把系统/浅色/纸张/深色主题、亮度、字号、字体、三档行距和点击/滑动翻页作为应用默认值，把书源样式开关与用户 CSS 作为本书覆盖；R5 起两层分别校验、恢复和持久化。四边距不是偏好：桌面阅读页固定使用上 144、右 32、下 144、左 32 设备像素；Android 只在顶部 / 底部安全区更大时扩大相应排版边距，不改变左右正文宽度。亮度只过滤阅读页，不改变壳层控件。
 
 书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、用户 CSS 排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。用户 CSS 可检查、启停和撤销，拒绝 `@import`、`url()` 与 Shadow 边界选择器；它不能修改应用壳。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
 
@@ -32,7 +34,7 @@ Tauri 复用后端书根、EPUB / CBZ 导入、共享 CLI、窗口尺寸和诊�
 
 ## 本地书架与应用内导入
 
-Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB / CBZ。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；已知 `.epub` / `.cbz` 严格分派到对应 importer，不透明 content URI 的中性副本只在符合严格 EPUB marker / container 时进入 EPUB，其余进入严格 CBZ，不使用“EPUB 失败后再试 CBZ”。书架以完整源文件 SHA-256 作为书籍身份，在 `%LOCALAPPDATA%/Atha/Library` 为每书保存一份受限 JSON，在既有 `%LOCALAPPDATA%/Atha/ImportedBooks/<sha256>` 保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
+Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB、CBZ、Markdown 或 TXT。`reader::library::LocalLibrary` 是书架边界，只暴露列出、导入、打开、读取封面和移除；已知 `.epub`、`.cbz`、`.md` / `.markdown`、`.txt` 严格分派到对应 importer。Android content URI 由 Tauri 内置 PathPlugin 经 `ContentResolver` 取得显示文件名，只保留允许列表后缀后复制到 Picker cache；provider 不返回可用后缀时稳定拒绝，不从 URI 或正文猜格式。书架以格式域和完整源文件共同生成的 SHA-256 作为文本书身份，EPUB / CBZ 继续保持原始文件 SHA-256；在平台 Library 目录为每书保存一份受限 JSON，在 ImportedBooks 下保留导入缓存。移除只删除书架记录，因此再次导入仍可恢复同一内容身份下的阅读状态。
 
 EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；EPUB2 的 `meta name="cover"` 与 EPUB3 的 `cover-image` 最终投影为同一封面字段。CBZ 只消费可选 `ComicInfo.xml` 中有界的 `Title`、`Writer` 与唯一有效 `FrontCover`，无效、冲突或超限元数据回退而不让有效图片书失败。无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性和导入时间，不接收源路径、缓存路径或书籍内容。打开书籍后，宿主把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
 
@@ -43,6 +45,8 @@ EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持
 阅读页的运行时书籍输入始终是受控书根内的 schema 1 manifest。manifest 以书籍内容哈希标识版本，声明有序且唯一的 section、可访问资源和可选 TOC；未知字段、重复项、超量输入、编码绕过、绝对路径、查询和书根越界均拒绝。单 XHTML `entry` 只作为现有样本的兼容入口。
 
 Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `reader::epub` module 读取单个 EPUB2 或 EPUB3 rendition 的 OCF、OPF manifest、spine 和 navigation document，把 spine XHTML 与当前支持的 CSS、SVG、PNG、JPEG、GIF、WebP 原子写入 `%LOCALAPPDATA%/Atha/ImportedBooks/<source-sha256>`，再交回既有 `BookRoot` 与 `ReadingSession`。EPUB2 只按 OPF `spine@toc` 解析对应的 `application/x-dtbncx+xml` NCX，把 `navMap` 的嵌套 `navPoint` 按前序拍平成现有 `ReaderManifest.toc`；EPUB3 继续只使用唯一 XHTML nav。两条路径共享相同的 section、资源、路径、大小和 XML 深度边界，不建立第二套 importer。XHTML 身份以 OPF manifest 的 `application/xhtml+xml` 为准，不依赖文件扩展名；`BookRoot` 只对 reader manifest 已声明的 section 返回 XHTML MIME。缓存目录和 `contentVersion` 都使用完整源文件 SHA-256，因此相同内容跨路径复用身份，内容改变则形成新身份；导入器不解释 Locator、分页或阅读状态。
+
+`reader::text` 是 Markdown / TXT 的具体导入 adapter，不建立格式 factory。Markdown 使用 `pulldown-cmark 0.13.4` 的事件流生成受控 XHTML：原始 HTML 转义，链接只保留 label，图片只保留 alt，占位不获取路径或网络；首个 H1 前内容和各 H1 形成 section / TOC，固定的最小样式只补齐代码换行、表格边框、等宽代码与引用缩进。TXT 由 BOM、严格 UTF-8 或 `chardetng 1.0.0` + `encoding_rs 0.8.35` 识别，至少两个高置信整行章节标题才建立语义 TOC；相邻章节按约 1 MiB 软上限合并为 XHTML section，每章保留受控 fragment。两种格式都在发布前复核源文件未变化，使用同文件系统 staging 与原子发布；Markdown 源与单 section 上限为 16 MiB，ReaderManifest 仍最多 1000 sections / 2000 TOC items。
 
 `reader::cbz` 以路径分段 ASCII 数字自然序排列 ZIP 内的 JPEG / PNG，忽略隐藏段、`__MACOSX` 和非图片成员，并为每图生成一个 Atha 控制的 XHTML section 与一个声明资源。`imagesize 0.15` 只校验 JPEG / PNG 魔数、非零尺寸、8192 单边和 20000000 像素预算；ZIP CRC 与 WebView `img.decode()` 继续覆盖其余损坏，尾部损坏显示可访问占位并允许继续导航。
 
@@ -60,7 +64,7 @@ schema 1 Locator 是同一书籍内容版本内的内容坐标：起点由 secti
 
 ### 阅读状态与书签
 
-Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。EPUB / CBZ 导入入口的规范路径位于以完整源 SHA-256 命名的缓存目录，因此移动源文件不改变状态键；manifest 同时提供相同内容版本。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可用时当前会话仍可继续。
+Windows host 使用持久 WebView2 profile，并从规范入口路径计算只含 16 个十六进制字符的稳定状态键，不把用户路径交给页面。所有导入入口的规范路径位于以内容版本命名的缓存目录，因此移动源文件不改变状态键；EPUB / CBZ 内容版本保持原始文件 SHA-256，Markdown / TXT 以不同固定格式域隔离相同字节。旧 `entry` 兼容入口仍由 host 根据 XHTML 字节生成 64 个十六进制字符的内容指纹。页面以状态键分区三个 schema 1 记录：应用偏好跨书共享，本书偏好与书签按书保存，进度仅保存内容版本和 Locator。输入有严格结构、长度与书签数量上限；损坏状态被安全丢弃或在定位时回落，存储不可用时当前会话仍可继续。
 
 稳定导航只在同一任务末尾合并写入一次小型进度记录，并在页面隐藏或离开时同步 flush。恢复顺序是有效偏好优先，再恢复同内容版本且可定位的进度；错版本进度不应用，错版本书签保留并显示为不可跳转。书签只提供当前位置创建、去重、跳转与删除；纯图片或只有不可见字符的页面通过当前 Locator 识别已有书签，不依赖可见文字偏移；书籍身份迁移、跨版本重锚、同步和历史记录不属于本层。
 

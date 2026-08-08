@@ -1,14 +1,15 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{BufReader, Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom},
     path::Path,
 };
 
-use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
-pub const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
+use super::source::{self, SourceError};
+
+pub use super::source::MAX_SOURCE_BYTES;
 pub(super) const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 pub(super) const MAX_MEMBER_BYTES: u64 = 16 * 1024 * 1024;
 pub(super) const MAX_ENTRIES: usize = 10_000;
@@ -32,8 +33,8 @@ pub(super) struct ArchiveIndex {
 }
 
 pub(super) fn fingerprint(source: &Path) -> Result<(String, File), ArchiveError> {
-    let mut file = File::open(source).map_err(|_| ArchiveError::InvalidSource)?;
-    let hash = hash_reader(&mut file)?;
+    let (hash, mut file) =
+        source::fingerprint(source, b"", MAX_SOURCE_BYTES).map_err(ArchiveError::from)?;
     verify_entry_count(&mut file)?;
     Ok((hash, file))
 }
@@ -255,40 +256,16 @@ pub(super) fn safe_path(value: &str) -> Result<String, ArchiveError> {
 }
 
 pub(super) fn hash_file(path: &Path) -> Result<String, ArchiveError> {
-    let mut file = File::open(path).map_err(|_| ArchiveError::InvalidSource)?;
-    hash_reader(&mut file)
+    source::hash_file(path, b"", MAX_SOURCE_BYTES).map_err(ArchiveError::from)
 }
 
-fn hash_reader(reader: &mut (impl Read + Seek)) -> Result<String, ArchiveError> {
-    reader
-        .seek(SeekFrom::Start(0))
-        .map_err(|_| ArchiveError::InvalidSource)?;
-    let mut reader = BufReader::new(reader);
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    let mut total = 0_u64;
-    loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|_| ArchiveError::InvalidSource)?;
-        if read == 0 {
-            break;
+impl From<SourceError> for ArchiveError {
+    fn from(error: SourceError) -> Self {
+        match error {
+            SourceError::InvalidSource => Self::InvalidSource,
+            SourceError::SourceTooLarge => Self::SourceTooLarge,
         }
-        total = total
-            .checked_add(read as u64)
-            .ok_or(ArchiveError::SourceTooLarge)?;
-        if total > MAX_SOURCE_BYTES {
-            return Err(ArchiveError::SourceTooLarge);
-        }
-        digest.update(&buffer[..read]);
     }
-    let mut value = String::with_capacity(64);
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    for byte in digest.finalize() {
-        value.push(char::from(HEX[usize::from(byte >> 4)]));
-        value.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    Ok(value)
 }
 
 #[cfg(test)]

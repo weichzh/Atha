@@ -22,6 +22,7 @@ pub(crate) fn cleanup(app: &AppHandle) -> io::Result<()> {
 
 pub(crate) struct PickerInput {
     path: PickerPath,
+    title_hint: Option<String>,
 }
 
 impl PickerInput {
@@ -34,6 +35,7 @@ impl PickerInput {
         if let Ok(path) = selected.clone().into_path() {
             return Ok(Self {
                 path: PickerPath::Direct(path),
+                title_hint: None,
             });
         }
 
@@ -49,11 +51,35 @@ impl PickerInput {
         target.sync_all()?;
         Ok(Self {
             path: PickerPath::Temporary(temporary),
+            title_hint: None,
         })
+    }
+
+    pub(crate) fn open_book(
+        app: &AppHandle,
+        selected: FilePath,
+        max_bytes: u64,
+    ) -> io::Result<Self> {
+        if selected.clone().into_path().is_ok() {
+            return Self::open(app, selected, "book", max_bytes);
+        }
+        let file_name = app
+            .path()
+            .file_name(&selected.to_string())
+            .ok_or_else(invalid_book_name)?;
+        let (suffix, title_hint) =
+            book_source_metadata(&file_name).ok_or_else(invalid_book_name)?;
+        let mut input = Self::open(app, selected, suffix, max_bytes)?;
+        input.title_hint = Some(title_hint.to_owned());
+        Ok(input)
     }
 
     pub(crate) fn path(&self) -> &Path {
         self.path.as_ref()
+    }
+
+    pub(crate) fn title_hint(&self) -> Option<&str> {
+        self.title_hint.as_deref()
     }
 }
 
@@ -166,6 +192,23 @@ fn reserve_temporary(parent: &Path, suffix: &'static str) -> io::Result<Temporar
     ))
 }
 
+fn book_source_metadata(file_name: &str) -> Option<(&'static str, &str)> {
+    if file_name.is_empty() || file_name.contains(['/', '\\', '\0']) {
+        return None;
+    }
+    let path = Path::new(file_name);
+    let extension = path.extension()?.to_str()?;
+    let suffix = ["epub", "cbz", "md", "markdown", "txt"]
+        .into_iter()
+        .find(|candidate| extension.eq_ignore_ascii_case(candidate))?;
+    let title_hint = path.file_stem()?.to_str()?;
+    (!title_hint.is_empty()).then_some((suffix, title_hint))
+}
+
+fn invalid_book_name() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "unsupported book file name")
+}
+
 fn copy_limited(
     source: &mut impl Read,
     target: &mut impl Write,
@@ -187,6 +230,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn book_source_metadata_accepts_only_supported_file_names() {
+        for (name, suffix, title_hint) in [
+            ("book.epub", "epub", "book"),
+            ("book.CBZ", "cbz", "book"),
+            ("notes.md", "md", "notes"),
+            ("notes.MARKDOWN", "markdown", "notes"),
+            ("novel.txt", "txt", "novel"),
+        ] {
+            assert_eq!(book_source_metadata(name), Some((suffix, title_hint)));
+        }
+        for name in ["book", "book.pdf", "book.txt.exe", ".txt"] {
+            assert_eq!(book_source_metadata(name), None);
+        }
+    }
+
+    #[test]
     fn temporary_picker_path_is_removed_on_drop() {
         let parent = std::env::temp_dir().join(format!(
             "atha-picker-test-{}-{}",
@@ -195,6 +254,13 @@ mod tests {
         ));
         let temporary = reserve_temporary(&parent, "epub").expect("reserve picker cache");
         let directory = temporary.directory.clone();
+        assert_eq!(
+            temporary
+                .path()
+                .file_name()
+                .and_then(|value| value.to_str()),
+            Some("content.epub")
+        );
         fs::write(temporary.path(), b"epub").expect("write picker cache");
 
         drop(temporary);
