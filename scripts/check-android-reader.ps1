@@ -320,6 +320,21 @@ function Focus-CdpElement {
     if (-not [bool]$focused) { throw 'Android reader WebView input did not receive focus.' }
 }
 
+function Set-CdpInputValue {
+    param(
+        [Parameter(Mandatory)]$Connection,
+        [Parameter(Mandatory)][string]$Selector,
+        [Parameter(Mandatory)][string]$Value
+    )
+
+    $escapedSelector = $Selector | ConvertTo-Json -Compress
+    $escapedValue = $Value | ConvertTo-Json -Compress
+    $updated = Get-AndroidWebViewValue `
+        -Connection $Connection `
+        -JavaScript "(()=>{const element=document.querySelector($escapedSelector);if(!(element instanceof HTMLInputElement))return false;const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(element,$escapedValue);element.dispatchEvent(new Event('input',{bubbles:true}));return element.value===$escapedValue})()"
+    if (-not [bool]$updated) { throw 'Android reader WebView input value could not be updated.' }
+}
+
 function Wait-CdpCondition {
     param(
         [Parameter(Mandatory)]$Connection,
@@ -1086,7 +1101,7 @@ if ($null -ne $resolvedBook) {
             Invoke-CdpClick -Connection $textWebView -Selector '.reader-tool.search > summary'
             Focus-CdpElement -Connection $textWebView -Selector '#search-query'
             $searchToken = 'atha' + [Guid]::NewGuid().ToString('N')
-            Invoke-Adb shell input text $searchToken | Out-Null
+            Set-CdpInputValue -Connection $textWebView -Selector '#search-query' -Value $searchToken
             $searchWatch = [Diagnostics.Stopwatch]::StartNew()
             Invoke-CdpClick -Connection $textWebView -Selector '#search-form button[type="submit"]'
             Wait-CdpCondition -Connection $textWebView -JavaScript "document.querySelector('#search-status')?.textContent === '找到 0 条'" -TimeoutSeconds 120
