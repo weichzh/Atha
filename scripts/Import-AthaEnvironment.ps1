@@ -4,7 +4,7 @@ param(
     [string]$RepoRoot
 )
 
-$environmentPath = Join-Path $RepoRoot 'env\local.ps1'
+$environmentPath = Join-Path $RepoRoot 'env/local.ps1'
 if (-not (Test-Path -LiteralPath $environmentPath -PathType Leaf)) {
     throw 'Missing env/local.ps1. Copy env/example.ps1 and set local tool paths.'
 }

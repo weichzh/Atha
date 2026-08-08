@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$appRoot = Join-Path $repoRoot 'reader\app'
-$apkPath = Join-Path $appRoot 'src-tauri\gen\android\app\build\outputs\apk\universal\debug\app-universal-debug.apk'
+$appRoot = Join-Path $repoRoot 'reader/app'
+$apkPath = Join-Path $appRoot 'src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk'
 $serial = 'emulator-5554'
 $avdName = $ExpectedAvd
 $package = 'com.atha.reader'
@@ -133,12 +133,14 @@ $javaHome = $env:ATHA_JAVA_HOME
 $androidHome = $env:ATHA_ANDROID_HOME
 $ndkHome = $env:ATHA_NDK_HOME
 $javaRelease = Join-Path $javaHome 'release'
-$adb = Join-Path $androidHome 'platform-tools\adb.exe'
-$buildTools = Join-Path $androidHome 'build-tools\35.0.0'
-$aapt2 = Join-Path $buildTools 'aapt2.exe'
-$zipalign = Join-Path $buildTools 'zipalign.exe'
-$androidPlatform = Join-Path $androidHome 'platforms\android-36\android.jar'
-$readelf = Join-Path $ndkHome 'toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-readelf.exe'
+$executableSuffix = if ($IsWindows) { '.exe' } else { '' }
+$ndkHost = if ($IsWindows) { 'windows-x86_64' } else { 'linux-x86_64' }
+$adb = Join-Path $androidHome "platform-tools/adb$executableSuffix"
+$buildTools = Join-Path $androidHome 'build-tools/35.0.0'
+$aapt2 = Join-Path $buildTools "aapt2$executableSuffix"
+$zipalign = Join-Path $buildTools "zipalign$executableSuffix"
+$androidPlatform = Join-Path $androidHome 'platforms/android-36/android.jar'
+$readelf = Join-Path $ndkHome "toolchains/llvm/prebuilt/$ndkHost/bin/llvm-readelf$executableSuffix"
 $androidWebViewEval = Join-Path $PSScriptRoot 'android-webview-eval.mjs'
 
 foreach ($tool in @($javaRelease, $adb, $aapt2, $zipalign, $androidPlatform, $readelf, $androidWebViewEval)) {
@@ -336,7 +338,7 @@ function Wait-CdpCondition {
 function Save-UiScreenshot {
     param([Parameter(Mandatory)][string]$Name)
 
-    $directory = Join-Path $repoRoot 'artifacts\local\screenshots'
+    $directory = Join-Path $repoRoot 'artifacts/local/screenshots'
     $remote = "/data/local/tmp/$Name.png"
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
     try {
@@ -803,9 +805,11 @@ foreach ($permission in @(
 
 Invoke-Checked $zipalign @('-c', '-P', '16', '-v', '4', $apkPath) | Out-Null
 
-$tempRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot ".tmp\android-gate-$PID"))
-$allowedTempRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot '.tmp')).TrimEnd('\') + '\'
-if (-not $tempRoot.StartsWith($allowedTempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+$tempRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot ".tmp/android-gate-$PID"))
+$separator = [IO.Path]::DirectorySeparatorChar
+$allowedTempRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot '.tmp')).TrimEnd($separator) + $separator
+$pathComparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+if (-not $tempRoot.StartsWith($allowedTempRoot, $pathComparison)) {
     throw 'Refusing to use a temporary directory outside the repository .tmp directory.'
 }
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
@@ -1273,7 +1277,7 @@ if ($null -ne $resolvedBook) {
         $libraryShelfOrderingResult = 'not-asserted-single-book-emulator'
     }
 
-    $evidenceDirectory = Join-Path $repoRoot 'artifacts\local\android'
+    $evidenceDirectory = Join-Path $repoRoot 'artifacts/local/android'
     New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
     $apkSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $apkPath).Hash.ToLowerInvariant()
     $gateSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash.ToLowerInvariant()
