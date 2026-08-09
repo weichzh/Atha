@@ -14,9 +14,13 @@
 
 以 PCT-AL10 上已安装的微信读书与 Readest 原图、真实拖动和滑动行为为准，右上设置已改为移动底部抽屉和分层页面，首行缩进、16–40 字号滑块与左右翻页 / 上下滚动两种模式已落地。字号以逻辑 CSS px 记录并按 DPR 换算内部设备像素；没有引入手势、动画或通用 UI 框架。
 
-## Now：项目收尾
+## Done：项目收尾
 
-汇总本轮非 PDF 格式、CSS、统计、词典与操控的固定基准，完成 workflow 清理、事实一致性复核与项目关闭；不在收尾阶段顺带实现 CSS 社区、同步或新格式。
+本轮非 PDF 格式、CSS、统计、词典与操控的正式入口、最新基准和证据等级已汇总；所有 change 状态为 `implemented`，workflow 无活动任务，过期的 FB2 状态已修正。收尾没有顺带实现 CSS 社区、同步或新格式。
+
+## Now：无活动切片
+
+后续需求必须重新建立最小 `accepted` change；`Later` 条目不授权预建。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
@@ -51,6 +55,7 @@
 | CSS 社区模块边界 | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md` |
 | 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/changes/local-reading-statistics.md` |
 | 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/changes/reader-controls-and-typography.md` |
+| 路线图收尾 | 固定验证入口与证据等级汇总、change / workflow 状态一致性复核和过期 FB2 状态修正 | `docs/ACTIVE.md`、`docs/codebase/MAP.md`、`project-workflow` 收据 |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 
 精确实施过程、历史验收数字和关闭收据由 Git 与 `project-workflow` 保存，不在路线图重复维护。
