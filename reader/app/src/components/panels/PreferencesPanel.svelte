@@ -12,21 +12,68 @@
     Copy,
     FileJson,
     Hand,
+    ListIndentIncrease,
+    MoveHorizontal,
+    MoveVertical,
     Palette,
     Plus,
     Save,
     Search,
     SunMedium,
+    TextAlignJustify,
     Trash2,
     Type,
+    X,
   } from "@lucide/svelte";
 
   import CssEditor from "../CssEditor.svelte";
+
+  let root: HTMLElement | undefined;
+
+  function closePanel() {
+    const owner = root?.closest("details");
+    owner?.removeAttribute("open");
+    owner?.querySelector<HTMLElement>(":scope > summary")?.focus();
+  }
+
+  function onPanelKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    closePanel();
+  }
 </script>
 
-<div class="tool-panel preferences-panel" data-settings-root data-settings-view="menu">
+<button
+  class="preferences-backdrop"
+  type="button"
+  aria-label="关闭阅读设置"
+  tabindex="-1"
+  onclick={closePanel}
+></button>
+<div
+  bind:this={root}
+  class="tool-panel preferences-panel"
+  data-settings-root
+  data-settings-view="menu"
+  role="dialog"
+  aria-label="阅读设置"
+  tabindex="-1"
+  onkeydown={onPanelKeydown}
+>
+  <span class="settings-handle" aria-hidden="true"></span>
   <section class="settings-view settings-menu" data-settings-page="menu">
-    <h2 tabindex="-1">阅读设置</h2>
+    <header class="panel-heading settings-menu-heading">
+      <h2 id="preferences-heading" tabindex="-1">阅读设置</h2>
+      <button
+        class="icon-button panel-close"
+        type="button"
+        aria-label="关闭阅读设置"
+        title="关闭阅读设置"
+        onclick={closePanel}
+      >
+        <X aria-hidden="true" />
+      </button>
+    </header>
     <div class="settings-list">
       <button type="button" data-settings-target="font">
         <Type aria-hidden="true" />
@@ -77,19 +124,17 @@
       <h2 tabindex="-1">字体</h2>
     </header>
     <div class="setting-group">
-      <div class="setting-row">
-        <span class="setting-label">字号</span>
-        <div class="segmented-control" role="radiogroup" aria-label="正文字号">
-          <button type="button" role="radio" aria-checked="false" data-preference-for="font-size" data-preference-value="24"><span class="font-choice-small">A</span></button>
-          <button type="button" role="radio" aria-checked="true" data-preference-for="font-size" data-preference-value="32">A</button>
-          <button type="button" role="radio" aria-checked="false" data-preference-for="font-size" data-preference-value="40"><span class="font-choice-large">A</span></button>
+      <div class="setting-row setting-row-stacked font-size-setting">
+        <div class="setting-label-row">
+          <span class="setting-label">字号</span>
+          <output id="font-size-value" for="font-size">19</output>
         </div>
+        <label class="font-size-control">
+          <span class="font-choice-small" aria-hidden="true">A</span>
+          <input id="font-size" type="range" min="16" max="40" step="1" value="19" aria-label="正文字号" />
+          <span class="font-choice-large" aria-hidden="true">A</span>
+        </label>
       </div>
-      <select id="font-size" class="preference-source-select" aria-hidden="true" tabindex="-1">
-        <option value="24">24px</option>
-        <option value="32" selected>32px</option>
-        <option value="40">40px</option>
-      </select>
       <div class="setting-row setting-row-stacked">
         <span class="setting-label">字体</span>
         <div class="segmented-control segmented-control-wide" role="radiogroup" aria-label="正文字体">
@@ -134,15 +179,17 @@
       </select>
       <div class="setting-row setting-row-stacked">
         <span class="setting-label">段首缩进</span>
-        <div class="segmented-control segmented-control-wide" role="radiogroup" aria-label="段首缩进">
-          <button type="button" role="radio" aria-checked="true" data-preference-for="paragraph-indent" data-preference-value="book">跟随书源</button>
-          <button type="button" role="radio" aria-checked="false" data-preference-for="paragraph-indent" data-preference-value="none">顶格</button>
-          <button type="button" role="radio" aria-checked="false" data-preference-for="paragraph-indent" data-preference-value="two">缩进两字</button>
+        <div class="choice-cards" role="radiogroup" aria-label="段首缩进">
+          <button type="button" role="radio" aria-checked="true" data-preference-for="paragraph-indent" data-preference-value="none">
+            <TextAlignJustify class="indent-preview" aria-hidden="true" /><span>首行顶格</span>
+          </button>
+          <button type="button" role="radio" aria-checked="false" data-preference-for="paragraph-indent" data-preference-value="two">
+            <ListIndentIncrease class="indent-preview" aria-hidden="true" /><span>首行缩进</span>
+          </button>
         </div>
       </div>
       <select id="paragraph-indent" class="preference-source-select" aria-hidden="true" tabindex="-1">
-        <option value="book" selected>跟随书源</option>
-        <option value="none">不缩进</option>
+        <option value="none" selected>首行顶格</option>
         <option value="two">缩进两字</option>
       </select>
       <div class="setting-row setting-row-stacked">
@@ -219,16 +266,20 @@
       </button>
       <h2 tabindex="-1">阅读行为</h2>
     </header>
-    <label class="setting-row switch-row">
-      <span class="setting-label">点击页面两侧翻页</span>
-      <input id="tap-to-paginate" type="checkbox" checked />
-      <span class="switch-track" aria-hidden="true"></span>
-    </label>
-    <label class="setting-row switch-row">
-      <span class="setting-label">左右滑动翻页</span>
-      <input id="swipe-to-paginate" type="checkbox" checked />
-      <span class="switch-track" aria-hidden="true"></span>
-    </label>
+    <div class="reading-mode-cards" role="radiogroup" aria-label="阅读方式">
+      <button type="button" role="radio" aria-checked="true" data-preference-for="reading-mode" data-preference-value="paged">
+        <MoveHorizontal aria-hidden="true" />
+        <span><strong>左右翻页</strong></span>
+      </button>
+      <button type="button" role="radio" aria-checked="false" data-preference-for="reading-mode" data-preference-value="scroll">
+        <MoveVertical aria-hidden="true" />
+        <span><strong>上下滚动</strong></span>
+      </button>
+    </div>
+    <select id="reading-mode" class="preference-source-select" aria-hidden="true" tabindex="-1">
+      <option value="paged" selected>左右翻页</option>
+      <option value="scroll">上下滚动</option>
+    </select>
   </section>
 
   <section class="settings-view" data-settings-page="book" hidden>

@@ -162,6 +162,7 @@ function Invoke-LinuxGuiGate {
     $mobileScreenshot = Join-Path $guiRoot 'reader-mobile.png'
     $statisticsScreenshot = Join-Path $guiRoot 'reading-statistics.png'
     $statisticsMobileScreenshot = Join-Path $guiRoot 'reading-statistics-mobile.png'
+    $settingsMobileScreenshot = Join-Path $guiRoot 'reader-settings-mobile.png'
     try {
         Invoke-Checked 'systemd-run' @(
             '--user', '--collect', "--unit=$unit", "--working-directory=$repoRoot",
@@ -207,6 +208,132 @@ return {
         if (-not $reader.href.StartsWith('tauri://localhost/index.html?', [StringComparison]::Ordinal) -or $reader.toc -ne 3) {
             throw 'The Linux reader did not load the expected FB2 manifest.'
         }
+
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 600; height = 760 })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.documentElement.setAttribute('data-reader-tools', '');
+const preferences = document.querySelector('.reader-tool.preferences');
+preferences.open = true;
+return true;
+'@)
+        Start-Sleep -Milliseconds 100
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.querySelector('[data-settings-target="font"]').click();
+const slider = document.querySelector('#font-size');
+const started = performance.now();
+for (let index = 0; index < 48; index += 1) {
+  slider.value = String(16 + (index % 25));
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+}
+slider.value = '36';
+slider.dispatchEvent(new Event('input', { bubbles: true }));
+window.__athaFontInputBurstMs = performance.now() - started;
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Typography slider did not provide live feedback.' -Script @'
+const panel = document.querySelector('.preferences-panel').getBoundingClientRect();
+const slider = document.querySelector('#font-size');
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  mobile: matchMedia('(max-width: 640px)').matches,
+  contained: panel.left >= 0 && panel.right <= innerWidth && panel.top >= 0 && panel.bottom <= innerHeight,
+  backdrop: getComputedStyle(document.querySelector('.preferences-backdrop')).display !== 'none',
+  type: slider.type,
+  min: slider.min,
+  max: slider.max,
+  output: document.querySelector('#font-size-value').textContent,
+  pixels: document.querySelector('.reader').dataset.fontPixels,
+  burstMs: window.__athaFontInputBurstMs
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.mobile -and $value.contained -and $value.backdrop -and $value.type -eq 'range' -and $value.min -eq '16' -and $value.max -eq '40' -and $value.output -eq '36' -and $value.pixels -eq '36' -and $value.burstMs -lt 20 })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const slider = document.querySelector('#font-size');
+slider.dispatchEvent(new Event('change', { bubbles: true }));
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Typography slider did not persist its committed value.' -Script @'
+const key = Object.keys(localStorage).find((value) => value.startsWith('atha.reader.application.'));
+const saved = key ? JSON.parse(localStorage.getItem(key)) : null;
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  fontSize: saved?.preferences?.fontSize
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.fontSize -eq 36 })
+        $settingsShot = Invoke-WebDriver -BaseUrl $baseUrl -Method Get -Path "/session/$session/screenshot" -Body $null
+        [IO.File]::WriteAllBytes($settingsMobileScreenshot, [Convert]::FromBase64String($settingsShot.value))
+        $settingsMobileColors = [int](& identify -format '%k' $settingsMobileScreenshot)
+        if ($LASTEXITCODE -ne 0 -or $settingsMobileColors -lt 10) { throw 'The mobile settings screenshot is blank.' }
+
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const slider = document.querySelector('#font-size');
+slider.value = '40';
+slider.dispatchEvent(new Event('input', { bubbles: true }));
+slider.dispatchEvent(new Event('change', { bubbles: true }));
+document.querySelector('[data-settings-back]').click();
+document.querySelector('[data-settings-target="behavior"]').click();
+document.querySelector('[data-preference-for="reading-mode"][data-preference-value="scroll"]').click();
+return true;
+'@)
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 600; height = 420 })
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Scrolled reading mode did not settle.' -Script @'
+const key = Object.keys(localStorage).find((value) => value.startsWith('atha.reader.book.'));
+const saved = key ? JSON.parse(localStorage.getItem(key)) : null;
+const reader = document.querySelector('.reader');
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  mode: reader.dataset.readingMode,
+  saved: saved?.preferences?.readingMode,
+  columns: reader.dataset.pageColumns,
+  scrollable: reader.dataset.scrollable
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.mode -eq 'scroll' -and $value.saved -eq 'scroll' -and $value.columns -eq '1' })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.querySelector('[data-preference-for="reading-mode"][data-preference-value="paged"]').click();
+const slider = document.querySelector('#font-size');
+slider.value = '19';
+slider.dispatchEvent(new Event('input', { bubbles: true }));
+slider.dispatchEvent(new Event('change', { bubbles: true }));
+return true;
+'@)
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Paged reading mode did not restore.' -Script @'
+const reader = document.querySelector('.reader');
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  mode: reader.dataset.readingMode,
+  columns: reader.dataset.pageColumns
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.mode -eq 'paged' -and $value.columns -eq 'paged' })
+        $settingsKeyboard = Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const owner = document.querySelector('.reader-tool.preferences');
+const panel = owner.querySelector('.preferences-panel');
+const summary = owner.querySelector(':scope > summary');
+panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+return {
+  label: panel.getAttribute('aria-label'),
+  open: owner.open,
+  summaryFocused: document.activeElement === summary
+};
+'@
+        if ($settingsKeyboard.label -ne '阅读设置' -or $settingsKeyboard.open -or -not $settingsKeyboard.summaryFocused) {
+            throw 'The settings dialog did not expose a stable name and Escape focus return.'
+        }
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 600; height = 760 })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+document.querySelector('.reader-tool.preferences').open = false;
+const reader = document.querySelector('.reader');
+const rect = reader.getBoundingClientRect();
+reader.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 91, pointerType: 'touch', isPrimary: true, button: 0, clientX: rect.right - 80, clientY: rect.top + 120 }));
+window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 91, pointerType: 'touch', isPrimary: true, button: 0, clientX: rect.right - 180, clientY: rect.top + 124 }));
+return true;
+'@)
+        $dragging = Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "return document.querySelector('.reader').dataset.swipeDragging === 'true';"
+        if (-not $dragging) { throw 'Paged reading did not follow the horizontal pointer move.' }
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "window.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 91, pointerType: 'touch', isPrimary: true })); return true;")
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 1200; height = 900 })
 
         if (-not [string]::IsNullOrWhiteSpace($DictionaryQuery)) {
             $queryLiteral = ConvertTo-Json $DictionaryQuery -Compress
@@ -664,6 +791,7 @@ return {
         [void](New-Item -ItemType Directory -Path $artifactRoot -Force)
         Copy-Item -LiteralPath $statisticsScreenshot -Destination (Join-Path $artifactRoot 'atha-reading-statistics-linux.png') -Force
         Copy-Item -LiteralPath $statisticsMobileScreenshot -Destination (Join-Path $artifactRoot 'atha-reading-statistics-linux-mobile.png') -Force
+        Copy-Item -LiteralPath $settingsMobileScreenshot -Destination (Join-Path $artifactRoot 'atha-reader-settings-linux-mobile.png') -Force
 
         [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Delete -Path "/session/$session" -Body $null)
         $session = $null
@@ -732,6 +860,7 @@ return {
             mobile_screenshot_colors = $mobileColors
             statistics_screenshot_colors = $statisticsColors
             statistics_mobile_screenshot_colors = $statisticsMobileColors
+            settings_mobile_screenshot_colors = $settingsMobileColors
             evidence = 'Linux Tauri GUI'
         }
     }

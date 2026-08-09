@@ -76,13 +76,13 @@ export function createDiagnostics({
 
     if (pagination.snapshot().pages > 1) await pagination.show(1);
     const reflowAnchor = navigation.current();
-    const anchorAt32 = await navigation.setFontSize(40);
-    assert(anchorAt32.start.offset === reflowAnchor.start.offset, "sample-boundary");
-    assert(pagination.isOffsetVisible(anchorAt32.start.offset), "sample-boundary");
-    const anchorAt40 = await navigation.setFontSize(24);
+    const anchorAt40 = await navigation.setFontSize(40);
+    assert(anchorAt40.start.offset === reflowAnchor.start.offset, "sample-boundary");
     assert(pagination.isOffsetVisible(anchorAt40.start.offset), "sample-boundary");
-    const anchorAt24 = await navigation.setFontSize(32);
-    assert(pagination.isOffsetVisible(anchorAt24.start.offset), "sample-boundary");
+    const anchorAt16 = await navigation.setFontSize(16);
+    assert(pagination.isOffsetVisible(anchorAt16.start.offset), "sample-boundary");
+    const anchorAt19 = await navigation.setFontSize(19);
+    assert(pagination.isOffsetVisible(anchorAt19.start.offset), "sample-boundary");
 
     let tocSection = null;
     let previousSection = null;
@@ -191,7 +191,7 @@ export function createDiagnostics({
     const compactAnchor = await navigation.setPreferences("application", {
       theme: "dark",
       brightness: 80,
-      fontSize: 24,
+      fontSize: 16,
       fontFamily: "serif",
       density: "compact",
     });
@@ -206,7 +206,13 @@ export function createDiagnostics({
     assert(compactStyle.backgroundColor === "rgb(26, 33, 30)", "sample-boundary");
     assert(compactStyle.color === "rgb(232, 236, 232)", "sample-boundary");
     assert(compactStyle.fontFamily.includes("Georgia"), "sample-boundary");
-    assert(Math.abs(parseFloat(compactStyle.lineHeight) - 34.8) < 0.1, "sample-boundary");
+    assert(
+      Math.abs(
+        parseFloat(compactStyle.lineHeight) -
+          Number(reader.dataset.fontPixels) * LINE_HEIGHT_RATIOS.compact,
+      ) < 0.1,
+      "sample-boundary",
+    );
     const formula = content.book.querySelector("img.math-inline, img.math-display");
     const ordinary = content.book.querySelector("img:not(.math-inline):not(.math-display)");
     if (formula) assert(getComputedStyle(formula).filter !== "none", "sample-boundary");
@@ -226,7 +232,13 @@ export function createDiagnostics({
     assert(comfortableStyle.backgroundColor === "rgb(255, 255, 255)", "sample-boundary");
     assert(comfortableStyle.color === "rgb(40, 43, 41)", "sample-boundary");
     assert(comfortableStyle.fontFamily.includes("Microsoft YaHei"), "sample-boundary");
-    assert(Math.abs(parseFloat(comfortableStyle.lineHeight) - 72) < 0.1, "sample-boundary");
+    assert(
+      Math.abs(
+        parseFloat(comfortableStyle.lineHeight) -
+          Number(reader.dataset.fontPixels) * LINE_HEIGHT_RATIOS.comfortable,
+      ) < 0.1,
+      "sample-boundary",
+    );
     if (formula) assert(getComputedStyle(formula).filter === "none", "sample-boundary");
     if (ordinary) assert(getComputedStyle(ordinary).filter === "none", "sample-boundary");
     assert(pagination.countCutRects(true) === 0, "layout-cut");
@@ -296,11 +308,11 @@ export function createDiagnostics({
     assert(
       restored.application.theme === "system" &&
         restored.application.brightness === 100 &&
-        restored.application.fontSize === 32 &&
+        restored.application.fontSize === 19 &&
         restored.application.fontFamily === "book" &&
         restored.application.density === "standard" &&
-        restored.application.tapToPaginate &&
-        restored.application.swipeToPaginate &&
+        restored.book.readingMode === "paged" &&
+        restored.book.paragraphIndent === "none" &&
         !document.documentElement.dataset.theme &&
         document.documentElement.style.getPropertyValue("--reader-brightness") === "1" &&
         !content.book.dataset.fontFamily,
@@ -328,6 +340,14 @@ export function createDiagnostics({
       target.dispatchEvent(
         new PointerEvent(type, { bubbles: true, pointerType: "mouse", isPrimary: true, ...options }),
       );
+    const touch = (type, points, target) => {
+      const event = new Event(type, { bubbles: true, composed: true });
+      Object.defineProperties(event, {
+        touches: { value: type === "touchend" ? [] : points },
+        changedTouches: { value: points },
+      });
+      target.dispatchEvent(event);
+    };
     const rect = reader.getBoundingClientRect();
 
     await pagination.show(0);
@@ -378,6 +398,17 @@ export function createDiagnostics({
       clientX: rect.right - 80,
       clientY: rect.top + 80,
     });
+    pointer(
+      "pointermove",
+      {
+        pointerId: 2,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.left + 150,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
     pointer("pointerup", {
       pointerId: 2,
       pointerType: "touch",
@@ -386,13 +417,104 @@ export function createDiagnostics({
       clientY: rect.top + 84,
     });
     await navigation.idle();
-    assert(pagination.snapshot().page === 1, "sample-boundary");
-
-    await navigation.setPreferences("application", {
-      tapToPaginate: false,
-      swipeToPaginate: false,
+    assert(
+      pagination.snapshot().page === 1 && content.book.hasAttribute("data-swipe-settling"),
+      "sample-boundary",
+    );
+    pointer("pointerdown", {
+      pointerId: 13,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
     });
+    pointer(
+      "pointermove",
+      {
+        pointerId: 13,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.right - 150,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    assert(
+      content.book.hasAttribute("data-swipe-dragging") &&
+        !content.book.hasAttribute("data-swipe-settling"),
+      "sample-boundary",
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointercancel", {
+        bubbles: true,
+        pointerId: 13,
+        pointerType: "touch",
+        isPrimary: true,
+      }),
+    );
+
+    await navigation.setPreferences("book", { readingMode: "scroll" });
+    assert(content.book.dataset.readingMode === "scroll", "sample-boundary");
     await pagination.show(0);
+    const scrollProbe = document.createElement("p");
+    scrollProbe.textContent = "Scrolled reading mode probe. ".repeat(240);
+    content.book.append(scrollProbe);
+    await pagination.resizeViewport(0);
+    assert(reader.scrollHeight > reader.clientHeight, "sample-boundary");
+    const protectedTouch = document.createElement("a");
+    protectedTouch.href = "#protected-touch";
+    protectedTouch.textContent = "Protected touch target";
+    content.book.append(protectedTouch);
+    reader.scrollTop = reader.scrollHeight;
+    const protectedSection = session.snapshot().currentIndex;
+    const protectedCount = interaction.snapshot().touch;
+    touch("touchstart", [{ identifier: 1, clientX: 20, clientY: 100 }], protectedTouch);
+    touch("touchend", [{ identifier: 1, clientX: 20, clientY: 20 }], protectedTouch);
+    await navigation.idle();
+    assert(
+      session.snapshot().currentIndex === protectedSection &&
+        interaction.snapshot().touch === protectedCount,
+      "sample-boundary",
+    );
+    protectedTouch.remove();
+    reader.scrollTop = 0;
+    key("PageDown");
+    await new Promise(requestAnimationFrame);
+    assert(reader.scrollTop > 0, "sample-boundary");
+    reader.scrollTop = Math.min(120, reader.scrollHeight - reader.clientHeight);
+    reader.dispatchEvent(new Event("scroll"));
+    await new Promise(requestAnimationFrame);
+    assert(reader.scrollTop > 0, "sample-boundary");
+    const beforeFontPreview = navigation.current().start.offset;
+    const fontControl = document.querySelector("#font-size");
+    for (const value of [20, 24, 28]) {
+      fontControl.value = String(value);
+      fontControl.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await new Promise(requestAnimationFrame);
+    fontControl.dispatchEvent(new Event("change", { bubbles: true }));
+    await navigation.idle();
+    const afterFontPreview = navigation.current().start.offset;
+    assert(
+      afterFontPreview === beforeFontPreview && pagination.isOffsetVisible(beforeFontPreview),
+      "sample-boundary",
+    );
+    await navigation.setFontSize(19);
+    if (session.snapshot().sections > 1) {
+      reader.scrollTop = reader.scrollHeight - reader.clientHeight;
+      reader.dispatchEvent(new Event("scroll"));
+      await new Promise(requestAnimationFrame);
+      assert(
+        pagination.snapshot().page + 1 === pagination.snapshot().pages,
+        "sample-boundary",
+      );
+      await navigation.next();
+      assert(session.snapshot().currentIndex === 1, "sample-boundary");
+      await session.open(0);
+    }
+    scrollProbe.remove();
+    reader.scrollTop = 0;
+    await pagination.resizeViewport(0);
     const disabledCounts = interaction.snapshot();
     pointer("pointerdown", { pointerId: 8, button: 0, clientX: right, clientY: rect.top + 40 });
     pointer("pointerup", { pointerId: 8, button: 0, clientX: right, clientY: rect.top + 40 });
@@ -414,13 +536,11 @@ export function createDiagnostics({
     assert(
       pagination.snapshot().page === 0 &&
         interaction.snapshot().mouse === disabledCounts.mouse &&
-        interaction.snapshot().touch === disabledCounts.touch,
+        interaction.snapshot().touch === disabledCounts.touch &&
+        reader.dataset.readingMode === "scroll",
       "sample-boundary",
     );
-    await navigation.setPreferences("application", {
-      tapToPaginate: true,
-      swipeToPaginate: true,
-    });
+    await navigation.setPreferences("book", { readingMode: "paged" });
 
     await pagination.show(0);
     document.documentElement.removeAttribute("data-reader-tools");
@@ -435,6 +555,22 @@ export function createDiagnostics({
     pointer("pointerup", {
       pointerId: 7,
       pointerType: "touch",
+      button: 0,
+      clientX: center,
+      clientY: rect.top + 80,
+    });
+    assert(document.documentElement.hasAttribute("data-reader-tools"), "sample-boundary");
+    document.documentElement.removeAttribute("data-reader-tools");
+    pointer("pointerdown", {
+      pointerId: 10,
+      pointerType: "",
+      button: 0,
+      clientX: center,
+      clientY: rect.top + 80,
+    });
+    pointer("pointerup", {
+      pointerId: 10,
+      pointerType: "",
       button: 0,
       clientX: center,
       clientY: rect.top + 80,
@@ -537,12 +673,67 @@ export function createDiagnostics({
     if (session.snapshot().sections > 1) {
       await session.open(0);
       await pagination.show(pagination.snapshot().pages - 1);
-      key("PageDown");
+      pointer("pointerdown", {
+        pointerId: 11,
+        pointerType: "",
+        button: 0,
+        clientX: rect.right - 20,
+        clientY: rect.top + 80,
+      });
+      pointer("pointerup", {
+        pointerId: 11,
+        pointerType: "",
+        button: 0,
+        clientX: rect.right - 20,
+        clientY: rect.top + 80,
+      });
       await navigation.idle();
       assert(session.snapshot().currentIndex === 1, "sample-boundary");
       key("PageUp");
       await navigation.idle();
       assert(session.snapshot().currentIndex === 0, "sample-boundary");
+
+      await session.open(session.snapshot().sections - 1);
+      await pagination.show(pagination.snapshot().pages - 1);
+      const finalTransform = content.book.style.transform;
+      pointer("pointerdown", {
+        pointerId: 12,
+        pointerType: "",
+        button: 0,
+        clientX: rect.right - 80,
+        clientY: rect.top + 80,
+      });
+      pointer(
+        "pointermove",
+        {
+          pointerId: 12,
+          pointerType: "",
+          button: 0,
+          clientX: rect.left + 80,
+          clientY: rect.top + 84,
+        },
+        window,
+      );
+      assert(reader.dataset.swipeDragging === "true", "sample-boundary");
+      pointer(
+        "pointerup",
+        {
+          pointerId: 12,
+          pointerType: "",
+          button: 0,
+          clientX: rect.left + 80,
+          clientY: rect.top + 84,
+        },
+        window,
+      );
+      await navigation.idle();
+      await new Promise(requestAnimationFrame);
+      assert(
+        session.snapshot().currentIndex === session.snapshot().sections - 1 &&
+          !reader.dataset.swipeDragging &&
+          content.book.style.transform === finalTransform,
+        "sample-boundary",
+      );
     }
     await session.open(0);
     await pagination.show(0);
@@ -552,7 +743,7 @@ export function createDiagnostics({
       keyboardVerified: counts.keyboard >= 2,
       wheelVerified: counts.wheel === 1,
       mouseVerified: counts.mouse === 2,
-      touchVerified: counts.touch === 1,
+      touchVerified: counts.touch === 3,
       touchCenterVerified: true,
       selectionVerified: counts.selectionProtected === 1,
       controlsVerified: counts.controlProtected === 1,
@@ -673,14 +864,14 @@ export function createDiagnostics({
 
     for (let sample = 1; sample <= BENCHMARK_SAMPLES; sample += 1) {
       const started = performance.now();
-      await pagination.setFontSize(sample % 2 ? 40 : 24);
+      await pagination.setFontSize(sample % 2 ? 40 : 16);
       const state = pagination.snapshot();
       emit(
         `metric|font_reflow|${sample}|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}|${reader.clientWidth}|${reader.clientHeight}`,
       );
     }
-    await pagination.setFontSize(32);
-    document.querySelector("#font-size").value = "32";
+    await pagination.setFontSize(19);
+    document.querySelector("#font-size").value = "19";
   }
 
   function visualSnapshot() {
@@ -697,6 +888,12 @@ export function createDiagnostics({
       error: document.documentElement.dataset.error || null,
       dark: matchMedia("(prefers-color-scheme: dark)").matches,
       pages: pagination.snapshot().pages,
+      fontSize: pagination.snapshot().fontSize,
+      fontPixels: getComputedStyle(book).fontSize,
+      readingMode: reader.dataset.readingMode,
+      columnCount: getComputedStyle(book).columnCount,
+      scrollable: reader.scrollHeight > reader.clientHeight,
+      swipeDragging: book.hasAttribute("data-swipe-dragging"),
       formulaCount: formulas.length,
       ordinaryCount: ordinary.length,
       standaloneFormulaCount: standaloneFormulas.length,

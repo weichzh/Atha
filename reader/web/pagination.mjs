@@ -14,7 +14,27 @@ export function createPagination({
   assert,
   fail,
 }) {
-  const state = { page: 0, pages: 0, fontSize: 32 };
+  const state = { page: 0, pages: 0, fontSize: 19 };
+  let fontPreviewAnchor = null;
+  let settleTimer = 0;
+
+  function isScrolled() {
+    return reader.dataset.readingMode === "scroll";
+  }
+
+  function syncScrollPage() {
+    state.pages = Math.max(1, Math.ceil(reader.scrollHeight / reader.clientHeight));
+    const atEnd = reader.scrollTop + reader.clientHeight >= reader.scrollHeight - 1;
+    state.page = atEnd
+      ? state.pages - 1
+      : Math.max(0, Math.min(state.pages - 1, Math.floor(reader.scrollTop / reader.clientHeight)));
+  }
+
+  function updatePosition() {
+    const label = `${state.page + 1} / ${state.pages}`;
+    position.textContent = label;
+    document.title = `Atha Reader — section ${document.documentElement.dataset.sectionPosition} — page ${label}`;
+  }
 
   function textNodes() {
     const nodes = [];
@@ -38,7 +58,28 @@ export function createPagination({
   }
 
   function captureOffset() {
+    if (fontPreviewAnchor !== null) return fontPreviewAnchor;
     return withoutTranslation(() => {
+      if (isScrolled()) {
+        const readerTop = reader.getBoundingClientRect().top;
+        let base = 0;
+        for (const node of textNodes()) {
+          const text = node.textContent || "";
+          const whole = document.createRange();
+          whole.selectNodeContents(node);
+          if ([...whole.getClientRects()].some((rect) => rect.height && rect.bottom > readerTop + 1)) {
+            for (let offset = 0; offset < text.length; offset += 1) {
+              const character = document.createRange();
+              character.setStart(node, offset);
+              character.setEnd(node, offset + 1);
+              const rect = [...character.getClientRects()].find((item) => item.height);
+              if (rect && rect.bottom > readerTop + 1) return base + offset;
+            }
+          }
+          base += text.length;
+        }
+        return base;
+      }
       const style = getComputedStyle(book);
       const step = parseFloat(style.width) + parseFloat(style.columnGap);
       const bookLeft = book.getBoundingClientRect().left;
@@ -89,6 +130,20 @@ export function createPagination({
     return withoutTranslation(() => {
       const point = pointForOffset(offset);
       if (!point.exact || !point.node) return { exact: point.exact, page: 0 };
+      if (isScrolled()) {
+        const range = document.createRange();
+        range.setStart(point.node, point.offset);
+        range.setEnd(point.node, Math.min(point.offset + 1, point.node.textContent.length));
+        const rect = [...range.getClientRects()].find((item) => item.height);
+        if (!rect) return { exact: true, page: state.page };
+        const viewport = reader.getBoundingClientRect();
+        const scale = reader.clientHeight / viewport.height;
+        const absolute = reader.scrollTop + (rect.top - viewport.top) * scale;
+        return {
+          exact: true,
+          page: Math.max(0, Math.min(state.pages - 1, Math.floor(absolute / reader.clientHeight))),
+        };
+      }
       const nodes = textNodes().filter((node) => (node.textContent || "").length > 0);
       const start = nodes.indexOf(point.node);
       const visibleRect = (node, from, to, last = false) => {
@@ -182,7 +237,7 @@ export function createPagination({
   }
 
   function applyFormulaScale() {
-    const fontScale = state.fontSize / SOURCE_FONT_SIZE;
+    const fontScale = fontSizePixels(state.fontSize) / SOURCE_FONT_SIZE;
     const contentWidth = book.clientWidth;
     for (const formula of book.querySelectorAll("img.math-inline, img.math-display")) {
       if (!formula.dataset.sourceWidth) {
@@ -210,23 +265,48 @@ export function createPagination({
   }
 
   function showPage() {
-    const style = getComputedStyle(book);
-    const step = parseFloat(style.width) + parseFloat(style.columnGap);
-    book.style.transform = `translateX(${-state.page * step}px)`;
-    const label = `${state.page + 1} / ${state.pages}`;
-    position.textContent = label;
-    document.title = `Atha Reader — section ${document.documentElement.dataset.sectionPosition} — page ${label}`;
+    const wasDragging = book.hasAttribute("data-swipe-dragging");
+    book.removeAttribute("data-swipe-dragging");
+    delete reader.dataset.swipeDragging;
+    if (wasDragging) {
+      clearTimeout(settleTimer);
+      book.setAttribute("data-swipe-settling", "");
+      settleTimer = setTimeout(() => {
+        settleTimer = 0;
+        book.removeAttribute("data-swipe-settling");
+      }, 180);
+    }
+    if (isScrolled()) {
+      book.style.transform = "none";
+      reader.scrollTop = state.page * reader.clientHeight;
+    } else {
+      const style = getComputedStyle(book);
+      const step = parseFloat(style.width) + parseFloat(style.columnGap);
+      book.style.transform = `translateX(${-state.page * step}px)`;
+    }
+    updatePosition();
   }
 
   function layout() {
-    book.style.fontSize = `${state.fontSize}px`;
+    const pixels = fontSizePixels(state.fontSize);
+    book.style.fontSize = `${pixels}px`;
+    reader.dataset.fontPixels = String(pixels);
     book.style.transform = "none";
     applyFormulaScale();
+    if (isScrolled()) {
+      syncScrollPage();
+      reader.dataset.pageColumns = "1";
+      reader.dataset.scrollable = String(reader.scrollHeight > reader.clientHeight);
+      updatePosition();
+      return;
+    }
     const style = getComputedStyle(book);
     const width = parseFloat(style.width);
     const gap = parseFloat(style.columnGap);
     state.pages = Math.max(1, Math.round((book.scrollWidth + gap) / (width + gap)));
     state.page = Math.min(state.page, state.pages - 1);
+    reader.dataset.pageColumns = "paged";
+    reader.dataset.scrollable = "false";
     showPage();
   }
 
@@ -339,7 +419,7 @@ export function createPagination({
         const height = rect.height / fitScale;
         const isDisplay = formula.classList.contains("math-display");
         const maximumScale = Math.min(
-          (state.fontSize / SOURCE_FONT_SIZE) *
+          (fontSizePixels(state.fontSize) / SOURCE_FONT_SIZE) *
             (isDisplay ? DISPLAY_FORMULA_MULTIPLIER : 1),
           columnWidth / sourceWidth,
         );
@@ -402,6 +482,7 @@ export function createPagination({
 
   async function setFontSize(value, anchor = captureOffset()) {
     state.fontSize = Number(value);
+    fontPreviewAnchor = null;
     await document.fonts.ready;
     layout();
     await waitForStableLayout("字号与布局重排");
@@ -422,12 +503,12 @@ export function createPagination({
   }
 
   async function verifySizes() {
-    for (const size of [24, 32, 40]) {
+    for (const size of [16, 19, 40]) {
       await setFontSize(size);
       verifyFormulaLayout();
     }
-    await setFontSize(32);
-    fontSizeControl.value = "32";
+    await setFontSize(19);
+    fontSizeControl.value = "19";
   }
 
   async function show(index, anchor, operationStage = "翻页与公式加载") {
@@ -442,6 +523,23 @@ export function createPagination({
   }
 
   async function showOffset(offset, operationStage) {
+    if (isScrolled()) {
+      const point = pointForOffset(offset);
+      if (!point.exact || !point.node) return false;
+      const range = document.createRange();
+      range.setStart(point.node, point.offset);
+      range.setEnd(point.node, Math.min(point.offset + 1, point.node.textContent.length));
+      const rect = [...range.getClientRects()].find((item) => item.height);
+      if (rect) {
+        const viewport = reader.getBoundingClientRect();
+        reader.scrollTop += (rect.top - viewport.top) * (reader.clientHeight / viewport.height);
+      }
+      await nextFrame();
+      syncScrollPage();
+      updatePosition();
+      if ((await onPageShown(true)) > 0) await relayoutAtOffset(offset, operationStage);
+      return true;
+    }
     const target = pageForOffset(offset);
     if (!target.exact) return false;
     await show(target.page, offset, operationStage);
@@ -449,6 +547,16 @@ export function createPagination({
   }
 
   function isOffsetVisible(offset) {
+    if (isScrolled()) {
+      const point = pointForOffset(offset);
+      if (!point.exact || !point.node) return false;
+      const range = document.createRange();
+      range.setStart(point.node, point.offset);
+      range.setEnd(point.node, Math.min(point.offset + 1, point.node.textContent.length));
+      const rect = [...range.getClientRects()].find((item) => item.height);
+      const viewport = reader.getBoundingClientRect();
+      return Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom);
+    }
     const target = pageForOffset(offset);
     return target.exact && target.page === state.page;
   }
@@ -458,6 +566,13 @@ export function createPagination({
   }
 
   async function move(delta) {
+    if (
+      isScrolled() &&
+      ((delta < 0 && reader.scrollTop <= 0) ||
+        (delta > 0 && reader.scrollTop + reader.clientHeight >= reader.scrollHeight - 1))
+    ) {
+      return false;
+    }
     const target = state.page + delta;
     if (target < 0 || target >= state.pages) return false;
     await show(target);
@@ -468,7 +583,33 @@ export function createPagination({
     return { ...state };
   }
 
-  function bindControls({ onPrevious, onNext, onFontSize, onProgress }) {
+  function previewFontSize(value) {
+    if (fontPreviewAnchor === null) fontPreviewAnchor = captureOffset();
+    state.fontSize = Number(value);
+    layout();
+    const target = pageForOffset(fontPreviewAnchor);
+    state.page = target.page;
+    showPage();
+  }
+
+  function previewSwipe(deltaX) {
+    if (isScrolled()) return;
+    clearTimeout(settleTimer);
+    settleTimer = 0;
+    book.removeAttribute("data-swipe-settling");
+    const style = getComputedStyle(book);
+    const step = parseFloat(style.width) + parseFloat(style.columnGap);
+    const scale = reader.clientWidth / reader.getBoundingClientRect().width;
+    book.setAttribute("data-swipe-dragging", "");
+    reader.dataset.swipeDragging = "true";
+    book.style.transform = `translateX(${-state.page * step + deltaX * scale}px)`;
+  }
+
+  function cancelSwipe() {
+    if (book.hasAttribute("data-swipe-dragging")) showPage();
+  }
+
+  function bindControls({ onPrevious, onNext, onFontSize, onProgress, onScroll }) {
     const run = (action) => {
       Promise.resolve(action()).catch((error) => {
         if (!document.documentElement.dataset.error) {
@@ -478,10 +619,45 @@ export function createPagination({
     };
     previous.addEventListener("click", () => run(onPrevious));
     next.addEventListener("click", () => run(onNext));
+    let fontFrame = 0;
     fontSizeControl.addEventListener("change", () => {
+      if (fontFrame) cancelAnimationFrame(fontFrame);
+      fontFrame = 0;
       run(() => onFontSize(fontSizeControl.value));
     });
+    fontSizeControl.addEventListener("input", () => {
+      if (fontFrame) return;
+      fontFrame = requestAnimationFrame(() => {
+        fontFrame = 0;
+        previewFontSize(fontSizeControl.value);
+      });
+    });
     progressRange.addEventListener("change", () => run(() => onProgress(progressRange.value)));
+    let scrollFrame = 0;
+    let scrollIdle = 0;
+    let scrollDirty = false;
+    const settleScroll = () => {
+      clearTimeout(scrollIdle);
+      if (!scrollDirty) return;
+      scrollDirty = false;
+      onScroll();
+    };
+    reader.addEventListener("scroll", () => {
+      if (!isScrolled()) return;
+      scrollDirty = true;
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0;
+        syncScrollPage();
+        updatePosition();
+        clearTimeout(scrollIdle);
+        scrollIdle = setTimeout(settleScroll, 160);
+      });
+    });
+    window.addEventListener("pagehide", settleScroll);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") settleScroll();
+    });
   }
 
   function initialize() {
@@ -511,14 +687,17 @@ export function createPagination({
   return Object.freeze({
     bindControls,
     bindResize,
+    cancelSwipe,
     captureOffset,
     countCutRects,
     hasOffset,
     initialize,
     isOffsetVisible,
+    isScrolled,
     move,
     nextFrame,
     offsetForFragment,
+    previewSwipe,
     renderFromStart,
     resizeViewport,
     setFontSize,

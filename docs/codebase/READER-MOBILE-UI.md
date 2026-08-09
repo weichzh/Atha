@@ -18,13 +18,14 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/app/src/message-editor.ts`、`message-markdown.ts` | 受限 Tiptap 扩展、链接规则及按需加载的 Markdown 双向转换 |
 | `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部五图标 |
 | `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
+| `reader/app/src/components/panels/PreferencesPanel.svelte` | Readest 风格分层设置、字号滑块、排版卡片、两种阅读方式与 CSS 模块入口 |
 | `reader/app/src/components/CssEditor.svelte` | CSS 模块页可见时按需加载的 CodeMirror 6 渐进增强；隐藏 textarea 保持唯一状态入口 |
 | `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 桌面词典浮层、移动端 75% 高底部抽屉、导入 / 移除 / 选择、选区精确查词与纯文本结果 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的无网络 codec；未来数据源只能经此复用字段、大小、重复 ID 与 CSS 安全校验 |
 | `reader/app/src/shell.css` | 顶部和底部覆盖层、面板、图标及壳层明暗视觉 |
 | `reader/atha-reader.css` | 自适应书页、固定内部边距、系统缩放和书籍内容样式 |
 | `reader/web/app.mjs` | 组合模块；开关工具层；目录投影；设置下钻；返回按钮 |
-| `reader/web/interaction.mjs` | 正文左、中、右点击区和键盘、滚轮、触摸输入；中间点击开关工具层 |
+| `reader/web/interaction.mjs` | 左右模式的键盘、滚轮、页区和横向触摸；上下模式的原生滚动、边界跨章和中间点击工具层 |
 | `reader/web/bookmarks.mjs` | 右上角书签切换、目录中的书签列表和书签跳转 |
 | `reader/web/message-store.mjs` | 正式根 Message 到标注/笔记投影的适配，以及旧 localStorage 记录迁移 |
 | `reader/web/conversations.mjs` | 对话浮层、本条/本章/本书记录、时间/书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
@@ -73,6 +74,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 ## 尺寸与缩放
 
 - `.reader` 填满当前 WebView；`pagination.mjs` 把内部宽高设置为视口 CSS 像素乘 `devicePixelRatio`，再用 `1 / devicePixelRatio` 设置 `--page-scale`。
+- 字号滑块保存 16–40 逻辑 CSS px，默认 19；正文实际字号为 `逻辑字号 × devicePixelRatio` 个内部设备像素。PCT-AL10 的 DPR 3 因此对应 48–120 设备像素，默认 57。
 - 普通图片在单页可用宽高内等比缩放；表格与代码由 reader 注入的 `.atha-structured-overflow` 容器限制在单页并允许双向滚动，避免书源样式把内容静默裁掉。
 - 例如 4K 屏幕采用 200% 系统缩放且视口为 390 × 840 CSS 像素时，内部书页为 780 × 1680 设备像素；同一窗口放大后会按新的设备像素宽高重新分页。
 - `.top-toolbar` 与 `.toolbar` 固定为 48 CSS px；`.tool-panel` 和普通表单控件同样不跟随 `--page-scale`，而是遵循系统 CSS 像素和系统缩放。
@@ -97,7 +99,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 消息输入 | `.message-editor`、`.message-editor-toolbar-primary`、`.message-editor-toolbar-secondary`、`.message-editor-mode-switch`、`.message-editor-markdown` |
 | 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
 | 进度与统计 | `.progress-panel`、`.reading-statistics`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
-| 更多菜单 | `.preferences-panel`、`.settings-list`、`.settings-view`、`.module-settings`、`.css-editor-*` |
+| 阅读设置 | `.preferences-backdrop`、`.preferences-panel`、`.settings-list`、`.settings-view`、`.reading-mode-cards`、`.module-settings`、`.css-editor-*` |
 | 主题 | `reader/atha-reader.css` 顶部语义令牌及 `data-theme="light|paper|dark"` 覆盖 |
 
 图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `BottomToolbar.svelte` 决定；`.toolbar` 固定为五等分。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
@@ -105,10 +107,11 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 ## 交互连接
 
 - `app.mjs` 的 `toggleReaderTools()` 先撤销待处理的选区动作，再切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录和笔记页的返回按钮使用同一关闭入口；根级 `contextmenu` 监听统一禁止 WebView 默认右键菜单。
-- `interaction.mjs` 只按横向比例区分左 35%、中间 30% 和右 35%；中间区调用 `toggleReaderTools()`。
+- `#reading-mode` 只接受 `paged` 和 `scroll`。左右模式按左 35%、中间 30% 和右 35% 处理页区点击，单指横向拖动实时移动正文并在 170ms 内收束；上下模式把纵向手势交给 `.reader` 原生滚动，到顶部 / 底部后再以前后意图跨 section。
+- 华为 WebView 114 对 adb 和部分真实触摸会给出空 `pointerType`，`interaction.mjs` 将其归一为 touch；原生 `pan-y` 取消 pointer 时使用仍会到达的 `touchend` 处理章节边界。正文与 reader 的 touch 监听复用 inside / outside 去重，闭合 Shadow DOM 内的链接、表格、代码、dialog 和选择不会被外层事件误判。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；投影目录中的章节或书签完成跳转后自动关闭目录。
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
-- `#density` 调整行距；`#page-margin` 按书选择 24 / 32 / 48 设备像素左右边距，`#paragraph-indent` 与 `#paragraph-spacing` 生成受控可视 CSS。上下 144 设备像素安全区固定不变，旧应用记录中的四个自由边距字段仍会被忽略。
+- `#font-size` 是原生 range，input burst 每帧只预览一次，change 后才通过原 Locator 提交重排；`#density` 使用 1.55 / 1.8 / 2.05 无单位行距。`#page-margin` 按书选择 24 / 32 / 48 设备像素左右边距，`#paragraph-indent` 以顶格 / 2em 卡片切换，`#paragraph-spacing` 生成受控可视 CSS。上下 144 设备像素安全区固定不变，旧应用记录中的四个自由边距字段仍会被忽略。
 - CSS 模块页直接复用每书偏好：最多 32 个模块，支持搜索、分组、排序、批量启停和 schema 1 JSON 导入导出；独立 codec 统一解析、序列化、字段、大小、重复 ID 与 CSSOM 校验，不包含网络或 provider registry。新模块单个 32 KiB、启用组合 64 KiB，超限旧 CSS 只作为停用恢复副本保留。CodeMirror 在页面首次可见时按需加载，100 ms 显示 lint，180 ms 后通过同一 textarea 触发预览；输入草稿绑定原模块，任一验证、重排或持久化失败均恢复上次有效状态、渲染与 Locator。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
 - 进度面板在进度摘要和拖动条之间投影今日、近 7 天、本书与连续阅读。桌面为四列，600 px 及以下为 2 × 2；指标使用分隔线而非嵌套卡片。统计在工具层打开时暂停，关闭后由同一阅读状态接口恢复。
@@ -116,7 +119,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - 选区“查词”复用同一待处理 Range，只向顶栏 `.dictionary` 面板发送受限查询；桌面保持锚定浮层，640 px 及以下按 RD-24 / RD-25 使用 75% 高底部抽屉、遮罩、固定词头与独立滚动区，点击遮罩或关闭按钮回到原阅读位置，并尊重 reduced-motion。面板从 Tauri 本地词典 command 列出和选择词典，只把净化后的词头与纯文本释义写入 DOM；没有词典、无结果和失败分别显示明确状态，不加载网络或富 MDD 内容。
 - `#message-conversation` 默认从底部占约半屏，拖动顶部把手可连续调高，轻点把手或标题栏全屏按钮可进入全屏；标题栏不提供收起、导出或共享。顶部可切换本条、本章和本书：本条显示当前 Conversation 的原文短预览、回复与更多；本章和本书是只读聚合记录，可按创建时间或根 Message Locator 的书内位置排列，点击“打开”后进入对应本条对话再写入。被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记页仍可导出本书消息。
 - `.message-editor` 随内容增高，到达紧凑上限后出现全屏按钮。全屏编辑顶部使用两层工具栏：第一层切换可视/Markdown 输入并保留撤销、重做与返回紧凑输入，第二层显示标题、粗体、斜体、列表、引用和安全链接。Markdown 转换按需加载，切回可视模式或发送前必须通过同一正文 schema；不支持的格式保留原文并显示错误，不静默丢失。
-- `#tap-to-paginate` 和 `#swipe-to-paginate` 只控制对应指针输入；键盘和滚轮继续保持原行为。
+- 设置入口使用原生 `<details>`、backdrop、Escape、焦点返回和 CSS transition；600 px 以下为自适应高度底部抽屉，子页按内容收缩并以 72dvh 为上限，`prefers-reduced-motion` 下关闭进入、返回和翻页收束动画。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
 ## 当前有意暂缓
@@ -147,4 +150,4 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 Readest 原图、逐图观察和本次 Linux 统计实现副本位于忽略目录 `fixtures/local/readest/`；统计设计复核使用 WR-05 与 RD-03，不以文字报告替代原图。
 
-PCT-AL10 上 Atha 最终原生选区与词典抽屉原图、说明和 SHA-256 位于 `artifacts/local/audits/offline-dictionary-pct/`；动作栏与抽屉设计复核使用 RD-22、RD-24、RD-25 与 RD-27。
+PCT-AL10 上 Atha 最终原生选区与词典抽屉原图、说明和 SHA-256 位于 `artifacts/local/audits/offline-dictionary-pct/`；动作栏与抽屉设计复核使用 RD-22、RD-24、RD-25 与 RD-27。阅读设置菜单、字号、布局、阅读方式和纵向滚动原图位于 `artifacts/local/audits/reader-controls-pct/`；设置层级参考本地 RD-* 原图，字号、缩进与滚动行为以同机真实交互复核。

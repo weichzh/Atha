@@ -283,6 +283,10 @@ export function createNavigation({
       onNext: () => run(nextPage),
       onFontSize: (value) => run(() => setFontSize(value)),
       onProgress: (value) => run(() => goToProgress(value)),
+      onScroll: () => {
+        syncControls();
+        onStable();
+      },
     });
     preferences.bind({
       onUpdate: (scope, patch) => run(() => setPreferences(scope, patch)),

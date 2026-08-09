@@ -946,6 +946,17 @@ textarea:focus-visible,
   touch-action: pan-y;
 }
 
+.reader[data-reading-mode="scroll"] {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+}
+
+.reader[data-reading-mode="scroll"]::-webkit-scrollbar {
+  display: none;
+}
+
 .page {
   position: absolute;
   top: var(--page-top-margin);
@@ -974,6 +985,41 @@ textarea:focus-visible,
   color: var(--page-text);
   overflow: visible;
   overflow-wrap: anywhere;
+}
+
+.book[data-swipe-dragging] {
+  will-change: transform;
+}
+
+.book[data-swipe-settling] {
+  transition: transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.reader[data-reading-mode="scroll"] .page {
+  position: relative;
+  top: 0;
+  left: 0;
+  width: auto;
+  height: auto;
+  min-height: 100%;
+  padding: var(--page-top-margin) var(--page-right-margin) var(--page-bottom-margin)
+    var(--page-left-margin);
+  overflow: visible;
+}
+
+.reader[data-reading-mode="scroll"] #book-host {
+  width: auto;
+  height: auto;
+}
+
+.book[data-reading-mode="scroll"] {
+  width: 100%;
+  height: auto;
+  min-height: var(--content-height);
+  margin: 0;
+  column-width: auto;
+  column-count: 1;
+  column-gap: normal;
 }
 
 .book img.atha-resource-pending {
@@ -1314,6 +1360,7 @@ textarea:focus-visible,
 }
 
 .preferences-panel {
+  z-index: 22;
   top: auto;
   right: 12px;
   bottom: calc(60px + var(--safe-area-bottom));
@@ -1326,6 +1373,11 @@ textarea:focus-visible,
   border: 1px solid var(--ui-border);
   border-radius: 8px;
   box-shadow: 0 16px 48px var(--ui-shadow);
+}
+
+.preferences-backdrop,
+.settings-handle {
+  display: none;
 }
 
 .preferences-panel[data-settings-view="modules"] {
@@ -1740,6 +1792,7 @@ textarea:focus-visible,
   display: grid;
   max-height: inherit;
   gap: 0;
+  align-content: start;
   padding: 10px 16px 16px;
   overflow: auto;
   overscroll-behavior: contain;
@@ -1750,7 +1803,7 @@ textarea:focus-visible,
 }
 
 .settings-view > .panel-heading,
-.settings-menu > h2 {
+.settings-menu-heading {
   position: sticky;
   z-index: 2;
   top: -10px;
@@ -1759,9 +1812,9 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--ui-border);
 }
 
-.settings-menu > h2 {
-  display: grid;
-  place-items: center;
+.settings-menu-heading .panel-close {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .setting-group {
@@ -1788,6 +1841,35 @@ textarea:focus-visible,
   min-width: 0;
   font-size: 0.94rem;
   font-weight: 600;
+}
+
+.setting-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#font-size-value {
+  min-width: 38px;
+  color: var(--reader-accent);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  text-align: right;
+}
+
+.font-size-control {
+  display: grid;
+  min-height: 52px;
+  grid-template-columns: 30px minmax(0, 1fr) 34px;
+  gap: 12px;
+  align-items: center;
+}
+
+.font-size-control input {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--reader-accent);
 }
 
 .preference-source-select,
@@ -1838,11 +1920,77 @@ textarea:focus-visible,
 }
 
 .font-choice-small {
-  font-size: 0.78em;
+  font-size: 15px;
 }
 
 .font-choice-large {
-  font-size: 1.22em;
+  font-size: 25px;
+  text-align: right;
+}
+
+.choice-cards,
+.reading-mode-cards {
+  display: grid;
+  gap: 10px;
+}
+
+.choice-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.choice-cards button,
+.reading-mode-cards button {
+  min-width: 0;
+  min-height: 76px;
+  padding: 14px 16px;
+  color: var(--ui-muted);
+  text-align: left;
+  background: var(--ui-surface-muted);
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.choice-cards button[aria-checked="true"],
+.reading-mode-cards button[aria-checked="true"] {
+  color: var(--reader-accent);
+  border-color: var(--reader-accent);
+  background: color-mix(in srgb, var(--reader-accent) 8%, var(--ui-surface));
+}
+
+.choice-cards button {
+  display: grid;
+  gap: 8px;
+}
+
+.indent-preview {
+  width: 32px;
+  height: 32px;
+}
+
+.reading-mode-cards {
+  padding-top: 8px;
+}
+
+.reading-mode-cards button {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.reading-mode-cards svg {
+  width: 26px;
+  height: 26px;
+}
+
+.reading-mode-cards span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.reading-mode-cards strong {
+  font-size: 1rem;
 }
 
 .brightness-row {
@@ -2055,6 +2203,7 @@ textarea:focus-visible,
   grid-template-columns: minmax(218px, 0.72fr) minmax(320px, 1.28fr);
   grid-template-rows: auto auto auto minmax(150px, 1fr) auto;
   gap: 0 16px;
+  align-content: stretch;
   overflow: hidden;
 }
 
@@ -2407,6 +2556,49 @@ textarea:focus-visible,
     border-radius: 8px 8px 0 0;
   }
 
+  .reader-tool.preferences[open] .preferences-backdrop {
+    position: fixed;
+    z-index: 21;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--ui-backdrop);
+    animation: settings-backdrop-in 160ms ease-out;
+  }
+
+  .preferences-panel {
+    height: auto;
+    max-height: min(72dvh, calc(100dvh - var(--safe-area-top) - 24px));
+    padding-top: 12px;
+    border-top: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -12px 40px var(--ui-shadow);
+    animation: settings-sheet-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .settings-handle {
+    position: absolute;
+    z-index: 3;
+    top: 7px;
+    left: 50%;
+    display: block;
+    width: 44px;
+    height: 5px;
+    background: var(--ui-border);
+    border-radius: 999px;
+    transform: translateX(-50%);
+  }
+
+  .settings-view {
+    height: auto;
+    padding: 10px 18px max(18px, calc(12px + var(--safe-area-bottom)));
+    animation: settings-page-in 150ms ease-out;
+  }
+
   .reader-tool.dictionary[open] .dictionary-backdrop {
     position: fixed;
     z-index: 21;
@@ -2530,10 +2722,37 @@ textarea:focus-visible,
   }
 }
 
+@keyframes settings-sheet-in {
+  from {
+    opacity: 0.6;
+    transform: translateY(28px);
+  }
+}
+
+@keyframes settings-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes settings-page-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reader-tool.dictionary[open] .dictionary-backdrop,
-  .dictionary-panel {
+  .dictionary-panel,
+  .reader-tool.preferences[open] .preferences-backdrop,
+  .preferences-panel,
+  .settings-view {
     animation: none;
+  }
+
+  .book[data-swipe-settling] {
+    transition: none;
   }
 }
 

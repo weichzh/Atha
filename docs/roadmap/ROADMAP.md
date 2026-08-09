@@ -10,11 +10,13 @@
 
 日常功能与界面门继续使用 Linux Tauri / WebKitGTK；指定样本 benchmark 先在 Linux 固定环境形成可重复基线，Android 仅在需要验证 ARM 真机性能时运行专项门。停止条件是索引和首查 / 热查开销受控、释义不越过内容安全边界，并且阅读翻页、排版与 Locator 恢复不回退。
 
-## Next：阅读操控与设置界面
+## Done：阅读操控与设置界面
 
-以 PCT-AL10 上已安装的微信读书与 Readest 原图、真实拖动和滑动行为为准，重做右上设置菜单、首行缩进、字体滑块和翻页方式。只保留左右分页滑动与上下滚动两种阅读模式；拖动必须连续反馈，字号档位覆盖微信读书同级范围，并明确区分 CSS 字号、系统 DPI 与设备像素换算。设置入口参考 Readest 的层级、动效和关闭行为，查词动作栏与 75% 高移动抽屉已先按 RD-22、RD-24、RD-25 与 RD-27 校准；不引入通用动效框架。
+以 PCT-AL10 上已安装的微信读书与 Readest 原图、真实拖动和滑动行为为准，右上设置已改为移动底部抽屉和分层页面，首行缩进、16–40 字号滑块与左右翻页 / 上下滚动两种模式已落地。字号以逻辑 CSS px 记录并按 DPR 换算内部设备像素；没有引入手势、动画或通用 UI 框架。
 
-该切片关闭后，再汇总本轮非 PDF 格式、CSS、统计、词典与操控的固定基准，完成独立评审、事实文档与项目关闭；不在收尾阶段顺带实现 CSS 社区、同步或新格式。
+## Now：项目收尾
+
+汇总本轮非 PDF 格式、CSS、统计、词典与操控的固定基准，完成 workflow 清理、事实一致性复核与项目关闭；不在收尾阶段顺带实现 CSS 社区、同步或新格式。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
@@ -48,6 +50,7 @@
 | CSS 编辑与模块管理 | 可视排版、按需 CodeMirror 6、实时预览、32 个有界模块、筛选 / 排序 / 批量启停 / JSON 交换、旧状态迁移、失败回退与 Linux 真 GUI 门 | `docs/architecture/READER-CORE.md`、`docs/changes/css-editor-module-management.md` |
 | CSS 社区模块边界 | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md` |
 | 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/changes/local-reading-statistics.md` |
+| 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/changes/reader-controls-and-typography.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 
 精确实施过程、历史验收数字和关闭收据由 Git 与 `project-workflow` 保存，不在路线图重复维护。

@@ -26,7 +26,7 @@ Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持�
 
 ## 样式层
 
-默认样式提供稳定、克制的阅读体验。Preferences 把系统/浅色/纸张/深色主题、亮度、字号、字体、三档行距和点击/滑动翻页作为应用默认值，把书源样式开关、三档左右边距、段首缩进、段距和有序 CSS 模块作为本书覆盖。旧的单段 `userStylesheet` 恢复时迁移为 `legacy-user-css` 模块；旧应用记录中的四个自由边距字段继续忽略。上下正文安全区固定为 144 设备像素，Android 只在顶部 / 底部安全区更大时扩大对应排版边距；左右边距默认 32，可按书选择 24 / 32 / 48 设备像素。亮度只过滤阅读页，不改变壳层控件。
+默认样式提供稳定、克制的阅读体验。Preferences 把系统/浅色/纸张/深色主题、亮度、16–40 逻辑 CSS px 字号、字体和三档行距作为应用默认值，把左右翻页 / 上下滚动、书源样式开关、三档左右边距、段首缩进、段距和有序 CSS 模块作为本书覆盖。旧的单段 `userStylesheet` 恢复时迁移为 `legacy-user-css` 模块；旧应用记录中的四个自由边距字段和点击 / 滑动开关继续忽略。上下正文安全区固定为 144 设备像素，Android 只在顶部 / 底部安全区更大时扩大对应排版边距；左右边距默认 32，可按书选择 24 / 32 / 48 设备像素。亮度只过滤阅读页，不改变壳层控件。
 
 书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、可视排版 CSS 与已启用用户模块排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。每书至多 32 个用户模块，新建或导入模块单个至多 32 KiB、启用组合至多 64 KiB；旧单段 CSS 仍按原 32768 UTF-16 字符上限完整迁移，超过组合上限时只保留为停用恢复副本。名称、分组、ID、顺序、启停和 schema 1 JSON 导入均严格校验。`style-module-package.mjs` 独立拥有模块包解析、序列化和结构限制，并注入 `content.validateStylesheet()` 复用同一 CSSOM 边界；Preferences 只拥有 UI、每书状态、按模块隔离的预览 timer 和组合。手动保存只取消同模块的待处理预览，删除、导入和重置清理失效任务。任一启用组合仍拒绝 `@import`、子资源、转义和 Shadow 边界选择器；验证、重排或持久化失败统一恢复上次状态、渲染与 Locator。CodeMirror 只在模块页可见时按需增强隐藏 textarea 的编辑体验，不能修改应用壳或绕过 CSSOM。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
 
@@ -58,7 +58,7 @@ Windows host 的 `--epub` 是运行时 manifest 之前的导入入口。后端 `
 
 ## 离线词典
 
-`reader::dictionary::LocalDictionaries` 独立于普通书籍导入器，在应用数据根的 `Dictionaries` 目录事务导入、列出和移除词典。MDict v2 的 MDX 与最多四个 MDD 固定交给 `mdict-rs 0.1.4`，MDX 精确查询最多跟随八层链接；MDD 先查资源范围和 32 MiB 上限，再按块读取。经典 Kindle 只支持当前样本所需的 MOBI6、CP1252、HUFF/CDIC 与正排 INDX 精确查询，按稀疏首键二分后只解压目标正文 records；ORDT、自定义排序、names / keys 屈折变化、KF8 词典、DRM、全文和模糊查询稳定拒绝或不命中。
+`reader::dictionary::LocalDictionaries` 独立于普通书籍导入器，在应用数据根的 `Dictionaries` 目录事务导入、列出和移除词典。MDict v2 的 MDX 与最多四个 MDD 固定交给 `mdict-rs 0.1.4`，MDX 精确查询最多跟随八层链接；MDD 先查资源范围和 32 MiB 上限，再按块读取。经典 Kindle 只支持当前样本所需的 MOBI6、CP1252、HUFF/CDIC 与正排 INDX 精确查询，导入时按真实 HUFF 解压长度生成有界 `dictionary.offsets`，查询按稀疏首键和正文累计偏移二分后只解压目标 records；旧导入缺失 sidecar 时可重建。ORDT、自定义排序、names / keys 屈折变化、KF8 词典、DRM、全文和模糊查询稳定拒绝或不命中。
 
 词典源、查询、词头、释义和资源均属于私有内容。Tauri 只把词典 ID、查询和安全结果送入固定 command，后台 lookup 使用 blocking worker，日志只保留操作、格式、资源数、结果数、耗时与稳定错误码。释义先移除脚本、样式、表单、嵌入和媒体节点，再归一为空白受限纯文本；Svelte 面板不使用 `{@html}`，MDD 富资源首版不渲染。选区“查词”只发送当前正文选区，不建立 provider、缓存、网络或插件接口。
 
@@ -98,7 +98,7 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 ### 翻页输入
 
-`Interaction` 只把键盘、滚轮、鼠标页区和单指横向滑动解释为前后翻页意图，再交给 Navigation 串行执行。它不直接修改分页或 section；编辑区、对话框、表格、代码与非折叠文本选择保留浏览器原生行为。图片和公式的点击、键盘预览语义不阻止滚轮翻页；应用壳控件仍受保护。
+`Interaction` 在左右模式把键盘、滚轮、鼠标页区和单指横向滑动解释为前后翻页意图，再交给 Navigation 串行执行；横向拖动只预览 CSS transform，松手后以 170ms 收束。在上下模式，浏览器原生纵向滚动拥有正文手势，键盘、滚轮或底部继续上滑才跨 section。华为 WebView 114 的空 `pointerType` 归一为 touch，原生 `pan-y` 触发 `pointercancel` 时以 `touchend` 处理章节边界；闭合 Shadow DOM 内外监听通过同一 inside / outside 去重，链接、表格、代码、dialog、多点触控和非折叠选区仍保留原生行为。
 
 标准离散滚轮输入逐次产生翻页意图；小幅高频输入先累计阈值，并在同一精密手势的空闲窗口结束前抑制惯性尾流。`scripts/check-reader-wheel.ps1` 用固定快速样本在真实浏览器记录书内媒体目标、4 次间隔 100ms 的离散输入接受率和事件到 Navigation 稳定的 P95；50ms 门槛只用于该快速样本，同页 benchmark 与多章节样书继续分别记录分页成本和跨章成本。
 
@@ -124,9 +124,9 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 长期验收样本位于本机忽略目录 `fixtures/local/`。当前清单包含三个既有单章节样本，以及从《数学及其历史 (2026)》固定哈希源文件重复导出的“1.1 算术与几何”“1.2 勾股数组”“1.3 圆上的有理点”三章节 R1 样本；源 EPUB 不修改，也不提交样本内容到仓库。`scripts/export_reader_sample.py` 支持导出单章节或带 manifest 的多章节样本，`scripts/check-reader-samples.ps1` 统一运行实际 Windows host 与明暗主题截图验收。
 
-阅读页填充 WebView 视口，内部画布尺寸等于视口 CSS 像素乘 `devicePixelRatio`。页内字号、正文边距、栏宽、公式和图形尺寸继续使用绝对设备像素；显示层以 `1 / devicePixelRatio` 抵消系统 DPI。Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素并遵循 DPI。窗口停止调整或用户改变排版后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。控制层显隐不改变书页、正文列或 Locator 几何。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
+阅读页填充 WebView 视口，内部画布尺寸等于视口 CSS 像素乘 `devicePixelRatio`。用户字号以 16–40 逻辑 CSS px 保存，默认 19；Pagination 写入 `字号 × devicePixelRatio` 的内部设备像素，显示层再以 `1 / devicePixelRatio` 抵消系统 DPI，因此同一档保持可解释的 CSS 绝对大小。正文边距、栏宽、公式和图形继续使用设备像素，Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素。窗口停止调整或用户改变排版后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。控制层显隐不改变书页、正文列或 Locator 几何。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
 
-正式内容回归覆盖 780 × 1680、960 × 720 的 DPR 1 视口，以及 390 × 840 的 DPR 2 视口。780 × 1680 不再是产品页面的固定尺寸；benchmark 记录每次运行的真实内部设备像素尺寸，以免跨布局误判性能。阅读器的一页是有受控边距的分页内容区，不是任意滚动位置的截图：不得裁切文字行、公式或图形。上下边距固定为 144 设备像素，其中包含不会被系统缩放工具栏越过的页眉页脚安全区；左右边距默认 32，并可按书选择 24 / 32 / 48。首个字号基线为 32px、行距为 1.6，均可从阅读设置调整。
+正式内容回归覆盖 780 × 1680、960 × 720 的 DPR 1 视口，以及 390 × 840 的 DPR 2 视口。780 × 1680 不再是产品页面的固定尺寸；benchmark 记录每次运行的真实内部设备像素尺寸，以免跨布局误判性能。阅读器的一页是有受控边距的分页内容区，不是任意滚动位置的截图：不得裁切文字行、公式或图形。上下边距固定为 144 设备像素，其中包含不会被系统缩放工具栏越过的页眉页脚安全区；左右边距默认 32，并可按书选择 24 / 32 / 48。默认字号为 19 逻辑 CSS px，行距为无单位 1.8；两者均可从阅读设置调整。
 
 普通图片以读者可用宽高为上限等比缩放；表格与块级预格式化内容由 reader 注入的受控容器限制在单页，并保留双向滚动与既有安全预览。`countCutRects()` 继续进入 ready 遥测与 verify-sample / benchmark 门，但不再让普通首开、字号、窗口重排或延迟资源完成失败；真正的资源、安全、Locator 与持续布局不稳定错误仍阻断阅读。
 
@@ -162,7 +162,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### 离线词典入口门槛
 
-`scripts/check-dictionary-source.ps1` 运行公共边界测试、私有 MDict / MDD 与经典 Kindle 精确查词、release benchmark 和 workspace 回归；选区按钮的事件生产与华为 WebView 的折叠误报回归由 Node 测试固定，`-VerifyLinuxGui` 复用正式 Linux Tauri / WebKitGTK 门验证词典列表、事件消费、纯文本命中、宽窄视口和日志隐私。当前 Linux WebKitGTK 不提供闭合 Shadow DOM 的可用选区对象，因此该门不冒充真实选区点击。`-VerifyAndroid -Device <serial>` 只向显式 PCT-AL10 推送匿名 fixture 与 arm64 release 原生测试二进制，记录查词 P95 和进程 RSS 后立即清理；Tauri / WebView 的真实长按、直接点击、抽屉、应用 PSS 与截图按活动 change 另行在同一 PCT-AL10 验收。
+`scripts/check-dictionary-source.ps1` 运行公共边界测试、私有 MDict / MDD 与经典 Kindle 精确查词、release benchmark 和 workspace 回归；忽略目录中的 schema 1 清单固定至少三组英文查询及归一化释义 SHA-256，门禁只读取预期值，不能由本次结果自更新。选区按钮的事件生产与华为 WebView 的折叠误报回归由 Node 测试固定，`-VerifyLinuxGui` 复用正式 Linux Tauri / WebKitGTK 门验证词典列表、事件消费、纯文本命中、宽窄视口和日志隐私。当前 Linux WebKitGTK 不提供闭合 Shadow DOM 的可用选区对象，因此该门不冒充真实选区点击。`-VerifyAndroid -Device <serial>` 只向显式 PCT-AL10 推送匿名 fixture 与 arm64 release 原生测试二进制，记录查词 P95 和进程 RSS 后立即清理；Tauri / WebView 的真实长按、直接点击、抽屉、应用 PSS 与截图按活动 change 另行在同一 PCT-AL10 验收。
 
 ## 性能策略
 

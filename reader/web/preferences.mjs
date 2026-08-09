@@ -1,11 +1,9 @@
 const APPLICATION_DEFAULTS = Object.freeze({
   theme: "system",
   brightness: 100,
-  fontSize: 32,
+  fontSize: 19,
   fontFamily: "book",
   density: "standard",
-  tapToPaginate: true,
-  swipeToPaginate: true,
 });
 const LEGACY_MARGIN_KEYS = ["marginTopPx", "marginRightPx", "marginBottomPx", "marginLeftPx"];
 const LEGACY_BOOK_KEYS = Object.freeze([
@@ -16,8 +14,9 @@ const LEGACY_BOOK_KEYS = Object.freeze([
 const BOOK_DEFAULTS = Object.freeze({
   sourceStyles: true,
   userStylesEnabled: true,
+  readingMode: "paged",
   pageMargin: "standard",
-  paragraphIndent: "book",
+  paragraphIndent: "none",
   paragraphSpacing: "book",
   styleModules: Object.freeze([]),
 });
@@ -25,8 +24,12 @@ const MAX_STYLE_MODULES = STYLE_MODULE_LIMITS.modules;
 const MAX_STYLE_MODULE_BYTES = STYLE_MODULE_LIMITS.moduleBytes;
 const MAX_COMBINED_STYLE_BYTES = STYLE_MODULE_LIMITS.combinedBytes;
 const UTF8 = new TextEncoder();
-const LINE_HEIGHT_RATIOS = Object.freeze({ compact: 1.45, standard: 1.6, comfortable: 1.8 });
+const LINE_HEIGHT_RATIOS = Object.freeze({ compact: 1.55, standard: 1.8, comfortable: 2.05 });
 const PAGE_MARGINS = Object.freeze({ narrow: 24, standard: 32, wide: 48 });
+
+function fontSizePixels(value) {
+  return Math.round(value * devicePixelRatio);
+}
 
 export function createPreferences({ root, reader, content, controls, assert }) {
   let application = { ...APPLICATION_DEFAULTS };
@@ -83,12 +86,16 @@ export function createPreferences({ root, reader, content, controls, assert }) {
 
   function validateApplication(value) {
     ensure(value && typeof value === "object" && !Array.isArray(value));
+    const legacyControls = Object.hasOwn(value, "tapToPaginate") || Object.hasOwn(value, "swipeToPaginate");
     const normalized = {
       brightness: 100,
-      tapToPaginate: APPLICATION_DEFAULTS.tapToPaginate,
-      swipeToPaginate: APPLICATION_DEFAULTS.swipeToPaginate,
       ...value,
     };
+    if (legacyControls) {
+      normalized.fontSize = { 24: 16, 32: 19, 40: 24 }[normalized.fontSize] ?? 19;
+    }
+    delete normalized.tapToPaginate;
+    delete normalized.swipeToPaginate;
     for (const key of LEGACY_MARGIN_KEYS) delete normalized[key];
     ensure(
       exact(normalized, Object.keys(APPLICATION_DEFAULTS).sort()) &&
@@ -96,11 +103,11 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         Number.isInteger(normalized.brightness) &&
         normalized.brightness >= 70 &&
         normalized.brightness <= 120 &&
-        [24, 32, 40].includes(normalized.fontSize) &&
+        Number.isInteger(normalized.fontSize) &&
+        normalized.fontSize >= 16 &&
+        normalized.fontSize <= 40 &&
         ["book", "serif", "sans"].includes(normalized.fontFamily) &&
-        Object.hasOwn(LINE_HEIGHT_RATIOS, normalized.density) &&
-        typeof normalized.tapToPaginate === "boolean" &&
-        typeof normalized.swipeToPaginate === "boolean",
+        Object.hasOwn(LINE_HEIGHT_RATIOS, normalized.density),
     );
     return normalized;
   }
@@ -134,15 +141,18 @@ export function createPreferences({ root, reader, content, controls, assert }) {
           : Object.freeze([]),
       };
     }
+    const normalized = { readingMode: "paged", ...value };
+    if (normalized.paragraphIndent === "book") normalized.paragraphIndent = "none";
     ensure(
-      exact(value, Object.keys(BOOK_DEFAULTS).sort()) &&
-        typeof value.sourceStyles === "boolean" &&
-        typeof value.userStylesEnabled === "boolean" &&
-        Object.hasOwn(PAGE_MARGINS, value.pageMargin) &&
-        ["book", "none", "two"].includes(value.paragraphIndent) &&
-        ["book", "compact", "comfortable"].includes(value.paragraphSpacing),
+      exact(normalized, Object.keys(BOOK_DEFAULTS).sort()) &&
+        typeof normalized.sourceStyles === "boolean" &&
+        typeof normalized.userStylesEnabled === "boolean" &&
+        ["paged", "scroll"].includes(normalized.readingMode) &&
+        Object.hasOwn(PAGE_MARGINS, normalized.pageMargin) &&
+        ["none", "two"].includes(normalized.paragraphIndent) &&
+        ["book", "compact", "comfortable"].includes(normalized.paragraphSpacing),
     );
-    return { ...value, styleModules: validateModules(value.styleModules, true) };
+    return { ...normalized, styleModules: validateModules(normalized.styleModules, true) };
   }
 
   function visualStylesheet(value) {
@@ -287,10 +297,10 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.theme.value = application.theme;
     controls.brightness.value = String(application.brightness);
     controls.fontSize.value = String(application.fontSize);
+    controls.fontSizeValue.textContent = String(application.fontSize);
     controls.fontFamily.value = application.fontFamily;
     controls.density.value = application.density;
-    controls.tapToPaginate.checked = application.tapToPaginate;
-    controls.swipeToPaginate.checked = application.swipeToPaginate;
+    controls.readingMode.value = book.readingMode;
     controls.sourceStyles.checked = book.sourceStyles;
     controls.userStylesEnabled.checked = book.userStylesEnabled;
     controls.pageMargin.value = book.pageMargin;
@@ -298,9 +308,9 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.paragraphSpacing.value = book.paragraphSpacing;
     for (const control of [
       controls.theme,
-      controls.fontSize,
       controls.fontFamily,
       controls.density,
+      controls.readingMode,
       controls.pageMargin,
       controls.paragraphIndent,
       controls.paragraphSpacing,
@@ -323,11 +333,13 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     }
     syncSystemBars();
     root.style.setProperty("--reader-brightness", String(application.brightness / 100));
+    reader.dataset.readingMode = nextBook.readingMode;
+    content.book.dataset.readingMode = nextBook.readingMode;
     if (application.fontFamily === "book") delete content.book.dataset.fontFamily;
     else content.book.dataset.fontFamily = application.fontFamily;
     reader.style.setProperty(
       "--reader-line-height",
-      `${application.fontSize * LINE_HEIGHT_RATIOS[application.density]}px`,
+      String(LINE_HEIGHT_RATIOS[application.density]),
     );
     const margin = `${PAGE_MARGINS[book.pageMargin]}px`;
     reader.style.setProperty("--page-left-margin", margin);
@@ -435,23 +447,17 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.brightness.addEventListener("input", () => {
       root.style.setProperty("--reader-brightness", String(Number(controls.brightness.value) / 100));
     });
+    controls.fontSize.addEventListener("input", () => {
+      controls.fontSizeValue.textContent = controls.fontSize.value;
+    });
     controls.brightness.addEventListener("change", () => {
       void run(
         () => onUpdate("application", { brightness: Number(controls.brightness.value) }),
         "已应用",
       );
     });
-    controls.tapToPaginate.addEventListener("change", () => {
-      void run(
-        () => onUpdate("application", { tapToPaginate: controls.tapToPaginate.checked }),
-        "已应用",
-      );
-    });
-    controls.swipeToPaginate.addEventListener("change", () => {
-      void run(
-        () => onUpdate("application", { swipeToPaginate: controls.swipeToPaginate.checked }),
-        "已应用",
-      );
+    controls.readingMode.addEventListener("change", () => {
+      void run(() => onUpdate("book", { readingMode: controls.readingMode.value }), "已应用");
     });
     controls.sourceStyles.addEventListener("change", () => {
       void run(() => onUpdate("book", { sourceStyles: controls.sourceStyles.checked }), "已应用");
@@ -641,7 +647,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   for (const invalid of [
     ["application", { theme: "sepia" }],
     ["application", { brightness: 121 }],
-    ["application", { fontSize: 31 }],
+    ["application", { fontSize: 15 }],
     ["application", { unknown: true }],
     ["book", { unknown: true }],
   ]) {
