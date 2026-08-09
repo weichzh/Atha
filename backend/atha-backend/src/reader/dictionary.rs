@@ -23,6 +23,8 @@ const KINDLE_IDENTITY_DOMAIN: &[u8] = b"atha/dictionary/kindle-mobi6-v1\0";
 const RECORD_FILE: &str = "dictionary.json";
 const MDX_FILE: &str = "dictionary.mdx";
 const KINDLE_FILE: &str = "dictionary.mobi";
+const KINDLE_OFFSETS_FILE: &str = "dictionary.offsets";
+const KINDLE_OFFSETS_MAGIC: &[u8; 8] = b"ATHAKO1\0";
 const MAX_DICTIONARY_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_RESOURCE_FILES: usize = 4;
 const MAX_QUERY_CHARS: usize = 128;
@@ -106,7 +108,6 @@ struct KindleDictionary {
     offsets: Vec<u64>,
     text_bytes: u64,
     text_records: usize,
-    record_size: usize,
     extra_data_flags: u16,
     index_start: usize,
     index_records: usize,
@@ -116,6 +117,7 @@ struct KindleDictionary {
     huff_count: usize,
     title: String,
     entry_count: u64,
+    text_offsets: Option<Vec<u64>>,
 }
 
 #[derive(Clone, Copy)]
@@ -230,7 +232,6 @@ impl KindleDictionary {
             offsets,
             text_bytes,
             text_records,
-            record_size,
             extra_data_flags,
             index_start,
             index_records,
@@ -240,7 +241,32 @@ impl KindleDictionary {
             huff_count,
             title,
             entry_count,
+            text_offsets: None,
         })
+    }
+
+    fn open_imported(path: &Path) -> Result<Self, DictionaryError> {
+        let mut dictionary = Self::open(path)?;
+        let offsets = path.with_file_name(KINDLE_OFFSETS_FILE);
+        if offsets.is_file() {
+            dictionary.text_offsets = Some(read_kindle_offsets(
+                &offsets,
+                dictionary.text_records,
+                dictionary.text_bytes,
+            )?);
+        } else {
+            dictionary.ensure_text_offsets()?;
+            let _ = write_kindle_offsets(
+                &offsets,
+                dictionary
+                    .text_offsets
+                    .as_deref()
+                    .ok_or(DictionaryError::CorruptSource)?,
+                dictionary.text_records,
+                dictionary.text_bytes,
+            );
+        }
+        Ok(dictionary)
     }
 
     fn lookup(
@@ -301,15 +327,18 @@ impl KindleDictionary {
         if length == 0 || length > MAX_RAW_DEFINITION_BYTES as u64 || end > self.text_bytes {
             return Err(DictionaryError::DefinitionTooLarge);
         }
-        let first = usize::try_from(position / self.record_size as u64)
-            .map_err(|_| DictionaryError::CorruptSource)?
-            .checked_add(1)
+        self.ensure_text_offsets()?;
+        let offsets = self
+            .text_offsets
+            .as_ref()
             .ok_or(DictionaryError::CorruptSource)?;
-        let last = usize::try_from((end - 1) / self.record_size as u64)
-            .map_err(|_| DictionaryError::CorruptSource)?
-            .checked_add(1)
-            .ok_or(DictionaryError::CorruptSource)?;
-        if first == 0 || last > self.text_records {
+        let first = offsets
+            .partition_point(|offset| *offset <= position)
+            .saturating_sub(1);
+        let last = offsets
+            .partition_point(|offset| *offset < end)
+            .saturating_sub(1);
+        if first > last || last >= self.text_records {
             return Err(DictionaryError::CorruptSource);
         }
         let huff = read_record_bytes(&mut self.file, &self.offsets, self.huff_index)?;
@@ -327,14 +356,17 @@ impl KindleDictionary {
         let mut budget = MAX_RAW_DEFINITION_BYTES;
         let mut output = Vec::with_capacity(length as usize);
         for record_index in first..=last {
-            let compressed = read_record_bytes(&mut self.file, &self.offsets, record_index)?;
+            let compressed = read_record_bytes(&mut self.file, &self.offsets, record_index + 1)?;
             let decompressed = huff
                 .decompress(
                     strip_trailing_data(&compressed, self.extra_data_flags),
                     &mut budget,
                 )
                 .map_err(|_| DictionaryError::CorruptSource)?;
-            let record_start = (record_index - 1) as u64 * self.record_size as u64;
+            let record_start = offsets[record_index];
+            if decompressed.len() as u64 != offsets[record_index + 1] - record_start {
+                return Err(DictionaryError::CorruptSource);
+            }
             let slice_start = position.saturating_sub(record_start) as usize;
             let slice_end = usize::try_from(end.saturating_sub(record_start))
                 .unwrap_or(usize::MAX)
@@ -348,6 +380,53 @@ impl KindleDictionary {
             return Err(DictionaryError::CorruptSource);
         }
         Ok(output)
+    }
+
+    fn ensure_text_offsets(&mut self) -> Result<(), DictionaryError> {
+        if self.text_offsets.is_some() {
+            return Ok(());
+        }
+        let huff = read_record_bytes(&mut self.file, &self.offsets, self.huff_index)?;
+        let mut cdics = Vec::with_capacity(self.huff_count - 1);
+        for index in 1..self.huff_count {
+            cdics.push(read_record_bytes(
+                &mut self.file,
+                &self.offsets,
+                self.huff_index + index,
+            )?);
+        }
+        let cdic_refs = cdics.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let mut huff =
+            HuffCdicReader::new(&huff, &cdic_refs).map_err(|_| DictionaryError::CorruptSource)?;
+        let mut offsets = Vec::with_capacity(self.text_records + 1);
+        offsets.push(0_u64);
+        let decompressed_limit = self
+            .text_bytes
+            .checked_add(MAX_DECOMPRESSED_TEXT_RECORD as u64)
+            .ok_or(DictionaryError::CorruptSource)?;
+        for record_index in 1..=self.text_records {
+            let compressed = read_record_bytes(&mut self.file, &self.offsets, record_index)?;
+            let mut budget = MAX_DECOMPRESSED_TEXT_RECORD;
+            let length = huff
+                .decompress(
+                    strip_trailing_data(&compressed, self.extra_data_flags),
+                    &mut budget,
+                )
+                .map_err(|_| DictionaryError::CorruptSource)?
+                .len() as u64;
+            let end = offsets
+                .last()
+                .copied()
+                .and_then(|start| start.checked_add(length))
+                .filter(|end| *end <= decompressed_limit)
+                .ok_or(DictionaryError::CorruptSource)?;
+            offsets.push(end);
+        }
+        if offsets.last().is_none_or(|end| *end < self.text_bytes) {
+            return Err(DictionaryError::CorruptSource);
+        }
+        self.text_offsets = Some(offsets);
+        Ok(())
     }
 }
 
@@ -466,8 +545,7 @@ fn parse_index_entry(
     let controls = &data[controls_start..controls_end];
     let mut cursor = controls_end;
     let mut control_index = 0;
-    let mut position = None;
-    let mut length = None;
+    let mut pending = Vec::new();
     for descriptor in tagx {
         if descriptor.control_byte != 0 {
             control_index += 1;
@@ -494,10 +572,15 @@ fn parse_index_entry(
             }
             (Some(masked as usize), None)
         };
+        pending.push((descriptor.tag, descriptor.values_count, count, byte_length));
+    }
+    let mut position = None;
+    let mut length = None;
+    for (tag, values_count, count, byte_length) in pending {
         let mut values = Vec::new();
         if let Some(count) = count {
             let total = count
-                .checked_mul(usize::from(descriptor.values_count))
+                .checked_mul(usize::from(values_count))
                 .filter(|value| *value <= 32)
                 .ok_or(DictionaryError::CorruptSource)?;
             for _ in 0..total {
@@ -515,9 +598,9 @@ fn parse_index_entry(
                 }
             }
         }
-        if descriptor.tag == 1 {
+        if tag == 1 {
             position = values.first().copied().map(u64::from);
-        } else if descriptor.tag == 2 {
+        } else if tag == 2 {
             length = values.first().copied().map(u64::from);
         }
     }
@@ -582,6 +665,17 @@ fn be_u32(data: &[u8], offset: usize) -> Result<u32, DictionaryError> {
         .get(offset..offset + 4)
         .ok_or(DictionaryError::CorruptSource)?;
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn be_u64(data: &[u8], offset: usize) -> Result<u64, DictionaryError> {
+    let bytes = data
+        .get(offset..offset + 8)
+        .ok_or(DictionaryError::CorruptSource)?;
+    Ok(u64::from_be_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| DictionaryError::CorruptSource)?,
+    ))
 }
 
 fn mobi_title(record_zero: &[u8]) -> Option<String> {
@@ -693,7 +787,7 @@ impl LocalDictionaries {
         let record = read_record(&directory)?;
         match record.format {
             DictionaryFormat::KindleMobi6 => {
-                let mut dictionary = KindleDictionary::open(&directory.join(KINDLE_FILE))?;
+                let mut dictionary = KindleDictionary::open_imported(&directory.join(KINDLE_FILE))?;
                 dictionary.lookup(&record.id, &query)
             }
             DictionaryFormat::Mdict => lookup_mdict(&directory, &record.id, &query),
@@ -823,7 +917,17 @@ impl LocalDictionaries {
             fs::remove_dir_all(staging).map_err(|_| DictionaryError::WriteFailed)?;
             return Ok(read_record(&target)?.public());
         }
-        let dictionary = KindleDictionary::open(&staging.join(KINDLE_FILE))?;
+        let mut dictionary = KindleDictionary::open(&staging.join(KINDLE_FILE))?;
+        dictionary.ensure_text_offsets()?;
+        write_kindle_offsets(
+            &staging.join(KINDLE_OFFSETS_FILE),
+            dictionary
+                .text_offsets
+                .as_deref()
+                .ok_or(DictionaryError::CorruptSource)?,
+            dictionary.text_records,
+            dictionary.text_bytes,
+        )?;
         let record = StoredDictionary {
             schema: DICTIONARY_SCHEMA,
             id: id.clone(),
@@ -1024,6 +1128,81 @@ fn write_record(directory: &Path, record: &StoredDictionary) -> Result<(), Dicti
     file.write_all(b"\n")
         .and_then(|()| file.sync_all())
         .map_err(|_| DictionaryError::WriteFailed)
+}
+
+fn write_kindle_offsets(
+    path: &Path,
+    offsets: &[u64],
+    text_records: usize,
+    text_bytes: u64,
+) -> Result<(), DictionaryError> {
+    if offsets.len() != text_records + 1
+        || offsets.first() != Some(&0)
+        || offsets.windows(2).any(|pair| {
+            pair[0] >= pair[1] || pair[1] - pair[0] > MAX_DECOMPRESSED_TEXT_RECORD as u64
+        })
+        || offsets.last().is_none_or(|end| {
+            *end < text_bytes
+                || *end > text_bytes.saturating_add(MAX_DECOMPRESSED_TEXT_RECORD as u64)
+        })
+    {
+        return Err(DictionaryError::CorruptSource);
+    }
+    let text_records = u64::try_from(text_records).map_err(|_| DictionaryError::CorruptSource)?;
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(path)
+        .map_err(|_| DictionaryError::WriteFailed)?;
+    file.write_all(KINDLE_OFFSETS_MAGIC)
+        .and_then(|()| file.write_all(&text_records.to_be_bytes()))
+        .and_then(|()| file.write_all(&text_bytes.to_be_bytes()))
+        .map_err(|_| DictionaryError::WriteFailed)?;
+    for offset in offsets {
+        file.write_all(&offset.to_be_bytes())
+            .map_err(|_| DictionaryError::WriteFailed)?;
+    }
+    file.sync_all().map_err(|_| DictionaryError::WriteFailed)
+}
+
+fn read_kindle_offsets(
+    path: &Path,
+    text_records: usize,
+    text_bytes: u64,
+) -> Result<Vec<u64>, DictionaryError> {
+    let expected = 24_usize
+        .checked_add(
+            text_records
+                .checked_add(1)
+                .and_then(|count| count.checked_mul(8))
+                .ok_or(DictionaryError::CorruptSource)?,
+        )
+        .ok_or(DictionaryError::CorruptSource)?;
+    let data = fs::read(path).map_err(|_| DictionaryError::ReadFailed)?;
+    if data.len() != expected
+        || data.get(0..8) != Some(KINDLE_OFFSETS_MAGIC)
+        || be_u64(&data, 8)?
+            != u64::try_from(text_records).map_err(|_| DictionaryError::CorruptSource)?
+        || be_u64(&data, 16)? != text_bytes
+    {
+        return Err(DictionaryError::CorruptSource);
+    }
+    let offsets = data[24..]
+        .chunks_exact(8)
+        .map(|bytes| u64::from_be_bytes(bytes.try_into().expect("eight-byte offset")))
+        .collect::<Vec<_>>();
+    if offsets.first() != Some(&0)
+        || offsets.last().is_none_or(|end| {
+            *end < text_bytes
+                || *end > text_bytes.saturating_add(MAX_DECOMPRESSED_TEXT_RECORD as u64)
+        })
+        || offsets.windows(2).any(|pair| {
+            pair[0] >= pair[1] || pair[1] - pair[0] > MAX_DECOMPRESSED_TEXT_RECORD as u64
+        })
+    {
+        return Err(DictionaryError::CorruptSource);
+    }
+    Ok(offsets)
 }
 
 fn validate_record(record: &StoredDictionary) -> Result<(), DictionaryError> {
@@ -1466,6 +1645,67 @@ mod tests {
         fs::remove_dir_all(root).expect("remove Kindle test root");
     }
 
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct PrivateEnglishEvidence {
+        schema: u8,
+        kindle: Vec<PrivateEnglishCase>,
+        mdict: Vec<PrivateEnglishCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    struct PrivateEnglishCase {
+        query: String,
+        definition_sha256: String,
+    }
+
+    #[test]
+    fn private_english_dictionary_outputs_are_substantive() {
+        let Some(fixture_root) =
+            std::env::var_os("ATHA_PRIVATE_DICTIONARY_ROOT").map(PathBuf::from)
+        else {
+            return;
+        };
+        let evidence = fs::read(fixture_root.join("dictionary-english-output.json")).expect(
+            "private fixture evidence is missing; add the ignored schema-1 English query/hash manifest",
+        );
+        let evidence = serde_json::from_slice::<PrivateEnglishEvidence>(&evidence)
+            .expect("private English evidence manifest is invalid");
+        assert!(evidence.schema == 1, "unsupported private evidence schema");
+        validate_private_english_cases(&evidence.kindle);
+        validate_private_english_cases(&evidence.mdict);
+
+        let kindle_source = find_private_kindle(&fixture_root).expect("one Kindle sample");
+        let (mdx_source, mdd_sources) = find_private_mdict(&fixture_root);
+        let root = PrivateTestRoot::new("dictionary-english-output");
+        let dictionaries = LocalDictionaries::open(&root.0).expect("open dictionaries");
+        let kindle = dictionaries
+            .import_kindle(kindle_source)
+            .expect("import Kindle sample");
+        let mdict = dictionaries
+            .import_mdict(mdx_source, &mdd_sources)
+            .expect("import MDict sample");
+
+        assert_private_english_outputs(&dictionaries, &kindle.id, &evidence.kindle);
+        assert_private_english_outputs(&dictionaries, &mdict.id, &evidence.mdict);
+    }
+
+    #[test]
+    fn kindle_offset_sidecar_round_trips_and_rejects_corruption() {
+        let root = PrivateTestRoot::new("dictionary-offset-sidecar");
+        let path = root.0.join(KINDLE_OFFSETS_FILE);
+        let expected = vec![0, 4, 9];
+        write_kindle_offsets(&path, &expected, 2, 9).expect("write Kindle offsets");
+        assert_eq!(
+            read_kindle_offsets(&path, 2, 9).expect("read Kindle offsets"),
+            expected
+        );
+        fs::write(&path, [KINDLE_OFFSETS_MAGIC.as_slice(), &[0; 32]].concat())
+            .expect("corrupt Kindle offsets");
+        assert!(read_kindle_offsets(&path, 2, 9).is_err());
+    }
+
     #[test]
     #[ignore = "requires private local dictionary fixtures"]
     fn private_dictionary_benchmark() {
@@ -1677,6 +1917,121 @@ mod tests {
                 .expect("read middle Kindle key"),
             tail,
         ]
+    }
+
+    fn assert_private_english_outputs(
+        dictionaries: &LocalDictionaries,
+        dictionary_id: &str,
+        cases: &[PrivateEnglishCase],
+    ) {
+        for case in cases {
+            let result = dictionaries
+                .lookup(dictionary_id, &case.query)
+                .expect("private English lookup")
+                .expect("private English evidence query must resolve");
+            let query = normalized_english_evidence(&case.query)
+                .expect("private English evidence query is invalid");
+            let headword = normalized_english_evidence(&result.headword)
+                .expect("private English lookup headword is invalid");
+            let definition = normalize_text(&result.definition);
+            let lower = definition.to_ascii_lowercase();
+            assert!(
+                result.dictionary_id == dictionary_id,
+                "dictionary id mismatch"
+            );
+            assert!(query == headword, "private English headword mismatch");
+            assert!(
+                definition.chars().count() >= 24
+                    && !matches!(
+                        lower.as_str(),
+                        "placeholder"
+                            | "no definition"
+                            | "no definition available"
+                            | "undefined"
+                            | "null"
+                    ),
+                "private English definition is empty or a placeholder"
+            );
+            assert!(
+                definition_sha256(&definition) == case.definition_sha256,
+                "private English definition digest mismatch"
+            );
+        }
+    }
+
+    fn validate_private_english_cases(cases: &[PrivateEnglishCase]) {
+        assert!(
+            cases.len() >= 3,
+            "private evidence needs at least three cases"
+        );
+        for (index, case) in cases.iter().enumerate() {
+            assert!(
+                normalized_english_evidence(&case.query).is_some(),
+                "private evidence contains an invalid English query"
+            );
+            assert!(
+                case.definition_sha256.len() == 64
+                    && case
+                        .definition_sha256
+                        .bytes()
+                        .all(|byte| { byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) }),
+                "private evidence contains an invalid definition digest"
+            );
+            assert!(
+                cases[..index]
+                    .iter()
+                    .all(|previous| !previous.query.eq_ignore_ascii_case(&case.query)),
+                "private evidence contains duplicate queries"
+            );
+        }
+    }
+
+    fn normalized_english_evidence(value: &str) -> Option<String> {
+        let value = normalize_text(value);
+        (value.chars().count() <= MAX_QUERY_CHARS
+            && value
+                .chars()
+                .any(|character| character.is_ascii_alphabetic())
+            && value.chars().all(|character| {
+                character.is_ascii_alphabetic()
+                    || character.is_ascii_whitespace()
+                    || matches!(character, '-' | '\'' | '.')
+            }))
+        .then(|| value.to_ascii_lowercase())
+    }
+
+    fn definition_sha256(value: &str) -> String {
+        let mut digest = SourceDigest::new(b"", MAX_RAW_DEFINITION_BYTES as u64);
+        digest
+            .update(value.as_bytes())
+            .expect("normalized definition exceeds hash budget");
+        digest.finish()
+    }
+
+    struct PrivateTestRoot(PathBuf);
+
+    impl PrivateTestRoot {
+        fn new(label: &str) -> Self {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(".tmp")
+                .join(format!(
+                    "{label}-{}-{}",
+                    std::process::id(),
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("clock after epoch")
+                        .as_nanos()
+                ));
+            fs::create_dir_all(&path).expect("create private test root");
+            Self(path)
+        }
+    }
+
+    impl Drop for PrivateTestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     fn find_private_kindle(root: &Path) -> Option<PathBuf> {

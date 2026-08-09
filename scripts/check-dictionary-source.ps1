@@ -34,6 +34,9 @@ if (-not [string]::IsNullOrWhiteSpace($PrivateFixtures)) {
     if (-not (Test-Path -LiteralPath $resolvedFixtures -PathType Container)) {
         throw 'PrivateFixtures must name a local directory.'
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $resolvedFixtures 'dictionary-english-output.json') -PathType Leaf)) {
+        throw 'Private fixture evidence is missing. Add the ignored schema-1 English query/hash manifest.'
+    }
 }
 
 Push-Location $repoRoot
@@ -60,6 +63,11 @@ try {
                 'reader::dictionary::tests::private_kindle_sample_supports_sparse_exact_lookup',
                 '--lib', '--', '--exact'
             ) 'Private Kindle compatibility test failed.' | Out-Host
+            Invoke-Checked $cargoPath @(
+                'test', '--locked', '--release', '-p', 'atha-backend',
+                'reader::dictionary::tests::private_english_dictionary_outputs_are_substantive',
+                '--lib', '--', '--exact'
+            ) 'Private English dictionary output gate failed.' | Out-Host
             $benchmarkOutput = Invoke-Checked $cargoPath @(
                 'test', '--locked', '--release', '-p', 'atha-backend',
                 'reader::dictionary::tests::private_dictionary_benchmark',
