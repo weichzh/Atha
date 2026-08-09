@@ -1,4 +1,13 @@
 <script lang="ts">
+  import {
+    BookOpenText,
+    Copy,
+    Highlighter,
+    NotebookPen,
+    RefreshCw,
+    Trash2,
+  } from "@lucide/svelte";
+
   import BottomToolbar from "./chrome/BottomToolbar.svelte";
   import ConversationOverlay from "./ConversationOverlay.svelte";
   import TopToolbar from "./chrome/TopToolbar.svelte";
@@ -10,12 +19,24 @@
 </section>
 
 <div id="selection-actions" class="selection-actions" role="toolbar" aria-label="选中文字操作" hidden>
-  <button id="lookup-selection" type="button">查词</button>
-  <button id="copy-selection" type="button">复制</button>
-  <button id="highlight-selection" type="button">标注</button>
-  <button id="update-selection" type="button" hidden>更新</button>
-  <button id="note-selection" type="button">笔记</button>
-  <button id="delete-selection" type="button" hidden>删除</button>
+  <button id="lookup-selection" type="button" aria-label="查词" title="查词"
+    ><BookOpenText aria-hidden="true" /><span class="visually-hidden">查词</span></button
+  >
+  <button id="copy-selection" type="button" aria-label="复制" title="复制"
+    ><Copy aria-hidden="true" /><span class="visually-hidden">复制</span></button
+  >
+  <button id="highlight-selection" type="button" aria-label="标注" title="标注"
+    ><Highlighter aria-hidden="true" /><span class="visually-hidden">标注</span></button
+  >
+  <button id="update-selection" type="button" aria-label="更新选区" title="更新选区" hidden
+    ><RefreshCw aria-hidden="true" /><span class="visually-hidden">更新</span></button
+  >
+  <button id="note-selection" type="button" aria-label="笔记" title="笔记"
+    ><NotebookPen aria-hidden="true" /><span class="visually-hidden">笔记</span></button
+  >
+  <button id="delete-selection" type="button" aria-label="删除标注" title="删除标注" hidden
+    ><Trash2 aria-hidden="true" /><span class="visually-hidden">删除</span></button
+  >
   <output id="selection-actions-status" class="visually-hidden" aria-live="polite"></output>
 </div>
 

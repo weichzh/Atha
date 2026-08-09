@@ -115,13 +115,7 @@ export function createAnnotations({
   }
 
   function currentSelection() {
-    const selection = content.book.getRootNode().getSelection?.();
-    if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
-    const range = selection.getRangeAt(0);
-    return content.book.contains(range.commonAncestorContainer) ||
-      range.commonAncestorContainer === content.book
-      ? range.cloneRange()
-      : null;
+    return content.selectionRange();
   }
 
   function errorCode() {
@@ -452,8 +446,14 @@ export function createAnnotations({
       controls.highlight.hidden = Boolean(item);
       controls.update.hidden = !item;
       controls.delete.hidden = !item;
-      controls.update.textContent = rangeEditingId === item?.id ? "保存" : "重选";
-      controls.note.textContent = item?.note ? "编辑笔记" : "笔记";
+      const updateLabel = rangeEditingId === item?.id ? "保存" : "重选";
+      const noteLabel = item?.note ? "编辑笔记" : "笔记";
+      controls.update.querySelector("span").textContent = updateLabel;
+      controls.update.setAttribute("aria-label", updateLabel);
+      controls.update.title = updateLabel;
+      controls.note.querySelector("span").textContent = noteLabel;
+      controls.note.setAttribute("aria-label", noteLabel);
+      controls.note.title = noteLabel;
       controls.selectionActions.setAttribute(
         "aria-label",
         item ? "已有标注操作" : "选中文字操作",

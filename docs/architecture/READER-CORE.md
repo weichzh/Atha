@@ -92,7 +92,7 @@ R6 只提供不区分大小写的字面量搜索。查询最长 128 个 UTF-16 c
 
 `SourceAnchor` 包含 canonical range Locator、至多 4096 个 UTF-16 code unit 的原文、前后各 32 个 code unit 的上下文和原文 UTF-8 SHA-256。同版本先验证 Locator 指向的原文；版本或文本不一致时，只在原 section 中接受唯一原文命中并更新当前 Locator，零个、多个命中或缺失 section 都报告重锚失败。原始 Locator 与历史快照保持不可变。
 
-Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，只把当前 section 的未删除根 Message 投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。有效新选区附近显示复制、标注和笔记；点击已有标注则恢复其 Range，并显示复制、重选、笔记和删除。重选使用浏览器原生选区分两步创建新的 Anchor 与 Snapshot，保持 Message 身份与笔记修订；重叠命中选择最近更新的一条。
+Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，只把当前 section 的未删除根 Message 投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。有效新选区附近显示查词、复制、标注和笔记；点击已有标注则恢复其 Range，并显示查词、复制、重选、笔记和删除。选区有效性由 `content.selectionRange()` 统一以真实 `Range.collapsed` 和正文归属判定，不信任厂商 WebView 可误报的 `Selection.isCollapsed`。重选使用浏览器原生选区分两步创建新的 Anchor 与 Snapshot，保持 Message 身份与笔记修订；重叠命中选择最近更新的一条。
 
 笔记入口负责新建、为 source-only Message 添加正文和预填编辑，并打开定位根消息的半屏对话。消息输入器使用最长 8000 字符的受限 Tiptap JSON，由后端派生纯文本；可视编辑与原始 Markdown 共用同一耐久事实，Markdown 无法表示的结构会保留原内容并拒绝切换。全屏笔记页投影所有未删除根 Message，并提供章节/全文筛选、本书导出和对话入口；对话浮层负责回复、引用、修订、关系、快照和跳回。删除写入 Message 墓碑并立即撤销正文投影。标注颜色、notebook、同步和 tombstone 压缩留待后续真实需求。
 
@@ -162,7 +162,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### 离线词典入口门槛
 
-`scripts/check-dictionary-source.ps1` 运行公共边界测试、私有 MDict / MDD 与经典 Kindle 精确查词、release benchmark 和 workspace 回归；选区按钮的事件生产由 Node 契约测试固定，`-VerifyLinuxGui` 复用正式 Linux Tauri / WebKitGTK 门验证词典列表、事件消费、纯文本命中、宽窄视口和日志隐私。当前 Linux WebKitGTK 不提供闭合 Shadow DOM 的可用选区对象，因此该门不冒充真实选区点击。`-VerifyAndroid -Device <serial>` 只向显式 PCT-AL10 推送匿名 fixture 与 arm64 release 原生测试二进制，记录查词 P95 和进程 RSS 后立即清理；它不安装应用，也不替代 Tauri / WebView 交互或应用 PSS。
+`scripts/check-dictionary-source.ps1` 运行公共边界测试、私有 MDict / MDD 与经典 Kindle 精确查词、release benchmark 和 workspace 回归；选区按钮的事件生产与华为 WebView 的折叠误报回归由 Node 测试固定，`-VerifyLinuxGui` 复用正式 Linux Tauri / WebKitGTK 门验证词典列表、事件消费、纯文本命中、宽窄视口和日志隐私。当前 Linux WebKitGTK 不提供闭合 Shadow DOM 的可用选区对象，因此该门不冒充真实选区点击。`-VerifyAndroid -Device <serial>` 只向显式 PCT-AL10 推送匿名 fixture 与 arm64 release 原生测试二进制，记录查词 P95 和进程 RSS 后立即清理；Tauri / WebView 的真实长按、直接点击、抽屉、应用 PSS 与截图按活动 change 另行在同一 PCT-AL10 验收。
 
 ## 性能策略
 

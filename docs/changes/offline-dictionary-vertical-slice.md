@@ -6,7 +6,7 @@ description: MDict 与经典 Kindle 离线词典的导入、精确查词、安�
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -44,10 +44,10 @@ present
 - [x] 用户可导入、列出和移除 MDict；重复导入幂等，损坏、超限、未来 schema 与半写入不会破坏既有词典；
 - [x] MDict v2 `encrypt=2` 私有样本可精确命中、miss、跟随有限深度链接，并对配套 MDD 做单资源范围读取；
 - [x] 经典 Kindle 私有样本可精确命中词典头、中、尾部条目，只读取索引、HUFF/CDIC 表和覆盖目标定义的文本记录；
-- [ ] 阅读器选词后可查词，桌面与窄视口面板不遮挡关键控制、可滚动、可关闭，结果使用文本节点且不会发起网络请求；
+- [x] 阅读器选词后可查词，桌面与窄视口面板不遮挡关键控制、可滚动、可关闭，结果使用文本节点且不会发起网络请求；
 - [x] 日志只记录格式、匿名词典 ID、阶段、耗时、结果数量与错误码，不记录查询、释义、路径或资源；
 - [x] Linux release 热精确查词 P95 不高于 100 ms、冷查词 P95 不高于 500 ms、额外 RSS 不高于 64 MiB；PCT-AL10 使用相同预算并记录 PSS；
-- [ ] Rust、Node、Svelte、Linux GUI、PCT-AL10、AutoCorrect、文档 gate 与独立 review 通过。
+- [x] Rust、Node、Svelte、Linux GUI、PCT-AL10、AutoCorrect、文档 gate 与独立 review 通过。
 
 ## Files And Steps
 
@@ -75,20 +75,20 @@ present
 
 ## Result
 
-已实现独立 `LocalDictionaries` 数据域、固定 MDict / Kindle 格式分派、事务导入、精确查词、安全纯文本释义、Tauri 管理 command、选区“查词”与词典面板。Android WebView 原生长按只产生 `selectionchange`、不保证向正文派发 `pointerup`；选区工具栏现统一从已有 `selectionchange` 监听器显示，以 120 ms 稳定窗避免拖动选区时持续重定位，并在关闭或新选择时取消待执行任务，不增加平台分支。MDict 使用固定 `mdict-rs 0.1.4`；经典 Kindle 只实现当前私有样本需要的 MOBI6、CP1252、HUFF/CDIC 与正排 INDX，不增加 provider、缓存、sidecar 或网络接口。
+已实现独立 `LocalDictionaries` 数据域、固定 MDict / Kindle 格式分派、事务导入、精确查词、安全纯文本释义、Tauri 管理 command、选区“查词”与词典面板。Android WebView 原生长按只产生 `selectionchange`、不保证向正文派发 `pointerup`；选区工具栏现统一从已有 `selectionchange` 监听器显示，以 120 ms 稳定窗避免拖动选区时持续重定位。PCT-AL10 的华为 WebView 114 还会把闭合 Shadow DOM 中非折叠 `Range` 的 `Selection.isCollapsed` 错报为 `true`；`content.selectionRange()` 统一改用真实 `Range.collapsed` 并校验正文归属，标注、翻页保护和结构化内容复用同一结果。移动端动作栏使用四个紧凑图标；词典改为 75% 高底部抽屉，固定词头、独立滚动、遮罩关闭和 reduced-motion 回退参考 RD-22、RD-24、RD-25 与 RD-27。MDict 使用固定 `mdict-rs 0.1.4`；经典 Kindle 只实现当前私有样本需要的 MOBI6、CP1252、HUFF/CDIC 与正排 INDX，不增加 provider、缓存、sidecar 或网络接口。
 
 ## Review
 
-独立 Standards review 提出的导入竞态、连续查询陈旧结果、command 归属、预期拒绝日志、零 RSS 假通过和隐私扫描六项问题均已修复并复审关闭；Spec 复审没有新的 P1 / P2。PCT-AL10 已补齐应用包级 PSS 和真实原生选区到词典面板 / 后端的受控验证；切片最终关闭仍等待把包含 `selectionchange` 修复的 APK 安装到真机并直接点击“查词”。Linux WebKitGTK 闭合 Shadow DOM 的选区能力不再被误报为已通过。
+独立 Standards review 提出的导入竞态、连续查询陈旧结果、command 归属、预期拒绝日志、零 RSS 假通过和隐私扫描六项问题均已修复并复审关闭；Spec 复审没有新的 P1 / P2。最终复审确认以 `Range.collapsed` 修复华为 WebView 误报的位置正确，桌面、键盘、翻页保护与结构化内容路径没有新的 P1 / P2。PCT-AL10 已补齐应用包级 PSS、真实原生选区、直接点击“查词”、底部抽屉完成态和遮罩关闭；Linux WebKitGTK 闭合 Shadow DOM 的选区能力不再被误报为已通过。
 
 ## Evidence And Residual Risks
 
-公共与私有 Rust 测试、选区查词事件 Node 契约测试、workspace Rust、Node 阅读统计、Svelte check / build 和 Linux Tauri / WebKitGTK 正式门已通过。Linux release 单次精确查词冷 / 热 P95：经典 Kindle 9.889 / 5.202 ms、MDict 0.855 / 0.866 ms、MDD 0.460 / 0.454 ms；进程峰值 RSS 29,444 KiB。这里的冷查词是导入后首次产品 lookup，不宣称清除了内核页缓存。Linux GUI 验证词典列表、事件消费、MDX 命中、非空纯文本结果和宽窄视口面板边界；AppLog 扫描私有根路径、源文件名、词典 ID / 标题、查询、词头和释义均未命中。
+公共与私有 Rust 测试、选区查词事件 Node 契约测试、workspace Rust、Node 阅读统计、Svelte check / build 和 Linux Tauri / WebKitGTK 正式门已通过。最终 Linux release 单次精确查词冷 / 热 P95：经典 Kindle 11.218 / 5.265 ms、MDict 0.866 / 0.870 ms、MDD 0.454 / 0.458 ms；进程峰值 RSS 29,544 KiB。这里的冷查词是导入后首次产品 lookup，不宣称清除了内核页缓存。Linux GUI 验证词典列表、事件消费、MDX 命中、非空纯文本结果、宽窄视口抽屉边界、CSS 模块与统计回归；AppLog 扫描私有根路径、源文件名、词典 ID / 标题、查询、词头和释义均未命中。
 
 当前 Linux WebKitGTK 实测不提供 `ShadowRoot.getSelection()`，`document.getSelection()` 也不能取得 Atha 闭合 Shadow DOM 内的选区；WebKit 的跨 ShadowRoot Selection 历史问题及新 `getComposedRanges()` 能力见 [WebKit 163921](https://bugs.webkit.org/show_bug.cgi?id=163921) 与 [MDN](https://developer.mozilla.org/docs/Web/API/Selection/getComposedRanges)。本切片不为测试改造内容根或引入第二套选区实现：按钮事件生产由 Node 固定，真实平台选区交互留给 Android Blink 应用门。
 
 PCT-AL10 的 arm64-v8a release 原生测试二进制已在实体设备运行：单次精确查词冷 / 热 P95 为经典 Kindle 38.158 / 31.573 ms、MDict 2.644 / 2.498 ms、MDD 1.098 / 1.015 ms，峰值 RSS 17,092 KiB，均在查词与 64 MiB RSS 预算内。
 
-实体设备上的旧安装包进一步证明根因和性能边界：原生长按产生 1 次 `selectionchange` 与 1 字符非空选区，但工具栏仍为隐藏，说明旧版依赖 `pointerup` 的假设不成立。测试通过 CDP 只补入“把同一真实选区派发给既有词典事件”这一缺失桥接；安装包内 Svelte 面板已打开、收到查询并完成原生 miss，测试输出未包含查询或私有结果。包级 PSS 使用 `dumpsys meminfo --package` 同时求和主进程与华为 WebView sandbox renderer，三轮“打开同一书籍 → 查词”的基线 / 查询后中位采样分别为 213,052 / 214,597、212,660 / 213,965、214,559 / 213,364 KiB；配对增量中位数 1,305 KiB，最大正增量 1,545 KiB，远低于 64 MiB 预算。PSS 单轮存在系统回收噪声，因此不把负增量解释为内存收益。
+包级 PSS 使用 `dumpsys meminfo --package` 同时求和主进程与华为 WebView sandbox renderer，三轮“打开同一书籍 → 查词”的基线 / 查询后中位采样分别为 213,052 / 214,597、212,660 / 213,965、214,559 / 213,364 KiB；配对增量中位数 1,305 KiB，最大正增量 1,545 KiB，远低于 64 MiB 预算。PSS 单轮存在系统回收噪声，因此不把负增量解释为内存收益。
 
-当前源码已在 Linux 正式 GUI gate 中执行新增的 `selectionChangeActions` 自检，干净构建的 arm64 APK 也已生成；但华为安装确认进入锁屏图案认证，数字凭据不能代替图案。未修改设备安全设置，也不把 CDP 桥接称为更新 APK 的端到端验收。旧 names / keys 屈折变化、ORDT、自定义排序、KF8 词典和富 MDD 资源仍属于明确非目标。
+最终 arm64 debug APK 的 SHA-256 为 `3ae93a2b41ac907c6974884e3d2e97d623f71984611d915ea8f51a3677fb77cc`。已有授权 ADB 直接使用与 Shizuku 同类的系统 `PackageInstaller` session 更新应用，不要求安装 Shizuku，也未修改锁屏、验证器或全局安全设置；PCT-AL10 `lastUpdateTime` 为 `2026-08-09 14:15:38`。实体设备直接长按公开合成书籍后，选区动作栏可见；直接点击“查词”打开 75% 高抽屉并完成明确 miss，点击遮罩关闭后阅读位置不变。原图与哈希保存在忽略目录 `artifacts/local/audits/offline-dictionary-pct/`。旧 names / keys 屈折变化、ORDT、自定义排序、KF8 词典和富 MDD 资源仍属于明确非目标。

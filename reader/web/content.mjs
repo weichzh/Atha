@@ -24,6 +24,18 @@ export function parseSafeXhtml(source) {
   );
 }
 
+export function cloneSelectedRange(book, selection) {
+  if (!selection || selection.rangeCount !== 1) return null;
+  const range = selection.getRangeAt(0);
+  if (
+    range.collapsed ||
+    (range.commonAncestorContainer !== book && !book.contains(range.commonAncestorContainer))
+  ) {
+    return null;
+  }
+  return range.cloneRange();
+}
+
 export function createContent({ host, reader, readerStyleSource, fail }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const bookStyle = document.createElement("style");
@@ -779,6 +791,10 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     });
   }
 
+  function selectionRange() {
+    return cloneSelectedRange(book, shadow.getSelection?.());
+  }
+
   async function captureRange(range, presentation) {
     ensure(range instanceof Range && book.contains(range.commonAncestorContainer), "annotation-selection");
     const wrapper = document.createElement("div");
@@ -852,6 +868,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     loadVisible,
     renderCached,
     resourceSnapshot,
+    selectionRange,
     describeLink,
     setStyles,
     styleSnapshot,

@@ -115,7 +115,7 @@ export function createStructuredActions({
     if (
       !(event.target instanceof Element) ||
       event.target.closest("a[href], img[role='button']") ||
-      content.book.getRootNode().getSelection?.()?.isCollapsed === false
+      content.selectionRange()
     ) {
       return;
     }

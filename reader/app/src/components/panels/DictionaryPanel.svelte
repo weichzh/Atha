@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Plus, Trash2 } from "@lucide/svelte";
+  import { Plus, Trash2, X } from "@lucide/svelte";
   import { onMount } from "svelte";
 
   import {
@@ -21,6 +21,10 @@
   let busy = false;
   let lookupVersion = 0;
   let root: HTMLElement | undefined;
+
+  function closePanel() {
+    root?.closest("details")?.removeAttribute("open");
+  }
 
   onMount(() => {
     void refresh();
@@ -117,9 +121,30 @@
   }
 </script>
 
-<div bind:this={root} class="tool-panel dictionary-panel">
+<button
+  class="dictionary-backdrop"
+  type="button"
+  aria-label="关闭词典"
+  tabindex="-1"
+  onclick={closePanel}
+></button>
+<div
+  bind:this={root}
+  class="tool-panel dictionary-panel"
+  role="dialog"
+  aria-labelledby="dictionary-heading"
+>
   <header class="panel-heading">
-    <h2>词典</h2>
+    <button
+      class="icon-button panel-close"
+      type="button"
+      aria-label="关闭词典"
+      title="关闭词典"
+      onclick={closePanel}
+    >
+      <X aria-hidden="true" />
+    </button>
+    <h2 id="dictionary-heading">{query || "词典"}</h2>
     <div class="panel-heading-actions">
       <button
         class="icon-button"
@@ -155,14 +180,13 @@
     </label>
   {/if}
 
-  {#if query}
-    <p class="dictionary-query">{query}</p>
-  {/if}
-  {#if result}
-    <article class="dictionary-result" aria-live="polite">
-      <h3>{result.headword}</h3>
-      <p>{result.definition}</p>
-    </article>
-  {/if}
-  <output class="dictionary-status" aria-live="polite">{status}</output>
+  <div class="dictionary-content">
+    {#if result}
+      <article class="dictionary-result" aria-live="polite">
+        <h3 class:visually-hidden={result.headword === query}>{result.headword}</h3>
+        <p>{result.definition}</p>
+      </article>
+    {/if}
+    <output class="dictionary-status" aria-live="polite">{status}</output>
+  </div>
 </div>

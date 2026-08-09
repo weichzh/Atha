@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { dispatchDictionaryLookup } from "./annotations.mjs";
+import { cloneSelectedRange } from "./content.mjs";
+
+test("shadow selection trusts the range when Chromium misreports isCollapsed", () => {
+  const node = {};
+  const cloned = {};
+  const range = {
+    collapsed: false,
+    commonAncestorContainer: node,
+    cloneRange: () => cloned,
+  };
+  const book = { contains: (candidate) => candidate === node };
+  const selection = {
+    isCollapsed: true,
+    rangeCount: 1,
+    getRangeAt: () => range,
+  };
+
+  assert.equal(cloneSelectedRange(book, selection), cloned);
+  range.collapsed = true;
+  assert.equal(cloneSelectedRange(book, selection), null);
+});
 
 test("dictionary lookup dispatches the selected text", () => {
   const events = [];

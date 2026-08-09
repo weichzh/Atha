@@ -65,9 +65,7 @@ export function createInteraction({ reader, content, navigation, preferences, on
   }
 
   function hasSelection() {
-    const root = content.book.getRootNode();
-    const selections = [root.getSelection?.(), document.getSelection()];
-    return selections.some((selection) => selection && !selection.isCollapsed);
+    return Boolean(content.selectionRange());
   }
 
   function wheelProtectedTarget(event) {
