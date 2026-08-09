@@ -6,7 +6,7 @@ description: FB2 与 FBZ 导入、受控渲染及 Linux GUI 纵切。
 
 ## Status
 
-`accepted`
+`implemented`
 
 ## Problem
 
