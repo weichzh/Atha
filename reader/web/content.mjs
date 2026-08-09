@@ -19,7 +19,7 @@ export function parseSafeXhtml(source) {
     return null;
   }
   return new DOMParser().parseFromString(
-    `${source.slice(0, start)}${source.slice(end + 1)}`,
+    `${source.slice(0, start)}${source.slice(end + 1)}`.replaceAll("&nbsp;", "&#160;"),
     "application/xhtml+xml",
   );
 }
@@ -77,7 +77,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     if (!condition) reject(code);
   }
 
-  function localBookUrl(value, base = bookUrl) {
+  function localBookUrl(value, base = bookUrl, optional = false) {
     let url;
     try {
       url = new URL(value, base);
@@ -92,7 +92,10 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       "external-resource",
     );
     ensure(!url.search, "external-resource");
-    if (declaredResources) ensure(declaredResources.has(url.href), "undeclared-resource");
+    if (declaredResources && !declaredResources.has(url.href)) {
+      if (optional) return null;
+      reject("undeclared-resource");
+    }
     return url.href;
   }
 
@@ -270,6 +273,14 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     return true;
   }
 
+  function replaceFailedImage(image) {
+    if (replaceFailedCbzImage(image)) return;
+    const alternative = image.getAttribute("alt");
+    image.replaceWith(
+      image.ownerDocument.createTextNode(alternative === null ? "图片无法显示" : alternative.trim()),
+    );
+  }
+
   function deferredFormula(image) {
     const source = image.getAttribute("src");
     const width = Number(image.getAttribute("width"));
@@ -284,8 +295,13 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     );
   }
 
+  function isSvgImage(image) {
+    return new URL(image.src).pathname.toLowerCase().endsWith(".svg");
+  }
+
   function validateMarkup(documentNode) {
     ensure(documentNode && !documentNode.querySelector("parsererror") && !documentNode.doctype, "invalid-xhtml");
+    documentNode.querySelectorAll("meta[http-equiv]").forEach((element) => element.remove());
     ensure(
       !documentNode.querySelector(
         "script, iframe, frame, object, embed, form, input, button, select, textarea, video, audio, source, track, base, meta[http-equiv], foreignObject",
@@ -303,7 +319,9 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
           continue;
         }
         ensure(!attributeName.startsWith("on"), "event-handler");
-        if (attributeName === "style") validateCss(attribute.value, true);
+        if (attributeName === "style" && rejected(() => validateCss(attribute.value, true))) {
+          element.removeAttribute(attribute.name);
+        }
         if (["srcset", "poster", "action", "formaction", "ping"].includes(attributeName)) {
           reject("unsupported-resource-attribute");
         }
@@ -313,20 +331,30 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
           if (name === "a") {
             element.setAttribute("href", describeLink(attribute.value).href);
           } else if (name === "link") {
-            ensure(element.getAttribute("rel") === "stylesheet", "active-content");
-            element.setAttribute("href", localBookUrl(attribute.value));
+            ensure(element.getAttribute("rel")?.trim().toLowerCase() === "stylesheet", "active-content");
+            element.setAttribute("rel", "stylesheet");
+            const href = localBookUrl(attribute.value, bookUrl, true);
+            if (href) element.setAttribute("href", href);
+            else element.remove();
           } else if (name === "image") {
-            attribute.value = localBookUrl(attribute.value);
+            const href = localBookUrl(attribute.value, bookUrl, true);
+            if (href) attribute.value = href;
+            else element.remove();
           } else {
             ensure(attribute.value.startsWith("#"), "external-resource");
           }
         }
       }
-      if (name === "style") validateCss(element.textContent);
+      if (name === "style" && rejected(() => validateCss(element.textContent))) element.remove();
     }
 
     for (const image of documentNode.querySelectorAll("img[src]")) {
-      image.setAttribute("src", localBookUrl(image.getAttribute("src")));
+      const src = localBookUrl(image.getAttribute("src"), bookUrl, true);
+      if (!src) {
+        replaceFailedImage(image);
+        continue;
+      }
+      image.setAttribute("src", src);
       setImageInteraction(image);
     }
     for (const element of documentNode.querySelectorAll("table, pre")) {
@@ -411,9 +439,11 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         if (!url) return;
         try {
           await validateSvgOnce(url);
-        } catch (error) {
+        } catch {
           if (generation !== renderGeneration) return;
-          throw error;
+          replaceFailedImage(image);
+          pendingImages.delete(image);
+          return;
         }
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
         image.src = url;
@@ -421,7 +451,9 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
           await image.decode();
         } catch {
           if (generation !== renderGeneration) return;
-          reject("image-load");
+          replaceFailedImage(image);
+          pendingImages.delete(image);
+          return;
         }
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
         readySvg.add(url);
@@ -519,8 +551,16 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         "active-content",
       );
     }
-    const xhtml11 = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><body>safe</body></html>`;
-    validateMarkup(parseSafeXhtml(xhtml11));
+    const passiveMetadata = new DOMParser().parseFromString(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><head><meta http-equiv='Content-Type' content='text/html'/></head><body>safe</body></html>",
+      "application/xhtml+xml",
+    );
+    validateMarkup(passiveMetadata);
+    ensure(!passiveMetadata.querySelector("meta[http-equiv]"), "active-content");
+    const xhtml11 = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><body>safe&nbsp;space</body></html>`;
+    const xhtml11Document = parseSafeXhtml(xhtml11);
+    validateMarkup(xhtml11Document);
+    ensure(xhtml11Document.body.textContent === "safe\u00a0space", "invalid-xhtml");
     const internalEntity = `<!DOCTYPE html [<!ENTITY unsafe "expanded">]><html xmlns="http://www.w3.org/1999/xhtml"><body>&unsafe;</body></html>`;
     ensure(rejected(() => validateMarkup(parseSafeXhtml(internalEntity))), "active-content");
     const samePage = new DOMParser().parseFromString(
@@ -535,6 +575,21 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     );
     validateMarkup(external);
     ensure(describeLink(external.querySelector("a").getAttribute("href")).kind === "external", "active-link");
+    const missingResource = new DOMParser().parseFromString(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><head><link rel='stylesheet' href='missing.css'/></head><body><img src='missing.png' alt='缺失插图'/></body></html>",
+      "application/xhtml+xml",
+    );
+    const previousResources = declaredResources;
+    declaredResources = new Set();
+    try {
+      validateMarkup(missingResource);
+    } finally {
+      declaredResources = previousResources;
+    }
+    ensure(
+      !missingResource.querySelector("link, img") && missingResource.body.textContent === "缺失插图",
+      "undeclared-resource",
+    );
     const imageMarkup = new DOMParser().parseFromString(
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><img alt='插图' aria-hidden='true' aria-disabled='true'/><img class='math-inline' alt='x + y'/><a href='#x'><img role='button' tabindex='0'/></a></body></html>",
       "application/xhtml+xml",
@@ -604,6 +659,11 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     book.classList.remove("atha-cbz-section");
     const ordinaryImage = document.createElement("img");
     ensure(!replaceFailedCbzImage(ordinaryImage), "image-load");
+    ordinaryImage.alt = "缺失插图";
+    book.append(ordinaryImage);
+    replaceFailedImage(ordinaryImage);
+    ensure(book.textContent === "缺失插图", "image-load");
+    book.replaceChildren();
     const markdownDocument = new DOMParser().parseFromString(
       "<html xmlns='http://www.w3.org/1999/xhtml'><body class='atha-text atha-markdown'><pre>code</pre></body></html>",
       "application/xhtml+xml",
@@ -645,20 +705,21 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     ]) {
       ensure(rejected(() => parseSvg(svg)), "invalid-svg");
     }
+    ensure(isSvgImage({ src: new URL("probe.SVG", bookUrl).href }), "invalid-svg");
     const deferredProbe = document.createElement("img");
+    deferredProbe.alt = "缺失公式";
     const deferredProbeUrl = "https://atha-book.localhost/invalid-probe.svg";
+    book.append(deferredProbe);
     pendingImages.set(deferredProbe, deferredProbeUrl);
     validatedSvg.set(deferredProbeUrl, Promise.reject(new Error("invalid-svg")));
-    let deferredRejected = false;
     try {
       await loadImages([deferredProbe], renderGeneration);
-    } catch (error) {
-      deferredRejected = error instanceof Error && error.message === "invalid-svg";
     } finally {
       pendingImages.delete(deferredProbe);
       validatedSvg.delete(deferredProbeUrl);
     }
-    ensure(deferredRejected && !deferredProbe.hasAttribute("src"), "invalid-svg");
+    ensure(book.textContent === "缺失公式" && !pendingImages.has(deferredProbe), "invalid-svg");
+    book.replaceChildren();
   }
 
   async function initialize() {
@@ -684,24 +745,33 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     const styleSources = detachSourceStyles(source);
     const stylesheets = await Promise.all(
       styleSources.map(async ({ css, url }) => {
-        if (css !== undefined) return css;
-        const styleResponse = await fetch(url);
-        ensure(styleResponse.ok, "stylesheet-load");
-        return styleResponse.text();
+        if (css === undefined) {
+          const styleResponse = await fetch(url);
+          if (!styleResponse.ok) return "";
+          css = await styleResponse.text();
+        }
+        return rejected(() => validateCss(css)) ? "" : css;
       }),
     );
     cachedCss = stylesheets.join("\n");
-    validateCss(cachedCss);
 
-    const svgUrls = [
-      ...new Set(
-        [...source.querySelectorAll("img[src$='.svg']")]
-          .filter((image) => !deferredFormula(image))
-          .map((image) => image.src),
-      ),
-    ];
-    eagerSvgCount = svgUrls.length;
-    await Promise.all(svgUrls.map(validateSvgOnce));
+    const svgImages = new Map();
+    for (const image of source.querySelectorAll("img[src]")) {
+      if (!isSvgImage(image) || deferredFormula(image)) continue;
+      const images = svgImages.get(image.src);
+      if (images) images.push(image);
+      else svgImages.set(image.src, [image]);
+    }
+    eagerSvgCount = svgImages.size;
+    await Promise.all(
+      [...svgImages].map(async ([url, images]) => {
+        try {
+          await validateSvgOnce(url);
+        } catch {
+          for (const image of images) replaceFailedImage(image);
+        }
+      }),
+    );
     for (const image of source.querySelectorAll("img")) {
       if (!deferredFormula(image)) continue;
       image.dataset.athaResource = image.src;
@@ -751,7 +821,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
           try {
             await image.decode();
           } catch {
-            if (!replaceFailedCbzImage(image)) reject("image-load");
+            replaceFailedImage(image);
           }
         }),
     );

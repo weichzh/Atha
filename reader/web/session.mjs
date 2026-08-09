@@ -1,4 +1,4 @@
-const MAX_MANIFEST_SECTIONS = 1000;
+const MAX_MANIFEST_SECTIONS = 2000;
 const MAX_RESOURCES = 10000;
 const MAX_TOC_ITEMS = 2000;
 const BOOK_ROOT_URL =
@@ -129,7 +129,7 @@ export function createReadingSession({ params, content, render, onState, assert,
   }
 
   function validatorSelfCheck() {
-    assert(MAX_MANIFEST_SECTIONS === 1000, "invalid-manifest-section-limit");
+    assert(MAX_MANIFEST_SECTIONS === 2000, "invalid-manifest-section-limit");
     const valid = {
       schema: 1,
       contentVersion: "a".repeat(64),

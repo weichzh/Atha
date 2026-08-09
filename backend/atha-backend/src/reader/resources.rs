@@ -7,9 +7,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use super::MAX_MANIFEST_SECTIONS;
-
 pub(super) const MAX_RESOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_READER_SECTIONS: usize = 2_000;
 
 #[derive(Clone, Debug)]
 pub struct BookRoot {
@@ -108,7 +107,7 @@ fn manifest_xhtml_paths(root: &Path) -> HashSet<PathBuf> {
     else {
         return HashSet::new();
     };
-    if sections.len() > MAX_MANIFEST_SECTIONS {
+    if sections.len() > MAX_READER_SECTIONS {
         return HashSet::new();
     }
     sections
@@ -166,7 +165,7 @@ fn decode_request_path(request_path: &str) -> Result<PathBuf, ResourceError> {
     Ok(relative.to_owned())
 }
 
-fn percent_decode(value: &str) -> Result<String, ResourceError> {
+pub(super) fn percent_decode(value: &str) -> Result<String, ResourceError> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;

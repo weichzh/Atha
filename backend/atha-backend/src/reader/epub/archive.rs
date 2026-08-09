@@ -1,35 +1,16 @@
-use zip::CompressionMethod;
-
 use super::ImportError;
 
 pub(super) use crate::reader::archive::{
     Archive as EpubArchive, ArchiveIndex, copy, fingerprint, hash_file, inspect,
-    open_fingerprinted as open, read, require, safe_path,
+    open_fingerprinted as open, read, safe_path,
 };
-
-pub(super) fn verify_mimetype(
-    archive: &mut EpubArchive,
-    index: &ArchiveIndex,
-) -> Result<(), ImportError> {
-    let first = archive
-        .by_index_raw(0)
-        .map_err(|_| ImportError::InvalidArchive)?;
-    if first.name() != "mimetype" || first.compression() != CompressionMethod::Stored {
-        return Err(ImportError::UnsupportedEpub);
-    }
-    drop(first);
-    if read(archive, index, "mimetype")? != b"application/epub+zip" {
-        return Err(ImportError::UnsupportedEpub);
-    }
-    Ok(())
-}
 
 pub(super) fn resolve_reference(
     base_file: &str,
     value: &str,
 ) -> Result<(String, Option<String>), ImportError> {
     if value.is_empty()
-        || value.contains(['\0', '\\', ':', '?', '%'])
+        || value.contains(['\0', '\\', ':', '?'])
         || value.starts_with('/')
         || value.matches('#').count() > 1
     {
@@ -41,16 +22,24 @@ pub(super) fn resolve_reference(
     if path.is_empty() {
         return Err(ImportError::UnsafePath);
     }
-    let mut parts = base_file.split('/').collect::<Vec<_>>();
+    let mut parts = base_file.split('/').map(str::to_owned).collect::<Vec<_>>();
     parts.pop();
-    for part in path.split('/') {
-        match part {
+    for encoded in path.split('/') {
+        let part = crate::reader::resources::percent_decode(encoded)
+            .map_err(|_| ImportError::UnsafePath)?;
+        if part.contains(['\0', '/', '\\', ':', '?', '#', '%'])
+            || part.chars().any(char::is_control)
+            || encoded.contains('%') && matches!(part.as_str(), "." | "..")
+        {
+            return Err(ImportError::UnsafePath);
+        }
+        match part.as_str() {
             "" => return Err(ImportError::UnsafePath),
             "." => {}
             ".." => {
                 parts.pop().ok_or(ImportError::UnsafePath)?;
             }
-            value => parts.push(value),
+            value => parts.push(value.to_owned()),
         }
     }
     let path = safe_path(&parts.join("/"))?;
@@ -67,4 +56,34 @@ pub(super) fn resolve_reference(
         None => None,
     };
     Ok((path, fragment))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_decodes_safe_path_segments_once() {
+        assert_eq!(
+            resolve_reference("OPS/book.opf", "images/cover%20one.png"),
+            Ok(("OPS/images/cover one.png".into(), None))
+        );
+        assert_eq!(
+            resolve_reference("OPS/book.opf", "fonts/%E4%B8%AD.ttf"),
+            Ok(("OPS/fonts/中.ttf".into(), None))
+        );
+        for value in [
+            "%2e%2e/escape.xhtml",
+            "images%2fescape.png",
+            "images/%00.png",
+            "images/%25.png",
+            "images/%zz.png",
+        ] {
+            assert_eq!(
+                resolve_reference("OPS/book.opf", value),
+                Err(ImportError::UnsafePath),
+                "{value}"
+            );
+        }
+    }
 }

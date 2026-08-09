@@ -20,7 +20,7 @@ pub const READER_MANIFEST: &str = ".atha-reader.json";
 const IMPORT_MARKER: &str = ".atha-epub-import";
 const BOOK_METADATA: &str = ".atha-book.json";
 use crate::reader::archive::MAX_ENTRIES;
-const MAX_SECTIONS: usize = 1_000;
+const MAX_SECTIONS: usize = 2_000;
 const MAX_TOC_ITEMS: usize = 2_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,15 +145,14 @@ fn build_import(
 ) -> Result<(), ImportError> {
     let mut epub = archive::open(source_file)?;
     let index = archive::inspect(&mut epub)?;
-    archive::verify_mimetype(&mut epub, &index)?;
-    if index.contains("META-INF/encryption.xml") {
-        return Err(ImportError::Encrypted);
-    }
-
     let container = archive::read(&mut epub, &index, "META-INF/container.xml")?;
     let package_path = package::parse_container(&container)?;
     let package_xml = archive::read(&mut epub, &index, &package_path)?;
     let publication = package::parse_package(&package_xml, &package_path)?;
+    if index.contains("META-INF/encryption.xml") {
+        let encryption = archive::read(&mut epub, &index, "META-INF/encryption.xml")?;
+        package::validate_font_obfuscation(&encryption, &publication, &index)?;
+    }
     let plan = package::plan_import(&mut epub, &index, publication, content_version)?;
 
     let mut extracted = 0_u64;

@@ -15,6 +15,7 @@ const DC_NS: &[u8] = b"http://purl.org/dc/elements/1.1/";
 const XHTML_NS: &[u8] = b"http://www.w3.org/1999/xhtml";
 const EPUB_NS: &[u8] = b"http://www.idpf.org/2007/ops";
 const NCX_NS: &[u8] = b"http://www.daisy.org/z3986/2005/ncx/";
+const XMLENC_NS: &[u8] = b"http://www.w3.org/2001/04/xmlenc#";
 const NCX_MEDIA_TYPE: &str = "application/x-dtbncx+xml";
 const NCX_DOCTYPE: &[u8] =
     br#"ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd""#;
@@ -31,11 +32,19 @@ struct PackageItem {
     properties: String,
 }
 
+#[derive(Default)]
+struct ObfuscatedFont {
+    algorithm: Option<String>,
+    path: Option<String>,
+    cipher_depth: Option<usize>,
+    leaf_depth: Option<usize>,
+}
+
 #[derive(Debug)]
 pub(super) struct Package {
     items: HashMap<String, PackageItem>,
     spine: Vec<String>,
-    navigation: Navigation,
+    navigation: Option<Navigation>,
     title: Option<String>,
     authors: Vec<String>,
     cover_path: Option<String>,
@@ -102,6 +111,7 @@ pub(super) fn parse_container(xml: &[u8]) -> Result<String, ImportError> {
     let mut reader = NsReader::from_reader(xml);
     reader.config_mut().trim_text(true);
     let mut depth = 0_usize;
+    let mut doctype_seen = false;
     let mut container_seen = false;
     let mut rootfiles_depth = None;
     let mut rootfiles_count = 0_u8;
@@ -175,7 +185,15 @@ pub(super) fn parse_container(xml: &[u8]) -> Result<String, ImportError> {
                 }
                 depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
             }
-            Event::DocType(_) => return Err(ImportError::InvalidXml),
+            Event::DocType(value)
+                if depth == 0
+                    && !container_seen
+                    && !doctype_seen
+                    && external_doctype(value.as_ref(), b"container") =>
+            {
+                doctype_seen = true;
+            }
+            Event::DocType(_) | Event::GeneralRef(_) => return Err(ImportError::InvalidXml),
             Event::Text(text) if depth == 0 && !xml_whitespace(text.as_ref()) => {
                 return Err(ImportError::InvalidXml);
             }
@@ -211,7 +229,7 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
     let mut package_seen = false;
     let mut version = None;
     let mut items = HashMap::new();
-    let mut paths = HashSet::new();
+    let mut paths = HashMap::new();
     let mut spine = Vec::new();
     let mut nav_path = None;
     let mut spine_toc = None;
@@ -437,50 +455,47 @@ pub(super) fn parse_package(xml: &[u8], package_path: &str) -> Result<Package, I
         return Err(ImportError::UnsupportedEpub);
     }
     let navigation = match version {
-        PackageVersion::Epub2 => {
-            let toc = spine_toc.ok_or(ImportError::UnsupportedEpub)?;
-            let item = items.get(&toc).ok_or(ImportError::UnsupportedEpub)?;
-            if item.media_type != NCX_MEDIA_TYPE {
-                return Err(ImportError::UnsupportedEpub);
-            }
-            Navigation::Ncx(item.path.clone())
-        }
-        PackageVersion::Epub3 => Navigation::Xhtml(nav_path.ok_or(ImportError::UnsupportedEpub)?),
+        PackageVersion::Epub2 => spine_toc
+            .and_then(|id| items.get(&id))
+            .filter(|item| item.media_type == NCX_MEDIA_TYPE)
+            .map(|item| Navigation::Ncx(item.path.clone())),
+        PackageVersion::Epub3 => nav_path.map(Navigation::Xhtml).or_else(|| {
+            spine_toc
+                .and_then(|id| items.get(&id))
+                .filter(|item| item.media_type == NCX_MEDIA_TYPE)
+                .map(|item| Navigation::Ncx(item.path.clone()))
+        }),
     };
     let cover_path = match version {
-        PackageVersion::Epub2 => match cover_id {
-            Some(id) => {
-                let item = items.get(&id).ok_or(ImportError::InvalidXml)?;
-                if !item.media_type.starts_with("image/")
-                    || !resource_type(&item.media_type, &item.path)
-                {
-                    return Err(ImportError::InvalidXml);
-                }
-                Some(item.path.clone())
-            }
-            None => None,
-        },
+        PackageVersion::Epub2 => cover_id
+            .and_then(|id| items.get(&id))
+            .filter(|item| {
+                item.media_type.starts_with("image/") && resource_type(&item.media_type, &item.path)
+            })
+            .map(|item| item.path.clone()),
         PackageVersion::Epub3 => {
-            let mut paths = items
+            let paths = items
                 .values()
                 .filter(|item| {
                     item.properties
                         .split_ascii_whitespace()
                         .any(|value| value == "cover-image")
                 })
-                .map(|item| item.path.clone());
-            let path = paths.next();
-            if paths.next().is_some() {
+                .map(|item| item.path.clone())
+                .collect::<HashSet<_>>();
+            if paths.len() > 1 {
                 return Err(ImportError::InvalidXml);
             }
-            path
+            paths.into_iter().next()
         }
     };
     let cover_path = cover_path.filter(|path| {
         items
             .values()
             .find(|item| item.path == *path)
-            .is_some_and(|item| resource_type(&item.media_type, path))
+            .is_some_and(|item| {
+                item.media_type.starts_with("image/") && resource_type(&item.media_type, path)
+            })
     });
     Ok(Package {
         items,
@@ -500,7 +515,8 @@ fn package_item(
     let id = attribute(decoder, event, b"id")?.ok_or(ImportError::InvalidXml)?;
     let href = attribute(decoder, event, b"href")?.ok_or(ImportError::InvalidXml)?;
     let media_type = attribute(decoder, event, b"media-type")?.ok_or(ImportError::InvalidXml)?;
-    let properties = attribute(decoder, event, b"properties")?.unwrap_or_default();
+    let properties =
+        normalize_tokens(&attribute(decoder, event, b"properties")?.unwrap_or_default());
     Ok(PackageItem {
         id,
         path: archive::resolve_reference(package_path, &href)?.0,
@@ -543,23 +559,37 @@ fn insert_item(
     event: &BytesStart<'_>,
     package_path: &str,
     items: &mut HashMap<String, PackageItem>,
-    paths: &mut HashSet<String>,
+    paths: &mut HashMap<String, (String, String)>,
     nav_path: &mut Option<String>,
 ) -> Result<(), ImportError> {
     let item = package_item(decoder, event, package_path)?;
-    if items.len() >= MAX_ENTRIES
-        || items.contains_key(&item.id)
-        || !paths.insert(item.path.clone())
-    {
+    if items.len() >= MAX_ENTRIES || items.contains_key(&item.id) {
         return Err(ImportError::InvalidXml);
+    }
+    match paths.get(&item.path) {
+        Some((media_type, properties))
+            if media_type != &item.media_type || properties != &item.properties =>
+        {
+            return Err(ImportError::InvalidXml);
+        }
+        Some(_) => {}
+        None => {
+            paths.insert(
+                item.path.clone(),
+                (item.media_type.clone(), item.properties.clone()),
+            );
+        }
     }
     if item
         .properties
         .split_ascii_whitespace()
         .any(|value| value == "nav")
-        && nav_path.replace(item.path.clone()).is_some()
     {
-        return Err(ImportError::UnsupportedEpub);
+        match nav_path {
+            Some(path) if path != &item.path => return Err(ImportError::UnsupportedEpub),
+            Some(_) => {}
+            None => *nav_path = Some(item.path.clone()),
+        }
     }
     items.insert(item.id.clone(), item);
     Ok(())
@@ -585,23 +615,29 @@ pub(super) fn plan_import(
 ) -> Result<ImportPlan, ImportError> {
     let title = package.title.clone();
     let authors = package.authors.clone();
-    let cover_path = package.cover_path.clone();
-    let (nav_path, ncx) = match &package.navigation {
-        Navigation::Xhtml(path) => (path, false),
-        Navigation::Ncx(path) => (path, true),
+    let cover_path = package
+        .cover_path
+        .clone()
+        .filter(|path| index.contains(path));
+    let navigation = match package.navigation.as_ref() {
+        Some(Navigation::Xhtml(path)) => Some((path.as_str(), false)),
+        Some(Navigation::Ncx(path)) => Some((path.as_str(), true)),
+        None => None,
     };
-    let nav_item = package
-        .items
-        .values()
-        .find(|item| item.path == *nav_path)
-        .ok_or(ImportError::InvalidXml)?;
-    let expected_media_type = if ncx {
-        NCX_MEDIA_TYPE
-    } else {
-        "application/xhtml+xml"
-    };
-    if nav_item.media_type != expected_media_type {
-        return Err(ImportError::UnsupportedEpub);
+    if let Some((nav_path, ncx)) = navigation {
+        let nav_item = package
+            .items
+            .values()
+            .find(|item| item.path == nav_path)
+            .ok_or(ImportError::InvalidXml)?;
+        let expected_media_type = if ncx {
+            NCX_MEDIA_TYPE
+        } else {
+            "application/xhtml+xml"
+        };
+        if nav_item.media_type != expected_media_type {
+            return Err(ImportError::UnsupportedEpub);
+        }
     }
     let mut sections = Vec::with_capacity(package.spine.len());
     let mut section_paths = HashSet::with_capacity(package.spine.len());
@@ -610,7 +646,9 @@ pub(super) fn plan_import(
         if item.media_type != "application/xhtml+xml" {
             return Err(ImportError::UnsupportedEpub);
         }
-        archive::require(index, &item.path)?;
+        if !index.contains(&item.path) {
+            continue;
+        }
         if !section_paths.insert(item.path.clone()) {
             return Err(ImportError::InvalidXml);
         }
@@ -619,25 +657,30 @@ pub(super) fn plan_import(
             href: item.path.clone(),
         });
     }
+    if sections.is_empty() {
+        return Err(ImportError::UnsupportedEpub);
+    }
 
-    let nav = archive::read(archive, index, nav_path)?;
-    let toc = if ncx {
-        parse_ncx(&nav, nav_path, &section_paths)?
+    let toc = if let Some((nav_path, ncx)) = navigation.filter(|(path, _)| index.contains(path)) {
+        let nav = archive::read(archive, index, nav_path)?;
+        if ncx {
+            optional_toc(parse_ncx(&nav, nav_path, &section_paths))?
+        } else {
+            optional_toc(parse_navigation(&nav, nav_path, &section_paths))?
+        }
     } else {
-        parse_navigation(&nav, nav_path, &section_paths)?
+        Vec::new()
     };
     let mut resources = package
         .items
         .values()
         .filter(|item| resource_type(&item.media_type, &item.path))
+        .filter(|item| index.contains(&item.path))
         .map(|item| item.path.clone())
         .filter(|path| !section_paths.contains(path))
         .collect::<Vec<_>>();
     resources.sort();
     resources.dedup();
-    for resource in &resources {
-        archive::require(index, resource)?;
-    }
     let mut files = sections
         .iter()
         .map(|section| section.href.clone())
@@ -660,8 +703,258 @@ pub(super) fn plan_import(
     })
 }
 
+pub(super) fn validate_font_obfuscation(
+    xml: &[u8],
+    package: &Package,
+    index: &archive::ArchiveIndex,
+) -> Result<(), ImportError> {
+    parse_font_obfuscation(xml, package, index).map_err(|_| ImportError::Encrypted)
+}
+
+fn parse_font_obfuscation(
+    xml: &[u8],
+    package: &Package,
+    index: &archive::ArchiveIndex,
+) -> Result<(), ImportError> {
+    let mut reader = NsReader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut depth = 0_usize;
+    let mut encryption_seen = false;
+    let mut current = None::<ObfuscatedFont>;
+    let mut paths = HashSet::new();
+    let mut count = 0_usize;
+    let items_by_path = package
+        .items
+        .values()
+        .map(|item| (item.path.as_str(), item))
+        .collect::<HashMap<_, _>>();
+    loop {
+        let (namespace, event) = reader
+            .read_resolved_event()
+            .map_err(|_| ImportError::InvalidXml)?;
+        match event {
+            Event::Start(event) => {
+                if current
+                    .as_ref()
+                    .is_some_and(|font| font.leaf_depth.is_some())
+                {
+                    return Err(ImportError::InvalidXml);
+                }
+                depth = next_xml_depth(depth)?;
+                let name = event.local_name();
+                if depth == 1 && name.as_ref() == b"encryption" && !encryption_seen {
+                    require_namespace(&namespace, CONTAINER_NS)?;
+                    encryption_seen = true;
+                } else if depth == 2
+                    && name.as_ref() == b"EncryptedData"
+                    && namespace_is(&namespace, XMLENC_NS)
+                    && current.is_none()
+                {
+                    current = Some(ObfuscatedFont::default());
+                } else {
+                    capture_font_element(&namespace, &event, depth, &mut current, false)?;
+                }
+            }
+            Event::Empty(event) => {
+                if current
+                    .as_ref()
+                    .is_some_and(|font| font.leaf_depth.is_some())
+                {
+                    return Err(ImportError::InvalidXml);
+                }
+                let event_depth = next_xml_depth(depth)?;
+                capture_font_element(&namespace, &event, event_depth, &mut current, true)?;
+            }
+            Event::End(event) => {
+                if current
+                    .as_ref()
+                    .is_some_and(|font| font.leaf_depth == Some(depth))
+                {
+                    current.as_mut().expect("checked font").leaf_depth = None;
+                    depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
+                    continue;
+                }
+                let name = event.local_name();
+                if depth == 3
+                    && name.as_ref() == b"CipherData"
+                    && namespace_is(&namespace, XMLENC_NS)
+                {
+                    let font = current.as_mut().ok_or(ImportError::InvalidXml)?;
+                    if font.cipher_depth != Some(depth) {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    font.cipher_depth = None;
+                } else if depth == 2
+                    && name.as_ref() == b"EncryptedData"
+                    && namespace_is(&namespace, XMLENC_NS)
+                {
+                    let font = current.take().ok_or(ImportError::InvalidXml)?;
+                    if font.cipher_depth.is_some() || font.leaf_depth.is_some() {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    let algorithm = font.algorithm.ok_or(ImportError::InvalidXml)?;
+                    if !matches!(
+                        algorithm.as_str(),
+                        "http://www.idpf.org/2008/embedding" | "http://ns.adobe.com/pdf/enc#RC"
+                    ) {
+                        return Err(ImportError::Encrypted);
+                    }
+                    let path = archive::safe_path(&font.path.ok_or(ImportError::InvalidXml)?)?;
+                    let item = items_by_path
+                        .get(path.as_str())
+                        .ok_or(ImportError::Encrypted)?;
+                    if !font_media_type(&item.media_type)
+                        || !index.contains(&path)
+                        || !paths.insert(path)
+                    {
+                        return Err(ImportError::Encrypted);
+                    }
+                    count += 1;
+                } else if !(depth == 1
+                    && name.as_ref() == b"encryption"
+                    && namespace_is(&namespace, CONTAINER_NS))
+                {
+                    return Err(ImportError::InvalidXml);
+                }
+                depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
+            }
+            Event::DocType(_) | Event::GeneralRef(_) | Event::PI(_) | Event::CData(_) => {
+                return Err(ImportError::InvalidXml);
+            }
+            Event::Text(text) if !xml_whitespace(text.as_ref()) => {
+                return Err(ImportError::InvalidXml);
+            }
+            Event::Eof if depth == 0 && current.is_none() => break,
+            Event::Eof => return Err(ImportError::InvalidXml),
+            _ => {}
+        }
+    }
+    if !encryption_seen || count == 0 {
+        return Err(ImportError::Encrypted);
+    }
+    Ok(())
+}
+
+fn capture_font_element(
+    namespace: &ResolveResult<'_>,
+    event: &BytesStart<'_>,
+    depth: usize,
+    current: &mut Option<ObfuscatedFont>,
+    empty: bool,
+) -> Result<(), ImportError> {
+    let font = current.as_mut().ok_or(ImportError::InvalidXml)?;
+    let name = event.local_name();
+    if depth == 3
+        && name.as_ref() == b"EncryptionMethod"
+        && namespace_is(namespace, XMLENC_NS)
+        && font.algorithm.is_none()
+    {
+        font.algorithm =
+            Some(attribute(event.decoder(), event, b"Algorithm")?.ok_or(ImportError::InvalidXml)?);
+        if !empty {
+            font.leaf_depth = Some(depth);
+        }
+    } else if depth == 3
+        && name.as_ref() == b"CipherData"
+        && namespace_is(namespace, XMLENC_NS)
+        && font.cipher_depth.is_none()
+    {
+        if empty {
+            return Err(ImportError::InvalidXml);
+        }
+        font.cipher_depth = Some(depth);
+    } else if depth == 4
+        && name.as_ref() == b"CipherReference"
+        && namespace_is(namespace, XMLENC_NS)
+        && font.cipher_depth == Some(3)
+        && font.path.is_none()
+    {
+        font.path =
+            Some(attribute(event.decoder(), event, b"URI")?.ok_or(ImportError::InvalidXml)?);
+        if !empty {
+            font.leaf_depth = Some(depth);
+        }
+    } else {
+        return Err(ImportError::InvalidXml);
+    }
+    Ok(())
+}
+
+fn optional_toc(result: Result<Vec<TocItem>, ImportError>) -> Result<Vec<TocItem>, ImportError> {
+    match result {
+        Err(
+            ImportError::InvalidXml | ImportError::UnsupportedEpub | ImportError::TooManyTocItems,
+        ) => Ok(Vec::new()),
+        result => result,
+    }
+}
+
 fn normalize_metadata(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalize_tokens(value: &str) -> String {
+    let mut tokens = value.split_ascii_whitespace().collect::<Vec<_>>();
+    tokens.sort_unstable();
+    tokens.dedup();
+    tokens.join(" ")
+}
+
+fn external_doctype(value: &[u8], root: &[u8]) -> bool {
+    let value = trim_xml_bytes(value);
+    let Some(rest) = value.strip_prefix(root) else {
+        return false;
+    };
+    if rest.first().is_none_or(|byte| !xml_whitespace(&[*byte])) {
+        return false;
+    }
+    let rest = trim_xml_bytes(rest);
+    let (mut rest, values) = if let Some(rest) = rest.strip_prefix(b"PUBLIC") {
+        (rest, 2)
+    } else if let Some(rest) = rest.strip_prefix(b"SYSTEM") {
+        (rest, 1)
+    } else {
+        return false;
+    };
+    if rest.first().is_none_or(|byte| !xml_whitespace(&[*byte])) {
+        return false;
+    }
+    for _ in 0..values {
+        rest = trim_xml_bytes(rest);
+        let Some(quote @ (b'\'' | b'"')) = rest.first().copied() else {
+            return false;
+        };
+        let Some(end) = rest[1..].iter().position(|byte| *byte == quote) else {
+            return false;
+        };
+        rest = &rest[end + 2..];
+    }
+    trim_xml_bytes(rest).is_empty()
+}
+
+fn trim_xml_bytes(mut value: &[u8]) -> &[u8] {
+    while value.first().is_some_and(|byte| xml_whitespace(&[*byte])) {
+        value = &value[1..];
+    }
+    while value.last().is_some_and(|byte| xml_whitespace(&[*byte])) {
+        value = &value[..value.len() - 1];
+    }
+    value
+}
+
+fn font_media_type(value: &str) -> bool {
+    matches!(
+        value,
+        "font/ttf"
+            | "font/otf"
+            | "font/woff"
+            | "font/woff2"
+            | "application/font-sfnt"
+            | "application/font-woff"
+            | "application/vnd.ms-opentype"
+            | "application/x-font-truetype"
+            | "application/x-font-ttf"
+    )
 }
 
 fn parse_navigation(
@@ -1129,9 +1422,6 @@ fn parse_ncx(
                     }
                     let href =
                         fragment.map_or_else(|| path.clone(), |value| format!("{path}#{value}"));
-                    if !hrefs.insert(href.clone()) {
-                        return Err(ImportError::InvalidXml);
-                    }
                     result[point.slot] = TocItem { label, href };
                 } else if ncx && name.as_ref() == b"navMap" {
                     if nav_map_depth != Some(depth) || !points.is_empty() {
@@ -1164,6 +1454,7 @@ fn parse_ncx(
             _ => {}
         }
     }
+    result.retain(|item| hrefs.insert(item.href.clone()));
     if !ncx_seen || nav_map_count != 1 || result.is_empty() {
         return Err(ImportError::UnsupportedEpub);
     }

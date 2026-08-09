@@ -12,6 +12,7 @@ use super::source::{self, SourceError};
 pub use super::source::MAX_SOURCE_BYTES;
 pub(super) const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 pub(super) const MAX_MEMBER_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_INDEXED_MEMBER_BYTES: u64 = 32 * 1024 * 1024;
 pub(super) const MAX_ENTRIES: usize = 10_000;
 
 pub(super) type Archive = ZipArchive<File>;
@@ -146,7 +147,7 @@ pub(super) fn inspect(archive: &mut Archive) -> Result<ArchiveIndex, ArchiveErro
         total = total
             .checked_add(entry.size())
             .ok_or(ArchiveError::ArchiveTooLarge)?;
-        if entry.size() > MAX_MEMBER_BYTES || total > MAX_TOTAL_BYTES {
+        if entry.size() > MAX_INDEXED_MEMBER_BYTES || total > MAX_TOTAL_BYTES {
             return Err(ArchiveError::ArchiveTooLarge);
         }
         if !folded.insert(name.to_lowercase()) {
@@ -174,10 +175,6 @@ impl ArchiveIndex {
             .copied()
             .ok_or(ArchiveError::InvalidArchive)
     }
-}
-
-pub(super) fn require(index: &ArchiveIndex, path: &str) -> Result<(), ArchiveError> {
-    index.require(path).map(|_| ())
 }
 
 pub(super) fn read(
@@ -240,7 +237,11 @@ pub(super) fn safe_path(value: &str) -> Result<String, ArchiveError> {
     {
         return Err(ArchiveError::UnsafePath);
     }
+    let mut normalized = String::with_capacity(value.len());
     for part in value.split('/') {
+        if part == "." {
+            continue;
+        }
         let stem = part.split('.').next().unwrap_or_default();
         let upper_stem = stem.to_ascii_uppercase();
         let reserved = matches!(upper_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
@@ -248,11 +249,18 @@ pub(super) fn safe_path(value: &str) -> Result<String, ArchiveError> {
                 && (upper_stem.starts_with("COM") || upper_stem.starts_with("LPT"))
                 && upper_stem.as_bytes()[3].is_ascii_digit()
                 && upper_stem.as_bytes()[3] != b'0';
-        if part.is_empty() || matches!(part, "." | "..") || part.ends_with(['.', ' ']) || reserved {
+        if part.is_empty() || part == ".." || part.ends_with(['.', ' ']) || reserved {
             return Err(ArchiveError::UnsafePath);
         }
+        if !normalized.is_empty() {
+            normalized.push('/');
+        }
+        normalized.push_str(part);
     }
-    Ok(value.to_owned())
+    if normalized.is_empty() {
+        return Err(ArchiveError::UnsafePath);
+    }
+    Ok(normalized)
 }
 
 pub(super) fn hash_file(path: &Path) -> Result<String, ArchiveError> {
@@ -280,6 +288,20 @@ mod tests {
             add_extracted(&mut total, 1),
             Err(ArchiveError::ArchiveTooLarge)
         );
+    }
+
+    #[test]
+    fn archive_paths_ignore_only_current_directory_segments() {
+        assert_eq!(
+            safe_path("OPS/./text/one.xhtml"),
+            Ok("OPS/text/one.xhtml".into())
+        );
+        assert_eq!(
+            safe_path("./OPS/text/one.xhtml"),
+            Ok("OPS/text/one.xhtml".into())
+        );
+        assert_eq!(safe_path("OPS/../one.xhtml"), Err(ArchiveError::UnsafePath));
+        assert_eq!(safe_path("./"), Err(ArchiveError::UnsafePath));
     }
 
     #[test]

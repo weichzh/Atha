@@ -28,11 +28,16 @@ enum EpubVariant {
     InvalidMimetype,
     UnsafePath,
     Doctype,
+    ContainerExternalDoctype,
     ExtraContainerRoot,
     ExtraPackageRoot,
     MultipleRootfiles,
     ExternalReference,
     Encryption,
+    FontObfuscation,
+    FontObfuscationContent,
+    FontObfuscationUnknown,
+    LargeOptionalFont,
     TruncatedNavigation,
     ExtensionlessXhtml,
     InvalidNavigationDoctype,
@@ -40,6 +45,13 @@ enum EpubVariant {
     ContainerDepthOverflow,
     PackageDepthOverflow,
     NavigationDepthOverflow,
+    Epub3NcxFallback,
+    Epub3NoNavigation,
+    ManifestPathAlias,
+    ManifestConflictingAlias,
+    MissingSpineMember,
+    MissingOptionalResources,
+    Epub3UnsupportedCover,
     Epub2Ncx,
     Epub2NcxWithoutDoctype,
     Epub2NcxExternalReference,
@@ -105,6 +117,120 @@ fn imports_extensionless_xhtml_with_html5_navigation_doctype() {
 }
 
 #[test]
+fn imports_structurally_valid_epub_with_noncanonical_mimetype() {
+    let root = TestRoot::new();
+    let source = root.0.join("noncanonical-mimetype.epub");
+    write_epub(&source, EpubVariant::InvalidMimetype);
+
+    let imported = import_epub(&source, root.0.join("cache"))
+        .expect("recognize EPUB from its bounded container and package");
+    let book = BookRoot::new(&imported.root).expect("open imported root");
+    book.read("/OEBPS/text/one.xhtml")
+        .expect("read EPUB despite noncanonical mimetype");
+}
+
+#[test]
+fn tolerates_safe_packaging_defects_without_guessing_content() {
+    let root = TestRoot::new();
+
+    for (name, variant) in [
+        (
+            "container-external-doctype.epub",
+            EpubVariant::ContainerExternalDoctype,
+        ),
+        ("manifest-path-alias.epub", EpubVariant::ManifestPathAlias),
+        ("missing-spine-member.epub", EpubVariant::MissingSpineMember),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        let imported = import_epub(&source, root.0.join(format!("{name}-cache")))
+            .expect("import recoverable packaging defect");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+        )
+        .expect("parse reader manifest");
+        assert!(
+            !manifest["sections"]
+                .as_array()
+                .expect("sections")
+                .is_empty()
+        );
+    }
+
+    let conflicting = root.0.join("manifest-conflicting-alias.epub");
+    write_epub(&conflicting, EpubVariant::ManifestConflictingAlias);
+    assert_eq!(
+        import_epub(&conflicting, root.0.join("conflicting-cache")),
+        Err(ImportError::InvalidXml)
+    );
+}
+
+#[test]
+fn omits_missing_optional_resources_without_rejecting_the_book() {
+    let root = TestRoot::new();
+    let source = root.0.join("missing-optional-resources.epub");
+    write_epub(&source, EpubVariant::MissingOptionalResources);
+
+    let imported = import_epub(&source, root.0.join("cache"))
+        .expect("import body with missing optional resources");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(
+        manifest["resources"],
+        serde_json::json!(["OEBPS/styles/book.css"])
+    );
+    assert_eq!(imported.cover_path, None);
+    assert!(!imported.root.join("OEBPS/images/missing.png").exists());
+    let book = BookRoot::new(&imported.root).expect("open imported root");
+    book.read("/OEBPS/text/one.xhtml")
+        .expect("read preserved body");
+    assert_eq!(
+        book.read("/OEBPS/images/missing.png"),
+        Err(ResourceError::NotFound)
+    );
+}
+
+#[test]
+fn ignores_only_allowlisted_obfuscated_fonts() {
+    let root = TestRoot::new();
+    for (name, variant) in [
+        ("font-obfuscation.epub", EpubVariant::FontObfuscation),
+        ("large-optional-font.epub", EpubVariant::LargeOptionalFont),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        let imported = import_epub(&source, root.0.join(format!("{name}-cache")))
+            .expect("read body with system-font fallback");
+        assert!(!imported.root.join("OEBPS/fonts/book.ttf").exists());
+        BookRoot::new(&imported.root)
+            .expect("open imported root")
+            .read("/OEBPS/text/one.xhtml")
+            .expect("read body without embedded font");
+    }
+
+    for (name, variant) in [
+        (
+            "obfuscated-content.epub",
+            EpubVariant::FontObfuscationContent,
+        ),
+        (
+            "unknown-obfuscation.epub",
+            EpubVariant::FontObfuscationUnknown,
+        ),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        assert_eq!(
+            import_epub(&source, root.0.join(format!("{name}-cache"))),
+            Err(ImportError::Encrypted),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn imports_epub2_ncx_into_existing_reader_contract() {
     let root = TestRoot::new();
     let source = root.0.join("epub2-ncx.epub");
@@ -149,7 +275,190 @@ fn imports_epub2_ncx_into_existing_reader_contract() {
 }
 
 #[test]
-fn rejects_unsafe_or_invalid_epub2_ncx() {
+fn imports_epub3_with_legacy_or_missing_navigation() {
+    let root = TestRoot::new();
+
+    let fallback = root.0.join("epub3-ncx-fallback.epub");
+    write_epub(&fallback, EpubVariant::Epub3NcxFallback);
+    let imported = import_epub(&fallback, root.0.join("fallback-cache"))
+        .expect("import EPUB3 through its legacy NCX");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(manifest["sections"].as_array().expect("sections").len(), 2);
+    assert_eq!(
+        manifest["toc"],
+        serde_json::json!([
+            { "label": "Part One", "href": "OEBPS/text/one.xhtml" },
+            { "label": "Nested Two", "href": "OEBPS/text/two.xhtml#start" }
+        ])
+    );
+    let book = BookRoot::new(&imported.root).expect("open imported root");
+    let second = book
+        .read("/OEBPS/text/two.xhtml")
+        .expect("read second section");
+    assert!(
+        std::str::from_utf8(&second.bytes)
+            .expect("second section is UTF-8")
+            .contains("fixture-body-two-7cb4")
+    );
+
+    let no_navigation = root.0.join("epub3-no-navigation.epub");
+    write_epub(&no_navigation, EpubVariant::Epub3NoNavigation);
+    let imported = import_epub(&no_navigation, root.0.join("no-navigation-cache"))
+        .expect("import readable EPUB3 without navigation");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(manifest["sections"].as_array().expect("sections").len(), 2);
+    assert_eq!(manifest["toc"], serde_json::json!([]));
+}
+
+#[test]
+fn keeps_first_ncx_entry_when_targets_repeat() {
+    let root = TestRoot::new();
+    let source = root.0.join("epub2-ncx-duplicate-href.epub");
+    write_epub(&source, EpubVariant::Epub2NcxDuplicateHref);
+
+    let imported =
+        import_epub(&source, root.0.join("cache")).expect("ignore duplicate NCX targets");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(
+        manifest["toc"],
+        serde_json::json!([
+            { "label": "Part One", "href": "OEBPS/text/one.xhtml" }
+        ])
+    );
+}
+
+#[test]
+fn imports_readable_spine_when_navigation_is_unusable() {
+    let root = TestRoot::new();
+    let cache = root.0.join("cache");
+    for (name, variant) in [
+        (
+            "truncated-navigation.epub",
+            EpubVariant::TruncatedNavigation,
+        ),
+        (
+            "invalid-navigation-doctype.epub",
+            EpubVariant::InvalidNavigationDoctype,
+        ),
+        (
+            "duplicate-navigation-doctype.epub",
+            EpubVariant::DuplicateNavigationDoctype,
+        ),
+        (
+            "navigation-depth-overflow.epub",
+            EpubVariant::NavigationDepthOverflow,
+        ),
+        (
+            "epub2-ncx-external-label-media.epub",
+            EpubVariant::Epub2NcxExternalLabelMedia,
+        ),
+        (
+            "epub2-ncx-trailing-external-label-media.epub",
+            EpubVariant::Epub2NcxTrailingExternalLabelMedia,
+        ),
+        (
+            "epub2-ncx-nav-map-external-label-media.epub",
+            EpubVariant::Epub2NcxNavMapExternalLabelMedia,
+        ),
+        (
+            "epub2-missing-spine-toc.epub",
+            EpubVariant::Epub2MissingSpineToc,
+        ),
+        ("epub2-truncated-ncx.epub", EpubVariant::Epub2TruncatedNcx),
+        (
+            "epub2-unknown-ncx-doctype.epub",
+            EpubVariant::Epub2UnknownNcxDoctype,
+        ),
+        ("epub2-ncx-entity.epub", EpubVariant::Epub2NcxEntity),
+        (
+            "epub2-ncx-out-of-order.epub",
+            EpubVariant::Epub2NcxOutOfOrder,
+        ),
+        (
+            "epub2-ncx-depth-overflow.epub",
+            EpubVariant::Epub2NcxDepthOverflow,
+        ),
+        (
+            "epub2-ncx-missing-head.epub",
+            EpubVariant::Epub2NcxMissingHead,
+        ),
+        (
+            "epub2-ncx-duplicate-head.epub",
+            EpubVariant::Epub2NcxDuplicateHead,
+        ),
+        (
+            "epub2-ncx-missing-title.epub",
+            EpubVariant::Epub2NcxMissingDocTitle,
+        ),
+        (
+            "epub2-ncx-duplicate-title.epub",
+            EpubVariant::Epub2NcxDuplicateDocTitle,
+        ),
+        (
+            "epub2-ncx-root-out-of-order.epub",
+            EpubVariant::Epub2NcxRootOutOfOrder,
+        ),
+        (
+            "epub2-ncx-unknown-root.epub",
+            EpubVariant::Epub2NcxUnknownRoot,
+        ),
+        (
+            "epub2-ncx-duplicate-id.epub",
+            EpubVariant::Epub2NcxDuplicateId,
+        ),
+        (
+            "epub2-ncx-duplicate-play-order.epub",
+            EpubVariant::Epub2NcxDuplicatePlayOrder,
+        ),
+        (
+            "epub2-ncx-empty-label.epub",
+            EpubVariant::Epub2NcxEmptyLabel,
+        ),
+        (
+            "epub2-ncx-oversize-label.epub",
+            EpubVariant::Epub2NcxOversizeLabel,
+        ),
+        (
+            "epub2-ncx-wrong-namespace.epub",
+            EpubVariant::Epub2NcxWrongNamespace,
+        ),
+        (
+            "epub2-ncx-wrong-version.epub",
+            EpubVariant::Epub2NcxWrongVersion,
+        ),
+        (
+            "epub2-ncx-toc-overflow.epub",
+            EpubVariant::Epub2NcxTocOverflow,
+        ),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        let imported = import_epub(&source, &cache).expect("ignore unusable optional navigation");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+        )
+        .expect("parse reader manifest");
+        let sections = manifest["sections"].as_array().expect("sections");
+        assert!(!sections.is_empty(), "{name}");
+        assert_eq!(manifest["toc"], serde_json::json!([]), "{name}");
+        let book = BookRoot::new(&imported.root).expect("open imported root");
+        let href = sections[0]["href"].as_str().expect("section href");
+        book.read(&format!("/{href}"))
+            .expect("read section without navigation");
+    }
+}
+
+#[test]
+fn rejects_unsafe_epub2_ncx_references() {
     let root = TestRoot::new();
     let cache = root.0.join("cache");
 
@@ -160,49 +469,9 @@ fn rejects_unsafe_or_invalid_epub2_ncx() {
             ImportError::UnsafePath,
         ),
         (
-            "epub2-ncx-external-label-media.epub",
-            EpubVariant::Epub2NcxExternalLabelMedia,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-trailing-external-label-media.epub",
-            EpubVariant::Epub2NcxTrailingExternalLabelMedia,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-nav-map-external-label-media.epub",
-            EpubVariant::Epub2NcxNavMapExternalLabelMedia,
-            ImportError::InvalidXml,
-        ),
-        (
             "epub2-ncx-traversal.epub",
             EpubVariant::Epub2NcxTraversal,
             ImportError::UnsafePath,
-        ),
-        (
-            "epub2-missing-spine-toc.epub",
-            EpubVariant::Epub2MissingSpineToc,
-            ImportError::UnsupportedEpub,
-        ),
-        (
-            "epub2-truncated-ncx.epub",
-            EpubVariant::Epub2TruncatedNcx,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-unknown-ncx-doctype.epub",
-            EpubVariant::Epub2UnknownNcxDoctype,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-entity.epub",
-            EpubVariant::Epub2NcxEntity,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-out-of-order.epub",
-            EpubVariant::Epub2NcxOutOfOrder,
-            ImportError::InvalidXml,
         ),
     ] {
         let source = root.0.join(name);
@@ -228,14 +497,6 @@ fn enforces_one_xml_depth_limit_for_every_epub_document() {
         (
             "package-depth-overflow.epub",
             EpubVariant::PackageDepthOverflow,
-        ),
-        (
-            "navigation-depth-overflow.epub",
-            EpubVariant::NavigationDepthOverflow,
-        ),
-        (
-            "epub2-ncx-depth-overflow.epub",
-            EpubVariant::Epub2NcxDepthOverflow,
         ),
     ] {
         let source = root.0.join(name);
@@ -265,96 +526,36 @@ fn accepts_only_ordered_ncx_root_structure_and_first_usable_label() {
 }
 
 #[test]
-fn rejects_invalid_ncx_structure_labels_identifiers_and_legacy_covers() {
+fn ignores_invalid_legacy_cover_hints_but_rejects_unsupported_section_encoding() {
     let root = TestRoot::new();
     let cache = root.0.join("cache");
 
-    for (name, variant, expected) in [
-        (
-            "epub2-ncx-missing-head.epub",
-            EpubVariant::Epub2NcxMissingHead,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-duplicate-head.epub",
-            EpubVariant::Epub2NcxDuplicateHead,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-missing-title.epub",
-            EpubVariant::Epub2NcxMissingDocTitle,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-duplicate-title.epub",
-            EpubVariant::Epub2NcxDuplicateDocTitle,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-root-out-of-order.epub",
-            EpubVariant::Epub2NcxRootOutOfOrder,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-unknown-root.epub",
-            EpubVariant::Epub2NcxUnknownRoot,
-            ImportError::InvalidXml,
-        ),
+    for (name, variant) in [
         (
             "epub2-missing-cover-item.epub",
             EpubVariant::Epub2MissingCoverItem,
-            ImportError::InvalidXml,
         ),
         (
             "epub2-unsupported-cover.epub",
             EpubVariant::Epub2UnsupportedCover,
-            ImportError::InvalidXml,
         ),
         (
-            "epub2-utf16-xhtml.epub",
-            EpubVariant::Epub2Utf16Xhtml,
-            ImportError::UnsupportedEpub,
-        ),
-        (
-            "epub2-ncx-duplicate-id.epub",
-            EpubVariant::Epub2NcxDuplicateId,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-duplicate-href.epub",
-            EpubVariant::Epub2NcxDuplicateHref,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-duplicate-play-order.epub",
-            EpubVariant::Epub2NcxDuplicatePlayOrder,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-empty-label.epub",
-            EpubVariant::Epub2NcxEmptyLabel,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-oversize-label.epub",
-            EpubVariant::Epub2NcxOversizeLabel,
-            ImportError::InvalidXml,
-        ),
-        (
-            "epub2-ncx-wrong-namespace.epub",
-            EpubVariant::Epub2NcxWrongNamespace,
-            ImportError::UnsupportedEpub,
-        ),
-        (
-            "epub2-ncx-wrong-version.epub",
-            EpubVariant::Epub2NcxWrongVersion,
-            ImportError::UnsupportedEpub,
+            "epub3-unsupported-cover.epub",
+            EpubVariant::Epub3UnsupportedCover,
         ),
     ] {
         let source = root.0.join(name);
         write_epub(&source, variant);
-        assert_eq!(import_epub(&source, &cache), Err(expected), "{name}");
+        let imported = import_epub(&source, &cache).expect("ignore unusable cover hint");
+        assert_eq!(imported.cover_path, None, "{name}");
     }
+
+    let unsupported = root.0.join("epub2-utf16-xhtml.epub");
+    write_epub(&unsupported, EpubVariant::Epub2Utf16Xhtml);
+    assert_eq!(
+        import_epub(&unsupported, &cache),
+        Err(ImportError::UnsupportedEpub)
+    );
 }
 
 #[test]
@@ -370,12 +571,29 @@ fn enforces_ncx_toc_item_limit() {
     )
     .expect("parse reader manifest");
     assert_eq!(manifest["toc"].as_array().expect("toc").len(), 2_000);
+}
 
-    let overflow = root.0.join("epub2-ncx-toc-overflow.epub");
-    write_epub(&overflow, EpubVariant::Epub2NcxTocOverflow);
+#[test]
+fn imports_2000_sections_and_rejects_the_next() {
+    let root = TestRoot::new();
+    let at_limit = root.0.join("sections-at-limit.epub");
+    write_many_section_epub(&at_limit, 2_000);
+    let imported =
+        import_epub(&at_limit, root.0.join("limit-cache")).expect("import EPUB at section limit");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported.root.join(READER_MANIFEST)).expect("read reader manifest"),
+    )
+    .expect("parse reader manifest");
+    assert_eq!(manifest["sections"].as_array().map(Vec::len), Some(2_000));
+    let book = BookRoot::new(&imported.root).expect("open imported root");
+    book.read("/OPS/text/1.xhtml").expect("read first section");
+    book.read("/OPS/text/2000").expect("read last section");
+
+    let overflow = root.0.join("sections-overflow.epub");
+    write_many_section_epub(&overflow, 2_001);
     assert_eq!(
         import_epub(&overflow, root.0.join("overflow-cache")),
-        Err(ImportError::TooManyTocItems)
+        Err(ImportError::TooManySections)
     );
 }
 
@@ -453,11 +671,6 @@ fn imports_epub_and_rejects_unsafe_or_unsupported_sources() {
 
     for (name, variant, expected) in [
         (
-            "invalid-mimetype.epub",
-            EpubVariant::InvalidMimetype,
-            ImportError::UnsupportedEpub,
-        ),
-        (
             "unsafe.epub",
             EpubVariant::UnsafePath,
             ImportError::UnsafePath,
@@ -491,21 +704,6 @@ fn imports_epub_and_rejects_unsafe_or_unsupported_sources() {
             "encrypted.epub",
             EpubVariant::Encryption,
             ImportError::Encrypted,
-        ),
-        (
-            "truncated-nav.epub",
-            EpubVariant::TruncatedNavigation,
-            ImportError::InvalidXml,
-        ),
-        (
-            "invalid-nav-doctype.epub",
-            EpubVariant::InvalidNavigationDoctype,
-            ImportError::InvalidXml,
-        ),
-        (
-            "duplicate-nav-doctype.epub",
-            EpubVariant::DuplicateNavigationDoctype,
-            ImportError::InvalidXml,
         ),
     ] {
         let rejected = root.0.join(name);
@@ -612,16 +810,42 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         archive.finish().expect("finish unsafe epub");
         return;
     }
-    if matches!(variant, EpubVariant::Encryption) {
+    if matches!(
+        variant,
+        EpubVariant::Encryption
+            | EpubVariant::FontObfuscation
+            | EpubVariant::FontObfuscationContent
+            | EpubVariant::FontObfuscationUnknown
+    ) {
+        let (algorithm, target) = match variant {
+            EpubVariant::FontObfuscation => {
+                ("http://ns.adobe.com/pdf/enc#RC", "OEBPS/fonts/book.ttf")
+            }
+            EpubVariant::FontObfuscationContent => {
+                ("http://www.idpf.org/2008/embedding", "OEBPS/text/one.xhtml")
+            }
+            EpubVariant::FontObfuscationUnknown => {
+                ("https://example.com/encryption", "OEBPS/fonts/book.ttf")
+            }
+            _ => ("", ""),
+        };
+        let encryption = if matches!(variant, EpubVariant::Encryption) {
+            "<encryption/>".to_owned()
+        } else {
+            format!(
+                r#"<?xml version="1.0"?><encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#"><enc:EncryptedData><enc:EncryptionMethod Algorithm="{algorithm}"/><enc:CipherData><enc:CipherReference URI="{target}"/></enc:CipherData></enc:EncryptedData></encryption>"#
+            )
+        };
         archive
             .start_file("META-INF/encryption.xml", stored)
             .expect("encryption marker");
         archive
-            .write_all(b"<encryption/>")
+            .write_all(encryption.as_bytes())
             .expect("write encryption marker");
     }
     let container = match variant {
         EpubVariant::Doctype => br#"<?xml version="1.0"?><!DOCTYPE container><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
+        EpubVariant::ContainerExternalDoctype => br#"<?xml version="1.0"?><!DOCTYPE container PUBLIC "-//EXAMPLE//DTD CONTAINER 1.0//EN" "https://example.com/container.dtd"><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
         EpubVariant::ExtraContainerRoot => br#"<?xml version="1.0"?><extra/><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
         EpubVariant::MultipleRootfiles => br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/><rootfile full-path="OEBPS/other.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
         EpubVariant::ContainerDepthOverflow => format!(
@@ -682,6 +906,28 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         br#"<?xml version="1.0"?><extra/><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/></spine></package>"#.to_vec()
     } else if matches!(variant, EpubVariant::ExtensionlessXhtml) {
         br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title>Example Book</dc:title></metadata><manifest><item id="nav" href="nav" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one" media-type="application/xhtml+xml"/><item id="two" href="text/two" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub3NcxFallback) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub3NoNavigation) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(
+        variant,
+        EpubVariant::FontObfuscation
+            | EpubVariant::FontObfuscationContent
+            | EpubVariant::FontObfuscationUnknown
+            | EpubVariant::LargeOptionalFont
+    ) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/><item id="font" href="fonts/book.ttf" media-type="application/x-font-ttf"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(variant, EpubVariant::ManifestPathAlias) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/><item id="css-alias" href="styles/book.css" media-type="text/css"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(variant, EpubVariant::ManifestConflictingAlias) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/><item id="css-alias" href="styles/book.css" media-type="image/png"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(variant, EpubVariant::MissingSpineMember) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="missing" href="text/missing.xhtml" media-type="application/xhtml+xml"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="missing"/><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(variant, EpubVariant::MissingOptionalResources) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/><item id="css" href="styles/book.css" media-type="text/css"/><item id="missing" href="images/missing.png" media-type="image/png"/><item id="cover" href="images/cover-missing.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub3UnsupportedCover) {
+        br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/><item id="css-cover" href="styles/book.css" media-type="text/css" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#.to_vec()
     } else {
         br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title> Example   Book </dc:title><dc:creator>Example Author</dc:creator></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"></item><item id="css" href="styles/book.css" media-type="text/css"/><item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"></itemref></spine></package>"#.to_vec()
     };
@@ -738,7 +984,7 @@ fn write_epub(path: &Path, variant: EpubVariant) {
             | EpubVariant::Epub2NcxTocOverflow
     ) {
         epub2_navigation_case(variant)
-    } else if epub2 {
+    } else if epub2 || matches!(variant, EpubVariant::Epub3NcxFallback) {
         br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="2"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navInfo><text>Navigation information</text></navInfo><navLabel><text>Table of Contents</text></navLabel><navPoint id="one" playOrder="1"><navLabel xml:lang="en"><text> Part One </text></navLabel><navLabel xml:lang="zh"><text>Ignored alternate</text></navLabel><content src="text/one.xhtml"/><navPoint id="two" playOrder="2"><navLabel><text>Nested Two</text></navLabel><content src="text/two.xhtml#start"/></navPoint></navPoint></navMap></ncx>"#.to_vec()
     } else if matches!(variant, EpubVariant::NavigationDepthOverflow) {
         format!(
@@ -758,7 +1004,7 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li><li><a href="text/two.xhtml#start"><span>Two</span></a></li></ol></nav></body></html>"#.to_vec()
     };
     let extensionless = matches!(variant, EpubVariant::ExtensionlessXhtml);
-    let nav_path = if epub2 {
+    let nav_path = if epub2 || matches!(variant, EpubVariant::Epub3NcxFallback) {
         "OEBPS/toc.ncx"
     } else if extensionless {
         "OEBPS/nav"
@@ -775,21 +1021,28 @@ fn write_epub(path: &Path, variant: EpubVariant) {
     } else {
         "OEBPS/text/two.xhtml"
     };
-    let one = if matches!(variant, EpubVariant::Epub2Utf16Xhtml) {
+    let one = if matches!(variant, EpubVariant::MissingOptionalResources) {
+        br#"<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="stylesheet" href="../styles/book.css"/></head><body><img src="../images/missing.png" alt="Missing illustration"/>Body</body></html>"#.to_vec()
+    } else if matches!(variant, EpubVariant::Epub2Utf16Xhtml) {
         let mut bytes = vec![0xff, 0xfe];
         for unit in r#"<?xml version="1.0" encoding="UTF-16"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>unsupported</p></body></html>"#.encode_utf16() {
             bytes.extend_from_slice(&unit.to_le_bytes());
         }
         bytes
-    } else if epub2 {
+    } else if epub2 || matches!(variant, EpubVariant::Epub3NcxFallback) {
         br#"<?xml version="1.0"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title><link rel="stylesheet" type="text/css" href="../styles/book.css"/></head><body><p>fixture-body-one-7cb4</p></body></html>"#.to_vec()
     } else {
         br#"<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>"#.to_vec()
     };
-    let two = if epub2 {
+    let two = if epub2 || matches!(variant, EpubVariant::Epub3NcxFallback) {
         br#"<?xml version="1.0"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head><body><p id="start">fixture-body-two-7cb4</p></body></html>"#.to_vec()
     } else {
         br#"<html xmlns="http://www.w3.org/1999/xhtml"><body id="start">Two</body></html>"#.to_vec()
+    };
+    let stylesheet = if matches!(variant, EpubVariant::MissingOptionalResources) {
+        b"body { color: black; background-image: url('../images/missing.png'); }".as_slice()
+    } else {
+        b"body { color: black; }".as_slice()
     };
     for (name, bytes) in [
         ("META-INF/container.xml", container.as_slice()),
@@ -797,10 +1050,7 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         (nav_path, navigation.as_slice()),
         (one_path, one.as_slice()),
         (two_path, two.as_slice()),
-        (
-            "OEBPS/styles/book.css",
-            b"body { color: black; }".as_slice(),
-        ),
+        ("OEBPS/styles/book.css", stylesheet),
         ("OEBPS/images/cover.png", PNG_1X1),
     ] {
         archive.start_file(name, stored).expect("start epub member");
@@ -812,7 +1062,70 @@ fn write_epub(path: &Path, variant: EpubVariant) {
             .expect("changed member");
         archive.write_all(b"changed").expect("write changed member");
     }
+    if matches!(
+        variant,
+        EpubVariant::FontObfuscation
+            | EpubVariant::FontObfuscationContent
+            | EpubVariant::FontObfuscationUnknown
+    ) {
+        archive
+            .start_file("OEBPS/fonts/book.ttf", stored)
+            .expect("font member");
+        archive.write_all(b"obfuscated-font").expect("write font");
+    } else if matches!(variant, EpubVariant::LargeOptionalFont) {
+        let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        archive
+            .start_file("OEBPS/fonts/book.ttf", deflated)
+            .expect("large font member");
+        let chunk = [0_u8; 8 * 1024];
+        for _ in 0..(16 * 1024 * 1024 / chunk.len() + 1) {
+            archive.write_all(&chunk).expect("write large font");
+        }
+    }
     archive.finish().expect("finish epub");
+}
+
+fn write_many_section_epub(path: &Path, count: usize) {
+    let file = File::create(path).expect("create many-section epub");
+    let mut archive = ZipWriter::new(file);
+    let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    archive.start_file("mimetype", stored).expect("mimetype");
+    archive
+        .write_all(b"application/epub+zip")
+        .expect("write mimetype");
+    archive
+        .start_file("META-INF/container.xml", stored)
+        .expect("container");
+    archive
+        .write_all(br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#)
+        .expect("write container");
+
+    let mut manifest = String::new();
+    let mut spine = String::new();
+    for index in 1..=count {
+        let suffix = if index == count { "" } else { ".xhtml" };
+        manifest.push_str(&format!(
+            r#"<item id="item-{index}" href="text/{index}{suffix}" media-type="application/xhtml+xml"/>"#
+        ));
+        spine.push_str(&format!(r#"<itemref idref="item-{index}"/>"#));
+    }
+    let package = format!(
+        r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest>{manifest}</manifest><spine>{spine}</spine></package>"#
+    );
+    archive.start_file("OPS/book.opf", stored).expect("package");
+    archive
+        .write_all(package.as_bytes())
+        .expect("write package");
+    for index in 1..=count {
+        let suffix = if index == count { "" } else { ".xhtml" };
+        archive
+            .start_file(format!("OPS/text/{index}{suffix}"), stored)
+            .expect("section");
+        archive
+            .write_all(b"<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>Section</body></html>")
+            .expect("write section");
+    }
+    archive.finish().expect("finish many-section epub");
 }
 
 fn epub2_package(variant: EpubVariant) -> Vec<u8> {
