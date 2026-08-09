@@ -2,6 +2,7 @@ const ANNOTATION_MAX_SELECTED_LENGTH = 4096;
 const ANNOTATION_MAX_NOTE_LENGTH = 2000;
 const ANNOTATION_CONTEXT_LENGTH = 32;
 const HIGHLIGHT_NAME = "atha-annotations";
+const SELECTION_CHANGE_SETTLE_MS = 120;
 
 export function dispatchDictionaryLookup(selection, target = globalThis) {
   if (!selection) return false;
@@ -34,6 +35,7 @@ export function createAnnotations({
   let renderedRanges = new Map();
   let filterGeneration = 0;
   let filterTimer = null;
+  let selectionChangeTimer = null;
   let searchConversations = null;
 
   function textNodes() {
@@ -389,7 +391,13 @@ export function createAnnotations({
     controls.selectionActions.hidden = true;
   }
 
+  function cancelPendingSelectionChange() {
+    clearTimeout(selectionChangeTimer);
+    selectionChangeTimer = null;
+  }
+
   function dismissSelection() {
+    cancelPendingSelectionChange();
     hideSelectionActions();
     pendingSelection = null;
     selectedAnnotationId = null;
@@ -480,7 +488,10 @@ export function createAnnotations({
       pendingSelection = range;
       controls.selectionStatus.textContent = "";
     };
-    const captureSelection = () => requestAnimationFrame(showSelectionActions);
+    const captureSelection = () => {
+      cancelPendingSelectionChange();
+      requestAnimationFrame(showSelectionActions);
+    };
     const selectAnnotationAtPoint = (event) => {
       if (event.button !== 0 || !event.isPrimary) return false;
       // ponytail: O(n) only on pointer-up; add a spatial index if the 1000-item cap becomes measurable.
@@ -539,6 +550,7 @@ export function createAnnotations({
     };
 
     content.book.addEventListener("pointerdown", () => {
+      cancelPendingSelectionChange();
       hideSelectionActions();
       pendingSelection = null;
       if (!rangeEditingId) selectedAnnotationId = null;
@@ -555,17 +567,25 @@ export function createAnnotations({
     });
     content.book.addEventListener("keyup", captureSelection);
     document.addEventListener("selectionchange", () => {
-      requestAnimationFrame(() => {
-        if (
-          !controls.noteDialog.open &&
-          !controls.selectionActions.contains(document.activeElement) &&
-          !currentSelection()
-        ) {
-          hideSelectionActions();
-          pendingSelection = null;
-          if (!rangeEditingId) selectedAnnotationId = null;
-        }
-      });
+      cancelPendingSelectionChange();
+      selectionChangeTimer = setTimeout(() => {
+        selectionChangeTimer = null;
+        requestAnimationFrame(() => {
+          if (!controls.noteDialog.open && currentSelection()) {
+            showSelectionActions();
+            return;
+          }
+          if (
+            !controls.noteDialog.open &&
+            !controls.selectionActions.contains(document.activeElement) &&
+            !currentSelection()
+          ) {
+            hideSelectionActions();
+            pendingSelection = null;
+            if (!rangeEditingId) selectedAnnotationId = null;
+          }
+        });
+      }, SELECTION_CHANGE_SETTLE_MS);
     });
     controls.selectionActions.addEventListener("pointerdown", (event) => event.preventDefault());
     controls.lookup.addEventListener("click", () => {
@@ -809,10 +829,13 @@ export function createAnnotations({
     content.book.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     assert(selectedAnnotationId === null, "sample-boundary");
     const selection = content.book.getRootNode().getSelection?.();
-    const verifySelectionInput = async (event) => {
+    const verifySelectionInput = async (event, target = content.book, settle = false) => {
       selection.removeAllRanges();
       selection.addRange(firstTextRange());
-      content.book.dispatchEvent(event);
+      target.dispatchEvent(event);
+      if (settle) {
+        await new Promise((resolve) => setTimeout(resolve, SELECTION_CHANGE_SETTLE_MS + 20));
+      }
       await new Promise(requestAnimationFrame);
       assert(
         !controls.selectionActions.hidden &&
@@ -830,6 +853,14 @@ export function createAnnotations({
       new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }),
     );
     await verifySelectionInput(new KeyboardEvent("keyup", { bubbles: true, key: "ArrowRight" }));
+    await verifySelectionInput(new Event("selectionchange"), document, true);
+    selection.removeAllRanges();
+    selection.addRange(firstTextRange());
+    document.dispatchEvent(new Event("selectionchange"));
+    dismissSelection();
+    await new Promise((resolve) => setTimeout(resolve, SELECTION_CHANGE_SETTLE_MS + 20));
+    await new Promise(requestAnimationFrame);
+    assert(controls.selectionActions.hidden, "sample-boundary");
     selection.removeAllRanges();
     content.book.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "ArrowRight" }));
     await new Promise(requestAnimationFrame);
@@ -848,6 +879,8 @@ export function createAnnotations({
       freshSelectionClearsAnnotation: true,
       touchSelectionActions: true,
       keyboardSelectionActions: true,
+      selectionChangeActions: true,
+      selectionChangeDismissed: true,
       invalidSelectionDismissed: true,
     });
   }
