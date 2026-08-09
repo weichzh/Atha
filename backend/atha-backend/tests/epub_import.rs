@@ -608,6 +608,28 @@ fn writes_epub2_gate_fixture() {
     assert!(path.metadata().is_ok_and(|metadata| metadata.len() > 0));
 }
 
+#[test]
+#[ignore = "seeds an isolated Linux GUI formula benchmark from an explicit private EPUB"]
+fn seeds_private_formula_gui_benchmark() {
+    let root = PathBuf::from(
+        std::env::var_os("ATHA_EPUB_GATE_LIBRARY_ROOT").expect("missing EPUB gate library root"),
+    );
+    let source =
+        PathBuf::from(std::env::var_os("ATHA_EPUB_GATE_SOURCE").expect("missing EPUB gate source"));
+    let temporary = fs::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp"))
+        .expect("resolve .tmp root");
+    let resolved = fs::canonicalize(&root).expect("resolve EPUB gate library root");
+    assert!(
+        root.is_absolute() && resolved.starts_with(temporary),
+        "EPUB gate library must stay inside the repository .tmp directory"
+    );
+    let library = LocalLibrary::open(root).expect("open EPUB gate library");
+    let book = library.import(source).expect("seed EPUB gate library");
+    library
+        .open_book(&book.id)
+        .expect("open seeded EPUB gate book through BookRoot");
+}
+
 struct TestRoot(PathBuf);
 static TEST_ROOT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 

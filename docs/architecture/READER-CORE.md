@@ -14,7 +14,7 @@
 
 平台 WebView 是当前唯一阅读渲染技术：Windows 使用 WebView2，Linux 使用 WebKitGTK，Android 使用系统 WebView。宿主只提供窗口、受控资源、导航拦截与有限遥测，HTML、CSS、布局和绘制继续由浏览器完成；不维护自研或组合式第二引擎。
 
-只有外部引擎的成熟度发生实质变化，并能在 ATHA 困难样本上同时证明浏览器兼容、文本选择与重锚、安全、无裁切和同机性能优势时，才通过新的研究与 change 重新决策。本轮及可预见功能开发只对 WebView2 做常规优化，不提前建设缓存数据库、预热系统或虚拟化框架。
+只有外部引擎的成熟度发生实质变化，并能在 ATHA 困难样本上同时证明浏览器兼容、文本选择与重锚、安全、无裁切和同机性能优势时，才通过新的研究与 change 重新决策。本轮及可预见功能开发只对各平台现有 WebView 做常规优化，不提前建设缓存数据库、预热系统或虚拟化框架。
 
 ### 应用壳与宿主
 
@@ -102,7 +102,9 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 ### 翻页输入
 
-`Interaction` 在左右模式把键盘、滚轮、鼠标页区和单指横向滑动解释为前后翻页意图，再交给 Navigation 串行执行；横向拖动只预览 CSS transform，松手后以 170ms 收束。在上下模式，浏览器原生纵向滚动拥有正文手势，键盘、滚轮或底部继续上滑才跨 section。华为 WebView 114 的空 `pointerType` 归一为 touch，原生 `pan-y` 触发 `pointercancel` 时以 `touchend` 处理章节边界；闭合 Shadow DOM 内外监听通过同一 inside / outside 去重，链接、表格、代码、dialog、多点触控和非折叠选区仍保留原生行为。
+`Interaction` 在左右模式把键盘、滚轮、页区点按和单指横向滑动解释为前后翻页意图，再交给 Navigation 串行执行。每个 Pointer 序列只认领一次 owner：链接、表单、弹窗、多点、非折叠选区与纵向意图保持受保护；图片、公式、表格和代码可在左右区域或明确横拖时翻页。横向溢出容器起手方向仍有空间时独占并滚动自身，已在对应边界时把整次序列交给翻页，序列中不反复换 owner。媒体中央单击仍打开预览；表格和代码中央单击仍切换工具层，既有双击或键盘预览不变。已提交的横拖同时抑制兼容 `click` 与 `dblclick`。
+
+横拖开始时只读取一次视口几何和布局 / 显示比例；后续输入只更新内存中的最新位移，由单个 `requestAnimationFrame` 写入 transform 或横向滚动值。DPR 缩放下，Pointer 的 CSS 像素位移先换算为内部布局像素。松手后的 CSS 收束为 150ms。在上下模式，浏览器原生纵向滚动继续拥有正文手势，键盘、滚轮或边界纵向滑动才跨 section；华为 WebView 114 的空 `pointerType` 仍归一为 touch，原生 `pan-y` 触发 `pointercancel` 时继续由既有 touch 边界链路处理。
 
 标准离散滚轮输入逐次产生翻页意图；小幅高频输入先累计阈值，并在同一精密手势的空闲窗口结束前抑制惯性尾流。`scripts/check-reader-wheel.ps1` 用固定快速样本在真实浏览器记录书内媒体目标、4 次间隔 100ms 的离散输入接受率和事件到 Navigation 稳定的 P95；50ms 门槛只用于该快速样本，同页 benchmark 与多章节样书继续分别记录分页成本和跨章成本。
 
@@ -120,7 +122,7 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 ### 表格与代码预览
 
-表格和块级预格式化内容保持原生语义与选择能力，并获得键盘焦点和可见焦点。双击或在自身焦点上按 Enter、Space 使用现有原生 dialog 打开独立预览；正文中的单击、链接与选择仍优先，表格和代码区域不触发背景翻页。
+表格和块级预格式化内容保持原生语义、选择能力、键盘焦点和可见焦点。双击或在自身焦点上按 Enter、Space 使用现有原生 dialog 打开独立预览；链接、选择和中央单击仍优先，左右页区点按与明确横拖按统一 owner 规则翻页。宽内容在中部横拖时滚动自身，到对应边界后的新手势才移交翻页。
 
 表格预览由应用从 caption、行、表头、单元格安全文本及最多 100 的合法行列跨度重建；单元格中的图片只使用限长替代文本。代码预览只设置 `textContent` 并保留空白。两者均不克隆书源 HTML、样式、链接、图片或事件属性，关闭后恢复焦点且不改变 section、页码或 Locator。缩放、拖拽、复制按钮、导出、执行和编辑留待明确需求。
 
@@ -158,7 +160,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### FB2 / FBZ 入口门槛
 
-`scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、三条目录、跨 section 跳转、全书搜索、可视排版、真实 CodeMirror 键入与 lint gutter、无效 CSS 和持久化失败回退、模块导入筛选、32 模块组合 benchmark、阅读统计前台 / 最小化 / 重启与心跳 benchmark、进度和样式重启恢复，以及宽屏 / 600 px 窄屏非空截图和 AppLog 隐私。系统 picker 后缀只由 Rust 单元测试覆盖；该 GUI 门不伪装为原生对话框交互，也不替代 Android ARM 真机性能证据。
+`scripts/check-fb2-source.ps1 -VerifyLinuxGui` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 workspace Rust、Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖书架卡片、打开、目录、跨 section 跳转、搜索、排版、CSS 模块、阅读统计、恢复、宽窄截图和 AppLog 隐私。手势矩阵请求 W3C touch Pointer Actions，逐次核对真实命中、`isTrusted`、左右点按 / 横拖、媒体误开、纵向意图、宽表双向内部滚动与双向边界移交，并记录 WebKitGTK 实际返回的 `pointerType`。当前 Linux WebKitGTK 把请求的 touch 映射为 `mouse`，因此该门只算可信自动化指针与性能证据，不冒充实体触摸；PCT-AL10 触摸手感由用户实测。
 
 ### Kindle 入口门槛
 
@@ -177,7 +179,9 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 - 性能优先模式可以削减部分视觉效果，但不得伪造或篡改原文内容。
 - 优先保持单个阅读会话中的 WebView 与阅读页存活，并先校正真实用户阶段的计时；持久缓存、渐进解码和其他专项优化由后续功能与实测瓶颈驱动。
 
-公式密集章节只对具有合法显式宽高的 SVG 公式启用延迟资源：同尺寸占位先参与分页，当前页与下一页必须在首个稳定页和每次翻页时完成原有 SVG 安全校验和解码，其余公式进入相邻视口时再加载。校验通过前不设置可呈现 `src`；加载前捕获文本偏移，加载后刷新页数并恢复该偏移，离开章节即释放校验与解码状态。完整自检与热打开 benchmark 可以按小批次补齐整章，产品态不在后台预热整章。固定入口 `scripts/check-reader-formula-performance.ps1` 使用 SHA-256 为 `c316559b6428d05b7ba81228879606e05f9adf6f3e67df917f6c90ce77ff6708` 的《数理逻辑导引 (2017)》`EPUB/text/ch095.xhtml`，记录 1332 个公式下的十样本 median/P95；当前公式压力门槛为冷启动 1500ms、首稳 750ms、热打开 200ms、翻页 50ms、字号重排 150ms。
+公式密集章节只对具有合法显式宽高的 SVG 公式启用延迟资源：同尺寸占位先参与分页，当前页与下一页必须在首个稳定页和每次翻页时完成原有 SVG 安全校验和解码，其余公式进入相邻视口时再加载。校验通过前不设置可呈现 `src`；固定尺寸公式成功校验、解码和显现不改变布局，也不捕获 Locator 或重排。只有失败占位替换会在首个 DOM 变化前捕获一次 Locator，随后重排并恢复；离开章节即释放校验与解码状态。
+
+`scripts/check-reader-formula-performance.ps1` 通过忽略目录中的私密 sidecar 锁定本地 EPUB 身份和章节，不把路径、标题、正文或哈希写入输出。它复用 Linux Tauri 手势门，要求章节达到固定的公式数与页数下限，再对普通与重公式页面分别执行 5 次预热、20 次逐场景测量。正式门槛为横拖首个视觉反馈 P95 不超过 33.4ms、实际视觉更新间隔 P95 不超过 25ms、最大间隔不超过 50ms、松手稳定 P95 不超过 220ms，以及点按松手到首个视觉变化 P95 不超过 50ms；少于 20 次的运行只作语义冒烟，不判定 P95。
 
 ## 位置与版本
 

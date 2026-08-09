@@ -17,6 +17,11 @@ export function createPagination({
   const state = { page: 0, pages: 0, fontSize: 19 };
   let fontPreviewAnchor = null;
   let settleTimer = 0;
+  let pageStep = 0;
+  let visualScale = 1;
+  let swipeFrame = 0;
+  let swipeDelta = 0;
+  let offsetCache = null;
 
   function isScrolled() {
     return reader.dataset.readingMode === "scroll";
@@ -43,70 +48,63 @@ export function createPagination({
     return nodes;
   }
 
-  function withoutTranslation(action) {
-    const transform = book.style.transform;
-    book.style.transform = "none";
-    try {
-      return action();
-    } finally {
-      book.style.transform = transform;
-    }
-  }
-
   function columnForRect(rect, bookLeft, step, scale) {
     return Math.max(0, Math.floor((rect.left - bookLeft) / (step * scale)));
   }
 
-  function captureOffset() {
-    if (fontPreviewAnchor !== null) return fontPreviewAnchor;
-    return withoutTranslation(() => {
-      if (isScrolled()) {
-        const readerTop = reader.getBoundingClientRect().top;
-        let base = 0;
-        for (const node of textNodes()) {
-          const text = node.textContent || "";
-          const whole = document.createRange();
-          whole.selectNodeContents(node);
-          if ([...whole.getClientRects()].some((rect) => rect.height && rect.bottom > readerTop + 1)) {
-            for (let offset = 0; offset < text.length; offset += 1) {
-              const character = document.createRange();
-              character.setStart(node, offset);
-              character.setEnd(node, offset + 1);
-              const rect = [...character.getClientRects()].find((item) => item.height);
-              if (rect && rect.bottom > readerTop + 1) return base + offset;
-            }
-          }
-          base += text.length;
-        }
-        return base;
-      }
-      const style = getComputedStyle(book);
-      const step = parseFloat(style.width) + parseFloat(style.columnGap);
-      const bookLeft = book.getBoundingClientRect().left;
-      const scale = reader.getBoundingClientRect().width / reader.clientWidth;
+  function scanOffset() {
+    if (isScrolled()) {
+      const readerTop = reader.getBoundingClientRect().top;
       let base = 0;
       for (const node of textNodes()) {
         const text = node.textContent || "";
         const whole = document.createRange();
         whole.selectNodeContents(node);
-        const reachesPage = [...whole.getClientRects()].some(
-          (rect) => rect.width && columnForRect(rect, bookLeft, step, scale) === state.page,
-        );
-        if (reachesPage) {
+        if ([...whole.getClientRects()].some((rect) => rect.height && rect.bottom > readerTop + 1)) {
           for (let offset = 0; offset < text.length; offset += 1) {
             const character = document.createRange();
             character.setStart(node, offset);
             character.setEnd(node, offset + 1);
-            const rect = [...character.getClientRects()].find((item) => item.width);
-            if (rect && columnForRect(rect, bookLeft, step, scale) === state.page) {
-              return base + offset;
-            }
+            const rect = [...character.getClientRects()].find((item) => item.height);
+            if (rect && rect.bottom > readerTop + 1) return base + offset;
           }
         }
         base += text.length;
       }
       return base;
-    });
+    }
+    const bookLeft = book.getBoundingClientRect().left;
+    let base = 0;
+    for (const node of textNodes()) {
+      const text = node.textContent || "";
+      const whole = document.createRange();
+      whole.selectNodeContents(node);
+      const reachesPage = [...whole.getClientRects()].some(
+        (rect) => rect.width && columnForRect(rect, bookLeft, pageStep, visualScale) === state.page,
+      );
+      if (reachesPage) {
+        for (let offset = 0; offset < text.length; offset += 1) {
+          const character = document.createRange();
+          character.setStart(node, offset);
+          character.setEnd(node, offset + 1);
+          const rect = [...character.getClientRects()].find((item) => item.width);
+          if (rect && columnForRect(rect, bookLeft, pageStep, visualScale) === state.page) {
+            return base + offset;
+          }
+        }
+      }
+      base += text.length;
+    }
+    return base;
+  }
+
+  function captureOffset() {
+    if (fontPreviewAnchor !== null) return fontPreviewAnchor;
+    const key = isScrolled() ? `scroll:${reader.scrollTop}` : `page:${state.page}`;
+    if (offsetCache?.key === key) return offsetCache.value;
+    const value = scanOffset();
+    offsetCache = { key, value };
+    return value;
   }
 
   function pointForOffset(offset) {
@@ -127,49 +125,49 @@ export function createPagination({
   }
 
   function pageForOffset(offset) {
-    return withoutTranslation(() => {
-      const point = pointForOffset(offset);
-      if (!point.exact || !point.node) return { exact: point.exact, page: 0 };
-      if (isScrolled()) {
-        const range = document.createRange();
-        range.setStart(point.node, point.offset);
-        range.setEnd(point.node, Math.min(point.offset + 1, point.node.textContent.length));
-        const rect = [...range.getClientRects()].find((item) => item.height);
-        if (!rect) return { exact: true, page: state.page };
-        const viewport = reader.getBoundingClientRect();
-        const scale = reader.clientHeight / viewport.height;
-        const absolute = reader.scrollTop + (rect.top - viewport.top) * scale;
-        return {
-          exact: true,
-          page: Math.max(0, Math.min(state.pages - 1, Math.floor(absolute / reader.clientHeight))),
-        };
-      }
-      const nodes = textNodes().filter((node) => (node.textContent || "").length > 0);
-      const start = nodes.indexOf(point.node);
-      const visibleRect = (node, from, to, last = false) => {
-        if (from >= to) return null;
-        const range = document.createRange();
-        range.setStart(node, from);
-        range.setEnd(node, to);
-        const rects = [...range.getClientRects()].filter((item) => item.width && item.height);
-        return last ? rects.at(-1) : rects[0];
+    const point = pointForOffset(offset);
+    if (!point.exact || !point.node) return { exact: point.exact, page: 0 };
+    if (isScrolled()) {
+      const range = document.createRange();
+      range.setStart(point.node, point.offset);
+      range.setEnd(point.node, Math.min(point.offset + 1, point.node.textContent.length));
+      const rect = [...range.getClientRects()].find((item) => item.height);
+      if (!rect) return { exact: true, page: state.page };
+      const viewport = reader.getBoundingClientRect();
+      const scale = reader.clientHeight / viewport.height;
+      const absolute = reader.scrollTop + (rect.top - viewport.top) * scale;
+      return {
+        exact: true,
+        page: Math.max(0, Math.min(state.pages - 1, Math.floor(absolute / reader.clientHeight))),
       };
-      let rect = visibleRect(point.node, point.offset, point.offset + 1);
-      for (let index = start; !rect && index < nodes.length; index += 1) {
-        const node = nodes[index];
-        rect = visibleRect(node, index === start ? point.offset : 0, node.textContent.length);
-      }
-      for (let index = start; !rect && index >= 0; index -= 1) {
-        const node = nodes[index];
-        rect = visibleRect(node, 0, index === start ? point.offset : node.textContent.length, true);
-      }
-      if (!rect) return { exact: true, page: Math.min(state.page, state.pages - 1) };
-      const style = getComputedStyle(book);
-      const step = parseFloat(style.width) + parseFloat(style.columnGap);
-      const scale = reader.getBoundingClientRect().width / reader.clientWidth;
-      const pageIndex = columnForRect(rect, book.getBoundingClientRect().left, step, scale);
-      return { exact: true, page: Math.min(pageIndex, state.pages - 1) };
-    });
+    }
+    const nodes = textNodes().filter((node) => (node.textContent || "").length > 0);
+    const start = nodes.indexOf(point.node);
+    const visibleRect = (node, from, to, last = false) => {
+      if (from >= to) return null;
+      const range = document.createRange();
+      range.setStart(node, from);
+      range.setEnd(node, to);
+      const rects = [...range.getClientRects()].filter((item) => item.width && item.height);
+      return last ? rects.at(-1) : rects[0];
+    };
+    let rect = visibleRect(point.node, point.offset, point.offset + 1);
+    for (let index = start; !rect && index < nodes.length; index += 1) {
+      const node = nodes[index];
+      rect = visibleRect(node, index === start ? point.offset : 0, node.textContent.length);
+    }
+    for (let index = start; !rect && index >= 0; index -= 1) {
+      const node = nodes[index];
+      rect = visibleRect(node, 0, index === start ? point.offset : node.textContent.length, true);
+    }
+    if (!rect) return { exact: true, page: Math.min(state.page, state.pages - 1) };
+    const pageIndex = columnForRect(
+      rect,
+      book.getBoundingClientRect().left,
+      pageStep,
+      visualScale,
+    );
+    return { exact: true, page: Math.min(pageIndex, state.pages - 1) };
   }
 
   function offsetForFragment(fragment) {
@@ -228,10 +226,10 @@ export function createPagination({
   }
 
   function syncViewportDeviceSize() {
-    const scale = 1 / devicePixelRatio;
+    visualScale = 1 / devicePixelRatio;
     const width = Math.max(1, Math.round(innerWidth * devicePixelRatio));
     const height = Math.max(1, Math.round(innerHeight * devicePixelRatio));
-    document.documentElement.style.setProperty("--page-scale", String(scale));
+    document.documentElement.style.setProperty("--page-scale", String(visualScale));
     document.documentElement.style.setProperty("--reader-width", `${width}px`);
     document.documentElement.style.setProperty("--reader-height", `${height}px`);
   }
@@ -265,6 +263,9 @@ export function createPagination({
   }
 
   function showPage() {
+    if (swipeFrame) cancelAnimationFrame(swipeFrame);
+    swipeFrame = 0;
+    swipeDelta = 0;
     const wasDragging = book.hasAttribute("data-swipe-dragging");
     book.removeAttribute("data-swipe-dragging");
     delete reader.dataset.swipeDragging;
@@ -274,20 +275,19 @@ export function createPagination({
       settleTimer = setTimeout(() => {
         settleTimer = 0;
         book.removeAttribute("data-swipe-settling");
-      }, 180);
+      }, 160);
     }
     if (isScrolled()) {
       book.style.transform = "none";
       reader.scrollTop = state.page * reader.clientHeight;
     } else {
-      const style = getComputedStyle(book);
-      const step = parseFloat(style.width) + parseFloat(style.columnGap);
-      book.style.transform = `translateX(${-state.page * step}px)`;
+      book.style.transform = `translateX(${-state.page * pageStep}px)`;
     }
     updatePosition();
   }
 
   function layout() {
+    offsetCache = null;
     const pixels = fontSizePixels(state.fontSize);
     book.style.fontSize = `${pixels}px`;
     reader.dataset.fontPixels = String(pixels);
@@ -303,7 +303,8 @@ export function createPagination({
     const style = getComputedStyle(book);
     const width = parseFloat(style.width);
     const gap = parseFloat(style.columnGap);
-    state.pages = Math.max(1, Math.round((book.scrollWidth + gap) / (width + gap)));
+    pageStep = width + gap;
+    state.pages = Math.max(1, Math.round((book.scrollWidth + gap) / pageStep));
     state.page = Math.min(state.page, state.pages - 1);
     reader.dataset.pageColumns = "paged";
     reader.dataset.scrollable = "false";
@@ -392,7 +393,7 @@ export function createPagination({
     state.page = 0;
     layout();
     await waitForStableLayout("初次分页");
-    if ((await onPageShown(true)) > 0) {
+    if ((await onPageShown(true)).layoutChanged) {
       await waitForStableLayout("初次分页");
       await relayoutAtOffset(0, "初次分页");
     }
@@ -496,7 +497,7 @@ export function createPagination({
   async function resizeViewport(anchor) {
     syncViewportDeviceSize();
     await relayoutAtOffset(anchor, "窗口尺寸重排");
-    if ((await onPageShown(true)) > 0) {
+    if ((await onPageShown(true)).layoutChanged) {
       await waitForStableLayout("窗口尺寸重排");
       await relayoutAtOffset(anchor, "窗口尺寸重排");
     }
@@ -515,8 +516,12 @@ export function createPagination({
     state.page = Math.max(0, Math.min(index, state.pages - 1));
     showPage();
     await nextFrame();
-    const restoreOffset = anchor ?? captureOffset();
-    if ((await onPageShown(true)) > 0) {
+    let restoreOffset = anchor ?? null;
+    const shown = await onPageShown(true, () => {
+      if (restoreOffset === null) restoreOffset = captureOffset();
+    });
+    if (shown.layoutChanged) {
+      assert(restoreOffset !== null, "locator-offset", operationStage);
       await waitForStableLayout(operationStage);
       await relayoutAtOffset(restoreOffset, operationStage);
     }
@@ -537,7 +542,7 @@ export function createPagination({
       await nextFrame();
       syncScrollPage();
       updatePosition();
-      if ((await onPageShown(true)) > 0) await relayoutAtOffset(offset, operationStage);
+      if ((await onPageShown(true)).layoutChanged) await relayoutAtOffset(offset, operationStage);
       return true;
     }
     const target = pageForOffset(offset);
@@ -594,15 +599,19 @@ export function createPagination({
 
   function previewSwipe(deltaX) {
     if (isScrolled()) return;
-    clearTimeout(settleTimer);
-    settleTimer = 0;
-    book.removeAttribute("data-swipe-settling");
-    const style = getComputedStyle(book);
-    const step = parseFloat(style.width) + parseFloat(style.columnGap);
-    const scale = reader.clientWidth / reader.getBoundingClientRect().width;
-    book.setAttribute("data-swipe-dragging", "");
-    reader.dataset.swipeDragging = "true";
-    book.style.transform = `translateX(${-state.page * step + deltaX * scale}px)`;
+    if (!book.hasAttribute("data-swipe-dragging")) {
+      clearTimeout(settleTimer);
+      settleTimer = 0;
+      book.removeAttribute("data-swipe-settling");
+      book.setAttribute("data-swipe-dragging", "");
+      reader.dataset.swipeDragging = "true";
+    }
+    swipeDelta = deltaX;
+    if (swipeFrame) return;
+    swipeFrame = requestAnimationFrame(() => {
+      swipeFrame = 0;
+      book.style.transform = `translateX(${-state.page * pageStep + swipeDelta / visualScale}px)`;
+    });
   }
 
   function cancelSwipe() {

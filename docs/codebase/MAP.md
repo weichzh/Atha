@@ -32,7 +32,7 @@
 | `scripts/check-p0-ffi.ps1` | 构建两个 FFI 实现并运行统一 runner | 已通过 |
 | `scripts/check-p0-sqlite.ps1` | 重建数据库并验证事务、FTS 与 10k 冒烟 | 已通过 |
 | `scripts/check-reader-slice.ps1` | 构建实际 host，运行安全、布局和性能验收 | M2 已通过 |
-| `scripts/check-reader-formula-performance.ps1` | 锁定真实公式重负载 EPUB 与章节，构建 Tauri 前端并运行十样本 WebView2 median/P95 benchmark | 已通过 |
+| `scripts/check-reader-formula-performance.ps1` | 通过忽略 sidecar 锁定私密公式压力样本，复用 Linux Tauri 手势矩阵执行 5 次预热与 20 次逐场景 P95 benchmark | Linux GUI 正式门已通过 |
 | `scripts/export_reader_sample.py` | 安全、可重复地从 EPUB 导出单章节、带 manifest 的多章节或 fixture-only 全 XHTML 验收样本 | M2 已通过 |
 | `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页、manifest 和书根资源 | M2 R1 已通过 |
 | `scripts/check-reader-samples.ps1` | 四样本实际 host、内容交互、状态、搜索、标注与明暗主题截图总验收 | M2 已通过 |
@@ -76,7 +76,7 @@
 - `reader::dictionary::LocalDictionaries` 在独立 `Dictionaries` 目录按固定格式域事务导入 MDX / MDD 或经典 MOBI6，MDict 复用成熟 reader，Kindle 以稀疏索引只读目标 records；精确查询结果统一净化为纯文本，Tauri 日志不记录路径、查询、词头、释义或资源；
 - `atha`、`atha-book` 与 `atha-cover` 自定义协议只提供应用资源、当前书根与已登记封面；Windows / Android 使用 `https://*.localhost`，Linux 使用 `<scheme>://localhost`。同书校验比较协议与 host，不能依赖 custom scheme 恒为 `null` 的 `URL.origin`；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
-- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`reader-state` 拥有偏好、书签、进度和应用级阅读统计记录；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式执行当前页优先校验、解码和章节内短期复用；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
+- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`interaction` 以一次序列一个 owner 仲裁翻页、横向溢出和内容激活，`pagination` 用单个 rAF 写入拖动预览并缓存稳定页偏移；`reader-state` 拥有偏好、书签、进度和应用级阅读统计记录；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式执行当前页优先校验、解码和章节内短期复用，成功显现不重排，失败替换才在首次布局变化前捕获 Locator；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
 - 十九份页面源码由 Vite 或应用资源协议按固定顺序交付为单个 `atha-reader` runtime，避免为源码分层增加多次请求；浏览器验证服务器使用同一顺序，并对各 module 与拼接后的整体 bundle 运行语法检查；
 - Locator 以内容版本、section id 和 DOM 文本 UTF-16 偏移表示 point/range；R2 range 限于单 section 并检查实际文本边界，无效输入安全回落并留下诊断，页码不作为内容坐标；窗口重排暂时无法测量文字矩形时保留已校验偏移和当前页，错误界面显示稳定代码与阶段而不暴露书籍内容；
 - 上一页和下一页可跨 section；manifest TOC 与已有书签继续共用隐藏的原生 `select` 数据源，壳层把它投影为全屏目录按钮，书签紧随对应章节并通过 Locator 跳转；用户点击章节或书签后等待导航稳定并返回沉浸阅读；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
@@ -92,7 +92,7 @@
 
 - 日常 GUI 使用当前 GNOME Wayland 会话中的 Tauri / WebKitGTK，不启动 Android 模拟器；发布前与移动端专项验收才恢复 Android 门禁；
 - Linux 应用根是 `tauri://localhost`，书根与封面分别是 `atha-book://localhost`、`atha-cover://localhost`；平台常量统一供路由、维护 command、前端资源和 CSP 使用；
-- `scripts/check-fb2-source.ps1 -VerifyLinuxGui` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；当前已覆盖书架、目录、搜索、跨 section 导航、阅读统计前台 / 最小化 / 重启、桌面 / 移动统计截图、重启恢复和 AppLog 隐私。
+- `scripts/check-fb2-source.ps1 -VerifyLinuxGui` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；除书架、目录、搜索、跨 section 导航、阅读统计、截图、恢复和 AppLog 隐私外，当前手势门覆盖 13 个普通、公式、表格、内部滚动与双向边界场景。门禁请求 W3C touch Actions 并核对可信事件，但当前 WebKitGTK 实际报告 `mouse`，因此它不是实体触摸证据。
 
 ### Android EPUB 纵切
 
@@ -149,10 +149,10 @@
 | EPUB2 / NCX 子集 | `cargo test -p atha-backend --test epub_import`、EPUBCheck 5.3.0、`scripts/check-android-reader.ps1 -VerifyEpub2NcxFixture` | 动态原创 fixture 通过规范 oracle；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证目录跳转和强停后同一 section / page 恢复 |
 | CBZ JPEG / PNG | `cargo test --locked -p atha-backend --test cbz_import`、`scripts/check-cbz-source.ps1`、`scripts/check-android-reader.ps1 -VerifyCbzFixture` | 动态原创 fixture 的 importer、安全矩阵和 reader 坏页自检已通过；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证逐页、坏页继续和强停恢复 |
 | Markdown / TXT | `cargo test --locked -p atha-backend --test text_import`、`scripts/check-text-source.ps1`、`scripts/check-android-reader.ps1 -VerifyMarkdownText` | 仓库 Markdown 与私有 opt-in TXT 的 importer、安全矩阵、API 36 x86_64 16 KiB picker / 目录 / 搜索 / 翻页 / 强停恢复和十样本 TXT 相对基线已通过；未完成 ARM64 真机性能门 |
-| FB2 / FBZ 与阅读统计 | `node --test reader/web/reader-state.test.mjs`、`cargo test --locked -p atha-backend --test fb2_import`、`scripts/check-fb2-source.ps1 -VerifyLinuxGui` | 动态原创 fixture 的 importer、安全矩阵、Windows-1251 与内容身份已通过；真实 Linux Tauri / WebKitGTK 已验证书架、三条目录、搜索、跨 section 导航、前台 / 最小化计时、统计重启恢复、桌面 / 移动截图和 AppLog 隐私 |
+| FB2 / FBZ、阅读统计与手势 | `node --test reader/web/reader-state.test.mjs`、`cargo test --locked -p atha-backend --test fb2_import`、`scripts/check-fb2-source.ps1 -VerifyLinuxGui` | 动态原创 fixture 的 importer、安全矩阵、Windows-1251 与内容身份已通过；真实 Linux Tauri / WebKitGTK 已验证书架、目录、搜索、导航、统计、恢复、宽窄截图、AppLog 隐私及 13 场景可信自动化指针矩阵；实际指针类型为 `mouse`，实体触摸待用户实测 |
 | MOBI / AZW / AZW3 | `cargo test --locked -p atha-backend --test kindle_import`、`scripts/check-kindle-source.ps1 -VerifyLinuxGui` | `boko 0.5.0` 前置有界预检、两个私有普通 KF8、词典早拒绝和相同字节跨后缀身份已通过；真实 Linux Tauri / WebKitGTK 已验证 204 条唯一目录、搜索、重排、恢复、非空截图和 AppLog 隐私；源 flow stylesheet 与 Android ARM64 性能尚未完成 |
 | MDict / Kindle 离线词典 | `cargo test --locked -p atha-backend --test dictionary_lookup`、`scripts/check-dictionary-source.ps1 -PrivateFixtures fixtures/local -VerifyLinuxGui -VerifyAndroid -Device <serial>` | 私有 MDict v2 / MDD 与经典 Kindle MOBI6 的固定英文查询 / 释义哈希、范围读取、安全纯文本和 release benchmark 已通过；Kindle HUFF 使用真实累计 record 偏移。Linux 冷 / 热 P95 为 Kindle 6.652 / 5.265ms、MDict 0.881 / 0.876ms、MDD 0.459 / 0.466ms，RSS 27,376 KiB；PCT-AL10 arm64 release 冷 / 热 P95 为 Kindle 45.261 / 28.442ms、MDict 2.780 / 2.377ms、MDD 1.100 / 0.970ms，RSS 23,308 KiB。Linux GUI、华为 WebView 114 的真实长按、四图标动作栏、直接查词、75% 抽屉和遮罩关闭均已通过 |
-| 公式性能 | `scripts/check-reader-formula-performance.ps1` | 固定真实 EPUB 章节的十样本本地 benchmark |
+| 公式与手势性能 | `scripts/check-reader-formula-performance.ps1` | 忽略 sidecar 锁定私密样本身份与章节；Linux Tauri 5 + 20 逐场景 P95 门已通过，普通 / 公式压力章节最差聚合值分别为输入 32 / 30ms、帧 17 / 25ms、最大帧 17 / 25ms、稳定 212 / 216ms |
 
 这些结果不是 CI、安装包、生产环境或跨设备证据。源码、依赖、配置或样本变化后，应重新运行受影响的最小入口；只有最终候选才扩展到 required gate。
 ## 已知缺口

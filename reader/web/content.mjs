@@ -204,6 +204,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     const alternative = image.getAttribute("alt")?.trim().slice(0, 160);
     image.removeAttribute("aria-hidden");
     image.removeAttribute("aria-disabled");
+    image.draggable = false;
     image.setAttribute("role", "button");
     image.setAttribute("tabindex", "0");
     image.setAttribute(
@@ -432,7 +433,14 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     });
   }
 
-  async function loadImages(images, generation) {
+  async function loadImages(images, generation, beforeLayoutChange) {
+    let layoutChanged = false;
+    const replaceFailed = (image) => {
+      if (!layoutChanged) beforeLayoutChange?.();
+      layoutChanged = true;
+      replaceFailedImage(image);
+      pendingImages.delete(image);
+    };
     await Promise.all(
       images.map(async (image) => {
         const url = pendingImages.get(image);
@@ -440,9 +448,8 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         try {
           await validateSvgOnce(url);
         } catch {
-          if (generation !== renderGeneration) return;
-          replaceFailedImage(image);
-          pendingImages.delete(image);
+          if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
+          replaceFailed(image);
           return;
         }
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
@@ -450,9 +457,8 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         try {
           await image.decode();
         } catch {
-          if (generation !== renderGeneration) return;
-          replaceFailedImage(image);
-          pendingImages.delete(image);
+          if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
+          replaceFailed(image);
           return;
         }
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
@@ -463,19 +469,29 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         pendingImages.delete(image);
       }),
     );
+    return layoutChanged;
   }
 
-  async function loadVisible(includeNextPage = false) {
+  async function loadVisible(includeNextPage = false, beforeLayoutChange) {
     const generation = renderGeneration;
     let loaded = 0;
+    let layoutChanged = false;
+    let layoutChangeNotified = false;
+    const notifyBeforeLayoutChange = () => {
+      if (layoutChangeNotified) return;
+      layoutChangeNotified = true;
+      beforeLayoutChange?.();
+    };
     for (let pass = 0; pass < 4; pass += 1) {
       const images = pendingWithin(loadBounds(includeNextPage));
       if (images.length === 0) break;
       loaded += images.length;
-      await loadImages(images, generation);
+      const passChangedLayout = await loadImages(images, generation, notifyBeforeLayoutChange);
+      layoutChanged ||= passChangedLayout;
+      if (!passChangedLayout) break;
     }
     lastVisibleLoadCount = loaded;
-    return loaded;
+    return Object.freeze({ loaded, layoutChanged });
   }
 
   function idleTurn() {
@@ -706,19 +722,41 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       ensure(rejected(() => parseSvg(svg)), "invalid-svg");
     }
     ensure(isSvgImage({ src: new URL("probe.SVG", bookUrl).href }), "invalid-svg");
-    const deferredProbe = document.createElement("img");
-    deferredProbe.alt = "缺失公式";
-    const deferredProbeUrl = "https://atha-book.localhost/invalid-probe.svg";
-    book.append(deferredProbe);
-    pendingImages.set(deferredProbe, deferredProbeUrl);
-    validatedSvg.set(deferredProbeUrl, Promise.reject(new Error("invalid-svg")));
+    const validProbe = document.createElement("img");
+    const validProbeUrl =
+      "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='1'%20height='1'/%3E";
+    Object.defineProperty(validProbe, "decode", { value: () => Promise.resolve() });
+    const invalidProbe = document.createElement("img");
+    invalidProbe.alt = "缺失公式";
+    const invalidProbeUrl = "https://atha-book.localhost/invalid-probe.svg";
+    book.append(validProbe, invalidProbe);
+    pendingImages.set(validProbe, validProbeUrl);
+    pendingImages.set(invalidProbe, invalidProbeUrl);
+    validatedSvg.set(validProbeUrl, Promise.resolve());
+    validatedSvg.set(invalidProbeUrl, Promise.reject(new Error("invalid-svg")));
+    let layoutCallbacks = 0;
     try {
-      await loadImages([deferredProbe], renderGeneration);
+      const layoutChanged = await loadImages([validProbe, invalidProbe], renderGeneration, () => {
+        layoutCallbacks += 1;
+        ensure(book.contains(validProbe) && book.contains(invalidProbe), "invalid-svg");
+      });
+      ensure(
+        layoutChanged &&
+          layoutCallbacks === 1 &&
+          book.contains(validProbe) &&
+          !book.contains(invalidProbe) &&
+          !pendingImages.has(validProbe) &&
+          !pendingImages.has(invalidProbe) &&
+          book.textContent === "缺失公式",
+        "invalid-svg",
+      );
     } finally {
-      pendingImages.delete(deferredProbe);
-      validatedSvg.delete(deferredProbeUrl);
+      pendingImages.delete(validProbe);
+      pendingImages.delete(invalidProbe);
+      validatedSvg.delete(validProbeUrl);
+      validatedSvg.delete(invalidProbeUrl);
+      readySvg.delete(validProbeUrl);
     }
-    ensure(book.textContent === "缺失公式" && !pendingImages.has(deferredProbe), "invalid-svg");
     book.replaceChildren();
   }
 

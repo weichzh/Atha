@@ -3,7 +3,17 @@
 [CmdletBinding()]
 param(
     [switch]$VerifyLinuxGui,
-    [string]$DictionaryFixtureRoot
+    [string]$DictionaryFixtureRoot,
+    [string]$FormulaBenchmarkEpub,
+    [string]$FormulaBenchmarkEntry,
+    [ValidateRange(1, 100000)]
+    [int]$FormulaBenchmarkMinimumFormulas = 1000,
+    [ValidateRange(1, 10000)]
+    [int]$FormulaBenchmarkMinimumPages = 10,
+    [ValidateRange(0, 20)]
+    [int]$GestureWarmupSamples = 5,
+    [ValidateRange(1, 100)]
+    [int]$GestureMeasureSamples = 20
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +25,18 @@ $expectedFixtureSha256 = '155225e7aa977574c5f75559f58ad121004bf714b91e10caeacd77
 
 . (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
 $cargoPath = $env:ATHA_CARGO
+$formulaSource = $null
+$formulaPrivateTokens = @()
+if ([string]::IsNullOrWhiteSpace($FormulaBenchmarkEpub) -ne [string]::IsNullOrWhiteSpace($FormulaBenchmarkEntry)) {
+    throw 'FormulaBenchmarkEpub and FormulaBenchmarkEntry must be provided together.'
+}
+if (-not [string]::IsNullOrWhiteSpace($FormulaBenchmarkEpub)) {
+    if (-not $VerifyLinuxGui) { throw 'FormulaBenchmarkEpub requires VerifyLinuxGui.' }
+    if (-not (Test-Path -LiteralPath $FormulaBenchmarkEpub -PathType Leaf)) {
+        throw 'Formula benchmark EPUB does not exist.'
+    }
+    $formulaSource = (Resolve-Path -LiteralPath $FormulaBenchmarkEpub).Path
+}
 
 function Invoke-CheckedCargo {
     param([string[]] $Arguments, [string] $Failure)
@@ -64,6 +86,299 @@ function Invoke-WebDriverScript {
         script = $Script
         args = @()
     }).value
+}
+
+function Invoke-WebDriverAsyncScript {
+    param(
+        [string] $BaseUrl,
+        [string] $Session,
+        [string] $Script,
+        [object[]] $ScriptArguments = @()
+    )
+
+    (Invoke-WebDriver -BaseUrl $BaseUrl -Method Post -Path "/session/$Session/execute/async" -Body @{
+        script = $Script
+        args = $ScriptArguments
+    }).value
+}
+
+function Enable-ReaderGestureDiagnostics {
+    param([string] $BaseUrl, [string] $Session)
+
+    if (Invoke-WebDriverScript -BaseUrl $BaseUrl -Session $Session -Script 'return Boolean(globalThis.__athaReaderDiagnostics?.beginGestureProbe);') {
+        return
+    }
+    [void](Invoke-WebDriverScript -BaseUrl $BaseUrl -Session $Session -Script @'
+const url = new URL(location.href);
+url.searchParams.set('gesture-probe', '1');
+location.replace(url.href);
+return true;
+'@)
+    [void](Wait-WebDriverScript -BaseUrl $BaseUrl -Session $Session -Failure 'Reader gesture diagnostics did not become ready.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null,
+  available: Boolean(globalThis.__athaReaderDiagnostics?.beginGestureProbe)
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.available })
+}
+
+function Invoke-WebDriverRequestedTouchGesture {
+    param(
+        [string] $BaseUrl,
+        [string] $Session,
+        [object] $Point,
+        [ValidateSet('tap', 'drag')]
+        [string] $Action,
+        [ValidateRange(8, 12)]
+        [int] $Steps = 10
+    )
+
+    $actions = [Collections.Generic.List[object]]::new()
+    $actions.Add(@{
+        type = 'pointerMove'
+        duration = 0
+        origin = 'viewport'
+        x = [int]$Point.x
+        y = [int]$Point.y
+    })
+    $actions.Add(@{ type = 'pointerDown'; button = 0 })
+    if ($Action -eq 'tap') {
+        $actions.Add(@{ type = 'pause'; duration = 40 })
+    }
+    else {
+        foreach ($step in 1..$Steps) {
+            $ratio = $step / $Steps
+            $actions.Add(@{
+                type = 'pointerMove'
+                duration = 16
+                origin = 'viewport'
+                x = [int][Math]::Round([double]$Point.x + ([double]$Point.endX - [double]$Point.x) * $ratio)
+                y = [int][Math]::Round([double]$Point.y + ([double]$Point.endY - [double]$Point.y) * $ratio)
+            })
+        }
+    }
+    $actions.Add(@{ type = 'pointerUp'; button = 0 })
+
+    try {
+        [void](Invoke-WebDriver -BaseUrl $BaseUrl -Method Post -Path "/session/$Session/actions" -Body @{
+            actions = @(@{
+                type = 'pointer'
+                id = "atha-touch-$([Guid]::NewGuid().ToString('N'))"
+                parameters = @{ pointerType = 'touch' }
+                actions = @($actions)
+            })
+        })
+    }
+    finally {
+        try { [void](Invoke-WebDriver -BaseUrl $BaseUrl -Method Delete -Path "/session/$Session/actions" -Body $null) }
+        catch { }
+    }
+}
+
+function Get-NearestRank {
+    param([double[]] $Values, [double] $Ratio = 0.95)
+
+    if ($Values.Count -eq 0) { return $null }
+    $ordered = @($Values | Sort-Object)
+    $ordered[[Math]::Max(0, [Math]::Ceiling($ordered.Count * $Ratio) - 1)]
+}
+
+function Test-FiniteNumber {
+    param([object] $Value)
+
+    if ($null -eq $Value) { return $false }
+    try { $number = [double]$Value }
+    catch { return $false }
+    -not [double]::IsNaN($number) -and -not [double]::IsInfinity($number)
+}
+
+function Invoke-ReaderGestureGate {
+    param(
+        [string] $BaseUrl,
+        [string] $Session,
+        [int] $WarmupSamples,
+        [int] $MeasureSamples
+    )
+
+    $beginScript = @'
+const done = arguments[arguments.length - 1];
+globalThis.__athaReaderDiagnostics
+  .beginGestureProbe(arguments[0], arguments[1], arguments[2], arguments[3])
+  .then((value) => done({ ok: true, value }))
+  .catch((error) => done({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+'@
+    $finishScript = @'
+const done = arguments[arguments.length - 1];
+globalThis.__athaReaderDiagnostics
+  .finishGestureProbe(arguments[0])
+  .then((value) => done({ ok: true, value }))
+  .catch((error) => done({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+'@
+    $cleanupScript = @'
+const done = arguments[arguments.length - 1];
+globalThis.__athaReaderDiagnostics
+  .cleanupGestureProbe()
+  .then((value) => done({ ok: true, value }))
+  .catch((error) => done({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+'@
+    $scenarios = @(
+        [pscustomobject]@{ name = 'ordinary-tap'; target = 'ordinary'; action = 'tap'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'ordinary-drag'; target = 'ordinary'; action = 'drag'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'formula-tap'; target = 'formula'; action = 'tap'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'formula-drag'; target = 'formula'; action = 'drag'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'formula-vertical'; target = 'formula'; action = 'drag'; mode = 'vertical'; direction = 1; expectation = 'protected' },
+        [pscustomobject]@{ name = 'table-tap'; target = 'table'; action = 'tap'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'table-drag'; target = 'table'; action = 'drag'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'table-vertical'; target = 'table'; action = 'drag'; mode = 'vertical'; direction = 1; expectation = 'protected' },
+        [pscustomobject]@{ name = 'overflow-table-tap'; target = 'overflow-table'; action = 'tap'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'overflow-table-pan-next'; target = 'overflow-table'; action = 'drag'; mode = 'pan'; direction = 1; expectation = 'pan' },
+        [pscustomobject]@{ name = 'overflow-table-pan-previous'; target = 'overflow-table'; action = 'drag'; mode = 'pan'; direction = -1; expectation = 'pan' },
+        [pscustomobject]@{ name = 'overflow-table-edge-next'; target = 'overflow-table'; action = 'drag'; mode = 'edge'; direction = 1; expectation = 'page' },
+        [pscustomobject]@{ name = 'overflow-table-edge-previous'; target = 'overflow-table'; action = 'drag'; mode = 'edge'; direction = -1; expectation = 'page' }
+    )
+    $failures = [Collections.Generic.List[string]]::new()
+    $measurements = [Collections.Generic.List[object]]::new()
+    $smokeChecked = $false
+    $trustedPointer = $false
+    $nativeTouchObserved = $false
+    $pointerTypes = @()
+
+    Enable-ReaderGestureDiagnostics -BaseUrl $BaseUrl -Session $Session
+    try {
+        foreach ($scenario in $scenarios) {
+            $samples = $WarmupSamples + $MeasureSamples
+            for ($sample = 0; $sample -lt $samples; $sample += 1) {
+                $begin = Invoke-WebDriverAsyncScript -BaseUrl $BaseUrl -Session $Session -Script $beginScript -ScriptArguments @(
+                    $scenario.target, $scenario.action, $scenario.mode, $scenario.direction
+                )
+                if (-not $begin.ok) {
+                    throw "Gesture probe setup failed for $($scenario.name): $($begin.error)"
+                }
+                Invoke-WebDriverRequestedTouchGesture -BaseUrl $BaseUrl -Session $Session -Point $begin.value -Action $scenario.action -Steps 10
+                $finished = Invoke-WebDriverAsyncScript -BaseUrl $BaseUrl -Session $Session -Script $finishScript -ScriptArguments @($begin.value.id)
+                if (-not $finished.ok) {
+                    throw "Gesture probe result failed for $($scenario.name): $($finished.error)"
+                }
+                $result = $finished.value
+                if (-not $smokeChecked) {
+                    if (-not $result.targetHit -or -not $result.trusted) {
+                        $smoke = [ordered]@{
+                            targetHit = [bool]$result.targetHit
+                            trusted = [bool]$result.trusted
+                            touch = [bool]$result.touch
+                            pointerTypes = @($result.pointerTypes)
+                            pointerMoves = [int]$result.pointerMoves
+                        } | ConvertTo-Json -Compress
+                        throw "W3C requested-touch pointer smoke failed: $smoke"
+                    }
+                    $trustedPointer = [bool]$result.trusted
+                    $nativeTouchObserved = [bool]$result.touch
+                    $pointerTypes = @($result.pointerTypes)
+                    $smokeChecked = $true
+                }
+
+                $sampleLabel = if ($sample -lt $WarmupSamples) { "warmup-$($sample + 1)" } else { "measure-$($sample - $WarmupSamples + 1)" }
+                $reasons = [Collections.Generic.List[string]]::new()
+                if (-not $result.targetHit) { $reasons.Add('target-miss') }
+                if (-not $result.trusted) { $reasons.Add('untrusted-pointer') }
+                if (-not $result.settled) { $reasons.Add('not-settled') }
+                if ($result.preview) { $reasons.Add('preview-opened') }
+                if ($result.compatibilityEvents -ne 0) { $reasons.Add("compatibility-events=$($result.compatibilityEvents)") }
+                if ($scenario.action -eq 'drag' -and $result.pointerMoves -lt 10) { $reasons.Add("pointer-moves=$($result.pointerMoves)") }
+                if (-not (Test-FiniteNumber $result.timing.releaseToStableMs)) { $reasons.Add('invalid-settle-timing') }
+                if ($scenario.expectation -ne 'protected') {
+                    if (-not (Test-FiniteNumber $result.timing.inputToFirstVisualMs)) { $reasons.Add('invalid-input-timing') }
+                    if ($scenario.action -eq 'tap' -and -not (Test-FiniteNumber $result.timing.releaseToFirstVisualMs)) { $reasons.Add('invalid-tap-timing') }
+                }
+                if ($scenario.expectation -eq 'page') {
+                    if (-not $result.singlePage) { $reasons.Add('not-single-page') }
+                    if ($scenario.action -eq 'drag') {
+                        if ($result.rafTransformSamples -lt 6) { $reasons.Add("raf-transforms=$($result.rafTransformSamples)") }
+                    }
+                }
+                elseif ($scenario.expectation -eq 'pan') {
+                    if (-not $result.samePage) { $reasons.Add('pan-changed-page') }
+                    if ([Math]::Abs([double]$result.scrollDelta) -lt 24) { $reasons.Add("scroll-delta=$($result.scrollDelta)") }
+                }
+                else {
+                    if (-not $result.samePage) { $reasons.Add('vertical-changed-page') }
+                    if ([Math]::Abs([double]$result.scrollDelta) -ge 1) { $reasons.Add("vertical-scroll-delta=$($result.scrollDelta)") }
+                    if ($result.visualUpdateSamples -ne 0) { $reasons.Add("vertical-visual-updates=$($result.visualUpdateSamples)") }
+                }
+                if ($scenario.action -eq 'drag' -and $scenario.expectation -ne 'protected') {
+                    $minimumVisualUpdates = [Math]::Max(3, [Math]::Ceiling([double]$result.pointerMoves / 2))
+                    if ($result.visualUpdateSamples -lt $minimumVisualUpdates) { $reasons.Add("visual-updates=$($result.visualUpdateSamples)") }
+                    if (-not (Test-FiniteNumber $result.timing.frameP95Ms)) { $reasons.Add('invalid-frame-timing') }
+                    if (-not (Test-FiniteNumber $result.timing.maxFrameMs)) { $reasons.Add('invalid-maximum-timing') }
+                }
+                if ($reasons.Count -gt 0) {
+                    $failures.Add("$($scenario.name)/$sampleLabel[$([string]::Join(',', $reasons))]")
+                }
+                if ($sample -ge $WarmupSamples -and $scenario.expectation -ne 'protected') {
+                    $measurements.Add([pscustomobject]@{
+                        name = $scenario.name
+                        action = $scenario.action
+                        input = $result.timing.inputToFirstVisualMs
+                        tap = $result.timing.releaseToFirstVisualMs
+                        frame = $result.timing.frameP95Ms
+                        maximum = $result.timing.maxFrameMs
+                        settle = $result.timing.releaseToStableMs
+                    })
+                }
+            }
+        }
+    }
+    finally {
+        $cleanup = Invoke-WebDriverAsyncScript -BaseUrl $BaseUrl -Session $Session -Script $cleanupScript
+        if (-not $cleanup.ok) { throw "Gesture probe cleanup failed: $($cleanup.error)" }
+    }
+
+    if ($failures.Count -gt 0) {
+        throw "Trusted pointer gesture semantics failed: $([string]::Join('; ', $failures))"
+    }
+    $scenarioMetrics = @($measurements | Group-Object name | ForEach-Object {
+        $samples = @($_.Group)
+        $drag = @($samples | Where-Object action -eq 'drag')
+        $tap = @($samples | Where-Object action -eq 'tap')
+        [pscustomobject]@{
+            name = $_.Name
+            input = if ($drag.Count) { Get-NearestRank -Values @($drag | ForEach-Object { [double]$_.input }) } else { $null }
+            tap = if ($tap.Count) { Get-NearestRank -Values @($tap | ForEach-Object { [double]$_.tap }) } else { $null }
+            frame = if ($drag.Count) { Get-NearestRank -Values @($drag | ForEach-Object { [double]$_.frame }) } else { $null }
+            settle = Get-NearestRank -Values @($samples | ForEach-Object { [double]$_.settle })
+        }
+    })
+    if ($MeasureSamples -ge 20) {
+        foreach ($metric in $scenarioMetrics) {
+            if ($null -ne $metric.input -and $metric.input -gt 33.4) { throw "Gesture input-to-first-visual P95 exceeded 33.4 ms for $($metric.name): $($metric.input) ms." }
+            if ($null -ne $metric.tap -and $metric.tap -gt 50) { throw "Gesture tap-to-first-visual P95 exceeded 50 ms for $($metric.name): $($metric.tap) ms." }
+            if ($null -ne $metric.frame -and $metric.frame -gt 25) { throw "Gesture drag frame P95 exceeded 25 ms for $($metric.name): $($metric.frame) ms." }
+            if ($metric.settle -gt 220) { throw "Gesture release-to-stable P95 exceeded 220 ms for $($metric.name): $($metric.settle) ms." }
+        }
+    }
+    $maxFrameMeasurement = $measurements | Where-Object action -eq 'drag' | Sort-Object maximum -Descending | Select-Object -First 1
+    $maxFrame = $maxFrameMeasurement.maximum
+    if ($maxFrame -gt 50) { throw "Gesture maximum frame interval exceeded 50 ms for $($maxFrameMeasurement.name): $maxFrame ms." }
+    $inputP95 = ($scenarioMetrics | Measure-Object -Property input -Maximum).Maximum
+    $tapP95 = ($scenarioMetrics | Measure-Object -Property tap -Maximum).Maximum
+    $dragFrameP95 = ($scenarioMetrics | Measure-Object -Property frame -Maximum).Maximum
+    $settleP95 = ($scenarioMetrics | Measure-Object -Property settle -Maximum).Maximum
+
+    [pscustomobject]@{
+        requested_pointer_type = 'touch'
+        trusted_pointer_events = $trustedPointer
+        native_touch_observed = $nativeTouchObserved
+        observed_pointer_types = [string]::Join(',', $pointerTypes)
+        warmups_per_scenario = $WarmupSamples
+        measurements_per_scenario = $MeasureSamples
+        scenarios = $scenarios.Count
+        input_to_first_visual_p95_ms = $inputP95
+        tap_to_first_visual_p95_ms = $tapP95
+        drag_frame_p95_ms = $dragFrameP95
+        maximum_frame_ms = $maxFrame
+        release_to_stable_p95_ms = $settleP95
+    }
 }
 
 function Send-WebDriverText {
@@ -122,7 +437,13 @@ function Invoke-LinuxGuiGate {
         [string] $Application,
         [string] $DataRoot,
         [string] $DictionaryQuery,
-        [string[]] $DictionaryPrivateTokens
+        [string[]] $DictionaryPrivateTokens,
+        [string[]] $BookPrivateTokens,
+        [string] $FormulaEntry,
+        [int] $FormulaMinimumFormulas,
+        [int] $FormulaMinimumPages,
+        [int] $GestureWarmups,
+        [int] $GestureMeasurements
     )
 
     if (-not $IsLinux) { throw 'The FB2 Linux GUI gate requires Linux.' }
@@ -163,6 +484,9 @@ function Invoke-LinuxGuiGate {
     $statisticsScreenshot = Join-Path $guiRoot 'reading-statistics.png'
     $statisticsMobileScreenshot = Join-Path $guiRoot 'reading-statistics-mobile.png'
     $settingsMobileScreenshot = Join-Path $guiRoot 'reader-settings-mobile.png'
+    $expectedBooks = if ([string]::IsNullOrWhiteSpace($FormulaEntry)) { 1 } else { 2 }
+    $formulaBenchmark = $null
+    $formulaShape = $null
     try {
         Invoke-Checked 'systemd-run' @(
             '--user', '--collect', "--unit=$unit", "--working-directory=$repoRoot",
@@ -188,15 +512,23 @@ return {
   ready: document.readyState,
   href: location.href,
   cards: document.querySelectorAll('.library-book-open').length,
-  title: document.querySelector('.library-book-title')?.textContent || '',
-  author: document.querySelector('.library-book-author')?.textContent || ''
+  fb2: [...document.querySelectorAll('.library-book')].filter((card) =>
+    card.querySelector('.library-book-title')?.textContent === 'Atha FB2 Gate' &&
+    card.querySelector('.library-book-author')?.textContent === 'Ada Lin'
+  ).length
 };
-'@ -Accepted { param($value) $value.ready -eq 'complete' -and $value.cards -eq 1 }
-        if ($library.href -ne 'tauri://localhost' -or $library.title -ne 'Atha FB2 Gate' -or $library.author -ne 'Ada Lin') {
+'@ -Accepted { param($value) $value.ready -eq 'complete' -and $value.cards -eq $expectedBooks -and $value.fb2 -eq 1 }
+        if ($library.href -ne 'tauri://localhost') {
             throw 'The Linux library did not expose the prepared FB2 book.'
         }
 
-        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.querySelector('.library-book-open').click(); return true;")
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const card = [...document.querySelectorAll('.library-book')].find((item) =>
+  item.querySelector('.library-book-title')?.textContent === 'Atha FB2 Gate'
+);
+card.querySelector('.library-book-open').click();
+return true;
+'@)
         $reader = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'FB2 reader did not become ready.' -Script @'
 return {
   status: document.documentElement.dataset.status || null,
@@ -208,6 +540,13 @@ return {
         if (-not $reader.href.StartsWith('tauri://localhost/index.html?', [StringComparison]::Ordinal) -or $reader.toc -ne 3) {
             throw 'The Linux reader did not load the expected FB2 manifest.'
         }
+
+        [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 600; height = 760 })
+        $gestureBenchmark = Invoke-ReaderGestureGate `
+            -BaseUrl $baseUrl `
+            -Session $session `
+            -WarmupSamples $GestureWarmups `
+            -MeasureSamples $GestureMeasurements
 
         [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Post -Path "/session/$session/window/rect" -Body @{ width = 600; height = 760 })
         [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
@@ -797,8 +1136,14 @@ return {
         $session = $null
         $created = New-TauriSession -BaseUrl $baseUrl -Application $Application
         $session = $created.sessionId
-        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Restarted FB2 library did not become ready.' -Script "return { ready: document.readyState, cards: document.querySelectorAll('.library-book-open').length };" -Accepted { param($value) $value.ready -eq 'complete' -and $value.cards -eq 1 })
-        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.querySelector('.library-book-open').click(); return true;")
+        [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Restarted FB2 library did not become ready.' -Script "return { ready: document.readyState, cards: document.querySelectorAll('.library-book-open').length };" -Accepted { param($value) $value.ready -eq 'complete' -and $value.cards -eq $expectedBooks })
+        [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const card = [...document.querySelectorAll('.library-book')].find((item) =>
+  item.querySelector('.library-book-title')?.textContent === 'Atha FB2 Gate'
+);
+card.querySelector('.library-book-open').click();
+return true;
+'@)
         $restored = Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'FB2 reading position was not restored.' -Script @'
 if (document.documentElement.dataset.status !== 'pass') {
   return { status: document.documentElement.dataset.status || null, error: document.documentElement.dataset.error || null };
@@ -822,13 +1167,55 @@ return {
 };
 '@ -Accepted { param($value) $value.status -eq 'pass' -and $value.restored -and $value.modules -eq 2 -and $value.statistics.stored -and $value.statistics.visible }
 
+        if (-not [string]::IsNullOrWhiteSpace($FormulaEntry)) {
+            [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "location.assign('tauri://localhost'); return true;")
+            [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Formula benchmark library did not become ready.' -Script "return { ready: document.readyState, cards: document.querySelectorAll('.library-book-open').length };" -Accepted { param($value) $value.ready -eq 'complete' -and $value.cards -eq $expectedBooks })
+            [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'
+const card = [...document.querySelectorAll('.library-book')].find((item) =>
+  item.querySelector('.library-book-title')?.textContent !== 'Atha FB2 Gate'
+);
+card.querySelector('.library-book-open').click();
+return true;
+'@)
+            [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Formula benchmark reader did not become ready.' -Script @'
+return {
+  status: document.documentElement.dataset.status || null,
+  error: document.documentElement.dataset.error || null
+};
+'@ -Accepted { param($value) $value.status -eq 'pass' })
+            Enable-ReaderGestureDiagnostics -BaseUrl $baseUrl -Session $session
+            $formulaSectionScript = @'
+const done = arguments[arguments.length - 1];
+globalThis.__athaReaderDiagnostics
+  .openGestureSection(arguments[0])
+  .then((value) => done({ ok: true, value }))
+  .catch((error) => done({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+'@
+            $openedFormula = Invoke-WebDriverAsyncScript `
+                -BaseUrl $baseUrl `
+                -Session $session `
+                -Script $formulaSectionScript `
+                -ScriptArguments @($FormulaEntry)
+            if (-not $openedFormula.ok -or
+                $openedFormula.value.formulas -lt $FormulaMinimumFormulas -or
+                $openedFormula.value.pages -lt $FormulaMinimumPages) {
+                throw 'Formula benchmark section did not expose formulas.'
+            }
+            $formulaShape = $openedFormula.value
+            $formulaBenchmark = Invoke-ReaderGestureGate `
+                -BaseUrl $baseUrl `
+                -Session $session `
+                -WarmupSamples $GestureWarmups `
+                -MeasureSamples $GestureMeasurements
+        }
+
         [void](Invoke-WebDriver -BaseUrl $baseUrl -Method Delete -Path "/session/$session" -Body $null)
         $session = $null
         Invoke-Checked 'systemctl' @('--user', 'stop', "$unit.service") 'Could not stop the FB2 Linux GUI gate.'
         $unitStarted = $false
 
         $privatePattern = 'Atha FB2 Gate|Ada Lin|第一章|正文|重点|注释正文|fb2-gate\.fb2|5cec82bcb5514780'
-        $privateTokens = @($DictionaryPrivateTokens) + @(
+        $privateTokens = @($DictionaryPrivateTokens) + @($BookPrivateTokens) + @(
             $DictionaryQuery,
             $dictionary.title,
             $dictionary.headword,
@@ -853,6 +1240,24 @@ return {
             css_modules_p95_ms = $styleBenchmark.p95
             css_modules_bytes = $styleBenchmark.bytes
             reading_statistics_p95_ms = $statisticsBaseline.benchmark.p95Ms
+            gesture_requested_pointer_type = $gestureBenchmark.requested_pointer_type
+            gesture_trusted_pointer_events = $gestureBenchmark.trusted_pointer_events
+            gesture_native_touch_observed = $gestureBenchmark.native_touch_observed
+            gesture_observed_pointer_types = $gestureBenchmark.observed_pointer_types
+            gesture_scenarios = $gestureBenchmark.scenarios
+            gesture_input_p95_ms = $gestureBenchmark.input_to_first_visual_p95_ms
+            gesture_tap_p95_ms = $gestureBenchmark.tap_to_first_visual_p95_ms
+            gesture_frame_p95_ms = $gestureBenchmark.drag_frame_p95_ms
+            gesture_maximum_frame_ms = $gestureBenchmark.maximum_frame_ms
+            gesture_settle_p95_ms = $gestureBenchmark.release_to_stable_p95_ms
+            formula_section = $formulaShape.section
+            formula_count = $formulaShape.formulas
+            formula_pages = $formulaShape.pages
+            formula_gesture_input_p95_ms = $formulaBenchmark.input_to_first_visual_p95_ms
+            formula_gesture_tap_p95_ms = $formulaBenchmark.tap_to_first_visual_p95_ms
+            formula_gesture_frame_p95_ms = $formulaBenchmark.drag_frame_p95_ms
+            formula_gesture_maximum_frame_ms = $formulaBenchmark.maximum_frame_ms
+            formula_gesture_settle_p95_ms = $formulaBenchmark.release_to_stable_p95_ms
             foreground_duration_ms = $activeDelta
             background_duration_ms = $backgroundDelta
             restored_section = 4
@@ -904,6 +1309,31 @@ try {
     }
     finally {
         Remove-Item Env:ATHA_FB2_GATE_LIBRARY_ROOT -ErrorAction SilentlyContinue
+    }
+    if ($formulaSource) {
+        $env:ATHA_EPUB_GATE_LIBRARY_ROOT = Join-Path $guiRoot 'data/com.atha.reader'
+        $env:ATHA_EPUB_GATE_SOURCE = $formulaSource
+        try {
+            Invoke-CheckedCargo @(
+                'test', '--locked', '-p', 'atha-backend', '--test', 'epub_import',
+                'seeds_private_formula_gui_benchmark', '--', '--ignored', '--exact'
+            ) 'Formula Linux GUI seed failed.'
+        }
+        finally {
+            Remove-Item Env:ATHA_EPUB_GATE_LIBRARY_ROOT -ErrorAction SilentlyContinue
+            Remove-Item Env:ATHA_EPUB_GATE_SOURCE -ErrorAction SilentlyContinue
+        }
+        $formulaRecords = @(Get-ChildItem -LiteralPath (Join-Path $guiRoot 'data/com.atha.reader/Library') -File |
+            ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json } |
+            Where-Object title -NE 'Atha FB2 Gate')
+        if ($formulaRecords.Count -ne 1) { throw 'Formula GUI seed produced an invalid library record.' }
+        $formulaPrivateTokens = @(
+            $formulaSource,
+            (Split-Path -Leaf $formulaSource),
+            $FormulaBenchmarkEntry,
+            $formulaRecords[0].id,
+            $formulaRecords[0].title
+        ) + @($formulaRecords[0].authors)
     }
     $dictionaryQuery = $null
     $dictionaryPrivateTokens = @()
@@ -975,7 +1405,13 @@ try {
             -Application (Join-Path $repoRoot 'target/debug/atha-reader-app') `
             -DataRoot (Join-Path $guiRoot 'data') `
             -DictionaryQuery $dictionaryQuery `
-            -DictionaryPrivateTokens $dictionaryPrivateTokens | Format-List
+            -DictionaryPrivateTokens $dictionaryPrivateTokens `
+            -BookPrivateTokens $formulaPrivateTokens `
+            -FormulaEntry $FormulaBenchmarkEntry `
+            -FormulaMinimumFormulas $FormulaBenchmarkMinimumFormulas `
+            -FormulaMinimumPages $FormulaBenchmarkMinimumPages `
+            -GestureWarmups $GestureWarmupSamples `
+            -GestureMeasurements $GestureMeasureSamples | Format-List
     }
 }
 finally {

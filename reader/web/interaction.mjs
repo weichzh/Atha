@@ -2,6 +2,8 @@ const WHEEL_THRESHOLD = 60;
 const WHEEL_IDLE_MS = 240;
 const SWIPE_DISTANCE = 48;
 const CLICK_DRIFT = 8;
+const AXIS_ADVANTAGE = 1.5;
+const CLICK_SUPPRESSION_MS = 500;
 
 function createWheelDetector() {
   let total = 0;
@@ -44,7 +46,7 @@ function scrollSwipeDirection(startY, endY, atStart, atEnd) {
   return 0;
 }
 
-export function createInteraction({ reader, content, navigation, pagination, preferences, onCenter, assert, fail }) {
+export function createInteraction({ reader, content, navigation, pagination, onCenter, assert, fail }) {
   const wheel = createWheelDetector();
   const counts = {
     keyboard: 0,
@@ -58,7 +60,15 @@ export function createInteraction({ reader, content, navigation, pagination, pre
   };
   let pointer = null;
   let touch = null;
+  let suppressedClick = null;
   const insideEvents = new WeakSet();
+
+  function matchingPath(event, selector) {
+    return (
+      event.composedPath().find((node) => node instanceof Element && node.matches(selector)) ||
+      null
+    );
+  }
 
   function protectedTarget(event) {
     return event
@@ -70,6 +80,15 @@ export function createInteraction({ reader, content, navigation, pagination, pre
             "a, button, input, select, textarea, label, summary, details, dialog, table, pre, [contenteditable], [role='button']",
           ),
       );
+  }
+
+  function hardProtectedTarget(event) {
+    return Boolean(
+      matchingPath(
+        event,
+        "a, button, input, select, textarea, label, summary, details, dialog, [contenteditable], [role='button']:not(img)",
+      ),
+    );
   }
 
   function hasSelection() {
@@ -103,7 +122,52 @@ export function createInteraction({ reader, content, navigation, pagination, pre
   }
 
   function scrollMode() {
-    return preferences.snapshot().book.readingMode === "scroll";
+    return reader.dataset.readingMode === "scroll";
+  }
+
+  function canScrollOverflow(overflow, deltaX) {
+    return (
+      (deltaX < 0 && overflow.start < overflow.maximum - 1) ||
+      (deltaX > 0 && overflow.start > 1)
+    );
+  }
+
+  function applyOverflow(pointerState) {
+    pointerState.scrollFrame = 0;
+    pointerState.overflow.element.scrollLeft = Math.max(
+      0,
+      Math.min(
+        pointerState.overflow.maximum,
+        pointerState.overflow.start - pointerState.deltaX * pointerState.layoutScale,
+      ),
+    );
+  }
+
+  function previewOverflow(pointerState, deltaX) {
+    pointerState.deltaX = deltaX;
+    if (pointerState.scrollFrame) return;
+    pointerState.scrollFrame = requestAnimationFrame(() => applyOverflow(pointerState));
+  }
+
+  function finishOverflow(pointerState) {
+    if (!pointerState.scrollFrame) return;
+    cancelAnimationFrame(pointerState.scrollFrame);
+    applyOverflow(pointerState);
+  }
+
+  function cancelPointer(pointerState = pointer) {
+    pointer = null;
+    if (pointerState?.scrollFrame) cancelAnimationFrame(pointerState.scrollFrame);
+    pagination.cancelSwipe();
+  }
+
+  function suppressCompatibilityClick(event, anywhere = false) {
+    suppressedClick = {
+      until: performance.now() + CLICK_SUPPRESSION_MS,
+      x: event.clientX,
+      y: event.clientY,
+      anywhere,
+    };
   }
 
   function onKeydown(event) {
@@ -171,11 +235,14 @@ export function createInteraction({ reader, content, navigation, pagination, pre
 
   function onPointerDown(event) {
     if (!event.isPrimary) {
-      pointer = null;
+      cancelPointer();
+      suppressCompatibilityClick(event, true);
       counts.multiTouchProtected += 1;
       return;
     }
-    const control = protectedTarget(event);
+    cancelPointer();
+    suppressedClick = null;
+    const control = scrollMode() ? protectedTarget(event) : hardProtectedTarget(event);
     if (control) counts.contentProtected += 1;
     if (
       event.button !== 0 ||
@@ -187,24 +254,56 @@ export function createInteraction({ reader, content, navigation, pagination, pre
     ) {
       return;
     }
+    if (hasSelection()) {
+      counts.selectionProtected += 1;
+      return;
+    }
+    const media = matchingPath(event, "img[role='button']");
+    const structured = matchingPath(event, "table, pre");
+    const overflowElement = matchingPath(event, ".atha-structured-overflow");
+    const rect = reader.getBoundingClientRect();
+    const overflow = overflowElement
+      ? {
+          element: overflowElement,
+          start: overflowElement.scrollLeft,
+          maximum: Math.max(0, overflowElement.scrollWidth - overflowElement.clientWidth),
+        }
+      : null;
     pointer = {
       id: event.pointerId,
       type: event.pointerType || "touch",
       x: event.clientX,
       y: event.clientY,
-      axis: null,
-      selection: hasSelection(),
+      owner: null,
+      media,
+      overflow,
+      dragEnabled: (event.pointerType || "touch") === "touch" || Boolean(media || structured),
+      rect,
+      layoutScale: rect.width > 0 ? reader.clientWidth / rect.width : 1,
+      deltaX: 0,
+      scrollFrame: 0,
     };
   }
 
   function onPointerMove(event) {
-    if (!pointer || pointer.id !== event.pointerId || pointer.type !== "touch" || scrollMode()) return;
+    if (!pointer || pointer.id !== event.pointerId || scrollMode()) return;
     const deltaX = event.clientX - pointer.x;
     const deltaY = event.clientY - pointer.y;
-    if (!pointer.axis && Math.max(Math.abs(deltaX), Math.abs(deltaY)) > CLICK_DRIFT) {
-      pointer.axis = Math.abs(deltaX) > Math.abs(deltaY) ? "horizontal" : "vertical";
+    const horizontal = Math.abs(deltaX);
+    const vertical = Math.abs(deltaY);
+    if (!pointer.owner && Math.max(horizontal, vertical) > CLICK_DRIFT) {
+      if (vertical > horizontal * AXIS_ADVANTAGE) pointer.owner = "vertical";
+      else if (horizontal > vertical * AXIS_ADVANTAGE && pointer.dragEnabled) {
+        pointer.owner =
+          pointer.overflow && canScrollOverflow(pointer.overflow, deltaX) ? "overflow" : "page";
+      }
     }
-    if (pointer.axis !== "horizontal") return;
+    if (pointer.owner === "overflow") {
+      event.preventDefault();
+      previewOverflow(pointer, deltaX);
+      return;
+    }
+    if (pointer.owner !== "page") return;
     event.preventDefault();
     pagination.previewSwipe(deltaX);
   }
@@ -212,11 +311,12 @@ export function createInteraction({ reader, content, navigation, pagination, pre
   function onPointerUp(event) {
     const start = pointer;
     pointer = null;
-    if (!start || start.id !== event.pointerId || protectedTarget(event)) {
-      pagination.cancelSwipe();
+    if (!start || start.id !== event.pointerId || hardProtectedTarget(event)) {
+      cancelPointer(start);
       return;
     }
-    if (start.selection || hasSelection()) {
+    if (start.owner === "overflow") finishOverflow(start);
+    if (hasSelection()) {
       pagination.cancelSwipe();
       counts.selectionProtected += 1;
       return;
@@ -228,33 +328,47 @@ export function createInteraction({ reader, content, navigation, pagination, pre
       }
       return;
     }
-    if (start.type === "touch") {
+    if (start.owner === "page") {
       const direction = swipeDirection(start, event);
+      suppressCompatibilityClick(event);
       if (direction) {
-        run(direction, "touch");
+        run(direction, start.type === "mouse" ? "mouse" : "touch");
         return;
       }
       pagination.cancelSwipe();
-      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) return;
-      const rect = reader.getBoundingClientRect();
-      const ratio = (event.clientX - rect.left) / rect.width;
-      if (ratio < 0.35) {
-        run(-1, "touch");
-      } else if (ratio > 0.65) {
-        run(1, "touch");
-      } else onCenter();
       return;
     }
-    if (start.type !== "mouse" || Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) {
+    if (start.owner === "overflow") {
+      suppressCompatibilityClick(event);
       return;
     }
-    const rect = reader.getBoundingClientRect();
-    const ratio = (event.clientX - rect.left) / rect.width;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) {
+      suppressCompatibilityClick(event);
+      return;
+    }
+    const ratio = (event.clientX - start.rect.left) / start.rect.width;
+    const kind = start.type === "mouse" ? "mouse" : "touch";
     if (ratio < 0.35) {
-      run(-1, "mouse");
+      suppressCompatibilityClick(event);
+      run(-1, kind);
     } else if (ratio > 0.65) {
-      run(1, "mouse");
-    } else onCenter();
+      suppressCompatibilityClick(event);
+      run(1, kind);
+    } else if (!start.media) onCenter();
+  }
+
+  function onCompatibilityEventCapture(event) {
+    if (
+      !suppressedClick ||
+      performance.now() > suppressedClick.until ||
+      (!suppressedClick.anywhere &&
+        Math.hypot(event.clientX - suppressedClick.x, event.clientY - suppressedClick.y) >
+          CLICK_DRIFT * 2)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
   }
 
   function onTouchStart(event) {
@@ -304,6 +418,8 @@ export function createInteraction({ reader, content, navigation, pagination, pre
     reader.addEventListener("wheel", outside(onWheel), { passive: false });
     content.book.addEventListener("pointerdown", inside(onPointerDown));
     reader.addEventListener("pointerdown", outside(onPointerDown));
+    content.book.addEventListener("click", onCompatibilityEventCapture, true);
+    content.book.addEventListener("dblclick", onCompatibilityEventCapture, true);
     content.book.addEventListener("touchstart", inside(onTouchStart), { passive: true });
     reader.addEventListener("touchstart", outside(onTouchStart), { passive: true });
     content.book.addEventListener("touchend", inside(onTouchEnd), { passive: true });
@@ -314,8 +430,7 @@ export function createInteraction({ reader, content, navigation, pagination, pre
     content.book.addEventListener("pointerup", inside(onPointerUp));
     window.addEventListener("pointerup", outside(onPointerUp));
     window.addEventListener("pointercancel", () => {
-      pointer = null;
-      pagination.cancelSwipe();
+      cancelPointer();
     });
   }
 

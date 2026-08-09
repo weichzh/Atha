@@ -32,6 +32,11 @@ export function createDiagnostics({
   let bookmarkEvidence = {};
   let searchEvidence = {};
   let annotationEvidence = {};
+  let gestureFixture = null;
+  let gestureOrigin = null;
+  let gestureTargets = new Map();
+  let activeGesture = null;
+  let gestureSequence = 0;
 
   function heading() {
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
@@ -934,6 +939,459 @@ export function createDiagnostics({
     };
   }
 
+  function gesturePageState() {
+    const page = pagination.snapshot();
+    return Object.freeze({
+      section: session.snapshot().currentIndex,
+      page: page.page,
+      pages: page.pages,
+    });
+  }
+
+  async function openGestureSection(href) {
+    const description = session.describe();
+    const sectionIndex = description.sections.findIndex((section) => section.href === href);
+    assert(sectionIndex >= 0, "sample-boundary");
+    await navigation.goTo(locator.point(description, description.sections[sectionIndex].id, 0));
+    await content.warmRemaining();
+    await pagination.nextFrame();
+    return Object.freeze({
+      section: sectionIndex,
+      formulas: content.book.querySelectorAll("img.math-inline, img.math-display").length,
+      pages: pagination.snapshot().pages,
+    });
+  }
+
+  function gestureTable(wide) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "atha-structured-overflow";
+    wrapper.dataset.gestureOverflow = String(wide);
+    wrapper.style.setProperty("width", "100%", "important");
+    wrapper.style.setProperty("height", "112px", "important");
+    wrapper.style.setProperty("overflow", "auto", "important");
+    wrapper.style.setProperty("pointer-events", "auto", "important");
+
+    const table = document.createElement("table");
+    table.tabIndex = 0;
+    table.setAttribute("aria-label", wide ? "Gesture overflow table" : "Gesture table");
+    table.style.setProperty("width", wide ? "1200px" : "100%", "important");
+    table.style.setProperty("height", "104px", "important");
+    table.style.setProperty("border-collapse", "collapse", "important");
+    table.style.setProperty("pointer-events", "auto", "important");
+    for (let rowIndex = 0; rowIndex < 2; rowIndex += 1) {
+      const row = document.createElement("tr");
+      for (let columnIndex = 0; columnIndex < (wide ? 10 : 4); columnIndex += 1) {
+        const cell = document.createElement("td");
+        cell.textContent = String((rowIndex + 1) * (columnIndex + 1));
+        cell.style.setProperty("min-width", wide ? "116px" : "auto", "important");
+        cell.style.setProperty("border", "1px solid currentColor", "important");
+        cell.style.setProperty("padding", "4px", "important");
+        row.append(cell);
+      }
+      table.append(row);
+    }
+    wrapper.append(table);
+    return Object.freeze({ target: table, wrapper });
+  }
+
+  function gestureBlock(kind, child) {
+    const block = document.createElement("section");
+    block.dataset.gestureTarget = kind;
+    block.style.setProperty("box-sizing", "border-box", "important");
+    block.style.setProperty("width", "100%", "important");
+    block.style.setProperty("min-height", "136px", "important");
+    block.style.setProperty("padding", "8px 0", "important");
+    block.style.setProperty("break-before", "column", "important");
+    block.style.setProperty("break-after", "column", "important");
+    block.style.setProperty("break-inside", "avoid", "important");
+    const anchor = document.createElement("span");
+    anchor.textContent = "0";
+    anchor.setAttribute("aria-hidden", "true");
+    anchor.style.setProperty("display", "block", "important");
+    anchor.style.setProperty("height", "1px", "important");
+    anchor.style.setProperty("overflow", "hidden", "important");
+    block.append(anchor, child);
+    return block;
+  }
+
+  async function installGestureFixture() {
+    if (gestureFixture?.isConnected) return;
+    if (!gestureOrigin) gestureOrigin = navigation.current();
+
+    const description = session.describe();
+    let source = content.book.querySelector("img[src]");
+    for (let index = 0; !source && index < description.sections.length; index += 1) {
+      await navigation.goTo(locator.point(description, description.sections[index].id, 0));
+      source = content.book.querySelector("img[src]");
+    }
+    assert(source, "sample-boundary");
+
+    const fixture = document.createElement("section");
+    fixture.dataset.gestureFixture = "true";
+    fixture.style.setProperty("width", "100%", "important");
+
+    const ordinary = document.createElement("img");
+    ordinary.src = source.src;
+    ordinary.alt = "";
+    ordinary.draggable = false;
+    ordinary.setAttribute("role", "button");
+    ordinary.tabIndex = 0;
+    ordinary.style.setProperty("display", "block", "important");
+    ordinary.style.setProperty("width", "100%", "important");
+    ordinary.style.setProperty("height", "112px", "important");
+    ordinary.style.setProperty("pointer-events", "auto", "important");
+
+    const formula = document.createElement("img");
+    formula.src = source.src;
+    formula.alt = "";
+    formula.draggable = false;
+    formula.className = "math-display";
+    formula.setAttribute("role", "button");
+    formula.setAttribute("width", "480");
+    formula.setAttribute("height", "96");
+    formula.tabIndex = 0;
+    formula.style.setProperty("pointer-events", "auto", "important");
+
+    const regularTable = gestureTable(false);
+    const overflowTable = gestureTable(true);
+    const records = [
+      ["ordinary", ordinary, ordinary, null],
+      ["formula", formula, formula, null],
+      ["table", regularTable.wrapper, regularTable.target, regularTable.wrapper],
+      ["overflow-table", overflowTable.wrapper, overflowTable.target, overflowTable.wrapper],
+    ];
+    for (const [kind, child, target, wrapper] of records) {
+      const block = gestureBlock(kind, child);
+      fixture.append(block);
+      gestureTargets.set(kind, Object.freeze({ block, target, wrapper }));
+    }
+    const tail = document.createElement("p");
+    tail.textContent = Array.from({ length: 600 }, () => "0").join(" ");
+    tail.style.setProperty("break-before", "column", "important");
+    fixture.append(tail);
+    content.book.append(fixture);
+    gestureFixture = fixture;
+    await Promise.all([ordinary.decode(), formula.decode()]);
+    await navigation.resize();
+    assert(pagination.snapshot().pages > 1, "sample-boundary");
+  }
+
+  async function showGestureTarget(record) {
+    const previousId = record.block.getAttribute("id");
+    const probeId = `atha-gesture-${crypto.randomUUID()}`;
+    record.block.id = probeId;
+    const offset = pagination.offsetForFragment(probeId);
+    if (previousId === null) record.block.removeAttribute("id");
+    else record.block.id = previousId;
+    assert(offset !== null, "sample-boundary");
+    const description = session.describe();
+    assert(
+      await navigation.goTo(
+        locator.point(description, session.snapshot().currentSection, offset),
+      ),
+      "sample-boundary",
+    );
+    await pagination.nextFrame();
+    await pagination.nextFrame();
+  }
+
+  function stopGestureTrace(trace) {
+    if (!trace) return;
+    cancelAnimationFrame(trace.frameRequest);
+    content.book.removeEventListener("pointerdown", trace.onPointerDown);
+    content.book.removeEventListener("click", trace.onCompatibilityEvent);
+    content.book.removeEventListener("dblclick", trace.onCompatibilityEvent);
+    window.removeEventListener("pointermove", trace.onPointerMove);
+    window.removeEventListener("pointerup", trace.onPointerUp);
+    window.removeEventListener("pointercancel", trace.onPointerCancel);
+    if (activeGesture === trace) activeGesture = null;
+  }
+
+  function gestureSinglePage(before, after, direction) {
+    if (before.section === after.section) return after.page === before.page + direction;
+    if (direction > 0) {
+      return (
+        after.section === before.section + 1 &&
+        before.page === before.pages - 1 &&
+        after.page === 0
+      );
+    }
+    return (
+      after.section === before.section - 1 &&
+      before.page === 0 &&
+      after.page === after.pages - 1
+    );
+  }
+
+  function nearestRank(values, ratio) {
+    if (values.length === 0) return null;
+    const sorted = [...values].sort((left, right) => left - right);
+    return sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)];
+  }
+
+  async function beginGestureProbe(kind, action, overflowMode = "edge", direction = 1) {
+    assert(["ordinary", "formula", "table", "overflow-table"].includes(kind), "sample-boundary");
+    assert(["tap", "drag"].includes(action), "sample-boundary");
+    assert(["edge", "pan", "vertical"].includes(overflowMode), "sample-boundary");
+    assert(direction === -1 || direction === 1, "sample-boundary");
+    stopGestureTrace(activeGesture);
+    await installGestureFixture();
+    const record = gestureTargets.get(kind);
+    assert(record?.target?.isConnected, "sample-boundary");
+
+    const dialog = document.querySelector("#content-dialog");
+    if (dialog.open) dialog.close();
+    contentActions.clearSelection();
+    await showGestureTarget(record);
+
+    const before = gesturePageState();
+    const description = session.describe();
+    assert(
+      (direction > 0 && (before.page + 1 < before.pages || before.section + 1 < description.sections.length)) ||
+        (direction < 0 && (before.page > 0 || before.section > 0)),
+      "sample-boundary",
+    );
+
+    if (record.wrapper) {
+      const maximum = Math.max(0, record.wrapper.scrollWidth - record.wrapper.clientWidth);
+      if (kind === "overflow-table" && overflowMode === "pan") {
+        record.wrapper.scrollLeft = Math.round(maximum / 2);
+      } else if (kind === "overflow-table") {
+        record.wrapper.scrollLeft = direction > 0 ? maximum : 0;
+      } else {
+        record.wrapper.scrollLeft = 0;
+      }
+    }
+    await pagination.nextFrame();
+
+    const viewport = reader.getBoundingClientRect();
+    const targetRect = record.target.getBoundingClientRect();
+    const visibleLeft = Math.max(viewport.left, targetRect.left);
+    const visibleRight = Math.min(viewport.right, targetRect.right);
+    const visibleTop = Math.max(viewport.top, targetRect.top);
+    const visibleBottom = Math.min(viewport.bottom, targetRect.bottom);
+    const startX = Math.round(viewport.left + viewport.width * (direction > 0 ? 0.8 : 0.2));
+    const endX = Math.round(
+      overflowMode === "vertical"
+        ? startX + viewport.width * 0.05
+        : overflowMode === "pan"
+          ? startX + viewport.width * (direction > 0 ? -0.2 : 0.2)
+        : viewport.left + viewport.width * (direction > 0 ? 0.2 : 0.8),
+    );
+    const candidateYs = [...record.target.querySelectorAll("*"), record.target]
+      .flatMap((element) => [...element.getClientRects()])
+      .filter(
+        (rect) =>
+          rect.height > 4 &&
+          startX > rect.left + 1 &&
+          startX < rect.right - 1 &&
+          rect.bottom > viewport.top + 1 &&
+          rect.top < viewport.bottom - 1,
+      )
+      .map((rect) => Math.round((Math.max(rect.top, viewport.top) + Math.min(rect.bottom, viewport.bottom)) / 2));
+    const startY = candidateYs[0];
+    const endY =
+      overflowMode === "vertical"
+        ? Math.round(startY + (startY < viewport.top + viewport.height / 2 ? 96 : -96))
+        : startY;
+    assert(
+      visibleRight - visibleLeft > 8 &&
+        visibleBottom - visibleTop > 8 &&
+        startX > visibleLeft + 1 &&
+        startX < visibleRight - 1 &&
+        startY !== undefined,
+      "sample-boundary",
+    );
+
+    const trace = {
+      id: ++gestureSequence,
+      direction,
+      record,
+      before,
+      baselineTransform: getComputedStyle(content.book).transform,
+      baselineScrollLeft: record.wrapper?.scrollLeft || 0,
+      scrollVisualScale: reader.clientWidth > 0 ? viewport.width / reader.clientWidth : 1,
+      baselinePreview: dialog.open,
+      pointerId: null,
+      pointerDownAt: null,
+      pointerUpAt: null,
+      targetHit: false,
+      events: [],
+      frames: [],
+      compatibilityEvents: 0,
+      frameRequest: 0,
+    };
+    const recordEvent = (event) => {
+      trace.events.push({
+        type: event.type,
+        at: performance.now(),
+        trusted: event.isTrusted,
+        pointerType: event.pointerType,
+      });
+    };
+    trace.onPointerDown = (event) => {
+      if (trace.pointerId !== null) return;
+      trace.pointerId = event.pointerId;
+      trace.pointerDownAt = performance.now();
+      trace.targetHit = event.composedPath().includes(record.target);
+      recordEvent(event);
+    };
+    trace.onPointerMove = (event) => {
+      if (event.pointerId === trace.pointerId) recordEvent(event);
+    };
+    trace.onPointerUp = (event) => {
+      if (event.pointerId !== trace.pointerId) return;
+      trace.pointerUpAt = performance.now();
+      recordEvent(event);
+    };
+    trace.onPointerCancel = (event) => {
+      if (event.pointerId !== trace.pointerId) return;
+      trace.pointerUpAt = performance.now();
+      recordEvent(event);
+    };
+    trace.onCompatibilityEvent = (event) => {
+      if (event.composedPath().includes(record.target)) trace.compatibilityEvents += 1;
+    };
+    const sampleFrame = (at) => {
+      const page = gesturePageState();
+      trace.frames.push({
+        at,
+        transform: getComputedStyle(content.book).transform,
+        section: page.section,
+        page: page.page,
+        preview: dialog.open,
+        scrollLeft: record.wrapper?.scrollLeft || 0,
+      });
+      trace.frameRequest = requestAnimationFrame(sampleFrame);
+    };
+    content.book.addEventListener("pointerdown", trace.onPointerDown);
+    content.book.addEventListener("click", trace.onCompatibilityEvent);
+    content.book.addEventListener("dblclick", trace.onCompatibilityEvent);
+    window.addEventListener("pointermove", trace.onPointerMove);
+    window.addEventListener("pointerup", trace.onPointerUp);
+    window.addEventListener("pointercancel", trace.onPointerCancel);
+    trace.frameRequest = requestAnimationFrame(sampleFrame);
+    activeGesture = trace;
+    return Object.freeze({
+      id: trace.id,
+      x: startX,
+      y: startY,
+      endX,
+      endY,
+      direction,
+    });
+  }
+
+  async function finishGestureProbe(id) {
+    const trace = activeGesture;
+    assert(trace?.id === Number(id), "sample-boundary");
+    await navigation.idle();
+    const deadline = performance.now() + 1500;
+    let settledFrames = 0;
+    let previousTransform = null;
+    while (performance.now() < deadline && settledFrames < 2) {
+      await pagination.nextFrame();
+      const transform = getComputedStyle(content.book).transform;
+      const ready =
+        !content.book.hasAttribute("data-swipe-dragging") &&
+        !content.book.hasAttribute("data-swipe-settling") &&
+        !reader.dataset.swipeDragging;
+      settledFrames = ready && transform === previousTransform ? settledFrames + 1 : 0;
+      previousTransform = transform;
+    }
+    const stableAt = performance.now();
+    const after = gesturePageState();
+    const scrollAfter = trace.record.wrapper?.scrollLeft || 0;
+    const dialog = document.querySelector("#content-dialog");
+    stopGestureTrace(trace);
+
+    const pointerEvents = trace.events.filter((event) => event.type.startsWith("pointer"));
+    const pointerMoves = pointerEvents.filter((event) => event.type === "pointermove");
+    const firstInputAt = pointerMoves[0]?.at ?? trace.pointerDownAt;
+    const relevantFrames = trace.frames.filter(
+      (frame) => trace.pointerDownAt === null || frame.at >= trace.pointerDownAt,
+    );
+    const visual = relevantFrames.find(
+      (frame) =>
+        frame.transform !== trace.baselineTransform ||
+        frame.section !== trace.before.section ||
+        frame.page !== trace.before.page ||
+        frame.preview !== trace.baselinePreview ||
+        frame.scrollLeft !== trace.baselineScrollLeft,
+    );
+    const dragFrames = relevantFrames.filter(
+      (frame) => trace.pointerUpAt === null || frame.at <= trace.pointerUpAt,
+    );
+    const visualFrames = dragFrames.reduce((values, frame) => {
+      const previous = values.at(-1);
+      if (
+        (!previous &&
+          (frame.transform !== trace.baselineTransform ||
+            frame.scrollLeft !== trace.baselineScrollLeft)) ||
+        (previous &&
+          (frame.transform !== previous.transform || frame.scrollLeft !== previous.scrollLeft))
+      ) {
+        values.push(frame);
+      }
+      return values;
+    }, []);
+    const frameIntervals = visualFrames
+      .slice(1)
+      .map((frame, index) => frame.at - visualFrames[index].at)
+      .filter((value) => value >= 0);
+    if (visualFrames.length > 0 && trace.pointerUpAt !== null) {
+      frameIntervals.push(Math.max(0, trace.pointerUpAt - visualFrames.at(-1).at));
+    }
+    const distinctRafTransforms = dragFrames.reduce((values, frame) => {
+      if (values.at(-1) !== frame.transform) values.push(frame.transform);
+      return values;
+    }, []);
+    return Object.freeze({
+      singlePage: gestureSinglePage(trace.before, after, trace.direction),
+      samePage: trace.before.section === after.section && trace.before.page === after.page,
+      targetHit: trace.targetHit,
+      pointerTypes: Object.freeze([...new Set(pointerEvents.map((event) => event.pointerType))]),
+      trusted:
+        pointerEvents.length >= 2 && pointerEvents.every((event) => event.trusted === true),
+      touch:
+        pointerEvents.length >= 2 && pointerEvents.every((event) => event.pointerType === "touch"),
+      pointerMoves: pointerMoves.length,
+      compatibilityEvents: trace.compatibilityEvents,
+      preview: dialog.open,
+      scrollDelta: (scrollAfter - trace.baselineScrollLeft) * trace.scrollVisualScale,
+      visualUpdateSamples: visualFrames.length,
+      rafTransformSamples: Math.max(0, distinctRafTransforms.length - 1),
+      settled: settledFrames >= 2,
+      timing: Object.freeze({
+        inputToFirstVisualMs:
+          visual && firstInputAt !== null ? visual.at - firstInputAt : null,
+        releaseToFirstVisualMs:
+          visual && trace.pointerUpAt !== null ? Math.max(0, visual.at - trace.pointerUpAt) : null,
+        releaseToStableMs:
+          trace.pointerUpAt !== null ? stableAt - trace.pointerUpAt : null,
+        frameP95Ms: nearestRank(frameIntervals, 0.95),
+        maxFrameMs: frameIntervals.length > 0 ? Math.max(...frameIntervals) : null,
+      }),
+    });
+  }
+
+  async function cleanupGestureProbe() {
+    stopGestureTrace(activeGesture);
+    const origin = gestureOrigin;
+    if (origin) await navigation.goTo(origin);
+    if (gestureFixture?.isConnected) {
+      gestureFixture.remove();
+      await navigation.resize();
+      if (origin) await navigation.goTo(origin);
+    }
+    gestureFixture = null;
+    gestureOrigin = null;
+    gestureTargets = new Map();
+    const dialog = document.querySelector("#content-dialog");
+    if (dialog.open) dialog.close();
+    return true;
+  }
+
   function mediaSource(kind) {
     const selector = {
       formula: "img[role='button'].math-inline, img[role='button'].math-display",
@@ -1134,11 +1592,20 @@ export function createDiagnostics({
     emit(`ready|${state.pages}|${inline}|${display}|${cuts}`);
   }
 
-  if (params.has("verify") || params.has("search-probe") || params.has("statistics-probe")) {
+  if (
+    params.has("verify") ||
+    params.has("gesture-probe") ||
+    params.has("search-probe") ||
+    params.has("statistics-probe")
+  ) {
     Object.defineProperty(globalThis, "__athaReaderDiagnostics", {
       value: Object.freeze({
         armCopyProbe: contentActions.armCopyProbe,
         clearSelection: contentActions.clearSelection,
+        beginGestureProbe,
+        cleanupGestureProbe,
+        finishGestureProbe,
+        openGestureSection,
         focusMedia,
         mediaPoint,
         previewState,

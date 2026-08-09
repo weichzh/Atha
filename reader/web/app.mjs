@@ -118,7 +118,8 @@ const pagination = createPagination({
   previous: document.querySelector("#previous"),
   next: document.querySelector("#next"),
   fontSizeControl: document.querySelector("#font-size"),
-  onPageShown: (includeNextPage) => content.loadVisible(includeNextPage),
+  onPageShown: (includeNextPage, beforeLayoutChange) =>
+    content.loadVisible(includeNextPage, beforeLayoutChange),
   assert,
   fail,
 });
@@ -305,7 +306,6 @@ const interaction = createInteraction({
   content,
   navigation,
   pagination,
-  preferences,
   onCenter: toggleReaderTools,
   assert,
   fail,

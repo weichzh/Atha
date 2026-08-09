@@ -37,10 +37,10 @@
 ## Linux GNOME 目标测试
 
 - 运行事实：主机别名、用户目录和实时工具路径只保存在用户级 `$CODEX_HOME/HOSTS.md`；仓库不硬编码地址。GNOME user manager 当前应包含 `WAYLAND_DISPLAY=wayland-0`、`DISPLAY=:0` 与 `XDG_RUNTIME_DIR=/run/user/1000`。
-- 官方入口：[Tauri WebDriver](https://v2.tauri.app/develop/tests/webdriver/)、[Tauri WebDriver 手动配置](https://v2.tauri.app/develop/tests/webdriver/manual-setup/)、[`WebviewWindowBuilder::use_https_scheme`](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewWindowBuilder.html#method.use_https_scheme)。
+- 官方入口：[Tauri WebDriver](https://v2.tauri.app/develop/tests/webdriver/)、[Tauri WebDriver 手动配置](https://v2.tauri.app/develop/tests/webdriver/manual-setup/)、[WebDriver Actions](https://www.w3.org/TR/webdriver2/#actions)、[Pointer Events 3 的兼容鼠标事件](https://www.w3.org/TR/pointerevents3/#compatibility-mapping-with-mouse-events)、[`WebviewWindowBuilder::use_https_scheme`](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewWindowBuilder.html#method.use_https_scheme)。
 - 项目快速用法：SSH 中的 CLI 构建直接运行；需要在远程 GNOME / RDP 桌面显示并在 SSH 断开后保留的 GUI 使用 `systemd-run --user --collect --unit=<唯一名> <program>`，例如 `systemd-run --user --collect --unit=gui-code code ~/Code/Atha`。不得用 `sudo` 启动 GUI，也不得依赖 SSH shell 临时导出的 Wayland 变量。
 - 测试策略：日常格式与 GUI 开发直接使用 Linux Tauri / WebKitGTK；Android 模拟器只在发布前或移动端专项验收时启动，Windows 只在用户明确要求时使用。用户已批准通过安全通道把私有 `fixtures/local` 复制到目标仓库的忽略目录；样本仍只用于本地 opt-in，不提交、不写日志、不进入公开证据或分发包。
-- 最短检查：`systemctl --user show-environment | rg '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)='`；安装一次 `cargo install tauri-driver --version 2.0.6 --locked` 后运行 `pwsh -NoProfile -File scripts/check-fb2-source.ps1 -VerifyLinuxGui`。入口用唯一 transient unit 启动真实 Tauri 壳，隔离 XDG 应用数据，并把构建、WebKitGTK 交互、截图和日志隐私作为 Linux 目标证据。
+- 最短检查：`systemctl --user show-environment | rg '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)='`；安装一次 `cargo install tauri-driver --version 2.0.6 --locked` 后运行 `pwsh -NoProfile -File scripts/check-fb2-source.ps1 -VerifyLinuxGui`。入口用唯一 transient unit 启动真实 Tauri 壳，隔离 XDG 应用数据，并把构建、WebKitGTK 交互、截图和日志隐私作为 Linux 目标证据。当前目标运行时把请求的 touch Actions 映射为可信 `mouse` PointerEvent；脚本必须同时记录请求类型和实际类型，不能把它称为真机 touch。
 - 必须重查：SSH 别名、GNOME 会话是否仍存活、systemd user 环境、KVM / emulator、Rust Android targets、JDK / SDK / NDK、Linux WebKitGTK / Tauri prerequisites 与私有样本是否已显式放置。
 
 ## Markdown / TXT
@@ -114,11 +114,11 @@
 - 最短检查：在证据目录运行 `sha256sum -c SHA256SUMS`；跨主机使用 PowerShell `Get-FileHash` 复核，不输出书架中的个人内容。
 - 必须重查：新增截图的设备、分辨率、原始文件名、哈希、界面状态和与既有结论的对应关系。
 
-## Readest 界面证据
+## Readest 界面与交互证据
 
-- 固定源码：[`readest/readest` 提交 `cf413b2b`](https://github.com/readest/readest/tree/cf413b2b9f1a205732062bf656e73c702f12ac02)；当前公开 Web 入口：[web.readest.com](https://web.readest.com/)，阅读与自定义能力以 [Reading](https://readest.com/docs/reading) 和 [Customization](https://readest.com/docs/customization) 为准。
+- 固定界面源码：[`readest/readest` 提交 `cf413b2b`](https://github.com/readest/readest/tree/cf413b2b9f1a205732062bf656e73c702f12ac02)；固定交互源码：Readest v0.11.20 [`useCapturedTurn.ts`](https://github.com/readest/readest/blob/1df1505fc5033fc949463c9908f2d53bd0fbdfa6/apps/readest-app/src/app/reader/hooks/useCapturedTurn.ts) 与对应 foliate-js [`paginator.js`](https://github.com/readest/foliate-js/blob/dd71f2be356563c16a23272686189fcfb45d0b82/paginator.js)。当前公开 Web 入口为 [web.readest.com](https://web.readest.com/)，阅读与自定义能力以 [Reading](https://readest.com/docs/reading) 和 [Customization](https://readest.com/docs/customization) 为准。
 - 本地事实：固定提交内的 Android、macOS、桌面原图，2026-08-08 的公开 Web 实际截图、逐图观察和 SHA-256 清单位于忽略目录 `fixtures/local/readest/`。
-- 项目快速用法：设计结论必须引用本地 `README.md` 的 `RD-*` 编号并打开原图；Atha 采用 Readest 的安静图标工具、正文与侧栏并存、主题预览和设置渐进披露，不复制其 React / Tailwind 实现。
+- 项目快速用法：设计结论必须引用本地 `README.md` 的 `RD-*` 编号并打开原图；Atha 采用 Readest 的安静图标工具、正文与侧栏并存、主题预览和设置渐进披露。交互只借鉴其小阈值后拖动优先于点击和分页收束，不复制 React / Tailwind、截图覆盖动画或 foliate 完整分页架构；表格边界必须按 Atha 的 owner 规则移交。
 - 最短检查：在证据目录运行 `sha256sum -c SHA256SUMS`；需要刷新 Web 界面时通过 `agent-browser` 重新采集带日期的截图，默认分支变化后使用新提交建立新快照，不覆盖既有证据。
 - 必须重查：默认分支提交、公开 Web 版本、商店截图与实际运行版本差异、屏幕尺寸、深浅主题、输入方式和与 Atha 当前设计结论的对应关系。
 

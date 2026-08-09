@@ -1,44 +1,43 @@
-# Description: Benchmark a fixed formula-heavy EPUB chapter in the real Tauri WebView2 reader.
+# Description: Run the formula-heavy EPUB benchmark through the Linux Tauri GUI gate.
 
 [CmdletBinding()]
 param(
-    [string]$Epub = 'fixtures/local/数理逻辑导引 (2017).epub',
-    [switch]$FullChecks
+    [Parameter(Mandatory)]
+    [string]$Epub,
+    [string]$Metadata = 'fixtures/local/logic-heavy-ch095/.atha-reader-sample.json',
+    [ValidateRange(1, 100000)]
+    [int]$MinimumFormulas = 1000,
+    [ValidateRange(1, 10000)]
+    [int]$MinimumPages = 10,
+    [ValidateRange(0, 20)]
+    [int]$GestureWarmupSamples = 5,
+    [ValidateRange(1, 100)]
+    [int]$GestureMeasureSamples = 20
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$epubPath = (Resolve-Path (Join-Path $repoRoot $Epub)).Path
-$expectedHash = 'c316559b6428d05b7ba81228879606e05f9adf6f3e67df917f6c90ce77ff6708'
-$actualHash = (Get-FileHash -LiteralPath $epubPath -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualHash -ne $expectedHash) {
-    throw "Unexpected formula benchmark EPUB SHA-256: $actualHash"
+if (-not (Test-Path -LiteralPath $Epub -PathType Leaf)) { throw 'Formula benchmark EPUB does not exist.' }
+$epubPath = (Resolve-Path -LiteralPath $Epub).Path
+$metadataPath = (Resolve-Path -LiteralPath (Join-Path $repoRoot $Metadata)).Path
+$metadataRecord = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+if ($metadataRecord.source_sha256 -notmatch '^[0-9a-f]{64}$' -or [string]::IsNullOrWhiteSpace($metadataRecord.entry)) {
+    throw 'Formula benchmark metadata is invalid.'
 }
-
-. (Join-Path $PSScriptRoot 'Import-AthaEnvironment.ps1') -RepoRoot $repoRoot
+if ((Get-FileHash -LiteralPath $epubPath -Algorithm SHA256).Hash -ne $metadataRecord.source_sha256) {
+    throw 'Formula benchmark EPUB does not match its private metadata.'
+}
 
 Push-Location $repoRoot
 try {
-    & $env:ATHA_PNPM --dir reader/app build
-    if ($LASTEXITCODE -ne 0) { throw 'Tauri reader frontend build failed.' }
-
-    & python scripts/export_reader_sample.py `
-        --epub $epubPath `
-        --entry EPUB/text/ch095.xhtml `
-        --output logic-heavy-ch095 |
-        Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Formula benchmark fixture export failed.' }
-
-    $arguments = @(
-        '-NoProfile', '-File', 'scripts/check-reader-slice.ps1',
-        '-BookRoot', 'fixtures/local/logic-heavy-ch095',
-        '-Entry', 'EPUB/text/ch095.xhtml',
-        '-HostPackage', 'atha-reader-app',
-        '-HostPath', 'target/debug/atha-reader-app.exe',
-        '-BenchmarkProfile', 'formula-heavy'
-    )
-    if (-not $FullChecks) { $arguments += '-BenchmarkOnly' }
-    & pwsh @arguments
+    & pwsh -NoProfile -File scripts/check-fb2-source.ps1 `
+        -VerifyLinuxGui `
+        -FormulaBenchmarkEpub $epubPath `
+        -FormulaBenchmarkEntry $metadataRecord.entry `
+        -FormulaBenchmarkMinimumFormulas $MinimumFormulas `
+        -FormulaBenchmarkMinimumPages $MinimumPages `
+        -GestureWarmupSamples $GestureWarmupSamples `
+        -GestureMeasureSamples $GestureMeasureSamples
     if ($LASTEXITCODE -ne 0) { throw 'Formula benchmark failed.' }
 }
 finally {
