@@ -167,6 +167,7 @@ pub fn import_kindle(
     let mut file = File::open(&source).map_err(|_| ImportError::InvalidSource)?;
     preflight(&mut file)?;
     drop(file);
+    let _import_guard = super::lock_import();
     let cache_root = cache_root.as_ref();
     fs::create_dir_all(cache_root).map_err(|_| ImportError::WriteFailed)?;
     let staging = cache_root.join(format!(
@@ -303,6 +304,16 @@ pub fn import_kindle(
         started.elapsed().as_millis()
     );
     imported_book(target, content_version)
+}
+
+pub(super) fn source_identity(source: impl AsRef<Path>) -> Result<String, ImportError> {
+    let source = fs::canonicalize(source).map_err(|_| ImportError::InvalidSource)?;
+    if !source.is_file() {
+        return Err(ImportError::InvalidSource);
+    }
+    let mut file = File::open(&source).map_err(|_| ImportError::InvalidSource)?;
+    preflight(&mut file)?;
+    source::hash_file(&source, IDENTITY_DOMAIN, MAX_KINDLE_BYTES).map_err(source_error)
 }
 
 fn preflight(file: &mut File) -> Result<Preflight, ImportError> {
@@ -939,11 +950,15 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), ImportError> {
     file.write_all(b"\n").map_err(|_| ImportError::WriteFailed)
 }
 
-fn complete_cache(path: &Path, content_version: &str) -> bool {
-    path.join(READER_MANIFEST).is_file()
-        && fs::read_to_string(path.join(IMPORT_MARKER))
-            .is_ok_and(|value| value == format!("{IMPORT_MARKER_VERSION}\n{content_version}\n"))
+pub(super) fn complete_cache(path: &Path, content_version: &str) -> bool {
+    has_cache_marker(path, content_version)
         && read_metadata(path, content_version).is_ok()
+        && super::resources::complete_reader_cache(path, content_version)
+}
+
+pub(super) fn has_cache_marker(path: &Path, content_version: &str) -> bool {
+    fs::read_to_string(path.join(IMPORT_MARKER))
+        .is_ok_and(|value| value == format!("{IMPORT_MARKER_VERSION}\n{content_version}\n"))
 }
 
 fn imported_book(root: PathBuf, content_version: String) -> Result<ImportedBook, ImportError> {

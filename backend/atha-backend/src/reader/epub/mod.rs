@@ -4,13 +4,18 @@ mod archive;
 mod package;
 
 use std::{
+    collections::HashMap,
     error::Error,
     fmt, fs,
     fs::File,
-    io::Write,
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
+use quick_xml::{
+    Reader, Writer, XmlVersion,
+    events::{BytesStart, Event},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::reader::archive::{ArchiveError, MAX_SOURCE_BYTES};
@@ -22,6 +27,8 @@ const BOOK_METADATA: &str = ".atha-book.json";
 use crate::reader::archive::MAX_ENTRIES;
 const MAX_SECTIONS: usize = 2_000;
 const MAX_TOC_ITEMS: usize = 2_000;
+const MAX_IMAGE_SIDE: usize = 8_192;
+const MAX_IMAGE_PIXELS: usize = 20_000_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImportedBook {
@@ -105,20 +112,12 @@ pub fn import_epub(
     source: impl AsRef<Path>,
     cache_root: impl AsRef<Path>,
 ) -> Result<ImportedBook, ImportError> {
-    let source = fs::canonicalize(source).map_err(|_| ImportError::InvalidSource)?;
-    let metadata = source.metadata().map_err(|_| ImportError::InvalidSource)?;
-    if !metadata.is_file() {
-        return Err(ImportError::InvalidSource);
-    }
-    if metadata.len() > MAX_SOURCE_BYTES {
-        return Err(ImportError::SourceTooLarge);
-    }
-
-    let (content_version, source_file) = archive::fingerprint(&source)?;
+    let (source, content_version, source_file) = fingerprinted_source(source.as_ref())?;
+    let _import_guard = crate::reader::lock_import();
     let cache_root = cache_root.as_ref();
     fs::create_dir_all(cache_root).map_err(|_| ImportError::WriteFailed)?;
     let target = cache_root.join(&content_version);
-    if complete_cache(&target, &content_version) {
+    if current_cache(&target, &content_version) {
         return imported_book(target, content_version);
     }
 
@@ -135,6 +134,24 @@ pub fn import_epub(
     }
     result?;
     imported_book(target, content_version)
+}
+
+pub(super) fn source_identity(source: impl AsRef<Path>) -> Result<String, ImportError> {
+    fingerprinted_source(source.as_ref()).map(|(_, content_version, _)| content_version)
+}
+
+fn fingerprinted_source(source: &Path) -> Result<(PathBuf, String, File), ImportError> {
+    let source = fs::canonicalize(source).map_err(|_| ImportError::InvalidSource)?;
+    let metadata = source.metadata().map_err(|_| ImportError::InvalidSource)?;
+    if !metadata.is_file() {
+        return Err(ImportError::InvalidSource);
+    }
+    if metadata.len() > MAX_SOURCE_BYTES {
+        return Err(ImportError::SourceTooLarge);
+    }
+
+    let (content_version, source_file) = archive::fingerprint(&source)?;
+    Ok((source, content_version, source_file))
 }
 
 fn build_import(
@@ -159,11 +176,9 @@ fn build_import(
     for path in &plan.files {
         archive::copy(&mut epub, &index, path, staging, &mut extracted)?;
     }
+    let mut image_dimensions = HashMap::new();
     for path in plan.section_paths() {
-        let bytes = fs::read(staging.join(path)).map_err(|_| ImportError::WriteFailed)?;
-        if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
-            return Err(ImportError::UnsupportedEpub);
-        }
+        annotate_section_images(staging, path, &mut image_dimensions)?;
     }
     let mut manifest =
         File::create(staging.join(READER_MANIFEST)).map_err(|_| ImportError::WriteFailed)?;
@@ -188,7 +203,7 @@ fn build_import(
         .map_err(|_| ImportError::WriteFailed)?;
     fs::write(
         staging.join(IMPORT_MARKER),
-        format!("atha-epub-import-v2\n{content_version}\n"),
+        format!("atha-epub-import-v5\n{content_version}\n"),
     )
     .map_err(|_| ImportError::WriteFailed)?;
     if archive::hash_file(source_path)? != content_version {
@@ -197,11 +212,260 @@ fn build_import(
     Ok(())
 }
 
-fn complete_cache(path: &Path, content_version: &str) -> bool {
-    path.join(READER_MANIFEST).is_file()
-        && fs::read_to_string(path.join(IMPORT_MARKER))
-            .is_ok_and(|value| value == format!("atha-epub-import-v2\n{content_version}\n"))
+pub(super) fn complete_cache(path: &Path, content_version: &str) -> bool {
+    has_cache_marker(path, content_version)
         && read_metadata(path, content_version).is_ok()
+        && super::resources::complete_reader_cache(path, content_version)
+}
+
+pub(super) fn has_cache_marker(path: &Path, content_version: &str) -> bool {
+    fs::read_to_string(path.join(IMPORT_MARKER)).is_ok_and(|value| {
+        value == format!("atha-epub-import-v2\n{content_version}\n")
+            || value == format!("atha-epub-import-v3\n{content_version}\n")
+            || value == format!("atha-epub-import-v4\n{content_version}\n")
+            || value == format!("atha-epub-import-v5\n{content_version}\n")
+    })
+}
+
+pub(super) fn needs_upgrade(path: &Path, content_version: &str) -> bool {
+    fs::read_to_string(path.join(IMPORT_MARKER)).is_ok_and(|value| {
+        value == format!("atha-epub-import-v2\n{content_version}\n")
+            || value == format!("atha-epub-import-v3\n{content_version}\n")
+            || value == format!("atha-epub-import-v4\n{content_version}\n")
+    })
+}
+
+fn current_cache(path: &Path, content_version: &str) -> bool {
+    fs::read_to_string(path.join(IMPORT_MARKER))
+        .is_ok_and(|value| value == format!("atha-epub-import-v5\n{content_version}\n"))
+        && read_metadata(path, content_version).is_ok()
+        && super::resources::complete_reader_cache(path, content_version)
+}
+
+fn annotate_section_images(
+    staging: &Path,
+    section_path: &str,
+    dimensions: &mut HashMap<String, Option<(usize, usize)>>,
+) -> Result<(), ImportError> {
+    let path = staging.join(section_path);
+    let bytes = fs::read(&path).map_err(|_| ImportError::WriteFailed)?;
+    if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
+        return Err(ImportError::UnsupportedEpub);
+    }
+    if let Some(rewritten) = rewrite_image_dimensions(&bytes, staging, section_path, dimensions) {
+        fs::write(path, rewritten).map_err(|_| ImportError::WriteFailed)?;
+    }
+    Ok(())
+}
+
+fn rewrite_image_dimensions(
+    source: &[u8],
+    staging: &Path,
+    section_path: &str,
+    dimensions: &mut HashMap<String, Option<(usize, usize)>>,
+) -> Option<Vec<u8>> {
+    let mut reader = Reader::from_reader(source);
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(source.len()));
+    let mut changed = false;
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(event) => {
+                let (event, annotated) =
+                    annotate_image(&reader, event, staging, section_path, dimensions)?;
+                changed |= annotated;
+                writer.write_event(Event::Start(event)).ok()?;
+            }
+            Event::Empty(event) => {
+                let (event, annotated) =
+                    annotate_image(&reader, event, staging, section_path, dimensions)?;
+                changed |= annotated;
+                writer.write_event(Event::Empty(event)).ok()?;
+            }
+            Event::Eof => break,
+            event => writer.write_event(event.into_owned()).ok()?,
+        }
+    }
+    changed.then(|| writer.into_inner())
+}
+
+fn annotate_image(
+    reader: &Reader<&[u8]>,
+    event: BytesStart<'_>,
+    staging: &Path,
+    section_path: &str,
+    dimensions: &mut HashMap<String, Option<(usize, usize)>>,
+) -> Option<(BytesStart<'static>, bool)> {
+    if !local_name(event.name().as_ref()).eq_ignore_ascii_case(b"img") {
+        return Some((event.into_owned(), false));
+    }
+
+    let mut src = None;
+    let mut has_width = false;
+    let mut has_height = false;
+    for attribute in event.attributes().with_checks(true) {
+        let attribute = attribute.ok()?;
+        match local_name(attribute.key.as_ref()) {
+            b"src" => {
+                src = Some(
+                    attribute
+                        .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
+                        .ok()?
+                        .into_owned(),
+                );
+            }
+            b"width" | b"data-atha-intrinsic-width" => has_width = true,
+            b"height" | b"data-atha-intrinsic-height" => has_height = true,
+            _ => {}
+        }
+    }
+    if has_width || has_height {
+        return Some((event.into_owned(), false));
+    }
+    let Some(src) = src else {
+        return Some((event.into_owned(), false));
+    };
+    let Ok((resource, _)) = archive::resolve_reference(section_path, &src) else {
+        return Some((event.into_owned(), false));
+    };
+    let size = if let Some(size) = dimensions.get(&resource) {
+        *size
+    } else {
+        let size = intrinsic_image_size(&staging.join(&resource));
+        dimensions.insert(resource, size);
+        size
+    };
+    let Some((width, height)) = size else {
+        return Some((event.into_owned(), false));
+    };
+    let mut output = event.into_owned();
+    let width = width.to_string();
+    let height = height.to_string();
+    output.push_attribute(("width", width.as_str()));
+    output.push_attribute(("height", height.as_str()));
+    output.push_attribute(("data-atha-native-size", ""));
+    Some((output, true))
+}
+
+fn intrinsic_image_size(path: &Path) -> Option<(usize, usize)> {
+    let size = imagesize::size(path).ok()?;
+    let pixels = size.width.checked_mul(size.height)?;
+    if size.width == 0
+        || size.height == 0
+        || size.width > MAX_IMAGE_SIDE
+        || size.height > MAX_IMAGE_SIDE
+        || pixels > MAX_IMAGE_PIXELS
+    {
+        return None;
+    }
+    let orientation = image_orientation(path)?;
+    if matches!(orientation, 5..=8) {
+        Some((size.height, size.width))
+    } else {
+        Some((size.width, size.height))
+    }
+}
+
+fn image_orientation(path: &Path) -> Option<u32> {
+    let mut file = File::open(path).ok()?;
+    let mut magic = [0_u8; 8];
+    file.read_exact(&mut magic).ok()?;
+    let has_orientation = if magic.starts_with(&[0xff, 0xd8]) {
+        jpeg_has_exif(path)?
+    } else {
+        magic == [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a] && png_has_exif(path)?
+    };
+    if !has_orientation {
+        return Some(1);
+    }
+    let file = File::open(path).ok()?;
+    match exif::Reader::new().read_from_container(&mut BufReader::new(file)) {
+        Ok(metadata) => metadata
+            .get_field(exif::Tag::Orientation, exif::In::PRIMARY)
+            .map_or(Some(1), |field| {
+                field
+                    .value
+                    .get_uint(0)
+                    .filter(|value| (1..=8).contains(value))
+            }),
+        Err(exif::Error::NotFound(_)) => Some(1),
+        Err(_) => None,
+    }
+}
+
+fn jpeg_has_exif(path: &Path) -> Option<bool> {
+    let mut file = BufReader::new(File::open(path).ok()?);
+    let mut marker = [0_u8; 2];
+    file.read_exact(&mut marker).ok()?;
+    if marker != [0xff, 0xd8] {
+        return Some(false);
+    }
+    loop {
+        file.read_exact(&mut marker[..1]).ok()?;
+        if marker[0] != 0xff {
+            return None;
+        }
+        loop {
+            file.read_exact(&mut marker[1..]).ok()?;
+            if marker[1] != 0xff {
+                break;
+            }
+        }
+        if matches!(marker[1], 0xd9 | 0xda) {
+            return Some(false);
+        }
+        if matches!(marker[1], 0xc0..=0xcf) && !matches!(marker[1], 0xc4 | 0xc8 | 0xcc) {
+            return Some(false);
+        }
+        if marker[1] == 0x01 || matches!(marker[1], 0xd0..=0xd7) {
+            continue;
+        }
+        let mut length = [0_u8; 2];
+        file.read_exact(&mut length).ok()?;
+        let payload = u16::from_be_bytes(length).checked_sub(2)? as usize;
+        if marker[1] == 0xe1 && payload >= 6 {
+            let mut signature = [0_u8; 6];
+            file.read_exact(&mut signature).ok()?;
+            if signature == *b"Exif\0\0" {
+                return Some(true);
+            }
+            file.seek(SeekFrom::Current((payload - signature.len()) as i64))
+                .ok()?;
+        } else {
+            file.seek(SeekFrom::Current(payload as i64)).ok()?;
+        }
+    }
+}
+
+fn png_has_exif(path: &Path) -> Option<bool> {
+    let mut file = BufReader::new(File::open(path).ok()?);
+    let mut header = [0_u8; 8];
+    file.read_exact(&mut header).ok()?;
+    if header != [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a] {
+        return Some(false);
+    }
+    let mut seen_image_data = false;
+    loop {
+        let mut chunk = [0_u8; 8];
+        file.read_exact(&mut chunk).ok()?;
+        let length = u32::from_be_bytes(chunk[..4].try_into().ok()?) as u64;
+        let kind = &chunk[4..];
+        if kind == b"eXIf" {
+            return (!seen_image_data).then_some(true);
+        }
+        if kind == b"IEND" {
+            return Some(false);
+        }
+        seen_image_data |= kind == b"IDAT";
+        file.seek(SeekFrom::Current(
+            i64::try_from(length.checked_add(4)?).ok()?,
+        ))
+        .ok()?;
+    }
+}
+
+fn local_name(name: &[u8]) -> &[u8] {
+    name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
 }
 
 fn imported_book(root: PathBuf, content_version: String) -> Result<ImportedBook, ImportError> {
@@ -242,7 +506,7 @@ fn read_metadata(path: &Path, content_version: &str) -> Result<BookMetadata, Imp
 }
 
 fn publish(staging: &Path, target: &Path, content_version: &str) -> Result<(), ImportError> {
-    if complete_cache(target, content_version) {
+    if current_cache(target, content_version) {
         fs::remove_dir_all(staging).map_err(|_| ImportError::WriteFailed)?;
         return Ok(());
     }
@@ -260,7 +524,7 @@ fn publish(staging: &Path, target: &Path, content_version: &str) -> Result<(), I
     }
     match renamed {
         Ok(()) => Ok(()),
-        Err(_) if complete_cache(target, content_version) => {
+        Err(_) if current_cache(target, content_version) => {
             fs::remove_dir_all(staging).map_err(|_| ImportError::WriteFailed)
         }
         Err(error) => {

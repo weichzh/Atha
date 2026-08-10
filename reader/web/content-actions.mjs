@@ -34,7 +34,7 @@ export function createContentActions({
     image.hidden = true;
     image.removeAttribute("src");
     image.className = "";
-    dialog.classList.remove("media-preview");
+    dialog.classList.remove("media-preview", "structured-preview", "table-preview", "code-preview");
     open(anchor);
   }
 
@@ -47,6 +47,7 @@ export function createContentActions({
     image.alt = source.getAttribute("alt")?.trim().slice(0, 160) || heading;
     image.className = formula ? "formula-preview" : "";
     image.hidden = false;
+    dialog.classList.remove("structured-preview", "table-preview", "code-preview");
     dialog.classList.add("media-preview");
     counts[formula ? "formula" : "image"] += 1;
     open(source);
@@ -145,7 +146,7 @@ export function createContentActions({
       image.hidden = true;
       image.removeAttribute("src");
       image.className = "";
-      dialog.classList.remove("media-preview");
+      dialog.classList.remove("media-preview", "structured-preview", "table-preview", "code-preview");
     });
   }
 
@@ -219,6 +220,8 @@ export function createContentActions({
           body.hidden &&
           image.src === source.src &&
           title.textContent === (formula ? "公式" : "图片") &&
+          dialog.classList.contains("media-preview") &&
+          getComputedStyle(dialog).position === "fixed" &&
           image.alt ===
             (source.getAttribute("alt")?.trim().slice(0, 160) ||
               (formula ? "公式" : "图片")),

@@ -3,8 +3,8 @@
 use std::{
     error::Error,
     fmt, fs,
-    fs::OpenOptions,
-    io::Write,
+    fs::{File, OpenOptions},
+    io::{Read, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     cbz,
-    epub::{ImportError, READER_MANIFEST, import_epub},
+    epub::{self, ImportError, READER_MANIFEST, import_epub},
     fb2, kindle,
     resources::{BookRoot, Resource, ResourceError},
     text,
@@ -23,6 +23,7 @@ const LIBRARY_SCHEMA: u8 = 1;
 const MAX_TITLE_CHARS: usize = 512;
 const MAX_AUTHOR_CHARS: usize = 512;
 const MAX_AUTHORS: usize = 16;
+const BOOK_METADATA: &str = ".atha-book.json";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +33,7 @@ pub struct LibraryBook {
     pub authors: Vec<String>,
     pub has_cover: bool,
     pub imported_at: u64,
+    pub prepared: bool,
 }
 
 #[derive(Debug)]
@@ -44,6 +46,7 @@ pub struct OpenedBook {
 pub struct LocalLibrary {
     records: PathBuf,
     imports: PathBuf,
+    sources: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -55,6 +58,25 @@ struct StoredBook {
     authors: Vec<String>,
     cover_path: Option<String>,
     imported_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ImportedMetadata {
+    schema: u8,
+    content_version: String,
+    title: Option<String>,
+    authors: Vec<String>,
+    cover_path: Option<String>,
+}
+
+struct ImportedSource {
+    content_version: String,
+    title: Option<String>,
+    authors: Vec<String>,
+    cover_path: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,9 +102,15 @@ impl LocalLibrary {
         let root = data_root.as_ref();
         let records = root.join("Library");
         let imports = root.join("ImportedBooks");
+        let sources = root.join("SourceBooks");
         fs::create_dir_all(&records).map_err(|_| LibraryError::InvalidRoot)?;
         fs::create_dir_all(&imports).map_err(|_| LibraryError::InvalidRoot)?;
-        Ok(Self { records, imports })
+        fs::create_dir_all(&sources).map_err(|_| LibraryError::InvalidRoot)?;
+        Ok(Self {
+            records,
+            imports,
+            sources,
+        })
     }
 
     pub fn list(&self) -> Result<Vec<LibraryBook>, LibraryError> {
@@ -93,7 +121,8 @@ impl LocalLibrary {
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
-            books.push(read_record(&path)?.public());
+            let record = read_record(&path)?;
+            books.push(self.public_book(&record));
         }
         books.sort_by(|left, right| {
             right
@@ -115,74 +144,13 @@ impl LocalLibrary {
         title_hint: Option<&str>,
     ) -> Result<LibraryBook, LibraryError> {
         let source = source.as_ref();
-        let extension = source
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
-        let (content_version, title, authors, cover_path) = if extension
-            .eq_ignore_ascii_case("epub")
-        {
-            let imported = import_epub(source, &self.imports).map_err(LibraryError::Import)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
-        } else if extension.eq_ignore_ascii_case("cbz") {
-            let imported = cbz::import_cbz(source, &self.imports).map_err(LibraryError::Cbz)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
-        } else if extension.eq_ignore_ascii_case("fb2") || extension.eq_ignore_ascii_case("fbz") {
-            let imported = fb2::import_fb2(source, &self.imports).map_err(LibraryError::Fb2)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
-        } else if extension.eq_ignore_ascii_case("mobi")
-            || extension.eq_ignore_ascii_case("azw")
-            || extension.eq_ignore_ascii_case("azw3")
-        {
-            let imported =
-                kindle::import_kindle(source, &self.imports).map_err(LibraryError::Kindle)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
-        } else if extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
-        {
-            let imported =
-                text::import_markdown(source, &self.imports).map_err(LibraryError::Text)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
-        } else if extension.eq_ignore_ascii_case("txt") {
-            let imported = text::import_txt(source, &self.imports).map_err(LibraryError::Text)?;
-            (
-                imported.content_version,
-                imported.title,
-                imported.authors,
-                imported.cover_path,
-            )
-        } else {
-            return Err(LibraryError::UnsupportedSource);
-        };
-        let path = self.record_path(&content_version)?;
+        let imported = import_source(source, &self.imports)?;
+        let path = self.record_path(&imported.content_version)?;
         if path.exists() {
-            return Ok(read_record(&path)?.public());
+            return Ok(self.public_book(&read_record(&path)?));
         }
-        let title = title
+        let title = imported
+            .title
             .as_deref()
             .map(normalize_text)
             .filter(|value| !value.is_empty())
@@ -198,36 +166,148 @@ impl LocalLibrary {
             .unwrap_or_else(|| "未命名书籍".into());
         let record = StoredBook {
             schema: LIBRARY_SCHEMA,
-            id: content_version,
+            id: imported.content_version,
             title: truncate(&title, MAX_TITLE_CHARS),
-            authors: authors
+            authors: imported
+                .authors
                 .iter()
                 .map(|value| truncate(&normalize_text(value), MAX_AUTHOR_CHARS))
                 .filter(|value| !value.is_empty())
                 .take(MAX_AUTHORS)
                 .collect(),
-            cover_path,
+            cover_path: imported.cover_path,
             imported_at: now_millis()?,
+            source_path: None,
         };
         validate_record(&record)?;
         write_record(&path, &record)?;
-        Ok(record.public())
+        Ok(self.public_book(&record))
+    }
+
+    pub fn stage_with_title_hint(
+        &self,
+        source: impl AsRef<Path>,
+        title_hint: Option<&str>,
+    ) -> Result<LibraryBook, LibraryError> {
+        let source = source.as_ref();
+        let extension = source_extension(source)?;
+        let temporary = copy_source(source, &self.sources, extension)?;
+        let result = (|| {
+            let content_version = source_identity(&temporary, extension)?;
+            let source_name = format!("{content_version}.{extension}");
+            let stored_source = self.sources.join(&source_name);
+            if stored_source.is_file()
+                && source_identity(&stored_source, extension)
+                    .is_ok_and(|existing| existing == content_version)
+            {
+                fs::remove_file(&temporary).map_err(|_| LibraryError::WriteFailed)?;
+            } else if stored_source.exists() && !stored_source.is_file() {
+                return Err(LibraryError::WriteFailed);
+            } else {
+                fs::rename(&temporary, &stored_source).map_err(|_| LibraryError::WriteFailed)?;
+            }
+
+            let path = self.record_path(&content_version)?;
+            if path.exists() {
+                match read_record(&path) {
+                    Ok(record) => return Ok(self.public_book(&record)),
+                    Err(LibraryError::CorruptRecord) => {
+                        fs::remove_file(&path).map_err(|_| LibraryError::WriteFailed)?;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            let title = title_hint
+                .map(normalize_text)
+                .filter(|value| !value.is_empty())
+                .or_else(|| {
+                    source
+                        .file_stem()
+                        .and_then(|value| value.to_str())
+                        .map(normalize_text)
+                })
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "未命名书籍".into());
+            let record = StoredBook {
+                schema: LIBRARY_SCHEMA,
+                id: content_version,
+                title: truncate(&title, MAX_TITLE_CHARS),
+                authors: Vec::new(),
+                cover_path: None,
+                imported_at: now_millis()?,
+                source_path: Some(source_name),
+            };
+            validate_record(&record)?;
+            write_record(&path, &record)?;
+            Ok(self.public_book(&record))
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(temporary);
+        }
+        result
     }
 
     pub fn open_book(&self, id: &str) -> Result<OpenedBook, LibraryError> {
         let record = read_record(&self.record_path(id)?)?;
-        let root = BookRoot::new(self.imports.join(id)).map_err(LibraryError::Resource)?;
-        root.read(&format!("/{READER_MANIFEST}"))
-            .map_err(LibraryError::Resource)?;
+        let root_path = self.imports.join(id);
+        let source_paths = self.source_paths(&record);
+        let cached = complete_any_import_cache(&root_path, id);
+        let upgrade_epub =
+            cached && !source_paths.is_empty() && epub::needs_upgrade(&root_path, id);
+        let cached_root = if cached && !upgrade_epub {
+            open_root(&root_path)
+        } else {
+            Err(LibraryError::CorruptRecord)
+        };
+        let root = match cached_root {
+            Ok(root) => root,
+            Err(error) => {
+                if source_paths.is_empty() {
+                    return Err(error);
+                }
+                let mut rebuilt = None;
+                let mut last_error = None;
+                for source_path in source_paths {
+                    let source = self.sources.join(source_path);
+                    let Ok(extension) = source_extension(&source) else {
+                        continue;
+                    };
+                    if source_identity(&source, extension)
+                        .ok()
+                        .is_none_or(|identity| identity != record.id)
+                    {
+                        continue;
+                    }
+                    match import_source(&source, &self.imports) {
+                        Ok(imported) if imported.content_version == record.id => {
+                            rebuilt = Some(open_root(&root_path));
+                            break;
+                        }
+                        Ok(_) => last_error = Some(LibraryError::CorruptRecord),
+                        Err(error) => last_error = Some(error),
+                    }
+                }
+                rebuilt.unwrap_or_else(|| {
+                    if cached {
+                        open_root(&root_path)
+                    } else {
+                        Err(last_error.unwrap_or(LibraryError::CorruptRecord))
+                    }
+                })?
+            }
+        };
         Ok(OpenedBook {
-            book: record.public(),
+            book: self.public_book(&record),
             root,
         })
     }
 
     pub fn cover(&self, id: &str) -> Result<Resource, LibraryError> {
         let record = read_record(&self.record_path(id)?)?;
-        let path = record.cover_path.ok_or(LibraryError::MissingCover)?;
+        let path = read_imported_metadata(&self.imports.join(id), id)
+            .and_then(|metadata| metadata.cover_path)
+            .or(record.cover_path)
+            .ok_or(LibraryError::MissingCover)?;
         let root = BookRoot::new(self.imports.join(id)).map_err(LibraryError::Resource)?;
         let resource = root
             .read(&format!("/{path}"))
@@ -252,16 +332,62 @@ impl LocalLibrary {
         }
         Ok(self.records.join(format!("{id}.json")))
     }
+
+    fn public_book(&self, record: &StoredBook) -> LibraryBook {
+        let root = self.imports.join(&record.id);
+        let imported = read_imported_metadata(&root, &record.id);
+        let prepared = imported.is_some()
+            && root.join(READER_MANIFEST).is_file()
+            && has_import_marker(&root, &record.id);
+        record.public(imported.as_ref(), prepared)
+    }
+
+    fn source_paths(&self, record: &StoredBook) -> Vec<String> {
+        let mut paths = record
+            .source_path
+            .iter()
+            .filter(|name| self.sources.join(name).is_file())
+            .cloned()
+            .collect::<Vec<_>>();
+        for extension in [
+            "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
+        ] {
+            let name = format!("{}.{extension}", record.id);
+            if self.sources.join(&name).is_file() && !paths.contains(&name) {
+                paths.push(name);
+            }
+        }
+        paths
+    }
 }
 
 impl StoredBook {
-    fn public(&self) -> LibraryBook {
+    fn public(&self, imported: Option<&ImportedMetadata>, prepared: bool) -> LibraryBook {
+        let imported_title = imported
+            .and_then(|metadata| metadata.title.as_deref())
+            .map(normalize_text)
+            .filter(|value| !value.is_empty());
+        let imported_authors = imported.map(|metadata| {
+            metadata
+                .authors
+                .iter()
+                .map(|value| truncate(&normalize_text(value), MAX_AUTHOR_CHARS))
+                .filter(|value| !value.is_empty())
+                .take(MAX_AUTHORS)
+                .collect::<Vec<_>>()
+        });
         LibraryBook {
             id: self.id.clone(),
-            title: self.title.clone(),
-            authors: self.authors.clone(),
-            has_cover: self.cover_path.is_some(),
+            title: imported_title.unwrap_or_else(|| self.title.clone()),
+            authors: imported_authors
+                .filter(|authors| !authors.is_empty())
+                .unwrap_or_else(|| self.authors.clone()),
+            has_cover: imported
+                .and_then(|metadata| metadata.cover_path.as_ref())
+                .or(self.cover_path.as_ref())
+                .is_some(),
             imported_at: self.imported_at,
+            prepared,
         }
     }
 }
@@ -294,6 +420,183 @@ impl fmt::Display for LibraryError {
 }
 
 impl Error for LibraryError {}
+
+fn import_source(source: &Path, imports: &Path) -> Result<ImportedSource, LibraryError> {
+    let imported = match source_extension(source)? {
+        "epub" => {
+            let book = import_epub(source, imports).map_err(LibraryError::Import)?;
+            ImportedSource {
+                content_version: book.content_version,
+                title: book.title,
+                authors: book.authors,
+                cover_path: book.cover_path,
+            }
+        }
+        "cbz" => {
+            let book = cbz::import_cbz(source, imports).map_err(LibraryError::Cbz)?;
+            ImportedSource {
+                content_version: book.content_version,
+                title: book.title,
+                authors: book.authors,
+                cover_path: book.cover_path,
+            }
+        }
+        "fb2" | "fbz" => {
+            let book = fb2::import_fb2(source, imports).map_err(LibraryError::Fb2)?;
+            ImportedSource {
+                content_version: book.content_version,
+                title: book.title,
+                authors: book.authors,
+                cover_path: book.cover_path,
+            }
+        }
+        "mobi" | "azw" | "azw3" => {
+            let book = kindle::import_kindle(source, imports).map_err(LibraryError::Kindle)?;
+            ImportedSource {
+                content_version: book.content_version,
+                title: book.title,
+                authors: book.authors,
+                cover_path: book.cover_path,
+            }
+        }
+        "md" | "markdown" => {
+            let book = text::import_markdown(source, imports).map_err(LibraryError::Text)?;
+            ImportedSource {
+                content_version: book.content_version,
+                title: book.title,
+                authors: book.authors,
+                cover_path: book.cover_path,
+            }
+        }
+        "txt" => {
+            let book = text::import_txt(source, imports).map_err(LibraryError::Text)?;
+            ImportedSource {
+                content_version: book.content_version,
+                title: book.title,
+                authors: book.authors,
+                cover_path: book.cover_path,
+            }
+        }
+        _ => unreachable!(),
+    };
+    Ok(imported)
+}
+
+fn source_identity(source: &Path, extension: &str) -> Result<String, LibraryError> {
+    match extension {
+        "epub" => epub::source_identity(source).map_err(LibraryError::Import),
+        "cbz" => cbz::source_identity(source).map_err(LibraryError::Cbz),
+        "fb2" | "fbz" => fb2::source_identity(source).map_err(LibraryError::Fb2),
+        "mobi" | "azw" | "azw3" => kindle::source_identity(source).map_err(LibraryError::Kindle),
+        "md" | "markdown" => text::markdown_source_identity(source).map_err(LibraryError::Text),
+        "txt" => text::txt_source_identity(source).map_err(LibraryError::Text),
+        _ => Err(LibraryError::UnsupportedSource),
+    }
+}
+
+fn complete_any_import_cache(root: &Path, id: &str) -> bool {
+    epub::complete_cache(root, id)
+        || cbz::complete_cache(root, id)
+        || fb2::complete_cache(root, id)
+        || kindle::complete_cache(root, id)
+        || text::complete_cache(root, id, "md")
+        || text::complete_cache(root, id, "txt")
+}
+
+fn source_extension(source: &Path) -> Result<&str, LibraryError> {
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .ok_or(LibraryError::UnsupportedSource)?;
+    for supported in [
+        "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
+    ] {
+        if extension.eq_ignore_ascii_case(supported) {
+            return Ok(supported);
+        }
+    }
+    Err(LibraryError::UnsupportedSource)
+}
+
+fn copy_source(source: &Path, sources: &Path, extension: &str) -> Result<PathBuf, LibraryError> {
+    let metadata = source.metadata().map_err(|_| LibraryError::ReadFailed)?;
+    if !metadata.is_file() || metadata.len() == 0 {
+        return Err(LibraryError::UnsupportedSource);
+    }
+    if metadata.len() > super::MAX_SOURCE_BYTES {
+        return Err(LibraryError::UnsupportedSource);
+    }
+    let (temporary, mut output) = (0..32)
+        .find_map(|attempt| {
+            let path = sources.join(format!(
+                ".source.staging-{}-{attempt}.{extension}",
+                std::process::id()
+            ));
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+                .ok()
+                .map(|file| (path, file))
+        })
+        .ok_or(LibraryError::WriteFailed)?;
+    let result = (|| {
+        let mut input = File::open(source).map_err(|_| LibraryError::ReadFailed)?;
+        let copied = std::io::copy(
+            &mut Read::take(&mut input, super::MAX_SOURCE_BYTES.saturating_add(1)),
+            &mut output,
+        )
+        .map_err(|_| LibraryError::WriteFailed)?;
+        if copied == 0 || copied > super::MAX_SOURCE_BYTES {
+            return Err(LibraryError::UnsupportedSource);
+        }
+        output.sync_all().map_err(|_| LibraryError::WriteFailed)
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(temporary)
+}
+
+fn open_root(path: &Path) -> Result<BookRoot, LibraryError> {
+    let root = BookRoot::new(path).map_err(LibraryError::Resource)?;
+    root.read(&format!("/{READER_MANIFEST}"))
+        .map_err(LibraryError::Resource)?;
+    Ok(root)
+}
+
+fn read_imported_metadata(path: &Path, id: &str) -> Option<ImportedMetadata> {
+    let metadata: ImportedMetadata =
+        serde_json::from_slice(&fs::read(path.join(BOOK_METADATA)).ok()?).ok()?;
+    if metadata.schema != 1
+        || metadata.content_version != id
+        || metadata
+            .title
+            .as_ref()
+            .is_some_and(|value| value.is_empty() || value.chars().count() > MAX_TITLE_CHARS)
+        || metadata.authors.len() > MAX_AUTHORS
+        || metadata
+            .authors
+            .iter()
+            .any(|value| value.is_empty() || value.chars().count() > MAX_AUTHOR_CHARS)
+        || metadata
+            .cover_path
+            .as_ref()
+            .is_some_and(|value| !valid_cover_path(value))
+    {
+        return None;
+    }
+    Some(metadata)
+}
+
+fn has_import_marker(path: &Path, id: &str) -> bool {
+    epub::has_cache_marker(path, id)
+        || cbz::has_cache_marker(path, id)
+        || fb2::has_cache_marker(path, id)
+        || kindle::has_cache_marker(path, id)
+        || text::has_cache_marker(path, id)
+}
 
 fn read_record(path: &Path) -> Result<StoredBook, LibraryError> {
     if !path.is_file() {
@@ -345,6 +648,10 @@ fn validate_record(record: &StoredBook) -> Result<(), LibraryError> {
             .cover_path
             .as_ref()
             .is_some_and(|value| !valid_cover_path(value))
+        || record
+            .source_path
+            .as_ref()
+            .is_some_and(|value| !valid_source_path(value, &record.id))
     {
         return Err(LibraryError::CorruptRecord);
     }
@@ -356,6 +663,17 @@ fn valid_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_source_path(value: &str, id: &str) -> bool {
+    let Some((stem, extension)) = value.rsplit_once('.') else {
+        return false;
+    };
+    stem == id
+        && matches!(
+            extension,
+            "epub" | "cbz" | "fb2" | "fbz" | "mobi" | "azw" | "azw3" | "md" | "markdown" | "txt"
+        )
 }
 
 fn valid_cover_path(value: &str) -> bool {

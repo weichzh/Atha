@@ -13,6 +13,9 @@ export function createReadingSession({ params, content, render, onState, assert,
   let contentLoads = 0;
   let stableLayouts = 0;
   let closes = 0;
+  let stableIndex = -1;
+  let lifecycle = 0;
+  let pendingOpen = Promise.resolve();
 
   function invalidManifest() {
     throw new Error("invalid-manifest");
@@ -219,44 +222,101 @@ export function createReadingSession({ params, content, render, onState, assert,
     content.close();
     delete document.documentElement.dataset.sectionPosition;
     currentIndex = -1;
+    stableIndex = -1;
     state = nextState;
     onState(state);
   }
 
-  async function open(index = 0) {
-    if (state !== "closed") {
-      release("closed");
-      closes += 1;
-    }
+  async function restore(book, index, token) {
+    const section = book.sections[index];
+    const prepared = await content.prepareSection(
+      section.url,
+      book.strictResources ? book.resources : null,
+      book.strictResources ? "section-load" : "book-load",
+    );
+    if (token !== lifecycle) return false;
+    content.activateSection(prepared);
+    document.documentElement.dataset.sectionPosition = `${index + 1} / ${book.sections.length}`;
+    currentIndex = index;
+    state = "content-loaded";
+    onState(state);
+    await render();
+    if (token !== lifecycle) return false;
+    state = "layout-stable";
+    onState(state);
+    return true;
+  }
+
+  async function openNow(index, token) {
+    if (token !== lifecycle) return false;
+    const previousIndex = stableIndex;
+    let activated = false;
     state = "opening";
     onState(state);
     try {
       const book = await loadManifest();
       if (!Number.isInteger(index) || index < 0 || index >= book.sections.length) {
-        fail("section-index");
+        throw new Error("section-index");
       }
       const section = book.sections[index];
-      document.documentElement.dataset.sectionPosition = `${index + 1} / ${book.sections.length}`;
-      await content.loadSection(
+      const prepared = await content.prepareSection(
         section.url,
         book.strictResources ? book.resources : null,
         book.strictResources ? "section-load" : "book-load",
       );
+      if (token !== lifecycle) return false;
+      content.activateSection(prepared);
+      activated = true;
+      document.documentElement.dataset.sectionPosition = `${index + 1} / ${book.sections.length}`;
       currentIndex = index;
-      contentLoads += 1;
       state = "content-loaded";
       onState(state);
       await render();
+      if (token !== lifecycle) return false;
+      contentLoads += 1;
       stableLayouts += 1;
+      stableIndex = index;
       state = "layout-stable";
       onState(state);
+      for (const adjacent of [index - 1, index + 1]) {
+        if (adjacent >= 0 && adjacent < book.sections.length) {
+          content.prefetchSection?.(book.sections[adjacent].url);
+        }
+      }
+      return true;
     } catch (error) {
+      if (token !== lifecycle) return false;
+      if (previousIndex >= 0) {
+        if (!activated) {
+          currentIndex = previousIndex;
+          document.documentElement.dataset.sectionPosition =
+            `${previousIndex + 1} / ${manifest.sections.length}`;
+          state = "layout-stable";
+          onState(state);
+          return false;
+        }
+        try {
+          const restored = await restore(manifest, previousIndex, token);
+          if (restored || token !== lifecycle) return false;
+        } catch {
+          // Fall through to the terminal state when even the stable section cannot be restored.
+        }
+      }
+      lifecycle += 1;
       release("failed");
       throw error;
     }
   }
 
+  function open(index = 0) {
+    const token = lifecycle;
+    const result = pendingOpen.then(() => openNow(index, token));
+    pendingOpen = result.catch(() => undefined);
+    return result;
+  }
+
   function close() {
+    lifecycle += 1;
     if (state === "closed") return;
     release("closed");
     closes += 1;

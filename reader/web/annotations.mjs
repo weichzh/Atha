@@ -362,7 +362,9 @@ export function createAnnotations({
     );
     if (index < 0) return fail("annotation-anchor");
     if (session.snapshot().currentSection !== inspected.start.section) {
-      await session.open(index);
+      if (!(await navigation.goTo(item.sourceAnchor.canonicalLocator))) {
+        return fail("annotation-anchor");
+      }
     }
     const resolved = await resolve(store.item(id));
     if (!resolved || resolved === "write") return fail(lastError || "annotation-anchor");

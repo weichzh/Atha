@@ -9,6 +9,71 @@ use atha_backend::reader::library::LocalLibrary;
 use encoding_rs::GBK;
 
 #[test]
+fn markdown_and_txt_can_be_staged_before_their_first_open() {
+    let root = TestRoot::new();
+    let markdown = root.0.join("staged.md");
+    let txt = root.0.join("staged.txt");
+    fs::write(&markdown, "# Staged\nbody").expect("write Markdown");
+    fs::write(&txt, "第一章\n正文").expect("write TXT");
+    let library = LocalLibrary::open(root.0.join("library")).expect("open library");
+
+    for source in [&markdown, &txt] {
+        let staged = library
+            .stage_with_title_hint(source, None)
+            .expect("stage text");
+        assert!(!staged.prepared);
+        assert!(
+            library
+                .open_book(&staged.id)
+                .expect("prepare text")
+                .book
+                .prepared
+        );
+    }
+}
+
+#[test]
+fn restaged_text_alias_recovers_from_a_bad_recorded_source() {
+    let root = TestRoot::new();
+    let markdown = root.0.join("staged.md");
+    let alias = root.0.join("staged.markdown");
+    fs::write(&markdown, "# Staged\nbody").expect("write Markdown");
+    fs::copy(&markdown, &alias).expect("write Markdown alias");
+    let data = root.0.join("library");
+    let library = LocalLibrary::open(&data).expect("open library");
+
+    let staged = library
+        .stage_with_title_hint(&markdown, None)
+        .expect("stage Markdown");
+    let alias_staged = library
+        .stage_with_title_hint(&alias, None)
+        .expect("stage Markdown alias");
+    assert_eq!(alias_staged.id, staged.id);
+    fs::write(
+        data.join("SourceBooks").join(format!("{}.md", staged.id)),
+        b"corrupt",
+    )
+    .expect("corrupt recorded source");
+
+    let opened = library
+        .open_book(&staged.id)
+        .expect("prepare from healthy alias");
+    assert!(opened.book.prepared);
+    fs::write(
+        data.join("ImportedBooks")
+            .join(&staged.id)
+            .join(".atha-book.json"),
+        b"{}",
+    )
+    .expect("corrupt metadata");
+    let repaired = library
+        .open_book(&staged.id)
+        .expect("rebuild cache with corrupt text metadata");
+    assert!(repaired.book.prepared);
+    assert_eq!(repaired.book.title, "Staged");
+}
+
+#[test]
 fn imports_repository_markdown_as_a_readable_book() {
     let root = TestRoot::new();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../README.md");

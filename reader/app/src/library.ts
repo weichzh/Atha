@@ -6,6 +6,7 @@ export interface LibraryBook {
   authors: string[];
   hasCover: boolean;
   importedAt: number;
+  prepared: boolean;
 }
 
 export interface ImportFailure {
@@ -227,6 +228,9 @@ export function importFailureMessage(code: string): string {
     case "kindle-source-too-large":
     case "kindle-text-too-large":
     case "kindle-resource-too-large":
+    case "fb2-source-too-large":
+    case "fbz-archive-too-large":
+    case "fb2-resource-too-large":
       return "文件过大";
     case "encrypted-epub":
       return "暂不支持受保护的 EPUB";
@@ -234,14 +238,21 @@ export function importFailureMessage(code: string): string {
       return "暂不支持受保护的 CBZ";
     case "encrypted-kindle":
       return "暂不支持受保护的 Kindle 书籍";
+    case "encrypted-fbz":
+      return "暂不支持受保护的 FBZ";
     case "kindle-dictionary-unsupported":
       return "这是 Kindle 词典，请在查词功能中使用";
     case "unsupported-epub":
       return "暂不支持这本 EPUB 的结构";
     case "unsupported-cbz":
       return "CBZ 中没有可读取的 JPEG 或 PNG 页面";
+    case "unsupported-fb2":
+      return "暂不支持这本 FB2 的结构";
     case "too-many-cbz-pages":
       return "CBZ 页数过多";
+    case "too-many-epub-sections":
+    case "too-many-epub-toc-items":
+      return "EPUB 章节或目录项过多";
     case "too-many-markdown-sections":
     case "too-many-markdown-toc-items":
       return "Markdown 章节或目录项过多";
@@ -250,6 +261,9 @@ export function importFailureMessage(code: string): string {
     case "too-many-kindle-sections":
     case "too-many-kindle-toc-items":
       return "Kindle 书籍的章节或目录项过多";
+    case "too-many-fb2-sections":
+    case "too-many-fb2-toc-items":
+      return "FB2 章节或目录项过多";
     case "invalid-cbz-image":
       return "CBZ 中包含无效或尺寸过大的图片";
     case "invalid-epub-source":
@@ -261,6 +275,13 @@ export function importFailureMessage(code: string): string {
     case "invalid-cbz-archive":
     case "unsafe-cbz-path":
       return "不是可读取的 CBZ 文件";
+    case "invalid-fb2-source":
+    case "invalid-fbz-archive":
+    case "unsafe-fbz-path":
+    case "invalid-fb2-xml":
+    case "invalid-fb2-reference":
+    case "invalid-fb2-image":
+      return "不是可读取的 FB2 或 FBZ 文件";
     case "invalid-markdown-source":
       return "不是可读取的 Markdown 文件";
     case "invalid-markdown-encoding":
@@ -282,14 +303,43 @@ export function importFailureMessage(code: string): string {
     case "markdown-source-changed":
     case "txt-source-changed":
     case "kindle-source-changed":
+    case "fb2-source-changed":
       return "文件在导入时发生了变化，请重试";
     case "epub-import-write-failed":
     case "cbz-import-write-failed":
     case "markdown-import-write-failed":
     case "txt-import-write-failed":
     case "kindle-import-write-failed":
+    case "fb2-import-write-failed":
       return "无法保存导入的书籍";
     default:
       return "导入失败";
+  }
+}
+
+export function openFailureMessage(error: unknown): string {
+  const code = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  switch (code) {
+    case "unknown-library-book":
+      return "书籍已不在书架中";
+    case "corrupt-library-record":
+      return "书架记录已损坏，请重新导入";
+    case "invalid-root":
+    case "not-found":
+    case "read-failed":
+    case "library-read-failed":
+    case "invalid-epub-source":
+    case "invalid-cbz-source":
+    case "invalid-fb2-source":
+    case "invalid-kindle-source":
+    case "invalid-markdown-source":
+    case "invalid-txt-source":
+      return "已保存的书籍内容不可读取，请重新导入";
+    case "library-write-failed":
+      return "无法准备书籍，请检查存储空间后重试";
+    default: {
+      const message = importFailureMessage(code);
+      return message === "导入失败" ? "无法打开书籍" : message;
+    }
   }
 }

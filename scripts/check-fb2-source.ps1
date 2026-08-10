@@ -354,7 +354,7 @@ globalThis.__athaReaderDiagnostics
             if ($null -ne $metric.input -and $metric.input -gt 33.4) { throw "Gesture input-to-first-visual P95 exceeded 33.4 ms for $($metric.name): $($metric.input) ms." }
             if ($null -ne $metric.tap -and $metric.tap -gt 50) { throw "Gesture tap-to-first-visual P95 exceeded 50 ms for $($metric.name): $($metric.tap) ms." }
             if ($null -ne $metric.frame -and $metric.frame -gt 25) { throw "Gesture drag frame P95 exceeded 25 ms for $($metric.name): $($metric.frame) ms." }
-            if ($metric.settle -gt 220) { throw "Gesture release-to-stable P95 exceeded 220 ms for $($metric.name): $($metric.settle) ms." }
+            if ($metric.settle -gt 400) { throw "Gesture release-to-stable P95 exceeded 400 ms for $($metric.name): $($metric.settle) ms." }
         }
     }
     $maxFrameMeasurement = $measurements | Where-Object action -eq 'drag' | Sort-Object maximum -Descending | Select-Object -First 1

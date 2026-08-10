@@ -734,7 +734,7 @@ fn validate_snapshot_presentation(value: &str) -> Result<(), MessageError> {
     if presentation.schema != 1
         || !matches!(presentation.theme.as_str(), "light" | "paper" | "dark")
         || !(70..=120).contains(&presentation.brightness)
-        || !matches!(presentation.font_size, 24 | 32 | 40)
+        || !(16..=40).contains(&presentation.font_size)
         || !matches!(presentation.font_family.as_str(), "book" | "serif" | "sans")
         || !matches!(
             presentation.density.as_str(),

@@ -129,6 +129,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     ),
                 }
             }
+            Event::UserEvent(UserEvent::Reader(Ok(ReaderEvent::ImageLoadTerminal(_)))) => {}
             Event::UserEvent(UserEvent::Reader(Ok(ReaderEvent::Error(failure)))) => {
                 fail_run(
                     &mut diagnostics,

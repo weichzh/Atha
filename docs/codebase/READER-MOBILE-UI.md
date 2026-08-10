@@ -13,6 +13,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
 | `reader/app/src/components/ReaderCanvas.svelte` | 自适应书页、章节和进度 DOM |
 | `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条、兼容笔记 dialog 与对话浮层的组合 |
+| `reader/app/src/components/ContentDialog.svelte` | 图片、公式和表格的全屏查看层，以及关闭、放大、缩小和复位控制 |
 | `reader/app/src/components/ConversationOverlay.svelte` | Atha 默认对话界面、修订/关系 dialog 与历史快照 dialog 的 DOM |
 | `reader/app/src/components/MessageComposer.svelte` | 自增高/全屏消息输入、两层工具栏和可视/Markdown 输入模式 |
 | `reader/app/src/message-editor.ts`、`message-markdown.ts` | 受限 Tiptap 扩展、链接规则及按需加载的 Markdown 双向转换 |
@@ -26,6 +27,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/atha-reader.css` | 自适应书页、固定内部边距、系统缩放和书籍内容样式 |
 | `reader/web/app.mjs` | 组合模块；开关工具层；目录投影；设置下钻；返回按钮 |
 | `reader/web/interaction.mjs` | 左右模式的键盘、滚轮、页区和横向触摸；上下模式的原生滚动、边界跨章和中间点击工具层 |
+| `reader/web/content-actions.mjs`、`reader/web/structured-actions.mjs` | 图片 / 公式与安全表格投影的激活、查看、焦点返回和诊断检查 |
 | `reader/web/bookmarks.mjs` | 右上角书签切换、目录中的书签列表和书签跳转 |
 | `reader/web/message-store.mjs` | 正式根 Message 到标注/笔记投影的适配，以及旧 localStorage 记录迁移 |
 | `reader/web/conversations.mjs` | 对话浮层、本条/本章/本书记录、时间/书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
@@ -44,6 +46,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 ```text
 .reader-shell
+├─ .reader-startup
 ├─ .reader-frame
 │  └─ .reader
 │     ├─ #page / #book-host
@@ -71,11 +74,13 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不改变 `.reader`、`#page`、章节标题或进度的几何尺寸。四个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录和笔记使用相同的全屏几何与返回入口。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。
 
+`.reader-startup` 从阅读路由首次挂载起用不透明书页底色覆盖书内内容；`app.mjs` 恢复上次 Locator 并绑定交互后设置根级 `data-reader-ready`，加载层才淡出。失败路径同样撤下加载层并显示错误，三点动画与淡出在 `prefers-reduced-motion` 下停用。
+
 ## 尺寸与缩放
 
 - `.reader` 填满当前 WebView；`pagination.mjs` 把内部宽高设置为视口 CSS 像素乘 `devicePixelRatio`，再用 `1 / devicePixelRatio` 设置 `--page-scale`。
 - 字号滑块保存 16–40 逻辑 CSS px，默认 19；正文实际字号为 `逻辑字号 × devicePixelRatio` 个内部设备像素。PCT-AL10 的 DPR 3 因此对应 48–120 设备像素，默认 57。
-- 普通图片在单页可用宽高内等比缩放；表格与代码由 reader 注入的 `.atha-structured-overflow` 容器限制在单页并允许双向滚动，避免书源样式把内容静默裁掉。
+- 普通图片在单页可用宽高内等比缩放；v5 本地图片以原生 HTML 宽高和书源 CSS 之前的有界 `contain-intrinsic-size` 规则稳定解码前盒，书源与用户 CSS 继续覆盖，不等待资源完成后再揭示正文。内嵌表格忽略书源最小列宽，以固定布局、紧凑字号和省略号生成整页宽预览；超出单页高度的部分直接裁掉。代码块仍在 `.atha-structured-overflow` 内原生滚动。
 - 例如 4K 屏幕采用 200% 系统缩放且视口为 390 × 840 CSS 像素时，内部书页为 780 × 1680 设备像素；同一窗口放大后会按新的设备像素宽高重新分页。
 - `.top-toolbar` 与 `.toolbar` 固定为 48 CSS px；`.tool-panel` 和普通表单控件同样不跟随 `--page-scale`，而是遵循系统 CSS 像素和系统缩放。
 - 上下正文安全区最小为 144 设备像素；在 DPR 2 下正文为 y=72–768 CSS px，工具栏为 y=0–48 与 y=792–840，因此控制层只进入页眉页脚。
@@ -107,7 +112,8 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 ## 交互连接
 
 - `app.mjs` 的 `toggleReaderTools()` 先撤销待处理的选区动作，再切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录和笔记页的返回按钮使用同一关闭入口；根级 `contextmenu` 监听统一禁止 WebView 默认右键菜单。
-- `#reading-mode` 只接受 `paged` 和 `scroll`。左右模式按左 35%、中间 30% 和右 35% 处理页区点击，单指横向拖动实时移动正文并在 170ms 内收束；上下模式把纵向手势交给 `.reader` 原生滚动，到顶部 / 底部后再以前后意图跨 section。
+- `#reading-mode` 只接受 `paged` 和 `scroll`。左右模式按左 35%、中间 30% 和右 35% 处理页区点击，单指横向拖动实时移动正文并在 300ms 内收束；上下模式把纵向手势交给 `.reader` 原生滚动，到顶部 / 底部后再以前后意图跨 section。
+- 表格中心单击打开安全投影后的全屏查看层；左右区域点按和表格上的横向拖动继续翻页，不再由内嵌表格截获。图片与表格查看层参考 Readest 的暗色全屏结构，右侧固定关闭、放大、缩小和复位按钮，顶部显示 50%–400% 缩放值，放大后由原生滚动查看完整内容。代码块仍以双击或键盘打开普通预览。
 - 华为 WebView 114 对 adb 和部分真实触摸会给出空 `pointerType`，`interaction.mjs` 将其归一为 touch；原生 `pan-y` 取消 pointer 时使用仍会到达的 `touchend` 处理章节边界。正文与 reader 的 touch 监听复用 inside / outside 去重，闭合 Shadow DOM 内的链接、表格、代码、dialog 和选择不会被外层事件误判。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；投影目录中的章节或书签完成跳转后自动关闭目录。
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
@@ -149,5 +155,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 微信读书源图与实现的同图对照位于 `artifacts/local/audits/reader-shell-usability/`。根目录 `design-qa.md` 记录尺寸归一、交互证据和修复历史；最终没有 P0、P1 或 P2 问题。
 
 Readest 原图、逐图观察和本次 Linux 统计实现副本位于忽略目录 `fixtures/local/readest/`；统计设计复核使用 WR-05 与 RD-03，不以文字报告替代原图。
+
+本次表格缩略图、表格全屏查看、图片全屏查看与 200% 放大原图位于忽略目录 `artifacts/local/audits/content-viewer-headless/`，并附 `SHA256SUMS`；这是 Chromium production build 的本地视觉证据，不替代 PCT-AL10 实机触摸。
 
 PCT-AL10 上 Atha 最终原生选区与词典抽屉原图、说明和 SHA-256 位于 `artifacts/local/audits/offline-dictionary-pct/`；动作栏与抽屉设计复核使用 RD-22、RD-24、RD-25 与 RD-27。阅读设置菜单、字号、布局、阅读方式和纵向滚动原图位于 `artifacts/local/audits/reader-controls-pct/`；设置层级参考本地 RD-* 原图，字号、缩进与滚动行为以同机真实交互复核。

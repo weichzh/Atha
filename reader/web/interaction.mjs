@@ -61,6 +61,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   let pointer = null;
   let touch = null;
   let suppressedClick = null;
+  let inputSequence = 0;
   const insideEvents = new WeakSet();
 
   function matchingPath(event, selector) {
@@ -107,6 +108,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   }
 
   function run(direction, kind) {
+    const sequence = ++inputSequence;
     counts[kind] += 1;
     Promise.resolve(direction < 0 ? navigation.previous() : navigation.next())
       .catch((error) => {
@@ -118,7 +120,9 @@ export function createInteraction({ reader, content, navigation, pagination, onC
           }
         }
       })
-      .finally(() => pagination.cancelSwipe());
+      .finally(() => {
+        if (sequence === inputSequence) pagination.cancelSwipe();
+      });
   }
 
   function scrollMode() {
@@ -157,6 +161,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
 
   function cancelPointer(pointerState = pointer) {
     pointer = null;
+    if (pointerState?.cancelTimer) clearTimeout(pointerState.cancelTimer);
     if (pointerState?.scrollFrame) cancelAnimationFrame(pointerState.scrollFrame);
     pagination.cancelSwipe();
   }
@@ -234,6 +239,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   }
 
   function onPointerDown(event) {
+    inputSequence += 1;
     if (!event.isPrimary) {
       cancelPointer();
       suppressCompatibilityClick(event, true);
@@ -260,6 +266,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     }
     const media = matchingPath(event, "img[role='button']");
     const structured = matchingPath(event, "table, pre");
+    const table = matchingPath(event, "table");
     const overflowElement = matchingPath(event, ".atha-structured-overflow");
     const rect = reader.getBoundingClientRect();
     const overflow = overflowElement
@@ -276,12 +283,15 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       y: event.clientY,
       owner: null,
       media,
+      table,
       overflow,
       dragEnabled: (event.pointerType || "touch") === "touch" || Boolean(media || structured),
       rect,
       layoutScale: rect.width > 0 ? reader.clientWidth / rect.width : 1,
       deltaX: 0,
       scrollFrame: 0,
+      cancelTimer: 0,
+      touchFallback: false,
     };
   }
 
@@ -289,6 +299,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     if (!pointer || pointer.id !== event.pointerId || scrollMode()) return;
     const deltaX = event.clientX - pointer.x;
     const deltaY = event.clientY - pointer.y;
+    pointer.deltaX = deltaX;
     const horizontal = Math.abs(deltaX);
     const vertical = Math.abs(deltaY);
     if (!pointer.owner && Math.max(horizontal, vertical) > CLICK_DRIFT) {
@@ -310,8 +321,10 @@ export function createInteraction({ reader, content, navigation, pagination, onC
 
   function onPointerUp(event) {
     const start = pointer;
+    if (!start || start.id !== event.pointerId) return;
     pointer = null;
-    if (!start || start.id !== event.pointerId || hardProtectedTarget(event)) {
+    if (start.cancelTimer) clearTimeout(start.cancelTimer);
+    if (hardProtectedTarget(event)) {
       cancelPointer(start);
       return;
     }
@@ -329,6 +342,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       return;
     }
     if (start.owner === "page") {
+      pagination.finishSwipe(event.clientX - start.x);
       const direction = swipeDirection(start, event);
       suppressCompatibilityClick(event);
       if (direction) {
@@ -354,7 +368,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     } else if (ratio > 0.65) {
       suppressCompatibilityClick(event);
       run(1, kind);
-    } else if (!start.media) onCenter();
+    } else if (!start.media && !start.table) onCenter();
   }
 
   function onCompatibilityEventCapture(event) {
@@ -386,6 +400,17 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   }
 
   function onTouchEnd(event) {
+    const orphan = pointer;
+    if (orphan?.type === "touch" && event.touches.length === 0 && event.changedTouches.length === 1) {
+      const point = [...event.changedTouches][0];
+      const path = event.composedPath();
+      const clientX = point?.clientX ?? orphan.x + orphan.deltaX;
+      const clientY = point?.clientY ?? orphan.y;
+      setTimeout(() => {
+        if (pointer !== orphan) return;
+        onPointerUp({ pointerId: orphan.id, clientX, clientY, composedPath: () => path });
+      }, 0);
+    }
     const start = touch;
     touch = null;
     if (!start || protectedTarget(event) || start.selection || hasSelection()) return;
@@ -401,6 +426,34 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     else if (Math.hypot(point.clientX - start.x, point.clientY - start.y) <= CLICK_DRIFT) onCenter();
   }
 
+  function onTouchMove(event) {
+    if (!pointer?.touchFallback || event.touches.length !== 1) return;
+    if (pointer.cancelTimer) {
+      clearTimeout(pointer.cancelTimer);
+      pointer.cancelTimer = 0;
+    }
+    const point = event.touches[0];
+    onPointerMove({
+      pointerId: pointer.id,
+      clientX: point.clientX,
+      clientY: point.clientY,
+      preventDefault: () => event.preventDefault(),
+    });
+  }
+
+  function onPointerCancel(event) {
+    const start = pointer;
+    if (!start || start.id !== event.pointerId) return;
+    if (start.type !== "touch") {
+      cancelPointer(start);
+      return;
+    }
+    start.touchFallback = true;
+    start.cancelTimer = setTimeout(() => {
+      if (pointer === start && start.touchFallback) cancelPointer(start);
+    }, 250);
+  }
+
   function bind() {
     const inside = (handler) => (event) => {
       insideEvents.add(event);
@@ -411,6 +464,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     };
     const cancelTouch = () => {
       touch = null;
+      if (pointer?.type === "touch") cancelPointer();
     };
     content.book.addEventListener("keydown", inside(onKeydown));
     document.addEventListener("keydown", outside(onKeydown));
@@ -422,6 +476,8 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     content.book.addEventListener("dblclick", onCompatibilityEventCapture, true);
     content.book.addEventListener("touchstart", inside(onTouchStart), { passive: true });
     reader.addEventListener("touchstart", outside(onTouchStart), { passive: true });
+    content.book.addEventListener("touchmove", inside(onTouchMove), { passive: false });
+    reader.addEventListener("touchmove", outside(onTouchMove), { passive: false });
     content.book.addEventListener("touchend", inside(onTouchEnd), { passive: true });
     reader.addEventListener("touchend", outside(onTouchEnd), { passive: true });
     content.book.addEventListener("touchcancel", inside(cancelTouch), { passive: true });
@@ -429,9 +485,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     window.addEventListener("pointermove", onPointerMove, { passive: false });
     content.book.addEventListener("pointerup", inside(onPointerUp));
     window.addEventListener("pointerup", outside(onPointerUp));
-    window.addEventListener("pointercancel", () => {
-      cancelPointer();
-    });
+    window.addEventListener("pointercancel", onPointerCancel);
   }
 
   const testWheel = createWheelDetector();

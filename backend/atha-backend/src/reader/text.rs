@@ -31,6 +31,7 @@ const IMPORT_MARKER: &str = ".atha-text-import";
 const BOOK_METADATA: &str = ".atha-book.json";
 const MARKDOWN_MARKER_VERSION: &str = "atha-markdown-import-v2";
 const TXT_MARKER_VERSION: &str = "atha-txt-import-v1";
+const MAX_METADATA_BYTES: u64 = 64 * 1024;
 const MARKDOWN_STYLE: &str = concat!(
     "pre { white-space: pre-wrap; overflow-wrap: break-word; }\n",
     "pre, code { font-family: monospace; }\n",
@@ -156,6 +157,7 @@ pub(super) fn import_markdown(
         source::fingerprint(source, MARKDOWN_IDENTITY_DOMAIN, MAX_RESOURCE_BYTES)
             .map_err(markdown_source_error)?;
     let fingerprint_ms = fingerprint_started.elapsed().as_millis();
+    let _import_guard = super::lock_import();
     let target = cache_root.join(&content_version);
     if complete_import(&target, MARKDOWN_MARKER_VERSION, &content_version) {
         return imported_book(
@@ -233,6 +235,7 @@ pub(super) fn import_txt(
     let input_bytes = probe.input_bytes;
     let encoding = probe.finish()?;
     let detect_ms = detect_started.elapsed().as_millis();
+    let _import_guard = super::lock_import();
     let target = cache_root.join(&content_version);
     if complete_import(&target, TXT_MARKER_VERSION, &content_version) {
         return imported_book(target, content_version, TXT_MARKER_VERSION, TextFormat::Txt);
@@ -274,6 +277,29 @@ pub(super) fn import_txt(
     }
     result?;
     imported_book(target, content_version, TXT_MARKER_VERSION, TextFormat::Txt)
+}
+
+pub(super) fn markdown_source_identity(source: impl AsRef<Path>) -> Result<String, ImportError> {
+    source::fingerprint(
+        source.as_ref(),
+        MARKDOWN_IDENTITY_DOMAIN,
+        MAX_RESOURCE_BYTES,
+    )
+    .map(|(content_version, _)| content_version)
+    .map_err(markdown_source_error)
+}
+
+pub(super) fn txt_source_identity(source: impl AsRef<Path>) -> Result<String, ImportError> {
+    let mut probe = TxtProbe::new();
+    let (content_version, _) = source::fingerprint_with(
+        source.as_ref(),
+        TXT_IDENTITY_DOMAIN,
+        super::MAX_SOURCE_BYTES,
+        |bytes, last| probe.feed(bytes, last),
+    )
+    .map_err(txt_source_error)?;
+    probe.finish()?;
+    Ok(content_version)
 }
 
 impl ImportError {
@@ -1231,10 +1257,27 @@ fn marker(version: &str, content_version: &str) -> String {
 }
 
 fn complete_import(path: &Path, version: &str, content_version: &str) -> bool {
-    path.join(READER_MANIFEST).is_file()
-        && path.join(BOOK_METADATA).is_file()
-        && fs::read_to_string(path.join(IMPORT_MARKER))
-            .is_ok_and(|value| value == marker(version, content_version))
+    has_marker(path, version, content_version)
+        && read_metadata(path, content_version).is_some()
+        && super::resources::complete_reader_cache(path, content_version)
+}
+
+fn has_marker(path: &Path, version: &str, content_version: &str) -> bool {
+    fs::read_to_string(path.join(IMPORT_MARKER))
+        .is_ok_and(|value| value == marker(version, content_version))
+}
+
+pub(super) fn has_cache_marker(path: &Path, content_version: &str) -> bool {
+    has_marker(path, MARKDOWN_MARKER_VERSION, content_version)
+        || has_marker(path, TXT_MARKER_VERSION, content_version)
+}
+
+pub(super) fn complete_cache(path: &Path, content_version: &str, extension: &str) -> bool {
+    match extension {
+        "md" | "markdown" => complete_import(path, MARKDOWN_MARKER_VERSION, content_version),
+        "txt" => complete_import(path, TXT_MARKER_VERSION, content_version),
+        _ => false,
+    }
 }
 
 fn imported_book(
@@ -1244,14 +1287,11 @@ fn imported_book(
     format: TextFormat,
 ) -> Result<ImportedBook, ImportError> {
     let write_failed = format.write_failed();
-    if !complete_import(&root, marker_version, &content_version) {
+    if !has_marker(&root, marker_version, &content_version) {
         return Err(write_failed);
     }
-    let metadata = serde_json::from_slice::<BookMetadata>(
-        &fs::read(root.join(BOOK_METADATA)).map_err(|_| write_failed)?,
-    )
-    .map_err(|_| write_failed)?;
-    if metadata.schema != 1 || metadata.content_version != content_version {
+    let metadata = read_metadata(&root, &content_version).ok_or(write_failed)?;
+    if !super::resources::complete_reader_cache(&root, &content_version) {
         return Err(write_failed);
     }
     Ok(ImportedBook {
@@ -1261,6 +1301,25 @@ fn imported_book(
         authors: metadata.authors,
         cover_path: metadata.cover_path,
     })
+}
+
+fn read_metadata(path: &Path, content_version: &str) -> Option<BookMetadata> {
+    let path = path.join(BOOK_METADATA);
+    if path.metadata().ok()?.len() > MAX_METADATA_BYTES {
+        return None;
+    }
+    let metadata: BookMetadata = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    if metadata.schema != 1
+        || metadata.content_version != content_version
+        || metadata.title.as_ref().is_some_and(|title| {
+            title.is_empty() || title.encode_utf16().count() > MAX_LABEL_UTF16_UNITS
+        })
+        || !metadata.authors.is_empty()
+        || metadata.cover_path.is_some()
+    {
+        return None;
+    }
+    Some(metadata)
 }
 
 fn write_json(path: &Path, value: &impl Serialize, error: ImportError) -> Result<(), ImportError> {

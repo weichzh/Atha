@@ -8,8 +8,8 @@ use atha_backend::reader::{
     READER_PAGE,
     resources::{BookRoot, ResourceError},
     telemetry::{
-        FailureStage, MetricStage, ReaderEvent, ReaderFailure, Search, TelemetryError,
-        parse_reader_event, safe_event,
+        FailureStage, ImageLoadBatch, ImageLoadTerminal, MetricStage, ReaderEvent, ReaderFailure,
+        Search, TelemetryError, parse_reader_event, safe_event,
     },
 };
 
@@ -143,6 +143,38 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
             duration_ms: 741.5,
         }))
     );
+    assert_eq!(
+        parse_reader_event(
+            READER_PAGE,
+            "image-load|2|2|3|1|4|3|1|1|2|1|0|0|0|0|0|0|0|0|0|0",
+        ),
+        Ok(ReaderEvent::ImageLoadTerminal(ImageLoadTerminal {
+            passes: 2,
+            remaining_current: 2,
+            remaining_current_or_next: 3,
+            generation_changed: true,
+            batches: [
+                ImageLoadBatch {
+                    selected: 4,
+                    success: 3,
+                    failure: 1,
+                    layout_changed: true,
+                },
+                ImageLoadBatch {
+                    selected: 2,
+                    success: 1,
+                    failure: 0,
+                    layout_changed: false,
+                },
+                ImageLoadBatch::default(),
+                ImageLoadBatch::default(),
+            ],
+        }))
+    );
+    let maximum_image_load =
+        "image-load|4|10000|10000|1|10000|9999|1|1|10000|9999|1|1|10000|9999|1|1|10000|9999|1|1";
+    assert!(maximum_image_load.len() <= 192);
+    assert!(parse_reader_event(READER_PAGE, maximum_image_load).is_ok());
 
     for (origin, message, expected) in [
         (
@@ -178,6 +210,31 @@ fn telemetry_accepts_only_fixed_non_content_fields_from_the_reader() {
         (
             READER_PAGE,
             "error|book-load|E:/private/book.xhtml",
+            TelemetryError::InvalidMessage,
+        ),
+        (
+            READER_PAGE,
+            "image-load|5|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0",
+            TelemetryError::OutOfRange,
+        ),
+        (
+            READER_PAGE,
+            "image-load|0|0|10001|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0",
+            TelemetryError::OutOfRange,
+        ),
+        (
+            READER_PAGE,
+            "image-load|0|0|1|0|1|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0",
+            TelemetryError::OutOfRange,
+        ),
+        (
+            READER_PAGE,
+            "image-load|1|0|1|0|1|1|1|0|0|0|0|0|0|0|0|0|0|0|0|0",
+            TelemetryError::OutOfRange,
+        ),
+        (
+            READER_PAGE,
+            "image-load|0|0|1|2|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0",
             TelemetryError::InvalidMessage,
         ),
         (READER_PAGE, "search|2001|0|1|1", TelemetryError::OutOfRange),

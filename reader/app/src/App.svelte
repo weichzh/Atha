@@ -17,7 +17,13 @@
 </svelte:head>
 
 {#if readerRoute}
-  <main class="reader-shell" aria-label="分页阅读器">
+  <main class="reader-shell" aria-label="分页阅读器" aria-busy="true">
+    <div class="reader-startup" role="status">
+      <span class="reader-startup-dot" aria-hidden="true"></span>
+      <span class="reader-startup-dot" aria-hidden="true"></span>
+      <span class="reader-startup-dot" aria-hidden="true"></span>
+      <span class="visually-hidden">正在恢复阅读位置…</span>
+    </div>
     <ReaderChrome />
     <ReaderCanvas />
     <p id="error" class="error" role="alert" hidden>无法安全打开这份内容。</p>

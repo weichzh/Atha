@@ -1,4 +1,29 @@
 const BENCHMARK_SAMPLES = 10;
+const IMAGE_LOAD_COUNT_MAX = 10_000;
+
+function imageLoadCount(value) {
+  return Math.min(Math.max(Math.trunc(value) || 0, 0), IMAGE_LOAD_COUNT_MAX);
+}
+
+function imageLoadTerminalMessage(resources) {
+  const visible = resources.visibleLoad;
+  const passes = Math.min(visible.passes, 4);
+  const fields = [
+    "image-load",
+    passes,
+    imageLoadCount(resources.currentPending),
+    imageLoadCount(resources.currentOrNextPending),
+    visible.generationChanged ? 1 : 0,
+  ];
+  for (let index = 0; index < 4; index += 1) {
+    const batch = index < passes ? visible.batches[index] : null;
+    const selected = imageLoadCount(batch?.selected);
+    const success = Math.min(imageLoadCount(batch?.success), selected);
+    const failure = Math.min(imageLoadCount(batch?.failure), selected - success);
+    fields.push(selected, success, failure, batch?.layoutChanged ? 1 : 0);
+  }
+  return fields.join("|");
+}
 
 export function createDiagnostics({
   params,
@@ -38,6 +63,22 @@ export function createDiagnostics({
   let activeGesture = null;
   let gestureSequence = 0;
 
+  assert(
+    imageLoadTerminalMessage({
+      currentPending: 2,
+      currentOrNextPending: 3,
+      visibleLoad: {
+        passes: 2,
+        generationChanged: true,
+        batches: [
+          { selected: 4, success: 3, failure: 1, layoutChanged: true },
+          { selected: 2, success: 1, failure: 0, layoutChanged: false },
+        ],
+      },
+    }) === "image-load|2|2|3|1|4|3|1|1|2|1|0|0|0|0|0|0|0|0|0|0",
+    "image-load",
+  );
+
   function heading() {
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
   }
@@ -65,6 +106,68 @@ export function createDiagnostics({
     emit(
       `metric|first_stable|1|${(performance.now() - started).toFixed(3)}|${state.fontSize}|${state.pages}|${reader.clientWidth}|${reader.clientHeight}`,
     );
+  }
+
+  function independentLastContentPage() {
+    const savedTransform = content.book.style.transform;
+    content.book.style.transform = "none";
+    const style = getComputedStyle(content.book);
+    const viewport = reader.getBoundingClientRect();
+    const scale = viewport.width / reader.clientWidth;
+    const step = (parseFloat(style.width) + parseFloat(style.columnGap)) * scale;
+    const left = content.book.getBoundingClientRect().left;
+    let right = left;
+    const walker = document.createTreeWalker(content.book, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      if (!walker.currentNode.textContent.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(walker.currentNode);
+      for (const rect of range.getClientRects()) {
+        if (rect.width && rect.height) right = Math.max(right, rect.right);
+      }
+    }
+    for (const element of content.book.querySelectorAll("img, table, figure")) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width && rect.height) right = Math.max(right, rect.right);
+    }
+    content.book.style.transform = savedTransform;
+    return Math.max(0, Math.floor((right - left - 0.5) / step));
+  }
+
+  async function verifyEmptyTailColumns() {
+    if (reader.dataset.readingMode === "scroll") return;
+    const anchor = pagination.captureOffset();
+    const probes = [document.createElement("div"), document.createElement("div")];
+    for (const probe of probes) {
+      probe.dataset.emptyColumnProbe = "true";
+      probe.style.setProperty("height", "1px", "important");
+      probe.style.setProperty("break-before", "column", "important");
+      probe.style.setProperty("break-after", "column", "important");
+      probe.style.setProperty("visibility", "hidden", "important");
+    }
+    content.book.append(...probes);
+    let evidence;
+    try {
+      await pagination.resizeViewport(anchor);
+      const style = getComputedStyle(content.book);
+      const step = parseFloat(style.width) + parseFloat(style.columnGap);
+      const scrollPages = Math.max(
+        1,
+        Math.round((content.book.scrollWidth + parseFloat(style.columnGap)) / step),
+      );
+      const expectedPage = independentLastContentPage();
+      evidence = Object.freeze({
+        scrollPages,
+        expectedPages: expectedPage + 1,
+        pages: pagination.snapshot().pages,
+      });
+      assert(scrollPages > evidence.expectedPages, "sample-boundary");
+      assert(evidence.pages === evidence.expectedPages, "sample-boundary");
+    } finally {
+      for (const probe of probes) probe.remove();
+      await pagination.resizeViewport(anchor);
+    }
+    return evidence;
   }
 
   async function verifyNavigation() {
@@ -99,6 +202,12 @@ export function createDiagnostics({
       await pagination.show(0);
       await navigation.previous();
       previousSection = session.snapshot().currentSection;
+      const previousPage = pagination.snapshot();
+      assert(
+        previousPage.page === previousPage.pages - 1 &&
+          previousPage.page === pagination.contentPageCount() - 1,
+        "sample-boundary",
+      );
       await navigation.next();
       nextSection = session.snapshot().currentSection;
       const queued = await Promise.all([navigation.goToToc(1), navigation.goToToc(0)]);
@@ -354,6 +463,7 @@ export function createDiagnostics({
       target.dispatchEvent(event);
     };
     const rect = reader.getBoundingClientRect();
+    assert(getComputedStyle(reader).touchAction === "none", "sample-boundary");
 
     await pagination.show(0);
     key("ArrowRight");
@@ -403,24 +513,40 @@ export function createDiagnostics({
       clientX: rect.right - 80,
       clientY: rect.top + 80,
     });
-    pointer(
-      "pointermove",
-      {
+    const nativeRequestAnimationFrame = globalThis.requestAnimationFrame;
+    const nativeCancelAnimationFrame = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = () => 1;
+    globalThis.cancelAnimationFrame = () => undefined;
+    try {
+      pointer(
+        "pointermove",
+        {
+          pointerId: 2,
+          pointerType: "touch",
+          button: 0,
+          clientX: rect.left + 150,
+          clientY: rect.top + 84,
+        },
+        window,
+      );
+      pointer("pointerup", {
         pointerId: 2,
         pointerType: "touch",
         button: 0,
-        clientX: rect.left + 150,
+        clientX: rect.left + 80,
         clientY: rect.top + 84,
-      },
-      window,
+      });
+    } finally {
+      globalThis.requestAnimationFrame = nativeRequestAnimationFrame;
+      globalThis.cancelAnimationFrame = nativeCancelAnimationFrame;
+    }
+    const releaseDelta =
+      (rect.left + 80 - (rect.right - 80)) * (reader.clientWidth / rect.width);
+    assert(
+      releaseDelta < -48 &&
+        Math.abs(new DOMMatrix(content.book.style.transform).m41 - releaseDelta) <= 1,
+      "sample-boundary",
     );
-    pointer("pointerup", {
-      pointerId: 2,
-      pointerType: "touch",
-      button: 0,
-      clientX: rect.left + 80,
-      clientY: rect.top + 84,
-    });
     await navigation.idle();
     assert(
       pagination.snapshot().page === 1 && content.book.hasAttribute("data-swipe-settling"),
@@ -457,9 +583,179 @@ export function createDiagnostics({
         isPrimary: true,
       }),
     );
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    assert(
+      !content.book.hasAttribute("data-swipe-dragging") &&
+        !reader.hasAttribute("data-swipe-dragging"),
+      "sample-boundary",
+    );
+
+    await pagination.show(0);
+    pointer("pointerdown", {
+      pointerId: 18,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer(
+      "pointermove",
+      {
+        pointerId: 18,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.right - 150,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointercancel", {
+        bubbles: true,
+        pointerId: 18,
+        pointerType: "touch",
+        isPrimary: true,
+      }),
+    );
+    touch("touchmove", [{ identifier: 18, clientX: rect.left + 80, clientY: rect.top + 84 }], reader);
+    touch("touchend", [{ identifier: 18, clientX: rect.left + 80, clientY: rect.top + 84 }], reader);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await navigation.idle();
+    assert(
+      pagination.snapshot().page === 1 &&
+        !content.book.hasAttribute("data-swipe-dragging") &&
+        !reader.hasAttribute("data-swipe-dragging"),
+      "sample-boundary",
+    );
+
+    await pagination.show(0);
+    pointer("pointerdown", {
+      pointerId: 14,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer(
+      "pointermove",
+      {
+        pointerId: 14,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.left + 80,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    touch("touchend", [{ identifier: 14, clientX: rect.left + 80, clientY: rect.top + 84 }], reader);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await navigation.idle();
+    assert(
+      pagination.snapshot().page === 1 &&
+        !content.book.hasAttribute("data-swipe-dragging") &&
+        !reader.hasAttribute("data-swipe-dragging"),
+      "sample-boundary",
+    );
+
+    await pagination.show(0);
+    pointer("pointerdown", {
+      pointerId: 16,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer(
+      "pointermove",
+      {
+        pointerId: 16,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.left + 80,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    touch("touchend", [{ identifier: 16, clientX: rect.left + 80, clientY: rect.top + 84 }], reader);
+    pointer("pointerdown", {
+      pointerId: 17,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer(
+      "pointerup",
+      {
+        pointerId: 16,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.left + 80,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    pointer(
+      "pointermove",
+      {
+        pointerId: 17,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.left + 80,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    pointer(
+      "pointerup",
+      {
+        pointerId: 17,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.left + 80,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await navigation.idle();
+    assert(
+      pagination.snapshot().page === 1 &&
+        !content.book.hasAttribute("data-swipe-dragging") &&
+        !reader.hasAttribute("data-swipe-dragging"),
+      "sample-boundary",
+    );
+
+    await pagination.show(0);
+    pointer("pointerdown", {
+      pointerId: 15,
+      pointerType: "touch",
+      button: 0,
+      clientX: rect.right - 80,
+      clientY: rect.top + 80,
+    });
+    pointer(
+      "pointermove",
+      {
+        pointerId: 15,
+        pointerType: "touch",
+        button: 0,
+        clientX: rect.right - 150,
+        clientY: rect.top + 84,
+      },
+      window,
+    );
+    touch("touchcancel", [], reader);
+    assert(
+      pagination.snapshot().page === 0 &&
+        !content.book.hasAttribute("data-swipe-dragging") &&
+        !reader.hasAttribute("data-swipe-dragging"),
+      "sample-boundary",
+    );
 
     await navigation.setPreferences("book", { readingMode: "scroll" });
     assert(content.book.dataset.readingMode === "scroll", "sample-boundary");
+    assert(getComputedStyle(reader).touchAction === "pan-y", "sample-boundary");
     await pagination.show(0);
     const scrollProbe = document.createElement("p");
     scrollProbe.textContent = "Scrolled reading mode probe. ".repeat(240);
@@ -948,18 +1244,107 @@ export function createDiagnostics({
     });
   }
 
-  async function openGestureSection(href) {
+  async function openGestureSection(href, warm = true) {
     const description = session.describe();
     const sectionIndex = description.sections.findIndex((section) => section.href === href);
     assert(sectionIndex >= 0, "sample-boundary");
     await navigation.goTo(locator.point(description, description.sections[sectionIndex].id, 0));
-    await content.warmRemaining();
+    let formulas = [...content.book.querySelectorAll("img.math-inline, img.math-display")];
+    if (warm) {
+      await content.warmRemaining();
+      const deadline = performance.now() + 10_000;
+      while (
+        formulas.some((image) => !image.complete || image.naturalWidth <= 0) &&
+        performance.now() < deadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await navigation.resize();
+    }
     await pagination.nextFrame();
+    formulas = [...content.book.querySelectorAll("img.math-inline, img.math-display")];
+    const style = getComputedStyle(content.book);
+    const step = parseFloat(style.width) + parseFloat(style.columnGap);
     return Object.freeze({
       section: sectionIndex,
-      formulas: content.book.querySelectorAll("img.math-inline, img.math-display").length,
+      formulas: formulas.length,
+      settledFormulas: formulas.filter((image) => image.complete && image.naturalWidth > 0).length,
       pages: pagination.snapshot().pages,
+      nativePagedScroll: pagination.snapshot().nativePagedScroll,
+      contentPages: independentLastContentPage() + 1,
+      scrollPages: Math.max(
+        1,
+        Math.round((content.book.scrollWidth + parseFloat(style.columnGap)) / step),
+      ),
     });
+  }
+
+  async function previousBoundaryProbe() {
+    const emptyTail = await verifyEmptyTailColumns();
+    const before = gesturePageState();
+    await pagination.show(0);
+    pagination.previewSwipe(80);
+    pagination.finishSwipe(80);
+    const moved = await navigation.previous();
+    const after = gesturePageState();
+    return Object.freeze({
+      moved,
+      sectionDelta: after.section - before.section,
+      page: after.page,
+      pages: after.pages,
+      lastContentPage: independentLastContentPage(),
+      emptyTail,
+      settling: content.book.hasAttribute("data-swipe-settling"),
+    });
+  }
+
+  async function scrollResourceProbe() {
+    const origin = navigation.current();
+    let evidence = Object.freeze({ candidate: false });
+    try {
+      await navigation.setPreferences("book", { readingMode: "scroll" });
+      const viewport = reader.getBoundingClientRect();
+      const target = [...content.book.querySelectorAll("img.atha-resource-pending")].find(
+        (image) => image.getBoundingClientRect().top > viewport.bottom + 1,
+      );
+      if (!target) return evidence;
+      const pendingBefore = content.resourceSnapshot().pending;
+      const targetRect = target.getBoundingClientRect();
+      reader.scrollTop += targetRect.top - viewport.top - 8;
+      reader.dispatchEvent(new Event("scroll"));
+      const offsetBefore = navigation.current().start.offset;
+      const deadline = performance.now() + 10_000;
+      while (
+        (target.classList.contains("atha-resource-pending") ||
+          !target.complete ||
+          target.naturalWidth <= 0) &&
+        performance.now() < deadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      await navigation.idle();
+      await pagination.nextFrame();
+      const settledOffset = navigation.current().start.offset;
+      await navigation.resize();
+      evidence = Object.freeze({
+        candidate: true,
+        loaded:
+          !target.classList.contains("atha-resource-pending") &&
+          target.complete &&
+          target.naturalWidth > 0,
+        pendingBefore,
+        pendingAfter: content.resourceSnapshot().pending,
+        offsetPreserved: settledOffset === offsetBefore,
+        relayoutPreserved:
+          navigation.current().start.offset === settledOffset &&
+          pagination.isOffsetVisible(settledOffset),
+      });
+      return evidence;
+    } finally {
+      await navigation.setPreferences("book", { readingMode: "paged" });
+      await navigation.goTo(origin);
+    }
   }
 
   function gestureTable(wide) {
@@ -1203,12 +1588,17 @@ export function createDiagnostics({
       "sample-boundary",
     );
 
+    const pageScroller = reader.querySelector("#page");
+    assert(pageScroller, "sample-boundary");
     const trace = {
       id: ++gestureSequence,
+      action,
       direction,
       record,
       before,
-      baselineTransform: getComputedStyle(content.book).transform,
+      baselineTransform: content.book.style.transform,
+      pageScroller,
+      baselinePageScrollLeft: pageScroller.scrollLeft,
       baselineScrollLeft: record.wrapper?.scrollLeft || 0,
       scrollVisualScale: reader.clientWidth > 0 ? viewport.width / reader.clientWidth : 1,
       baselinePreview: dialog.open,
@@ -1253,10 +1643,11 @@ export function createDiagnostics({
       if (event.composedPath().includes(record.target)) trace.compatibilityEvents += 1;
     };
     const sampleFrame = (at) => {
-      const page = gesturePageState();
+      const page = trace.action === "drag" ? trace.before : gesturePageState();
       trace.frames.push({
         at,
-        transform: getComputedStyle(content.book).transform,
+        transform: content.book.style.transform,
+        pageScrollLeft: trace.pageScroller?.scrollLeft || 0,
         section: page.section,
         page: page.page,
         preview: dialog.open,
@@ -1288,16 +1679,18 @@ export function createDiagnostics({
     await navigation.idle();
     const deadline = performance.now() + 1500;
     let settledFrames = 0;
-    let previousTransform = null;
+    let previousVisual = null;
     while (performance.now() < deadline && settledFrames < 2) {
       await pagination.nextFrame();
       const transform = getComputedStyle(content.book).transform;
+      const pageScrollLeft = trace.pageScroller?.scrollLeft || 0;
       const ready =
         !content.book.hasAttribute("data-swipe-dragging") &&
         !content.book.hasAttribute("data-swipe-settling") &&
         !reader.dataset.swipeDragging;
-      settledFrames = ready && transform === previousTransform ? settledFrames + 1 : 0;
-      previousTransform = transform;
+      const visual = `${transform}:${pageScrollLeft}`;
+      settledFrames = ready && visual === previousVisual ? settledFrames + 1 : 0;
+      previousVisual = visual;
     }
     const stableAt = performance.now();
     const after = gesturePageState();
@@ -1314,6 +1707,7 @@ export function createDiagnostics({
     const visual = relevantFrames.find(
       (frame) =>
         frame.transform !== trace.baselineTransform ||
+        frame.pageScrollLeft !== trace.baselinePageScrollLeft ||
         frame.section !== trace.before.section ||
         frame.page !== trace.before.page ||
         frame.preview !== trace.baselinePreview ||
@@ -1327,23 +1721,24 @@ export function createDiagnostics({
       if (
         (!previous &&
           (frame.transform !== trace.baselineTransform ||
+            frame.pageScrollLeft !== trace.baselinePageScrollLeft ||
             frame.scrollLeft !== trace.baselineScrollLeft)) ||
         (previous &&
-          (frame.transform !== previous.transform || frame.scrollLeft !== previous.scrollLeft))
+          (frame.transform !== previous.transform ||
+            frame.pageScrollLeft !== previous.pageScrollLeft ||
+            frame.scrollLeft !== previous.scrollLeft))
       ) {
         values.push(frame);
       }
       return values;
     }, []);
-    const frameIntervals = visualFrames
+    const frameIntervals = dragFrames
       .slice(1)
-      .map((frame, index) => frame.at - visualFrames[index].at)
+      .map((frame, index) => frame.at - dragFrames[index].at)
       .filter((value) => value >= 0);
-    if (visualFrames.length > 0 && trace.pointerUpAt !== null) {
-      frameIntervals.push(Math.max(0, trace.pointerUpAt - visualFrames.at(-1).at));
-    }
     const distinctRafTransforms = dragFrames.reduce((values, frame) => {
-      if (values.at(-1) !== frame.transform) values.push(frame.transform);
+      const visual = `${frame.transform}:${frame.pageScrollLeft}`;
+      if (values.at(-1) !== visual) values.push(visual);
       return values;
     }, []);
     return Object.freeze({
@@ -1363,6 +1758,10 @@ export function createDiagnostics({
       rafTransformSamples: Math.max(0, distinctRafTransforms.length - 1),
       settled: settledFrames >= 2,
       timing: Object.freeze({
+        inputToReleaseMs:
+          trace.pointerUpAt !== null && firstInputAt !== null
+            ? trace.pointerUpAt - firstInputAt
+            : null,
         inputToFirstVisualMs:
           visual && firstInputAt !== null ? visual.at - firstInputAt : null,
         releaseToFirstVisualMs:
@@ -1434,10 +1833,9 @@ export function createDiagnostics({
         rect.bottom <= viewport.bottom,
       "sample-boundary",
     );
-    const structured = kind === "table" || kind === "code";
     return Object.freeze({
-      x: structured ? rect.left + 2 : rect.left + rect.width / 2,
-      y: structured ? rect.top + 2 : rect.top + rect.height / 2,
+      x: kind === "code" ? rect.left + 2 : rect.left + rect.width / 2,
+      y: kind === "code" ? rect.top + 2 : rect.top + rect.height / 2,
     });
   }
 
@@ -1579,6 +1977,7 @@ export function createDiagnostics({
     const book = content.book;
     const state = pagination.snapshot();
     const resources = content.resourceSnapshot();
+    if (resources.currentOrNextPending !== 0) emit(imageLoadTerminalMessage(resources));
     assert(resources.currentOrNextPending === 0, "image-load");
     const inline = book.querySelectorAll("img.math-inline").length;
     const display = book.querySelectorAll("img.math-display").length;
@@ -1606,6 +2005,9 @@ export function createDiagnostics({
         cleanupGestureProbe,
         finishGestureProbe,
         openGestureSection,
+        pendingFormulaQueueProbe: structuredActions.verifyPendingFormulaQueue,
+        previousBoundaryProbe,
+        scrollResourceProbe,
         focusMedia,
         mediaPoint,
         previewState,

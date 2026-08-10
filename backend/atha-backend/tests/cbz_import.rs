@@ -21,6 +21,67 @@ const PNG_1X1: &[u8] = &[
 ];
 
 #[test]
+fn cbz_can_be_staged_before_its_first_open() {
+    let root = TestRoot::new();
+    let source = root.0.join("staged.cbz");
+    write_cbz(&source);
+    let library = LocalLibrary::open(root.0.join("library")).expect("open library");
+
+    let staged = library
+        .stage_with_title_hint(&source, None)
+        .expect("stage CBZ");
+    assert!(!staged.prepared);
+    assert!(
+        library
+            .open_book(&staged.id)
+            .expect("prepare CBZ")
+            .book
+            .prepared
+    );
+}
+
+#[test]
+fn correct_cbz_alias_recovers_from_an_epub_alias() {
+    let root = TestRoot::new();
+    let cbz = root.0.join("book.cbz");
+    let epub = root.0.join("book.epub");
+    write_cbz(&cbz);
+    fs::copy(&cbz, &epub).expect("copy CBZ with an EPUB suffix");
+    let library = LocalLibrary::open(root.0.join("library")).expect("open library");
+
+    let wrong = library
+        .stage_with_title_hint(&epub, None)
+        .expect("stage ZIP through the EPUB alias");
+    let correct = library
+        .stage_with_title_hint(&cbz, None)
+        .expect("stage the correct CBZ alias");
+    assert_eq!(wrong.id, correct.id);
+
+    let opened = library
+        .open_book(&correct.id)
+        .expect("try the valid format alias");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &opened
+            .root
+            .read("/.atha-reader.json")
+            .expect("read reader manifest")
+            .bytes,
+    )
+    .expect("parse reader manifest");
+    assert_eq!(manifest["sections"][0]["href"], ".atha-cbz/page-0001.xhtml");
+
+    fs::remove_file(
+        root.0
+            .join("library/SourceBooks")
+            .join(format!("{}.cbz", correct.id)),
+    )
+    .expect("remove the valid format source");
+    library
+        .open_book(&correct.id)
+        .expect("reuse the healthy cache independently of source aliases");
+}
+
+#[test]
 fn imports_cbz_as_naturally_sorted_image_sections() {
     let root = TestRoot::new();
     let source = root.0.join("natural-pages.cbz");

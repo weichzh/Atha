@@ -1,6 +1,8 @@
 const params = new URLSearchParams(location.search);
 const root = document.documentElement;
 const reader = document.querySelector(".reader");
+const readerShell = document.querySelector(".reader-shell");
+const readerStartup = document.querySelector(".reader-startup");
 const errorBox = document.querySelector("#error");
 const errorDetails = Object.freeze({
   "locator-offset": "恢复阅读位置失败：文字偏移量没有对应的可见内容",
@@ -31,6 +33,12 @@ function emit(message) {
   if (bridge?.postMessage) bridge.postMessage(message);
 }
 
+function revealReader() {
+  root.setAttribute("data-reader-ready", "");
+  readerShell.setAttribute("aria-busy", "false");
+  readerStartup.setAttribute("aria-hidden", "true");
+}
+
 function fail(code, operationStage = null) {
   document.documentElement.dataset.status = "fail";
   document.documentElement.dataset.error = code;
@@ -42,6 +50,7 @@ function fail(code, operationStage = null) {
     : sessionStage?.token || "initialization";
   errorBox.textContent = `${detail}（错误代码：${code}；阶段：${stage}）。`;
   errorBox.hidden = false;
+  revealReader();
   emit(`error|${code}|${diagnosticStage}`);
   console.error(`Atha reader failed: ${code}`);
   throw new Error(code);
@@ -60,10 +69,16 @@ function durableStorage() {
   }
 }
 
+let navigation;
 const content = createContent({
   host: document.querySelector("#book-host"),
   reader,
   readerStyleSource: document.querySelector("#reader-style-source"),
+  onLateLayout: ({ offset, pageIndex, scrollTop }) => {
+    if (!navigation) return;
+    const sectionIndex = session.snapshot().currentIndex;
+    void navigation.resize(offset, sectionIndex, pageIndex, scrollTop).catch(() => undefined);
+  },
   fail,
 });
 const preferences = createPreferences({
@@ -156,7 +171,7 @@ let readerState;
 let syncDirectorySelection = () => {};
 const keyPrefix = params.has("state-probe") ? "atha.reader.probe" : "atha.reader";
 const bookKey = params.get("state");
-const navigation = createNavigation({
+navigation = createNavigation({
   session,
   pagination,
   locator,
@@ -484,6 +499,7 @@ async function start() {
   contentActions.bind();
   structuredActions.bind();
   interaction.bind();
+  revealReader();
   diagnostics.recordFirstStable(firstStableStarted);
 
   const stateProbe = params.get("state-probe");

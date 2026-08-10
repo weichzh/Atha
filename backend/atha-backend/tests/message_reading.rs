@@ -108,7 +108,7 @@ fn snapshot() -> SourceSnapshotInput {
         reader_css: ".book { color: #222; }".into(),
         book_css: "p { text-indent: 2em; }".into(),
         user_css: String::new(),
-        presentation_json: r#"{"schema":1,"theme":"paper","brightness":100,"fontSize":32,"fontFamily":"book","density":"standard"}"#.into(),
+        presentation_json: r#"{"schema":1,"theme":"paper","brightness":100,"fontSize":19,"fontFamily":"book","density":"standard"}"#.into(),
         resources: Vec::new(),
     }
 }
@@ -931,6 +931,41 @@ fn source_snapshot_rejects_active_markup_unbound_assets_and_wrong_edition() {
         }),
         Err(atha_backend::messages::MessageError::InvalidInput)
     );
+}
+
+#[test]
+fn source_snapshot_accepts_current_font_size_range() {
+    let root = TestRoot::new("message-snapshot-font-size");
+    let store = MessageStore::open(&root.0).expect("open store");
+    for font_size in [16, 19, 40] {
+        let mut candidate = snapshot();
+        candidate.presentation_json = format!(
+            r#"{{"schema":1,"theme":"paper","brightness":100,"fontSize":{font_size},"fontFamily":"book","density":"standard"}}"#
+        );
+        store
+            .create_root(RootMessageDraft {
+                edition: edition(),
+                anchor: anchor(),
+                snapshot: candidate,
+                text: None,
+            })
+            .expect("accept current font size");
+    }
+    for font_size in [15, 41] {
+        let mut candidate = snapshot();
+        candidate.presentation_json = format!(
+            r#"{{"schema":1,"theme":"paper","brightness":100,"fontSize":{font_size},"fontFamily":"book","density":"standard"}}"#
+        );
+        assert_eq!(
+            store.create_root(RootMessageDraft {
+                edition: edition(),
+                anchor: anchor(),
+                snapshot: candidate,
+                text: None,
+            }),
+            Err(atha_backend::messages::MessageError::InvalidInput)
+        );
+    }
 }
 
 #[test]

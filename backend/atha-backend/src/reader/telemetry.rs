@@ -41,6 +41,23 @@ pub struct Search {
     pub duration_ms: f64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ImageLoadBatch {
+    pub selected: u16,
+    pub success: u16,
+    pub failure: u16,
+    pub layout_changed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageLoadTerminal {
+    pub passes: u8,
+    pub remaining_current: u16,
+    pub remaining_current_or_next: u16,
+    pub generation_changed: bool,
+    pub batches: [ImageLoadBatch; 4],
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FailureStage {
     Initialization,
@@ -61,6 +78,7 @@ pub enum ReaderEvent {
     Metric(Metric),
     Ready(Ready),
     Search(Search),
+    ImageLoadTerminal(ImageLoadTerminal),
     Error(ReaderFailure),
 }
 
@@ -136,10 +154,83 @@ pub fn parse_reader_event(origin: &str, message: &str) -> Result<ReaderEvent, Te
                 duration_ms,
             }))
         }
+        [
+            "image-load",
+            passes,
+            remaining_current,
+            remaining_current_or_next,
+            generation_changed,
+            b1_selected,
+            b1_success,
+            b1_failure,
+            b1_layout,
+            b2_selected,
+            b2_success,
+            b2_failure,
+            b2_layout,
+            b3_selected,
+            b3_success,
+            b3_failure,
+            b3_layout,
+            b4_selected,
+            b4_success,
+            b4_failure,
+            b4_layout,
+        ] => {
+            let passes = parse_range(passes, 0_u8, 4)?;
+            let remaining_current = parse_range(remaining_current, 0_u16, 10_000)?;
+            let remaining_current_or_next = parse_range(remaining_current_or_next, 0_u16, 10_000)?;
+            let batches = [
+                parse_image_load_batch(b1_selected, b1_success, b1_failure, b1_layout)?,
+                parse_image_load_batch(b2_selected, b2_success, b2_failure, b2_layout)?,
+                parse_image_load_batch(b3_selected, b3_success, b3_failure, b3_layout)?,
+                parse_image_load_batch(b4_selected, b4_success, b4_failure, b4_layout)?,
+            ];
+            if remaining_current > remaining_current_or_next
+                || batches.iter().enumerate().any(|(index, batch)| {
+                    (index < usize::from(passes)
+                        && (batch.selected == 0
+                            || u32::from(batch.success) + u32::from(batch.failure)
+                                > u32::from(batch.selected)))
+                        || (index >= usize::from(passes) && *batch != ImageLoadBatch::default())
+                })
+            {
+                return Err(TelemetryError::OutOfRange);
+            }
+            Ok(ReaderEvent::ImageLoadTerminal(ImageLoadTerminal {
+                passes,
+                remaining_current,
+                remaining_current_or_next,
+                generation_changed: parse_flag(generation_changed)?,
+                batches,
+            }))
+        }
         ["error", code, stage] => match (allowed_error(code), FailureStage::parse(stage)) {
             (Some(code), Some(stage)) => Ok(ReaderEvent::Error(ReaderFailure { code, stage })),
             _ => Err(TelemetryError::InvalidMessage),
         },
+        _ => Err(TelemetryError::InvalidMessage),
+    }
+}
+
+fn parse_image_load_batch(
+    selected: &str,
+    success: &str,
+    failure: &str,
+    layout_changed: &str,
+) -> Result<ImageLoadBatch, TelemetryError> {
+    Ok(ImageLoadBatch {
+        selected: parse_range(selected, 0_u16, 10_000)?,
+        success: parse_range(success, 0_u16, 10_000)?,
+        failure: parse_range(failure, 0_u16, 10_000)?,
+        layout_changed: parse_flag(layout_changed)?,
+    })
+}
+
+fn parse_flag(value: &str) -> Result<bool, TelemetryError> {
+    match value {
+        "0" => Ok(false),
+        "1" => Ok(true),
         _ => Err(TelemetryError::InvalidMessage),
     }
 }

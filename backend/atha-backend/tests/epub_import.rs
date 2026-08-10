@@ -2,8 +2,11 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{
+        Arc, Barrier,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use atha_backend::reader::{
@@ -21,9 +24,35 @@ const PNG_1X1: &[u8] = &[
     0xae, 0x42, 0x60, 0x82,
 ];
 
+const JPEG_2X1: &[u8] = &[
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x01, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43, 0x00, 0x03, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03,
+    0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x04, 0x06, 0x04, 0x04, 0x04, 0x04, 0x04, 0x08, 0x06,
+    0x06, 0x05, 0x06, 0x09, 0x08, 0x0a, 0x0a, 0x09, 0x08, 0x09, 0x09, 0x0a, 0x0c, 0x0f, 0x0c, 0x0a,
+    0x0b, 0x0e, 0x0b, 0x09, 0x09, 0x0d, 0x11, 0x0d, 0x0e, 0x0f, 0x10, 0x10, 0x11, 0x10, 0x0a, 0x0c,
+    0x12, 0x13, 0x12, 0x10, 0x13, 0x0f, 0x10, 0x10, 0x10, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01,
+    0x00, 0x02, 0x01, 0x01, 0x11, 0x00, 0xff, 0xc4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0xff, 0xc4, 0x00, 0x14,
+    0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x54, 0xdf, 0xff, 0xd9,
+];
+
+const EXIF_ORIENTATION_6: &[u8] = &[
+    0xff, 0xe1, 0x00, 0x22, b'E', b'x', b'i', b'f', 0x00, 0x00, b'I', b'I', 0x2a, 0x00, 0x08, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+];
+
 #[derive(Clone, Copy)]
 enum EpubVariant {
     Valid,
+    UnsizedImage,
+    StyledUnsizedImage,
+    OrientedImage,
+    MalformedJpegImage,
+    MalformedExifImage,
+    LateExifPngImage,
+    OversizedImage,
     Changed,
     InvalidMimetype,
     UnsafePath,
@@ -86,6 +115,110 @@ enum EpubVariant {
     Epub2NcxWrongVersion,
     Epub2NcxTocLimit,
     Epub2NcxTocOverflow,
+}
+
+#[test]
+fn annotates_unsized_images_without_changing_the_source() {
+    let root = TestRoot::new();
+    let source = root.0.join("unsized-image.epub");
+    write_epub(&source, EpubVariant::UnsizedImage);
+    let original = fs::read(&source).expect("read source before import");
+
+    let imported = import_epub(&source, root.0.join("cache")).expect("import unsized image");
+    let section = fs::read_to_string(imported.root.join("OEBPS/text/one.xhtml"))
+        .expect("read annotated section");
+
+    assert!(section.contains(r#"src="../images/cover.png""#));
+    assert!(section.contains(r#"width="1""#));
+    assert!(section.contains(r#"height="1""#));
+    assert!(section.contains(r#"data-atha-native-size="""#));
+    assert_eq!(
+        fs::read(source).expect("read source after import"),
+        original
+    );
+}
+
+#[test]
+fn native_image_dimensions_preserve_authored_css_and_reject_unsafe_sizes() {
+    let root = TestRoot::new();
+    for (name, variant) in [
+        ("styled.epub", EpubVariant::StyledUnsizedImage),
+        ("oversized.epub", EpubVariant::OversizedImage),
+    ] {
+        let source = root.0.join(name);
+        write_epub(&source, variant);
+        let imported = import_epub(&source, root.0.join(format!("{name}-cache")))
+            .expect("import without unsafe dimension hint");
+        let section = fs::read_to_string(imported.root.join("OEBPS/text/one.xhtml"))
+            .expect("read preserved section");
+        if matches!(variant, EpubVariant::StyledUnsizedImage) {
+            assert!(section.contains(r#"width="1""#), "{name}");
+            assert!(section.contains(r#"height="1""#), "{name}");
+            assert!(section.contains(r#"data-atha-native-size="""#), "{name}");
+            assert!(section.contains("img { width: 50px; }"), "{name}");
+            assert!(section.contains(r#"style="margin:auto""#), "{name}");
+        } else {
+            assert!(!section.contains(r#"width="9000""#), "{name}");
+            assert!(!section.contains(r#"height="1""#), "{name}");
+            assert!(!section.contains("data-atha-native-size"), "{name}");
+        }
+    }
+}
+
+#[test]
+fn applies_exif_orientation_to_intrinsic_dimensions() {
+    let root = TestRoot::new();
+    let source = root.0.join("oriented.epub");
+    write_epub(&source, EpubVariant::OrientedImage);
+
+    let imported = import_epub(&source, root.0.join("cache")).expect("import oriented image");
+    let section = fs::read_to_string(imported.root.join("OEBPS/text/one.xhtml"))
+        .expect("read oriented section");
+
+    assert!(section.contains(r#"width="1""#));
+    assert!(section.contains(r#"height="2""#));
+}
+
+#[test]
+fn annotates_jpeg_after_sof_when_scan_tail_is_missing() {
+    let root = TestRoot::new();
+    let source = root.0.join("malformed-jpeg.epub");
+    write_epub(&source, EpubVariant::MalformedJpegImage);
+
+    let imported = import_epub(&source, root.0.join("cache")).expect("import truncated JPEG scan");
+    let section = fs::read_to_string(imported.root.join("OEBPS/text/one.xhtml"))
+        .expect("read annotated section");
+
+    assert!(section.contains(r#"width="2""#));
+    assert!(section.contains(r#"height="1""#));
+}
+
+#[test]
+fn skips_dimension_hint_when_exif_metadata_is_malformed() {
+    let root = TestRoot::new();
+    let source = root.0.join("malformed-exif.epub");
+    write_epub(&source, EpubVariant::MalformedExifImage);
+
+    let imported = import_epub(&source, root.0.join("cache")).expect("import malformed EXIF");
+    let section = fs::read_to_string(imported.root.join("OEBPS/text/one.xhtml"))
+        .expect("read preserved section");
+
+    assert!(!section.contains(r#" width=""#));
+    assert!(!section.contains(r#" height=""#));
+}
+
+#[test]
+fn skips_dimension_hint_for_exif_after_png_image_data() {
+    let root = TestRoot::new();
+    let source = root.0.join("late-exif.epub");
+    write_epub(&source, EpubVariant::LateExifPngImage);
+
+    let imported = import_epub(&source, root.0.join("cache")).expect("import late PNG EXIF");
+    let section = fs::read_to_string(imported.root.join("OEBPS/text/one.xhtml"))
+        .expect("read preserved section");
+
+    assert!(!section.contains(r#" width=""#));
+    assert!(!section.contains(r#" height=""#));
 }
 
 #[test]
@@ -624,10 +757,27 @@ fn seeds_private_formula_gui_benchmark() {
         "EPUB gate library must stay inside the repository .tmp directory"
     );
     let library = LocalLibrary::open(root).expect("open EPUB gate library");
-    let book = library.import(source).expect("seed EPUB gate library");
+    let source_bytes = source.metadata().expect("read EPUB gate metadata").len();
+    let started = Instant::now();
+    let book = library
+        .stage_with_title_hint(&source, None)
+        .expect("stage EPUB gate library");
+    let stage_ms = started.elapsed().as_millis();
+    assert!(!book.prepared);
+    let started = Instant::now();
+    let opened = library
+        .open_book(&book.id)
+        .expect("prepare seeded EPUB gate book through BookRoot");
+    let first_open_ms = started.elapsed().as_millis();
+    assert!(opened.book.prepared);
+    let started = Instant::now();
     library
         .open_book(&book.id)
-        .expect("open seeded EPUB gate book through BookRoot");
+        .expect("reopen prepared EPUB gate book through BookRoot");
+    let cached_open_us = started.elapsed().as_micros();
+    eprintln!(
+        "source_bytes={source_bytes} stage_ms={stage_ms} first_open_ms={first_open_ms} cached_open_us={cached_open_us}"
+    );
 }
 
 struct TestRoot(PathBuf);
@@ -813,6 +963,291 @@ fn local_library_deduplicates_opens_and_removes_books_without_deleting_content()
     assert_eq!(reopened.list().unwrap_err(), LibraryError::CorruptRecord);
 }
 
+#[test]
+fn opens_legacy_epub_caches_without_a_durable_source() {
+    let root = TestRoot::new();
+    let source = root.0.join("book.epub");
+    write_epub(&source, EpubVariant::Valid);
+    for version in [2, 3, 4] {
+        let data = root.0.join(format!("data-v{version}"));
+        let library = LocalLibrary::open(&data).expect("open library");
+        let imported = library.import(&source).expect("create eager legacy record");
+        let marker = data
+            .join("ImportedBooks")
+            .join(&imported.id)
+            .join(".atha-epub-import");
+        fs::write(
+            &marker,
+            format!("atha-epub-import-v{version}\n{}\n", imported.id),
+        )
+        .expect("write legacy marker");
+
+        assert!(library.list().expect("list legacy cache")[0].prepared);
+        library
+            .open_book(&imported.id)
+            .expect("open legacy cache without SourceBooks");
+        assert!(
+            data.join("SourceBooks")
+                .read_dir()
+                .expect("read sources")
+                .next()
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn staged_library_import_prepares_on_first_open_and_reuses_the_cache() {
+    let root = TestRoot::new();
+    let source = root.0.join("book.epub");
+    write_epub(&source, EpubVariant::Valid);
+    let data = root.0.join("data");
+    let library = LocalLibrary::open(&data).expect("open library");
+
+    let staged = library
+        .stage_with_title_hint(&source, Some("Picker title"))
+        .expect("stage source");
+    assert!(!staged.prepared);
+    assert_eq!(staged.title, "Picker title");
+    assert!(staged.authors.is_empty());
+    assert!(!staged.has_cover);
+    assert_eq!(
+        fs::read_dir(data.join("SourceBooks"))
+            .expect("read staged sources")
+            .count(),
+        1
+    );
+    assert_eq!(
+        fs::read_dir(data.join("ImportedBooks"))
+            .expect("read empty imports")
+            .count(),
+        0
+    );
+
+    let opened = library.open_book(&staged.id).expect("prepare first open");
+    assert!(opened.book.prepared);
+    assert_eq!(opened.book.title, "Example Book");
+    assert_eq!(opened.book.authors, ["Example Author"]);
+    assert!(opened.book.has_cover);
+    assert!(opened.root.read(&format!("/{READER_MANIFEST}")).is_ok());
+
+    let marker = data
+        .join("ImportedBooks")
+        .join(&staged.id)
+        .join(".atha-epub-import");
+    fs::write(&marker, format!("atha-epub-import-v4\n{}\n", staged.id))
+        .expect("replace completion marker with legacy version");
+    library
+        .open_book(&staged.id)
+        .expect("upgrade legacy cache from durable source");
+    assert_eq!(
+        fs::read_to_string(&marker).expect("read upgraded marker"),
+        format!("atha-epub-import-v5\n{}\n", staged.id)
+    );
+
+    fs::write(&marker, format!("stale-import-version\n{}\n", staged.id))
+        .expect("replace completion marker with a stale version");
+    assert!(!library.list().expect("list incomplete book")[0].prepared);
+    library
+        .open_book(&staged.id)
+        .expect("rebuild cache with a stale completion marker");
+
+    for entry in fs::read_dir(data.join("SourceBooks")).expect("read prepared sources") {
+        fs::remove_file(entry.expect("source entry").path()).expect("remove durable source probe");
+    }
+    let reopened = library
+        .open_book(&staged.id)
+        .expect("open prepared cache without source");
+    assert_eq!(reopened.book, opened.book);
+    assert_eq!(library.list().expect("list prepared book"), [opened.book]);
+
+    fs::remove_file(
+        data.join("ImportedBooks")
+            .join(&staged.id)
+            .join("OEBPS/styles/book.css"),
+    )
+    .expect("remove cached resource");
+    assert_eq!(
+        library.open_book(&staged.id).unwrap_err(),
+        LibraryError::CorruptRecord
+    );
+}
+
+#[test]
+fn concurrent_first_opens_publish_one_complete_cache() {
+    let root = TestRoot::new();
+    let source = root.0.join("book.epub");
+    write_epub(&source, EpubVariant::Valid);
+    let library = LocalLibrary::open(root.0.join("data")).expect("open library");
+    let staged = library
+        .stage_with_title_hint(&source, None)
+        .expect("stage source");
+    let barrier = Arc::new(Barrier::new(4));
+
+    std::thread::scope(|scope| {
+        let handles = (0..4)
+            .map(|_| {
+                let library = library.clone();
+                let id = staged.id.clone();
+                let barrier = Arc::clone(&barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    library.open_book(&id)
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            let opened = handle
+                .join()
+                .expect("first-open worker")
+                .expect("concurrent first open");
+            assert!(opened.root.read(&format!("/{READER_MANIFEST}")).is_ok());
+            assert!(opened.root.read("/OEBPS/styles/book.css").is_ok());
+        }
+    });
+    let cache_entries = fs::read_dir(root.0.join("data/ImportedBooks"))
+        .expect("read completed cache")
+        .map(|entry| {
+            entry
+                .expect("cache entry")
+                .file_name()
+                .into_string()
+                .expect("ASCII cache name")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cache_entries, [staged.id]);
+}
+
+#[test]
+fn restaging_repairs_the_durable_source_and_legacy_record() {
+    let root = TestRoot::new();
+    let source = root.0.join("book.epub");
+    write_epub(&source, EpubVariant::Valid);
+    let data = root.0.join("data");
+    let library = LocalLibrary::open(&data).expect("open library");
+    let imported = library.import(&source).expect("create legacy eager record");
+    fs::remove_dir_all(data.join("ImportedBooks").join(&imported.id))
+        .expect("remove imported cache");
+
+    let staged = library
+        .stage_with_title_hint(&source, None)
+        .expect("backfill durable source");
+    assert!(!staged.prepared);
+    let stored_source = fs::read_dir(data.join("SourceBooks"))
+        .expect("read durable sources")
+        .next()
+        .expect("durable source")
+        .expect("durable source entry")
+        .path();
+    fs::write(&stored_source, b"corrupt").expect("corrupt durable source");
+    assert!(library.open_book(&imported.id).is_err());
+
+    library
+        .stage_with_title_hint(&source, None)
+        .expect("repair durable source");
+    library
+        .open_book(&imported.id)
+        .expect("prepare repaired source");
+
+    let imported_root = data.join("ImportedBooks").join(&imported.id);
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(imported_root.join(READER_MANIFEST)).expect("read prepared manifest"),
+    )
+    .expect("parse prepared manifest");
+    let section = manifest["sections"][0]["href"]
+        .as_str()
+        .expect("prepared section href");
+    let resource = manifest["resources"][0]
+        .as_str()
+        .expect("prepared resource path");
+    fs::remove_file(imported_root.join(section)).expect("remove cached section");
+
+    let reopened = library
+        .open_book(&imported.id)
+        .expect("rebuild incomplete cache");
+    assert!(reopened.root.read(&format!("/{section}")).is_ok());
+
+    fs::remove_file(imported_root.join(resource)).expect("remove cached resource");
+    let reopened = library
+        .open_book(&imported.id)
+        .expect("rebuild cache with missing resource");
+    assert!(reopened.root.read(&format!("/{resource}")).is_ok());
+
+    fs::write(imported_root.join(section), []).expect("empty cached section");
+    let reopened = library
+        .open_book(&imported.id)
+        .expect("rebuild empty cached section");
+    assert!(
+        !reopened
+            .root
+            .read(&format!("/{section}"))
+            .expect("read rebuilt section")
+            .bytes
+            .is_empty()
+    );
+
+    fs::write(
+        data.join("Library").join(format!("{}.json", imported.id)),
+        b"{}",
+    )
+    .expect("corrupt library record");
+    let restaged = library
+        .stage_with_title_hint(&source, None)
+        .expect("reconstruct corrupt record");
+    assert_eq!(restaged.id, imported.id);
+    library
+        .open_book(&imported.id)
+        .expect("open reconstructed record");
+}
+
+fn oriented_jpeg() -> Vec<u8> {
+    let mut bytes = JPEG_2X1.to_vec();
+    bytes.splice(2..2, EXIF_ORIENTATION_6.iter().copied());
+    bytes
+}
+
+fn jpeg_without_scan_marker() -> Vec<u8> {
+    let scan = JPEG_2X1
+        .windows(2)
+        .position(|bytes| bytes == [0xff, 0xda])
+        .expect("JPEG scan marker");
+    JPEG_2X1[..scan].to_vec()
+}
+
+fn jpeg_with_malformed_exif() -> Vec<u8> {
+    let mut bytes = JPEG_2X1.to_vec();
+    bytes.splice(
+        2..2,
+        [
+            0xff, 0xe1, 0x00, 0x0a, b'E', b'x', b'i', b'f', 0x00, 0x00, 0x00, 0x00,
+        ],
+    );
+    bytes
+}
+
+fn oversized_png() -> Vec<u8> {
+    let mut bytes = PNG_1X1.to_vec();
+    bytes[16..20].copy_from_slice(&9_000_u32.to_be_bytes());
+    bytes
+}
+
+fn png_with_late_exif() -> Vec<u8> {
+    let mut bytes = PNG_1X1.to_vec();
+    let iend = bytes
+        .windows(4)
+        .position(|chunk| chunk == b"IEND")
+        .expect("PNG IEND")
+        - 4;
+    bytes.splice(
+        iend..iend,
+        [
+            0x00, 0x00, 0x00, 0x04, b'e', b'X', b'I', b'f', 0x00, 0x00, 0x00, 0x00, 0x00, 0xd3,
+            0x36, 0x0f, 0x2f,
+        ],
+    );
+    bytes
+}
+
 fn write_epub(path: &Path, variant: EpubVariant) {
     let file = File::create(path).expect("create epub");
     let mut archive = ZipWriter::new(file);
@@ -953,6 +1388,21 @@ fn write_epub(path: &Path, variant: EpubVariant) {
     } else {
         br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title> Example   Book </dc:title><dc:creator>Example Author</dc:creator></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"></item><item id="css" href="styles/book.css" media-type="text/css"/><item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="one"/><itemref idref="two"></itemref></spine></package>"#.to_vec()
     };
+    let jpeg_cover = matches!(
+        variant,
+        EpubVariant::OrientedImage
+            | EpubVariant::MalformedJpegImage
+            | EpubVariant::MalformedExifImage
+    );
+    let package = if jpeg_cover {
+        String::from_utf8(package)
+            .expect("UTF-8 package")
+            .replace("images/cover.png", "images/cover.jpg")
+            .replace("image/png", "image/jpeg")
+            .into_bytes()
+    } else {
+        package
+    };
     let navigation = if matches!(variant, EpubVariant::Epub2NcxWithoutDoctype) {
         br#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navPoint id="one"><navLabel><text>One</text></navLabel><content src="text/one.xhtml"/></navPoint></navMap></ncx>"#.to_vec()
     } else if matches!(variant, EpubVariant::Epub2NcxExternalReference) {
@@ -1043,7 +1493,19 @@ fn write_epub(path: &Path, variant: EpubVariant) {
     } else {
         "OEBPS/text/two.xhtml"
     };
-    let one = if matches!(variant, EpubVariant::MissingOptionalResources) {
+    let one = if matches!(variant, EpubVariant::StyledUnsizedImage) {
+        br#"<html xmlns="http://www.w3.org/1999/xhtml"><head><style>img { width: 50px; }</style></head><body><img src="../images/cover.png" alt="Cover" style="margin:auto"/>One</body></html>"#.to_vec()
+    } else if matches!(
+        variant,
+        EpubVariant::UnsizedImage
+            | EpubVariant::OrientedImage
+            | EpubVariant::MalformedJpegImage
+            | EpubVariant::MalformedExifImage
+            | EpubVariant::LateExifPngImage
+            | EpubVariant::OversizedImage
+    ) {
+        br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="../images/cover.png" alt="Cover"/>One</body></html>"#.to_vec()
+    } else if matches!(variant, EpubVariant::MissingOptionalResources) {
         br#"<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="stylesheet" href="../styles/book.css"/></head><body><img src="../images/missing.png" alt="Missing illustration"/>Body</body></html>"#.to_vec()
     } else if matches!(variant, EpubVariant::Epub2Utf16Xhtml) {
         let mut bytes = vec![0xff, 0xfe];
@@ -1056,6 +1518,14 @@ fn write_epub(path: &Path, variant: EpubVariant) {
     } else {
         br#"<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>"#.to_vec()
     };
+    let one = if jpeg_cover {
+        String::from_utf8(one)
+            .expect("UTF-8 section")
+            .replace("images/cover.png", "images/cover.jpg")
+            .into_bytes()
+    } else {
+        one
+    };
     let two = if epub2 || matches!(variant, EpubVariant::Epub3NcxFallback) {
         br#"<?xml version="1.0"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head><body><p id="start">fixture-body-two-7cb4</p></body></html>"#.to_vec()
     } else {
@@ -1066,6 +1536,19 @@ fn write_epub(path: &Path, variant: EpubVariant) {
     } else {
         b"body { color: black; }".as_slice()
     };
+    let cover = match variant {
+        EpubVariant::OrientedImage => oriented_jpeg(),
+        EpubVariant::MalformedJpegImage => jpeg_without_scan_marker(),
+        EpubVariant::MalformedExifImage => jpeg_with_malformed_exif(),
+        EpubVariant::LateExifPngImage => png_with_late_exif(),
+        EpubVariant::OversizedImage => oversized_png(),
+        _ => PNG_1X1.to_vec(),
+    };
+    let cover_path = if jpeg_cover {
+        "OEBPS/images/cover.jpg"
+    } else {
+        "OEBPS/images/cover.png"
+    };
     for (name, bytes) in [
         ("META-INF/container.xml", container.as_slice()),
         ("OEBPS/book.opf", package.as_slice()),
@@ -1073,7 +1556,7 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         (one_path, one.as_slice()),
         (two_path, two.as_slice()),
         ("OEBPS/styles/book.css", stylesheet),
-        ("OEBPS/images/cover.png", PNG_1X1),
+        (cover_path, cover.as_slice()),
     ] {
         archive.start_file(name, stored).expect("start epub member");
         archive.write_all(bytes).expect("write epub member");

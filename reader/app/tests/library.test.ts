@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   filterLibraryBooks,
   groupLibraryBooksByProgress,
+  openFailureMessage,
   readStartedBookIds,
   removeBooksSerially,
   type LibraryBook,
@@ -11,9 +12,9 @@ import {
 
 const ids = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
 const books: LibraryBook[] = [
-  { id: ids[1], title: "Zeta", authors: ["Beta"], hasCover: true, importedAt: 30 },
-  { id: ids[0], title: "Alpha", authors: ["Gamma"], hasCover: false, importedAt: 20 },
-  { id: ids[2], title: "Middle", authors: [], hasCover: false, importedAt: 10 },
+  { id: ids[1], title: "Zeta", authors: ["Beta"], hasCover: true, importedAt: 30, prepared: true },
+  { id: ids[0], title: "Alpha", authors: ["Gamma"], hasCover: false, importedAt: 20, prepared: true },
+  { id: ids[2], title: "Middle", authors: [], hasCover: false, importedAt: 10, prepared: false },
 ];
 
 function progress(id: string) {
@@ -104,4 +105,13 @@ test("serial removal stops on failure and reports unprocessed books", async () =
   assert.deepEqual(result.removedIds, [ids[0]]);
   assert.deepEqual(result.remainingIds, [ids[1], ids[2]]);
   assert.deepEqual(result.books, books.filter((book) => book.id !== ids[0]));
+});
+
+test("first-open errors keep deterministic format guidance", () => {
+  assert.equal(openFailureMessage("encrypted-epub"), "暂不支持受保护的 EPUB");
+  assert.equal(
+    openFailureMessage(new Error("invalid-epub-source")),
+    "已保存的书籍内容不可读取，请重新导入",
+  );
+  assert.equal(openFailureMessage({ code: "encrypted-epub" }), "无法打开书籍");
 });

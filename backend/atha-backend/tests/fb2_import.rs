@@ -19,6 +19,26 @@ const PNG_1X1: &[u8] = &[
 ];
 
 #[test]
+fn fb2_can_be_staged_before_its_first_open() {
+    let root = TestRoot::new();
+    let source = root.0.join("staged.fb2");
+    fs::write(&source, sample_fb2()).expect("write FB2");
+    let library = LocalLibrary::open(root.0.join("library")).expect("open library");
+
+    let staged = library
+        .stage_with_title_hint(&source, None)
+        .expect("stage FB2");
+    assert!(!staged.prepared);
+    assert!(
+        library
+            .open_book(&staged.id)
+            .expect("prepare FB2")
+            .book
+            .prepared
+    );
+}
+
+#[test]
 fn imports_fb2_metadata_sections_links_and_cover() {
     let root = TestRoot::new();
     let source = root.0.join("reader-gate.fb2");

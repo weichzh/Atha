@@ -256,6 +256,7 @@ pub fn import_fb2(
     let (content_version, xml, format) = load_source(&source)?;
     let input_bytes = xml.len();
     let load_ms = load_started.elapsed().as_millis();
+    let _import_guard = super::lock_import();
     let cache_root = cache_root.as_ref();
     fs::create_dir_all(cache_root).map_err(|_| ImportError::WriteFailed)?;
     let target = cache_root.join(&content_version);
@@ -307,6 +308,14 @@ pub fn import_fb2(
         started.elapsed().as_millis()
     );
     imported_book(target, content_version)
+}
+
+pub(super) fn source_identity(source: impl AsRef<Path>) -> Result<String, ImportError> {
+    let source = fs::canonicalize(source).map_err(|_| ImportError::InvalidSource)?;
+    if !source.is_file() {
+        return Err(ImportError::InvalidSource);
+    }
+    load_source(&source).map(|(content_version, _, _)| content_version)
 }
 
 fn load_source(source_path: &Path) -> Result<(String, Vec<u8>, &'static str), ImportError> {
@@ -1323,11 +1332,15 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), ImportError> {
     file.write_all(b"\n").map_err(|_| ImportError::WriteFailed)
 }
 
-fn complete_cache(path: &Path, content_version: &str) -> bool {
-    path.join(READER_MANIFEST).is_file()
-        && fs::read_to_string(path.join(IMPORT_MARKER))
-            .is_ok_and(|value| value == format!("{IMPORT_MARKER_VERSION}\n{content_version}\n"))
+pub(super) fn complete_cache(path: &Path, content_version: &str) -> bool {
+    has_cache_marker(path, content_version)
         && read_metadata(path, content_version).is_ok()
+        && super::resources::complete_reader_cache(path, content_version)
+}
+
+pub(super) fn has_cache_marker(path: &Path, content_version: &str) -> bool {
+    fs::read_to_string(path.join(IMPORT_MARKER))
+        .is_ok_and(|value| value == format!("{IMPORT_MARKER_VERSION}\n{content_version}\n"))
 }
 
 fn imported_book(root: PathBuf, content_version: String) -> Result<ImportedBook, ImportError> {

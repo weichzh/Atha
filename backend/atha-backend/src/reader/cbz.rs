@@ -168,16 +168,8 @@ pub fn import_cbz(
     source: impl AsRef<Path>,
     cache_root: impl AsRef<Path>,
 ) -> Result<ImportedBook, ImportError> {
-    let source = fs::canonicalize(source).map_err(|_| ImportError::InvalidSource)?;
-    let metadata = source.metadata().map_err(|_| ImportError::InvalidSource)?;
-    if !metadata.is_file() {
-        return Err(ImportError::InvalidSource);
-    }
-    if metadata.len() > archive::MAX_SOURCE_BYTES {
-        return Err(ImportError::SourceTooLarge);
-    }
-
-    let (content_version, source_file) = archive::fingerprint(&source)?;
+    let (source, content_version, source_file) = fingerprinted_source(source.as_ref())?;
+    let _import_guard = super::lock_import();
     let cache_root = cache_root.as_ref();
     fs::create_dir_all(cache_root).map_err(|_| ImportError::WriteFailed)?;
     let target = cache_root.join(&content_version);
@@ -197,6 +189,24 @@ pub fn import_cbz(
     }
     result?;
     imported_book(target, content_version)
+}
+
+pub(super) fn source_identity(source: impl AsRef<Path>) -> Result<String, ImportError> {
+    fingerprinted_source(source.as_ref()).map(|(_, content_version, _)| content_version)
+}
+
+fn fingerprinted_source(source: &Path) -> Result<(PathBuf, String, File), ImportError> {
+    let source = fs::canonicalize(source).map_err(|_| ImportError::InvalidSource)?;
+    let metadata = source.metadata().map_err(|_| ImportError::InvalidSource)?;
+    if !metadata.is_file() {
+        return Err(ImportError::InvalidSource);
+    }
+    if metadata.len() > archive::MAX_SOURCE_BYTES {
+        return Err(ImportError::SourceTooLarge);
+    }
+
+    let (content_version, source_file) = archive::fingerprint(&source)?;
+    Ok((source, content_version, source_file))
 }
 
 fn build_import(
@@ -620,11 +630,15 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), ImportError> {
     file.write_all(b"\n").map_err(|_| ImportError::WriteFailed)
 }
 
-fn complete_cache(path: &Path, content_version: &str) -> bool {
-    path.join(READER_MANIFEST).is_file()
-        && fs::read_to_string(path.join(IMPORT_MARKER))
-            .is_ok_and(|value| value == format!("atha-cbz-import-v1\n{content_version}\n"))
+pub(super) fn complete_cache(path: &Path, content_version: &str) -> bool {
+    has_cache_marker(path, content_version)
         && read_metadata(path, content_version).is_ok()
+        && super::resources::complete_reader_cache(path, content_version)
+}
+
+pub(super) fn has_cache_marker(path: &Path, content_version: &str) -> bool {
+    fs::read_to_string(path.join(IMPORT_MARKER))
+        .is_ok_and(|value| value == format!("atha-cbz-import-v1\n{content_version}\n"))
 }
 
 fn imported_book(root: PathBuf, content_version: String) -> Result<ImportedBook, ImportError> {

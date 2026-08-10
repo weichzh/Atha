@@ -16,8 +16,23 @@ assert.deepEqual(captured, {
   brightness: 90,
   fontSize: 40,
   fontFamily: "serif",
-  lineHeightPx: 72,
+  lineHeightPx: 82,
 });
+for (const fontSize of [16, 19, 40]) {
+  assert.equal(
+    parseSnapshotPresentation(
+      `{"schema":1,"theme":"paper","brightness":100,"fontSize":${fontSize},"fontFamily":"book","density":"standard"}`,
+    ).fontSize,
+    fontSize,
+  );
+}
+for (const fontSize of [15, 19.5, 41]) {
+  assert.throws(() =>
+    parseSnapshotPresentation(
+      `{"schema":1,"theme":"paper","brightness":100,"fontSize":${fontSize},"fontFamily":"book","density":"standard"}`,
+    ),
+  );
+}
 assert.throws(() =>
   parseSnapshotPresentation(
     '{"schema":1,"theme":"system","brightness":100,"fontSize":32,"fontFamily":"book","density":"standard"}',

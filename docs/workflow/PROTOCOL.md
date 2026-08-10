@@ -59,7 +59,7 @@ workflow 只负责要求这些输入存在并保存验收证据；具体架构�
 
 - `ACTIVE.md` 只保留当前指针；详细范围、检查和风险更新到事实所有者或活动 change；
 - 全局 `project-workflow` 按 `docs/agents/workflow.md` 管理 task claim、工站证据与关闭；本协议仍独占任务分类和 change 生命周期；
-- 已接入的正式检查通过 `pwsh -NoProfile -File scripts/Invoke-Atha.ps1 check <target> -Activity <activity>` 运行；`Measure-Workflow.ps1` 只作为兼容记录层，不再手工维护日常 run/phase；
+- 已接入的正式检查由全局 `project-workflow` 工站调用对应 Bash 入口；`scripts/check-docs.sh` 和 `scripts/check-workflow.sh` 是 required 文档门，旧 PowerShell 脚本只保留为 Windows 兼容记录层；
 - 预期拒绝类检查由项目脚本把“观察到预期拒绝”转换为成功退出；任何非预期接受、失败类型或未完成检查仍非零退出；
 - 检查按静态预检、受影响 Module、required gate、真实目标或 benchmark 的成本顺序推进，不在低成本失败未收敛时运行高成本链路；
 - 修改中文 Markdown 后，只处理本次文件的 `autocorrect --fix`、适用格式化和 `autocorrect --lint`；

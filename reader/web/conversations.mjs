@@ -1,4 +1,4 @@
-const SNAPSHOT_LINE_HEIGHTS = Object.freeze({ compact: 1.45, standard: 1.6, comfortable: 1.8 });
+const SNAPSHOT_LINE_HEIGHTS = Object.freeze({ compact: 1.55, standard: 1.8, comfortable: 2.05 });
 const MESSAGE_TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit",
   minute: "2-digit",
@@ -61,7 +61,9 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
     !Number.isInteger(parsed.brightness) ||
     parsed.brightness < 70 ||
     parsed.brightness > 120 ||
-    ![24, 32, 40].includes(parsed.fontSize) ||
+    !Number.isInteger(parsed.fontSize) ||
+    parsed.fontSize < 16 ||
+    parsed.fontSize > 40 ||
     !["book", "serif", "sans"].includes(parsed.fontFamily) ||
     !Object.hasOwn(SNAPSHOT_LINE_HEIGHTS, parsed.density)
   ) {

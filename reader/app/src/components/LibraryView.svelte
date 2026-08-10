@@ -22,6 +22,7 @@
     libraryAvailable,
     listBooks,
     openBook,
+    openFailureMessage,
     readStartedBookIds,
     removeBooksSerially,
     restoreMessages,
@@ -40,6 +41,7 @@
   let loading = true;
   let busy = false;
   let status = "";
+  let workLabel = "";
   let query = "";
   let view: LibraryViewMode = "default";
   let selecting = false;
@@ -100,11 +102,12 @@
   async function chooseBooks() {
     if (busy) return;
     if (!libraryAvailable) {
-      status = "请在 Atha 应用中选择 EPUB、CBZ、FB2、FBZ、Markdown 或 TXT。";
+      status = "请在 Atha 应用中选择 EPUB、CBZ、FB2、FBZ、Kindle、Markdown 或 TXT。";
       return;
     }
     busy = true;
-    status = "正在导入…";
+    status = "";
+    workLabel = "正在加入书架…";
     try {
       const report = await importBooks();
       if (!report) {
@@ -123,6 +126,7 @@
     } catch {
       status = "无法导入所选书籍。";
     } finally {
+      workLabel = "";
       busy = false;
     }
   }
@@ -171,10 +175,12 @@
     if (busy) return;
     busy = true;
     status = "";
+    workLabel = book.prepared ? "" : "首次打开，正在准备书籍…";
     try {
       await openBook(book.id);
-    } catch {
-      status = `无法打开《${book.title}》，请重新导入。`;
+    } catch (error) {
+      status = `无法打开《${book.title}》：${openFailureMessage(error)}。`;
+      workLabel = "";
       busy = false;
     }
   }
@@ -380,7 +386,7 @@
     <section class="library-empty">
       <BookOpen aria-hidden="true" />
       <h2>开始你的书架</h2>
-      <p>选择 EPUB、CBZ、FB2、FBZ、Markdown 或 TXT，导入后即可随时继续阅读。</p>
+      <p>选择 EPUB、CBZ、FB2、FBZ、Kindle、Markdown 或 TXT，导入后即可随时继续阅读。</p>
       <button type="button" onclick={chooseBooks} disabled={busy}>选择书籍</button>
     </section>
   {:else if visibleBooks.length === 0}
@@ -441,5 +447,14 @@
 
   {#if status}
     <p class="library-status" role="status">{status}</p>
+  {/if}
+
+  {#if workLabel}
+    <div class="library-work-overlay" role="status" aria-live="polite">
+      <div class="library-work-progress">
+        <p>{workLabel}</p>
+        <progress aria-label={workLabel}></progress>
+      </div>
+    </div>
   {/if}
 </main>

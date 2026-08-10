@@ -9,6 +9,7 @@ use std::{
 
 pub(super) const MAX_RESOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_READER_SECTIONS: usize = 2_000;
+const MAX_READER_RESOURCES: usize = 10_000;
 
 #[derive(Clone, Debug)]
 pub struct BookRoot {
@@ -80,22 +81,7 @@ impl BookRoot {
 }
 
 fn manifest_xhtml_paths(root: &Path) -> HashSet<PathBuf> {
-    let Ok(manifest_path) = fs::canonicalize(root.join(".atha-reader.json")) else {
-        return HashSet::new();
-    };
-    if !manifest_path.starts_with(root) {
-        return HashSet::new();
-    }
-    let Ok(metadata) = manifest_path.metadata() else {
-        return HashSet::new();
-    };
-    if !metadata.is_file() || metadata.len() > MAX_RESOURCE_BYTES {
-        return HashSet::new();
-    }
-    let Ok(bytes) = fs::read(manifest_path) else {
-        return HashSet::new();
-    };
-    let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+    let Some(manifest) = read_manifest(root) else {
         return HashSet::new();
     };
     if manifest.get("schema").and_then(serde_json::Value::as_u64) != Some(1) {
@@ -115,6 +101,78 @@ fn manifest_xhtml_paths(root: &Path) -> HashSet<PathBuf> {
         .filter_map(|section| section.get("href").and_then(serde_json::Value::as_str))
         .filter_map(|href| decode_request_path(&format!("/{href}")).ok())
         .collect()
+}
+
+pub(super) fn complete_reader_cache(root: &Path, content_version: &str) -> bool {
+    let Ok(root) = fs::canonicalize(root) else {
+        return false;
+    };
+    let Some(manifest) = read_manifest(&root) else {
+        return false;
+    };
+    if manifest.get("schema").and_then(serde_json::Value::as_u64) != Some(1)
+        || manifest
+            .get("contentVersion")
+            .and_then(serde_json::Value::as_str)
+            != Some(content_version)
+    {
+        return false;
+    }
+    let Some(sections) = manifest
+        .get("sections")
+        .and_then(serde_json::Value::as_array)
+        .filter(|sections| !sections.is_empty() && sections.len() <= MAX_READER_SECTIONS)
+    else {
+        return false;
+    };
+    let Some(resources) = manifest
+        .get("resources")
+        .and_then(serde_json::Value::as_array)
+        .filter(|resources| resources.len() <= MAX_READER_RESOURCES)
+    else {
+        return false;
+    };
+    sections.iter().all(|section| {
+        section
+            .get("href")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|path| complete_reader_path(&root, path, true))
+    }) && resources.iter().all(|resource| {
+        resource
+            .as_str()
+            .is_some_and(|path| complete_reader_path(&root, path, false))
+    })
+}
+
+fn read_manifest(root: &Path) -> Option<serde_json::Value> {
+    let root = fs::canonicalize(root).ok()?;
+    let manifest_path = fs::canonicalize(root.join(".atha-reader.json")).ok()?;
+    if !manifest_path.starts_with(&root) {
+        return None;
+    }
+    let metadata = manifest_path.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_RESOURCE_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&fs::read(manifest_path).ok()?).ok()
+}
+
+fn complete_reader_path(root: &Path, value: &str, require_content: bool) -> bool {
+    if value.is_empty() || value.len() > 512 {
+        return false;
+    }
+    let Ok(relative) = decode_request_path(&format!("/{value}")) else {
+        return false;
+    };
+    let Ok(path) = fs::canonicalize(root.join(relative)) else {
+        return false;
+    };
+    path.starts_with(root)
+        && path.metadata().is_ok_and(|metadata| {
+            metadata.is_file()
+                && (!require_content || metadata.len() > 0)
+                && metadata.len() <= MAX_RESOURCE_BYTES
+        })
 }
 
 impl ResourceError {

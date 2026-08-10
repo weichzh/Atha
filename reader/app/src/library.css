@@ -556,6 +556,39 @@ summary {
   bottom: calc(88px + var(--safe-area-bottom));
 }
 
+.library-work-overlay {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 58%);
+}
+
+.library-work-progress {
+  width: min(360px, 100%);
+  box-sizing: border-box;
+  padding: 18px;
+  border: 1px solid var(--library-border);
+  border-radius: 8px;
+  background: var(--library-surface-raised);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 42%);
+}
+
+.library-work-progress p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.library-work-progress progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  accent-color: var(--library-accent);
+}
+
 .library-shell button:disabled,
 .library-shell input:disabled {
   cursor: default;

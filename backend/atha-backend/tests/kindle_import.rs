@@ -12,6 +12,30 @@ const SAFE_XHTML: &[u8] = br##"<?xml version="1.0" encoding="utf-8"?>
 <body><h1 id="start">PalmDOC gate</h1><p><a href="#end">Continue</a></p><a href="images/missing.png">Broken image link</a><p id="end">Ready.</p></body></html>"##;
 
 #[test]
+fn kindle_can_be_staged_before_its_first_open() {
+    let root = TestRoot::new();
+    let source = root.0.join("staged.azw3");
+    fs::write(
+        &source,
+        palm_database(minimal_record_zero(2, SAFE_XHTML), SAFE_XHTML),
+    )
+    .expect("write Kindle fixture");
+    let library = LocalLibrary::open(root.0.join("library")).expect("open library");
+
+    let staged = library
+        .stage_with_title_hint(&source, None)
+        .expect("stage Kindle");
+    assert!(!staged.prepared);
+    assert!(
+        library
+            .open_book(&staged.id)
+            .expect("prepare Kindle")
+            .book
+            .prepared
+    );
+}
+
+#[test]
 fn imports_palmdoc_through_the_shared_library() {
     let root = TestRoot::new();
     let source = root.0.join("gate.mobi");

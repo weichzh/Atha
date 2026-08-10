@@ -199,6 +199,33 @@ async fn reader_event(
                 search.duration_ms
             );
         }
+        ReaderEvent::ImageLoadTerminal(image_load) => {
+            let [b1, b2, b3, b4] = image_load.batches;
+            log::error!(
+                target: "atha::reader",
+                "event=reader_image_load_terminal passes={} remaining_current={} remaining_current_or_next={} generation_changed={} b1_selected={} b1_success={} b1_failure={} b1_layout={} b2_selected={} b2_success={} b2_failure={} b2_layout={} b3_selected={} b3_success={} b3_failure={} b3_layout={} b4_selected={} b4_success={} b4_failure={} b4_layout={}",
+                image_load.passes,
+                image_load.remaining_current,
+                image_load.remaining_current_or_next,
+                image_load.generation_changed,
+                b1.selected,
+                b1.success,
+                b1.failure,
+                b1.layout_changed,
+                b2.selected,
+                b2.success,
+                b2.failure,
+                b2.layout_changed,
+                b3.selected,
+                b3.success,
+                b3.failure,
+                b3.layout_changed,
+                b4.selected,
+                b4.success,
+                b4.failure,
+                b4.layout_changed
+            );
+        }
         ReaderEvent::Error(failure) => {
             log::error!(
                 target: "atha::reader",
@@ -285,7 +312,7 @@ async fn import_library_books(
                         continue;
                     }
                 };
-            if let Err(error) = library.import_with_title_hint(input.path(), input.title_hint()) {
+            if let Err(error) = library.stage_with_title_hint(input.path(), input.title_hint()) {
                 log::warn!(
                     target: "atha::library",
                     "operation=import stage=backend outcome=failed code={}",
@@ -328,21 +355,33 @@ async fn import_library_books(
 }
 
 #[tauri::command]
-fn open_library_book(
+async fn open_library_book(
     window: WebviewWindow,
     runtime: State<'_, ReaderRuntime>,
     id: String,
 ) -> Result<ReaderLaunch, String> {
     let started = Instant::now();
-    let opened = runtime.library.open_book(&id).map_err(|error| {
-        log::error!(
-            target: "atha::library",
-            "operation=open outcome=failed code={} duration_ms={}",
-            error.code(),
-            started.elapsed().as_millis()
-        );
-        error.code().to_owned()
-    })?;
+    let library = runtime.library.clone();
+    let open_id = id.clone();
+    let opened = tauri::async_runtime::spawn_blocking(move || library.open_book(&open_id))
+        .await
+        .map_err(|_| {
+            log::error!(
+                target: "atha::library",
+                "operation=open stage=task outcome=failed code=library-open-task duration_ms={}",
+                started.elapsed().as_millis()
+            );
+            "library-open-task".to_owned()
+        })?
+        .map_err(|error| {
+            log::error!(
+                target: "atha::library",
+                "operation=open outcome=failed code={} duration_ms={}",
+                error.code(),
+                started.elapsed().as_millis()
+            );
+            error.code().to_owned()
+        })?;
     let diagnostics = interactive_diagnostics().map_err(|_| {
         log::error!(
             target: "atha::library",
@@ -794,8 +833,8 @@ fn book_response(
     if request.method() != "GET" {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
-    let root = match current.read() {
-        Ok(value) => value.clone(),
+    let current = match current.read() {
+        Ok(value) => value,
         Err(_) => {
             log::error!(
                 target: "atha::protocol",
@@ -804,7 +843,7 @@ fn book_response(
             return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
-    let Some(root) = root else {
+    let Some(root) = current.as_ref() else {
         return empty_response(StatusCode::NOT_FOUND);
     };
     match root.read(request.uri().path()) {

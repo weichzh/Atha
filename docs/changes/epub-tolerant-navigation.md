@@ -83,4 +83,4 @@ present
 
 EPUB 定向测试为 17 passed / 1 ignored；workspace Clippy、Rust 全测试、Svelte check / build、正式 Linux GUI 门、AutoCorrect、文档 gate 与 diff 检查均通过。正式 Linux GUI 门同时覆盖共享 CSS 模块、统计、宽窄视口与状态恢复，CSS 模块和阅读统计 P95 均为 2 ms。
 
-残余风险是 `zip 8.6` 的 pseudo-ZIP64 兼容缺口和未执行系统化 EPUB fuzzing。绝对路径、重复 manifest ID、远程资源与未知加密不是残余兼容缺口，而是保留的信任边界。
+残余风险是 `zip 8.6` 的 pseudo-ZIP64 兼容缺口和未执行系统化 EPUB fuzzing。对上游 ZIP64 sentinel 的三行兼容补丁已通过 `zip` 自身 115 项测试并越过归档重叠检查，但矩阵中的同一样本随后仍因重复 manifest ID 被安全拒绝，净兼容增益为零，因此不维护本地 fork。绝对路径、重复 manifest ID、远程资源与未知加密不是残余兼容缺口，而是保留的信任边界。

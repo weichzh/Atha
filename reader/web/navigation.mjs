@@ -107,9 +107,17 @@ export function createNavigation({
     progressRange.value = String(ratio * Number(progressRange.max));
   }
 
+  async function openSection(index) {
+    const offset = pagination.captureOffset();
+    if (await session.open(index)) return true;
+    await pagination.showOffset(offset);
+    syncControls();
+    return false;
+  }
+
   async function fallback(reason, sectionIndex = 0) {
     const state = session.snapshot();
-    if (state.currentIndex !== sectionIndex) await session.open(sectionIndex);
+    if (state.currentIndex !== sectionIndex && !(await openSection(sectionIndex))) return false;
     await pagination.show(0);
     lastFallback = reason;
     onFallback(reason);
@@ -134,7 +142,9 @@ export function createNavigation({
     const sectionIndex = book().sections.findIndex(
       (section) => section.id === target.start.section,
     );
-    if (session.snapshot().currentIndex !== sectionIndex) await session.open(sectionIndex);
+    if (session.snapshot().currentIndex !== sectionIndex && !(await openSection(sectionIndex))) {
+      return false;
+    }
     if (target.end && !pagination.hasOffset(target.end.offset)) {
       return fallback("locator-offset", sectionIndex);
     }
@@ -152,7 +162,9 @@ export function createNavigation({
     const [href, fragment] = item.href.split("#");
     const sectionIndex = book().sections.findIndex((section) => section.href === href);
     if (sectionIndex < 0) return fallback("locator-section");
-    if (session.snapshot().currentIndex !== sectionIndex) await session.open(sectionIndex);
+    if (session.snapshot().currentIndex !== sectionIndex && !(await openSection(sectionIndex))) {
+      return false;
+    }
     if (fragment !== undefined) {
       const offset = pagination.offsetForFragment(fragment);
       if (offset === null) return fallback("locator-fragment", sectionIndex);
@@ -175,7 +187,9 @@ export function createNavigation({
       (section) => new URL(section.url).href === `${target.origin}${target.pathname}`,
     );
     if (sectionIndex < 0) return fallback("locator-section");
-    if (session.snapshot().currentIndex !== sectionIndex) await session.open(sectionIndex);
+    if (session.snapshot().currentIndex !== sectionIndex && !(await openSection(sectionIndex))) {
+      return false;
+    }
     if (target.hash) {
       let fragment;
       try {
@@ -200,7 +214,7 @@ export function createNavigation({
     }
     const index = session.snapshot().currentIndex;
     if (index === 0) return false;
-    await session.open(index - 1);
+    if (!(await openSection(index - 1))) return false;
     await pagination.show(pagination.snapshot().pages - 1);
     syncControls();
     return true;
@@ -213,7 +227,7 @@ export function createNavigation({
     }
     const state = session.snapshot();
     if (state.currentIndex + 1 === state.sections) return false;
-    await session.open(state.currentIndex + 1);
+    if (!(await openSection(state.currentIndex + 1))) return false;
     syncControls();
     return true;
   }
@@ -225,9 +239,10 @@ export function createNavigation({
       progressRange.max,
       state.sections,
     );
-    if (state.currentIndex !== sectionIndex) await session.open(sectionIndex);
+    if (state.currentIndex !== sectionIndex && !(await openSection(sectionIndex))) return false;
     await pagination.show(decodeProgressPage(localRatio, pagination.snapshot().pages));
     syncControls();
+    return true;
   }
 
   async function setFontSize(value) {
@@ -260,11 +275,34 @@ export function createNavigation({
     return commitPreferences(scope, () => preferences.reset(scope));
   }
 
-  async function resizeViewport() {
+  async function resizeViewport(
+    offset = null,
+    expectedSectionIndex = null,
+    expectedPageIndex = null,
+    expectedScrollTop = null,
+  ) {
+    if (
+      expectedSectionIndex !== null &&
+      session.snapshot().currentIndex !== expectedSectionIndex
+    ) {
+      return null;
+    }
     const anchor = current();
-    await pagination.resizeViewport(anchor.start.offset);
+    const pageChanged =
+      expectedPageIndex !== null && pagination.snapshot().page !== expectedPageIndex;
+    const scrollChanged =
+      expectedScrollTop !== null &&
+      Math.abs(pagination.scrollPosition() - expectedScrollTop) > 1;
+    await pagination.resizeViewport(
+      pageChanged || scrollChanged ? anchor.start.offset : (offset ?? anchor.start.offset),
+    );
     syncControls();
     return anchor;
+  }
+
+  async function settleScroll() {
+    await pagination.settleScrolledContent();
+    syncControls();
   }
 
   function bindControls() {
@@ -283,10 +321,7 @@ export function createNavigation({
       onNext: () => run(nextPage),
       onFontSize: (value) => run(() => setFontSize(value)),
       onProgress: (value) => run(() => goToProgress(value)),
-      onScroll: () => {
-        syncControls();
-        onStable();
-      },
+      onScroll: () => run(settleScroll),
     });
     preferences.bind({
       onUpdate: (scope, patch) => run(() => setPreferences(scope, patch)),
@@ -378,7 +413,10 @@ export function createNavigation({
     next: () => run(nextPage),
     previous: () => run(previousPage),
     resetPreferences: (scope) => run(() => resetPreferences(scope)),
-    resize: () => run(resizeViewport),
+    resize: (offset, expectedSectionIndex, expectedPageIndex, expectedScrollTop) =>
+      run(() =>
+        resizeViewport(offset, expectedSectionIndex, expectedPageIndex, expectedScrollTop),
+      ),
     setFontSize: (value) => run(() => setFontSize(value)),
     setPreferences: (scope, patch) => run(() => setPreferences(scope, patch)),
     snapshot,

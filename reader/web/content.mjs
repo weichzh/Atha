@@ -3,6 +3,14 @@ const XHTML_DOCTYPES = new Set([
   '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
   '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">',
 ]);
+const IMAGE_SETTLE_TIMEOUT_MS = 50;
+const MAX_INTRINSIC_IMAGE_SIDE = 8192;
+const MAX_INTRINSIC_IMAGE_PIXELS = 20_000_000;
+const MAX_NATIVE_IMAGE_HINT_RULES = 512;
+const MAX_SNAPSHOT_BOOK_CSS_BYTES = 1_048_576;
+const SECTION_CACHE_LIMIT = 3;
+const SECTION_CACHE_TEXT_LIMIT = 8 * 1024 * 1024;
+const NATIVE_IMAGE_BASE_STYLE = ":where(img[data-atha-native-size]){height:auto}";
 
 export function parseSafeXhtml(source) {
   const declarations = [...source.matchAll(/<!DOCTYPE\b/gu)];
@@ -36,14 +44,16 @@ export function cloneSelectedRange(book, selection) {
   return range.cloneRange();
 }
 
-export function createContent({ host, reader, readerStyleSource, fail }) {
+export function createContent({ host, reader, readerStyleSource, onLateLayout }) {
   const shadow = host.attachShadow({ mode: "closed" });
+  const nativeImageStyle = document.createElement("style");
   const bookStyle = document.createElement("style");
   const readerStyle = document.createElement("style");
   const userStyle = document.createElement("style");
   const book = document.createElement("article");
   book.className = "book";
-  shadow.append(bookStyle, readerStyle, userStyle, book);
+  nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
+  shadow.append(nativeImageStyle, bookStyle, readerStyle, userStyle, book);
 
   let bookUrl;
   let declaredResources;
@@ -58,19 +68,32 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   const validatedCss = new Map();
   const validatedSvg = new Map();
   const readySvg = new Set();
+  const preparedSections = new Map();
+  const pendingSectionMarkup = new Map();
+  const sectionCacheOrder = new Map();
   const pendingImages = new Map();
-  let silentFailure = false;
+  const pendingImageGeometry = new Map();
+  const lateImages = new Map();
   let selfChecked = false;
   let deferredImageCount = 0;
   let eagerSvgCount = 0;
   let lastVisibleLoadCount = 0;
+  let lastVisibleLoad = Object.freeze({
+    passes: 0,
+    generationChanged: false,
+    batches: Object.freeze([]),
+  });
   let renderGeneration = 0;
+  let lateLayoutTimer = 0;
+  let lateLayoutAnchor = null;
+  let lateLayoutDirty = false;
   let warmPromise;
   let warmDurationMs = null;
+  let pendingImageLayoutSignature = "";
+  let sectionGeneration = 0;
 
   function reject(code) {
-    if (silentFailure) throw new Error(code);
-    fail(code);
+    throw new Error(code);
   }
 
   function ensure(condition, code) {
@@ -152,14 +175,9 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
 
   function validateUserStylesheet(css) {
     ensure(typeof css === "string" && new TextEncoder().encode(css).length <= 65536, "invalid-user-style");
-    const previous = silentFailure;
-    silentFailure = true;
-    try {
-      const sheet = validateCss(css);
-      ensure(!css.trim() || sheet.cssRules.length > 0, "invalid-user-style");
-    } finally {
-      silentFailure = previous;
-    }
+    const sheet = validateCss(css);
+    const uncommented = css.replace(/\/\*[\s\S]*?\*\//gu, "").trim();
+    ensure(!uncommented || sheet.cssRules.length > 0, "invalid-user-style");
   }
 
   function snapshotReaderCss() {
@@ -186,6 +204,8 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     sourceStyles = value.sourceStyles;
     userStylesEnabled = value.userStylesEnabled;
     userStylesheet = value.userStylesheet;
+    pendingImageGeometry.clear();
+    pendingImageLayoutSignature = "";
     bookStyle.textContent = sourceStyles ? cachedCss || "" : "";
     userStyle.textContent = userStylesEnabled ? userStylesheet : "";
     for (const [element, style] of inlineStyles) {
@@ -232,7 +252,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
 
   function wrapStructuredOverflow(element) {
     const overflow = element.ownerDocument.createElement("div");
-    overflow.className = "atha-structured-overflow";
+    overflow.className = `atha-structured-overflow atha-${element.localName.toLowerCase()}-frame`;
     element.replaceWith(overflow);
     overflow.append(element);
   }
@@ -276,23 +296,154 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
 
   function replaceFailedImage(image) {
     if (replaceFailedCbzImage(image)) return;
+    const fallbackSize =
+      nativeImageSize(image) ||
+      intrinsicImageSize(image) ||
+      boundedImageSize(image, "width", "height");
+    const width = image.offsetWidth || fallbackSize?.width || 0;
+    const height = image.offsetHeight || fallbackSize?.height || 0;
+    const layout = image.isConnected ? getComputedStyle(image) : null;
     const alternative = image.getAttribute("alt");
-    image.replaceWith(
-      image.ownerDocument.createTextNode(alternative === null ? "图片无法显示" : alternative.trim()),
+    const label = (alternative === null ? "图片无法显示" : alternative.trim()).slice(0, 160);
+    const placeholder = image.ownerDocument.createElement("span");
+    placeholder.className = "atha-image-error";
+    placeholder.setAttribute("role", "img");
+    if (label) {
+      placeholder.setAttribute("aria-label", label);
+      placeholder.dataset.label = label;
+    } else {
+      placeholder.setAttribute("aria-hidden", "true");
+    }
+    if (width > 0 && height > 0) {
+      placeholder.style.width = `${width}px`;
+      placeholder.style.height = `${height}px`;
+      placeholder.style.boxSizing = "border-box";
+    }
+    if (layout) {
+      if (["block", "none"].includes(layout.display)) placeholder.style.display = layout.display;
+      for (const property of [
+        "margin-top",
+        "margin-right",
+        "margin-bottom",
+        "margin-left",
+        "float",
+        "clear",
+        "vertical-align",
+        "break-before",
+        "break-after",
+        "break-inside",
+        "position",
+        "top",
+        "right",
+        "bottom",
+        "left",
+        "transform",
+        "transform-origin",
+        "z-index",
+        "visibility",
+        "opacity",
+      ]) {
+        placeholder.style.setProperty(property, layout.getPropertyValue(property));
+      }
+    }
+    image.replaceWith(placeholder);
+  }
+
+  function boundedImageSize(image, widthAttribute, heightAttribute) {
+    const width = Number(image.getAttribute(widthAttribute));
+    const height = Number(image.getAttribute(heightAttribute));
+    if (
+      !Number.isInteger(width) ||
+      !Number.isInteger(height) ||
+      width <= 0 ||
+      height <= 0 ||
+      width > MAX_INTRINSIC_IMAGE_SIDE ||
+      height > MAX_INTRINSIC_IMAGE_SIDE ||
+      width * height > MAX_INTRINSIC_IMAGE_PIXELS
+    ) {
+      return null;
+    }
+    return Object.freeze({ width, height });
+  }
+
+  function intrinsicImageSize(image) {
+    return boundedImageSize(image, "data-atha-intrinsic-width", "data-atha-intrinsic-height");
+  }
+
+  function nativeImageSize(image) {
+    return image.hasAttribute("data-atha-native-size")
+      ? boundedImageSize(image, "width", "height")
+      : null;
+  }
+
+  function nativeImageHintCss(root, maxBytes = Number.POSITIVE_INFINITY) {
+    const sizes = new Map();
+    for (const image of root.querySelectorAll("img[data-atha-native-size][width][height]")) {
+      const size = nativeImageSize(image);
+      if (!size) continue;
+      sizes.set(`${size.width}x${size.height}`, size);
+      // ponytail: uncommon extra size pairs keep stable width-driven HTML hints; raise only if a real book needs them.
+      if (sizes.size >= MAX_NATIVE_IMAGE_HINT_RULES) break;
+    }
+    const rules = [];
+    let bytes = 0;
+    for (const rule of [
+      NATIVE_IMAGE_BASE_STYLE,
+      ...[...sizes.values()].map(
+        ({ width, height }) =>
+          `:where(img[data-atha-native-size][width="${width}"][height="${height}"]){contain:size;contain-intrinsic-size:${width}px ${height}px;width:auto;height:auto}`,
+      ),
+    ]) {
+      const nextBytes = bytes + (rules.length ? 1 : 0) + rule.length;
+      if (nextBytes > maxBytes) break;
+      rules.push(rule);
+      bytes = nextBytes;
+    }
+    return rules.join("\n");
+  }
+
+  function snapshotBookCss(root) {
+    const sourceRules = [...(bookStyle.sheet?.cssRules || [])];
+    let namespaceCount = 0;
+    while (sourceRules[namespaceCount]?.constructor?.name === "CSSNamespaceRule") {
+      namespaceCount += 1;
+    }
+    const namespaces = sourceRules.slice(0, namespaceCount).map((rule) => rule.cssText);
+    const source = namespaceCount
+      ? sourceRules.slice(namespaceCount).map((rule) => rule.cssText)
+      : [bookStyle.textContent];
+    const sourceCss = [...namespaces, ...source].filter(Boolean).join("\n");
+    const available = Math.max(
+      0,
+      MAX_SNAPSHOT_BOOK_CSS_BYTES - new TextEncoder().encode(sourceCss).length - 1,
     );
+    const hints = nativeImageHintCss(root, available);
+    return [...namespaces, hints, ...source].filter(Boolean).join("\n");
+  }
+
+  function applyIntrinsicImageHint(image) {
+    const size = intrinsicImageSize(image);
+    if (!size) return false;
+    image.style.setProperty("--atha-intrinsic-width", `${size.width}px`);
+    image.style.setProperty("--atha-intrinsic-height", `${size.height}px`);
+    image.style.setProperty("aspect-ratio", `${size.width} / ${size.height}`);
+    image.style.setProperty("height", "auto", "important");
+    return true;
+  }
+
+  function hasStableImageBox(image) {
+    if (intrinsicImageSize(image)) return true;
+    const width = Number(image.getAttribute("width"));
+    const height = Number(image.getAttribute("height"));
+    return Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
   }
 
   function deferredFormula(image) {
     const source = image.getAttribute("src");
-    const width = Number(image.getAttribute("width"));
-    const height = Number(image.getAttribute("height"));
     return (
       image.matches(".math-inline, .math-display") &&
       source?.toLowerCase().endsWith(".svg") &&
-      Number.isFinite(width) &&
-      width > 0 &&
-      Number.isFinite(height) &&
-      height > 0
+      hasStableImageBox(image)
     );
   }
 
@@ -395,19 +546,29 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     return svg;
   }
 
-  async function validateSvg(url) {
+  async function validateSvg(url, generation) {
     const response = await fetch(url);
     ensure(response.ok, "svg-load");
-    parseSvg(await response.text());
+    const source = await response.text();
+    ensureSectionCurrent(generation);
+    parseSvg(source);
   }
 
-  function validateSvgOnce(url) {
-    if (!validatedSvg.has(url)) validatedSvg.set(url, validateSvg(url));
+  function validateSvgOnce(url, generation = sectionGeneration) {
+    if (!validatedSvg.has(url)) validatedSvg.set(url, validateSvg(url, generation));
     return validatedSvg.get(url);
   }
 
   function loadBounds(includeNextPage) {
     const viewport = reader.getBoundingClientRect();
+    if (reader.dataset.readingMode === "scroll") {
+      return {
+        top: viewport.top,
+        right: viewport.right,
+        bottom: viewport.bottom + (includeNextPage ? viewport.height : 0),
+        left: viewport.left,
+      };
+    }
     const style = getComputedStyle(book);
     const scale = viewport.width / reader.clientWidth;
     const pageStep = (parseFloat(style.width) + parseFloat(style.columnGap)) * scale;
@@ -415,31 +576,192 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       top: viewport.top,
       right: viewport.right + (includeNextPage ? pageStep : 0),
       bottom: viewport.bottom,
-      left: viewport.left,
+      left: viewport.left - (book.hasAttribute("data-swipe-settling") ? pageStep : 0),
     };
   }
 
   function pendingWithin(bounds) {
+    const bookRect = book.getBoundingClientRect();
+    const readerRect = reader.getBoundingClientRect();
+    const measuredScale = reader.clientWidth > 0 ? readerRect.width / reader.clientWidth : 1;
+    const scale = Number.isFinite(measuredScale) && measuredScale > 0 ? measuredScale : 1;
+    const signature = [
+      book.scrollWidth,
+      book.scrollHeight,
+      book.clientWidth,
+      book.clientHeight,
+      reader.clientWidth,
+      reader.clientHeight,
+      scale,
+    ].join(":");
+    if (signature !== pendingImageLayoutSignature) {
+      pendingImageGeometry.clear();
+      pendingImageLayoutSignature = signature;
+    }
+    const localBounds = {
+      top: (bounds.top - bookRect.top) / scale,
+      right: (bounds.right - bookRect.left) / scale,
+      bottom: (bounds.bottom - bookRect.top) / scale,
+      left: (bounds.left - bookRect.left) / scale,
+    };
     return [...pendingImages.keys()].filter((image) => {
-      const rect = image.getBoundingClientRect();
+      const stableBox = hasStableImageBox(image);
+      let rect = stableBox ? pendingImageGeometry.get(image) : null;
+      if (!rect) {
+        const clientRect = image.getBoundingClientRect();
+        rect = {
+          width: clientRect.width / scale,
+          height: clientRect.height / scale,
+          top: (clientRect.top - bookRect.top) / scale,
+          right: (clientRect.right - bookRect.left) / scale,
+          bottom: (clientRect.bottom - bookRect.top) / scale,
+          left: (clientRect.left - bookRect.left) / scale,
+        };
+        if (stableBox) pendingImageGeometry.set(image, rect);
+      }
       return (
         rect.width > 0 &&
         rect.height > 0 &&
-        rect.right > bounds.left &&
-        rect.left < bounds.right &&
-        rect.bottom > bounds.top &&
-        rect.top < bounds.bottom
+        rect.right > localBounds.left &&
+        rect.left < localBounds.right &&
+        rect.bottom > localBounds.top &&
+        rect.top < localBounds.bottom
       );
     });
   }
 
-  async function loadImages(images, generation, beforeLayoutChange) {
+  function forgetPendingImage(image) {
+    pendingImages.delete(image);
+    pendingImageGeometry.delete(image);
+  }
+
+  function normalizeLayoutAnchor(value) {
+    if (Number.isFinite(value)) return { offset: value, pageIndex: null };
+    if (!Number.isFinite(value?.offset)) return null;
+    return {
+      offset: value.offset,
+      pageIndex: Number.isInteger(value.pageIndex) && value.pageIndex >= 0 ? value.pageIndex : null,
+      scrollTop: Number.isFinite(value.scrollTop) && value.scrollTop >= 0 ? value.scrollTop : null,
+    };
+  }
+
+  function scheduleLateLayout(anchor) {
+    if (!onLateLayout) return;
+    pendingImageGeometry.clear();
+    pendingImageLayoutSignature = "";
+    lateLayoutAnchor = normalizeLayoutAnchor(anchor) ?? lateLayoutAnchor;
+    lateLayoutDirty = true;
+    clearTimeout(lateLayoutTimer);
+    lateLayoutTimer = setTimeout(() => {
+      lateLayoutTimer = 0;
+      if (!lateLayoutDirty || !lateLayoutAnchor) return;
+      const anchorValue = lateLayoutAnchor;
+      lateLayoutAnchor = null;
+      lateLayoutDirty = false;
+      onLateLayout(anchorValue);
+    }, IMAGE_SETTLE_TIMEOUT_MS);
+  }
+
+  function resetLateImages() {
+    lateImages.clear();
+    lateLayoutAnchor = null;
+    lateLayoutDirty = false;
+    clearTimeout(lateLayoutTimer);
+    lateLayoutTimer = 0;
+  }
+
+  function waitForImage(image, onLateSettle, timeoutMs = IMAGE_SETTLE_TIMEOUT_MS, signal) {
+    return new Promise((resolve) => {
+      let returned = false;
+      let settled = false;
+      let timer;
+      const finish = (outcome) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        image.removeEventListener("load", loaded);
+        image.removeEventListener("error", failed);
+        signal?.removeEventListener("abort", aborted);
+        if (returned) onLateSettle?.(outcome);
+        else {
+          returned = true;
+          resolve(outcome);
+        }
+      };
+      const loaded = () => finish("loaded");
+      const failed = () => finish("failed");
+      const aborted = () => finish("aborted");
+      image.addEventListener("load", loaded, { once: true });
+      image.addEventListener("error", failed, { once: true });
+      signal?.addEventListener("abort", aborted, { once: true });
+      if (signal?.aborted) {
+        queueMicrotask(aborted);
+        return;
+      }
+      if (image.complete && image.naturalWidth > 0) queueMicrotask(loaded);
+      if (Number.isFinite(timeoutMs)) {
+        timer = setTimeout(() => {
+          if (returned) return;
+          if (image.complete) {
+            finish(image.naturalWidth > 0 ? "loaded" : "failed");
+            return;
+          }
+          returned = true;
+          resolve("timed-out");
+        }, timeoutMs);
+      }
+    });
+  }
+
+  async function materializePreviewImage(source, preview, signal) {
+    const url = pendingImages.get(source);
+    if (!url || signal?.aborted) return false;
+    const generation = renderGeneration;
+    try {
+      if (signal) {
+        let abort;
+        const aborted = new Promise((resolve) => {
+          abort = () => resolve(false);
+          signal.addEventListener("abort", abort, { once: true });
+          if (signal.aborted) abort();
+        });
+        try {
+          const validated = await Promise.race([validateSvgOnce(url).then(() => true), aborted]);
+          if (!validated) return false;
+        } finally {
+          signal.removeEventListener("abort", abort);
+        }
+      } else await validateSvgOnce(url);
+    } catch {
+      if (signal?.aborted || generation !== renderGeneration || !preview.isConnected) return false;
+      replaceFailedImage(preview);
+      return false;
+    }
+    if (generation !== renderGeneration || signal?.aborted) return false;
+    preview.src = url;
+    const settle = (outcome) => {
+      if (!preview.isConnected) return;
+      if (outcome === "loaded") {
+        preview.classList.remove("atha-preview-pending");
+        preview.removeAttribute("aria-busy");
+      } else if (outcome === "failed") {
+        replaceFailedImage(preview);
+      }
+    };
+    const outcome = await waitForImage(preview, settle, null, signal);
+    if (outcome !== "timed-out") settle(outcome);
+    if (outcome === "aborted") preview.removeAttribute("src");
+    return !["aborted", "failed"].includes(outcome);
+  }
+
+  async function loadImages(images, generation, beforeLayoutChange, batch) {
     let layoutChanged = false;
-    const replaceFailed = (image) => {
+    const replaceFailed = (image, count = true) => {
       if (!layoutChanged) beforeLayoutChange?.();
       layoutChanged = true;
       replaceFailedImage(image);
-      pendingImages.delete(image);
+      forgetPendingImage(image);
+      if (count && batch) batch.failure += 1;
     };
     await Promise.all(
       images.map(async (image) => {
@@ -454,19 +776,41 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         }
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
         image.src = url;
-        try {
-          await image.decode();
-        } catch {
-          if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
+        const reveal = () => {
+          image.classList.remove("atha-resource-pending");
+          image.removeAttribute("aria-busy");
+          delete image.dataset.athaResource;
+        };
+        const outcome = await waitForImage(image, (lateOutcome) => {
+          const late = lateImages.get(image);
+          lateImages.delete(image);
+          if (generation !== renderGeneration || image.src !== url || !book.contains(image)) return;
+          if (lateOutcome === "loaded") {
+            readySvg.add(url);
+            reveal();
+          }
+          else replaceFailed(image, false);
+          if (lateOutcome === "failed") scheduleLateLayout(late?.anchor);
+        });
+        if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
+        if (outcome === "failed") {
           replaceFailed(image);
           return;
         }
-        if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
-        readySvg.add(url);
-        image.classList.remove("atha-resource-pending");
-        image.removeAttribute("aria-busy");
-        delete image.dataset.athaResource;
-        pendingImages.delete(image);
+        if (outcome === "loaded") readySvg.add(url);
+        else {
+          lateImages.set(image, {
+            anchor: normalizeLayoutAnchor(beforeLayoutChange?.()) ?? {
+              offset: 0,
+              pageIndex: 0,
+              scrollTop: 0,
+            },
+            generation,
+          });
+        }
+        if (outcome === "loaded") reveal();
+        forgetPendingImage(image);
+        if (outcome === "loaded" && batch) batch.success += 1;
       }),
     );
     return layoutChanged;
@@ -477,20 +821,56 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     let loaded = 0;
     let layoutChanged = false;
     let layoutChangeNotified = false;
+    let layoutChangeAnchor;
+    const batches = [];
     const notifyBeforeLayoutChange = () => {
-      if (layoutChangeNotified) return;
-      layoutChangeNotified = true;
-      beforeLayoutChange?.();
+      if (!layoutChangeNotified) {
+        layoutChangeNotified = true;
+        layoutChangeAnchor = beforeLayoutChange?.();
+      }
+      return layoutChangeAnchor;
     };
+    if ((lateImages.size > 0 || lateLayoutDirty) && beforeLayoutChange) {
+      const anchor = normalizeLayoutAnchor(notifyBeforeLayoutChange());
+      if (anchor) {
+        for (const [image, late] of lateImages) {
+          if (late.generation === generation && book.contains(image)) late.anchor = anchor;
+        }
+        if (lateLayoutDirty) {
+          clearTimeout(lateLayoutTimer);
+          lateLayoutTimer = 0;
+          lateLayoutAnchor = null;
+          lateLayoutDirty = false;
+          layoutChanged = true;
+        }
+      }
+    }
     for (let pass = 0; pass < 4; pass += 1) {
       const images = pendingWithin(loadBounds(includeNextPage));
       if (images.length === 0) break;
       loaded += images.length;
-      const passChangedLayout = await loadImages(images, generation, notifyBeforeLayoutChange);
+      const batch = { selected: images.length, success: 0, failure: 0, layoutChanged: false };
+      const passChangedLayout = await loadImages(
+        images,
+        generation,
+        notifyBeforeLayoutChange,
+        batch,
+      );
+      batch.layoutChanged = passChangedLayout;
+      batches.push(Object.freeze(batch));
       layoutChanged ||= passChangedLayout;
-      if (!passChangedLayout) break;
+      if (passChangedLayout) {
+        pendingImageGeometry.clear();
+        pendingImageLayoutSignature = "";
+      }
+      if (generation !== renderGeneration) break;
     }
     lastVisibleLoadCount = loaded;
+    lastVisibleLoad = Object.freeze({
+      passes: batches.length,
+      generationChanged: generation !== renderGeneration,
+      batches: Object.freeze(batches),
+    });
     return Object.freeze({ loaded, layoutChanged });
   }
 
@@ -523,11 +903,13 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   function resourceSnapshot() {
     return Object.freeze({
       pending: pendingImages.size,
+      late: lateImages.size,
       currentPending: pendingWithin(loadBounds(false)).length,
       currentOrNextPending: pendingWithin(loadBounds(true)).length,
       deferred: deferredImageCount,
       eagerSvg: eagerSvgCount,
       lastVisible: lastVisibleLoadCount,
+      visibleLoad: lastVisibleLoad,
       validatedSvg: validatedSvg.size,
       warming: Boolean(warmPromise) && pendingImages.size > 0,
       warmDurationMs,
@@ -535,14 +917,11 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
   }
 
   function rejected(action) {
-    silentFailure = true;
     try {
       action();
       return false;
     } catch {
       return true;
-    } finally {
-      silentFailure = false;
     }
   }
 
@@ -602,8 +981,12 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     } finally {
       declaredResources = previousResources;
     }
+    const missingPlaceholder = missingResource.querySelector(".atha-image-error");
     ensure(
-      !missingResource.querySelector("link, img") && missingResource.body.textContent === "缺失插图",
+      !missingResource.querySelector("link, img") &&
+        missingPlaceholder?.dataset.label === "缺失插图" &&
+        missingPlaceholder.getAttribute("aria-label") === "缺失插图" &&
+        missingResource.body.textContent === "",
       "undeclared-resource",
     );
     const imageMarkup = new DOMParser().parseFromString(
@@ -624,6 +1007,77 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         !linkedImage.hasAttribute("tabindex"),
       "active-content",
     );
+    const hintedImage = document.createElement("img");
+    hintedImage.setAttribute("data-atha-intrinsic-width", "598");
+    hintedImage.setAttribute("data-atha-intrinsic-height", "130");
+    ensure(applyIntrinsicImageHint(hintedImage) && hasStableImageBox(hintedImage), "image-load");
+    const previousUserStyle = userStyle.textContent;
+    userStyle.textContent =
+      "img{display:block;width:50px;height:300px!important}";
+    book.append(hintedImage);
+    const hintedStyle = getComputedStyle(hintedImage);
+    ensure(
+      Math.abs(parseFloat(hintedStyle.width) - 50) < 0.1 &&
+        Math.abs(parseFloat(hintedStyle.height) - (50 * 130) / 598) < 0.2 &&
+        hintedImage.style.getPropertyPriority("height") === "important",
+      "image-load",
+    );
+    hintedImage.remove();
+    userStyle.textContent = "";
+    const nativeImage = document.createElement("img");
+    nativeImage.width = 598;
+    nativeImage.height = 130;
+    nativeImage.dataset.athaNativeSize = "";
+    book.append(nativeImage);
+    nativeImageStyle.textContent = nativeImageHintCss(book);
+    const nativeDefaultStyle = getComputedStyle(nativeImage);
+    const nativeDefaultWidth = parseFloat(nativeDefaultStyle.width);
+    ensure(
+      nativeDefaultWidth > 0 &&
+        nativeDefaultWidth <= 598 &&
+        Math.abs(parseFloat(nativeDefaultStyle.height) - (nativeDefaultWidth * 130) / 598) < 0.2,
+      "image-load",
+    );
+    userStyle.textContent = "img{display:block;width:50px}";
+    const nativeStyle = getComputedStyle(nativeImage);
+    ensure(
+      Math.abs(parseFloat(nativeStyle.width) - 50) < 0.1 &&
+        Math.abs(parseFloat(nativeStyle.height) - (50 * 130) / 598) < 0.2,
+      "image-load",
+    );
+    userStyle.textContent = "img{display:block;height:30px}";
+    const heightSizedStyle = getComputedStyle(nativeImage);
+    ensure(
+      Math.abs(parseFloat(heightSizedStyle.width) - (30 * 598) / 130) < 0.2 &&
+        Math.abs(parseFloat(heightSizedStyle.height) - 30) < 0.1,
+      "image-load",
+    );
+    userStyle.textContent =
+      "img{display:block;height:30px}@supports (not-a-real-property:x){img{width:50px}}";
+    ensure(
+      Math.abs(parseFloat(getComputedStyle(nativeImage).width) - (30 * 598) / 130) < 0.2,
+      "image-load",
+    );
+    userStyle.textContent = "img{display:block;width:50px;height:30px}";
+    ensure(
+      Math.abs(parseFloat(getComputedStyle(nativeImage).height) - 30) < 0.1,
+      "image-load",
+    );
+    const previousBookStyle = bookStyle.textContent;
+    bookStyle.textContent = '@namespace epub "urn:atha:test"; epub|img{height:30px}';
+    const snapshotCss = snapshotBookCss(book);
+    const snapshotSheet = new CSSStyleSheet();
+    snapshotSheet.replaceSync(snapshotCss);
+    ensure(
+      snapshotSheet.cssRules[0]?.constructor?.name === "CSSNamespaceRule" &&
+        [...snapshotSheet.cssRules].some((rule) => rule.selectorText === "epub|img") &&
+        new TextEncoder().encode(snapshotCss).length <= MAX_SNAPSHOT_BOOK_CSS_BYTES,
+      "invalid-message-snapshot",
+    );
+    bookStyle.textContent = previousBookStyle;
+    nativeImage.remove();
+    nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
+    userStyle.textContent = previousUserStyle;
     const structuredMarkup = new DOMParser().parseFromString(
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><table aria-hidden='true'><caption>数据</caption></table><pre aria-disabled='true'>code</pre><a href='#x'><pre tabindex='0'>linked</pre></a></body></html>",
       "application/xhtml+xml",
@@ -641,8 +1095,9 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         code.getAttribute("aria-label") === "查看代码" &&
         !code.hasAttribute("aria-disabled") &&
         !linkedCode.hasAttribute("tabindex") &&
-        [table, code, linkedCode].every(
-          (element) => element.parentElement?.className === "atha-structured-overflow",
+        table.parentElement?.classList.contains("atha-table-frame") &&
+        [code, linkedCode].every((element) =>
+          element.parentElement?.classList.contains("atha-pre-frame"),
         ),
       "active-content",
     );
@@ -676,9 +1131,49 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     const ordinaryImage = document.createElement("img");
     ensure(!replaceFailedCbzImage(ordinaryImage), "image-load");
     ordinaryImage.alt = "缺失插图";
+    ordinaryImage.style.cssText =
+      "display:block;width:320px;height:180px;margin:12px auto 18px";
     book.append(ordinaryImage);
+    const ordinaryBox = [ordinaryImage.offsetWidth, ordinaryImage.offsetHeight];
     replaceFailedImage(ordinaryImage);
-    ensure(book.textContent === "缺失插图", "image-load");
+    const ordinaryPlaceholder = book.querySelector(".atha-image-error");
+    ensure(
+      ordinaryPlaceholder?.dataset.label === "缺失插图" &&
+        ordinaryPlaceholder.getAttribute("aria-label") === "缺失插图" &&
+        ordinaryPlaceholder.offsetWidth === ordinaryBox[0] &&
+        ordinaryPlaceholder.offsetHeight === ordinaryBox[1] &&
+        getComputedStyle(ordinaryPlaceholder).display === "block" &&
+        getComputedStyle(ordinaryPlaceholder).marginTop === "12px" &&
+        getComputedStyle(ordinaryPlaceholder).marginBottom === "18px" &&
+        book.textContent === "",
+      "image-load",
+    );
+    const absoluteImage = document.createElement("img");
+    absoluteImage.alt = "absolute";
+    absoluteImage.style.cssText =
+      "position:absolute;top:7px;left:9px;width:20px;height:10px;transform:translateX(2px);z-index:2";
+    book.append(absoluteImage);
+    replaceFailedImage(absoluteImage);
+    const absolutePlaceholder = book.querySelector(".atha-image-error[data-label='absolute']");
+    const absoluteStyle = getComputedStyle(absolutePlaceholder);
+    ensure(
+      absoluteStyle.position === "absolute" &&
+        absoluteStyle.top === "7px" &&
+        absoluteStyle.left === "9px" &&
+        absoluteStyle.transform !== "none" &&
+        absoluteStyle.zIndex === "2",
+      "image-load",
+    );
+    const hiddenImage = document.createElement("img");
+    hiddenImage.alt = "hidden";
+    hiddenImage.style.display = "none";
+    book.append(hiddenImage);
+    replaceFailedImage(hiddenImage);
+    ensure(
+      getComputedStyle(book.querySelector(".atha-image-error[data-label='hidden']")).display ===
+        "none",
+      "image-load",
+    );
     book.replaceChildren();
     const markdownDocument = new DOMParser().parseFromString(
       "<html xmlns='http://www.w3.org/1999/xhtml'><body class='atha-text atha-markdown'><pre>code</pre></body></html>",
@@ -725,7 +1220,10 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     const validProbe = document.createElement("img");
     const validProbeUrl =
       "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='1'%20height='1'/%3E";
-    Object.defineProperty(validProbe, "decode", { value: () => Promise.resolve() });
+    Object.defineProperties(validProbe, {
+      complete: { get: () => true },
+      naturalWidth: { get: () => 1 },
+    });
     const invalidProbe = document.createElement("img");
     invalidProbe.alt = "缺失公式";
     const invalidProbeUrl = "https://atha-book.localhost/invalid-probe.svg";
@@ -740,6 +1238,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
         layoutCallbacks += 1;
         ensure(book.contains(validProbe) && book.contains(invalidProbe), "invalid-svg");
       });
+      const placeholder = book.querySelector(".atha-image-error");
       ensure(
         layoutChanged &&
           layoutCallbacks === 1 &&
@@ -747,7 +1246,9 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
           !book.contains(invalidProbe) &&
           !pendingImages.has(validProbe) &&
           !pendingImages.has(invalidProbe) &&
-          book.textContent === "缺失公式",
+          placeholder?.dataset.label === "缺失公式" &&
+          placeholder.getAttribute("aria-label") === "缺失公式" &&
+          book.textContent === "",
         "invalid-svg",
       );
     } finally {
@@ -758,6 +1259,134 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       readySvg.delete(validProbeUrl);
     }
     book.replaceChildren();
+    const previewSource = document.createElement("img");
+    const previewImage = document.createElement("img");
+    Object.defineProperties(previewImage, {
+      complete: { get: () => true },
+      naturalWidth: { get: () => 1 },
+    });
+    previewImage.className = "atha-preview-pending";
+    book.append(previewImage);
+    pendingImages.set(previewSource, validProbeUrl);
+    validatedSvg.set(validProbeUrl, Promise.resolve());
+    try {
+      ensure(
+        (await materializePreviewImage(previewSource, previewImage)) &&
+          previewImage.src === validProbeUrl &&
+          !previewImage.classList.contains("atha-preview-pending"),
+        "image-load",
+      );
+      const abortedPreview = document.createElement("img");
+      const controller = new AbortController();
+      controller.abort();
+      ensure(
+        !(await materializePreviewImage(previewSource, abortedPreview, controller.signal)) &&
+          !abortedPreview.hasAttribute("src"),
+        "image-load",
+      );
+    } finally {
+      pendingImages.delete(previewSource);
+      validatedSvg.delete(validProbeUrl);
+    }
+    book.replaceChildren();
+    const firstVisible = document.createElement("img");
+    const lateVisible = document.createElement("img");
+    const firstVisibleUrl = `${validProbeUrl}#first-visible`;
+    const lateVisibleUrl = `${validProbeUrl}#late-visible`;
+    const bounds = loadBounds(false);
+    const inside = () => ({
+      width: 1,
+      height: 1,
+      top: bounds.top + 1,
+      right: bounds.left + 2,
+      bottom: bounds.top + 2,
+      left: bounds.left + 1,
+    });
+    let lateInside = false;
+    Object.defineProperty(firstVisible, "getBoundingClientRect", { value: inside });
+    Object.defineProperty(lateVisible, "getBoundingClientRect", {
+      value: () =>
+        lateInside
+          ? inside()
+          : {
+              width: 1,
+              height: 1,
+              top: bounds.top + 1,
+              right: bounds.right + 2,
+              bottom: bounds.top + 2,
+              left: bounds.right + 1,
+            },
+    });
+    Object.defineProperties(firstVisible, {
+      complete: { get: () => true },
+      naturalWidth: {
+        get: () => {
+          lateInside = true;
+          return 1;
+        },
+      },
+    });
+    let lateLoad;
+    let lateDecodeCalls = 0;
+    Object.defineProperties(lateVisible, {
+      addEventListener: {
+        value: (type, listener) => {
+          if (type === "load") lateLoad = listener;
+        },
+      },
+      complete: { get: () => false },
+      decode: {
+        value: () => {
+          lateDecodeCalls += 1;
+          return new Promise(() => {});
+        },
+      },
+      removeEventListener: { value: () => {} },
+    });
+    lateVisible.classList.add("atha-resource-pending");
+    lateVisible.setAttribute("aria-busy", "true");
+    lateVisible.dataset.athaResource = lateVisibleUrl;
+    book.append(firstVisible, lateVisible);
+    pendingImages.set(firstVisible, firstVisibleUrl);
+    pendingImages.set(lateVisible, lateVisibleUrl);
+    validatedSvg.set(firstVisibleUrl, Promise.resolve());
+    validatedSvg.set(lateVisibleUrl, Promise.resolve());
+    try {
+      const loaded = await loadVisible(false, () => 37);
+      ensure(
+        loaded.loaded === 2 &&
+          !loaded.layoutChanged &&
+          !pendingImages.has(firstVisible) &&
+          !pendingImages.has(lateVisible) &&
+          lastVisibleLoad.passes === 2 &&
+          lastVisibleLoad.batches[1].success === 0 &&
+          lateImages.get(lateVisible)?.anchor.offset === 37 &&
+          lateVisible.classList.contains("atha-resource-pending") &&
+          lateVisible.getAttribute("aria-busy") === "true" &&
+          lateVisible.dataset.athaResource === lateVisibleUrl &&
+          lateDecodeCalls === 0 &&
+          typeof lateLoad === "function",
+        "image-load",
+      );
+      lateLoad();
+      ensure(
+        book.contains(lateVisible) &&
+          !lateVisible.classList.contains("atha-resource-pending") &&
+          !lateVisible.hasAttribute("aria-busy") &&
+          !lateVisible.dataset.athaResource &&
+          !lateImages.has(lateVisible),
+        "image-load",
+      );
+    } finally {
+      pendingImages.delete(firstVisible);
+      pendingImages.delete(lateVisible);
+      validatedSvg.delete(firstVisibleUrl);
+      validatedSvg.delete(lateVisibleUrl);
+      readySvg.delete(firstVisibleUrl);
+      readySvg.delete(lateVisibleUrl);
+      resetLateImages();
+    }
+    book.replaceChildren();
   }
 
   async function initialize() {
@@ -766,63 +1395,183 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     readerStyle.textContent = await response.text();
   }
 
-  async function loadSection(url, resources, loadError) {
-    bookUrl = url;
-    declaredResources = resources;
-    if (!selfChecked) {
-      await validatorSelfCheck();
-      selfChecked = true;
-    }
-    const response = await fetch(bookUrl);
-    ensure(response.ok, loadError);
-    const markup = await response.text();
-    const source = parseSafeXhtml(markup);
-    validateMarkup(source);
-    cachedCbzPage = isControlledCbzSection(source);
-    cachedMarkdownSection = isControlledMarkdownSection(source);
-    const styleSources = detachSourceStyles(source);
-    const stylesheets = await Promise.all(
-      styleSources.map(async ({ css, url }) => {
-        if (css === undefined) {
-          const styleResponse = await fetch(url);
-          if (!styleResponse.ok) return "";
-          css = await styleResponse.text();
-        }
-        return rejected(() => validateCss(css)) ? "" : css;
-      }),
+  function remember(cache, key, value, characters = sectionCacheOrder.get(key) || 0) {
+    cache.delete(key);
+    cache.set(key, value);
+    sectionCacheOrder.delete(key);
+    sectionCacheOrder.set(key, characters);
+    let cachedCharacters = [...sectionCacheOrder.values()].reduce(
+      (total, count) => total + count,
+      0,
     );
-    cachedCss = stylesheets.join("\n");
+    while (
+      sectionCacheOrder.size > SECTION_CACHE_LIMIT ||
+      (cachedCharacters > SECTION_CACHE_TEXT_LIMIT && sectionCacheOrder.size > 1)
+    ) {
+      const oldest = sectionCacheOrder.keys().next().value;
+      cachedCharacters -= sectionCacheOrder.get(oldest) || 0;
+      sectionCacheOrder.delete(oldest);
+      preparedSections.delete(oldest);
+      pendingSectionMarkup.delete(oldest);
+    }
+    return value;
+  }
 
-    const svgImages = new Map();
-    for (const image of source.querySelectorAll("img[src]")) {
-      if (!isSvgImage(image) || deferredFormula(image)) continue;
-      const images = svgImages.get(image.src);
-      if (images) images.push(image);
-      else svgImages.set(image.src, [image]);
+  function activateSection(section) {
+    bookUrl = section.url;
+    declaredResources = section.resources;
+    cachedBody = section.body;
+    cachedCss = section.css;
+    cachedCbzPage = section.cbz;
+    cachedMarkdownSection = section.markdown;
+    eagerSvgCount = section.eagerSvgCount;
+  }
+
+  function sectionMarkup(url) {
+    const key = url.href;
+    const cached = pendingSectionMarkup.get(key);
+    if (cached) return remember(pendingSectionMarkup, key, cached);
+    const generation = sectionGeneration;
+    const pending = fetch(url).then(async (response) => {
+      if (!response.ok) throw new Error("section-load");
+      const markup = await response.text();
+      if (generation === sectionGeneration && pendingSectionMarkup.get(key) === pending) {
+        remember(pendingSectionMarkup, key, pending, markup.length);
+      }
+      return markup;
+    });
+    return remember(pendingSectionMarkup, key, pending);
+  }
+
+  function forgetPendingSection(key, expected) {
+    if (pendingSectionMarkup.get(key) !== expected) return;
+    pendingSectionMarkup.delete(key);
+    if (!preparedSections.has(key)) sectionCacheOrder.delete(key);
+  }
+
+  function prefetchSection(url) {
+    const target = new URL(url);
+    if (preparedSections.has(target.href) || pendingSectionMarkup.has(target.href)) return;
+    const pending = sectionMarkup(target);
+    void pending.catch(() => forgetPendingSection(target.href, pending));
+  }
+
+  function ensureSectionCurrent(generation) {
+    if (generation !== sectionGeneration) throw new Error("section-superseded");
+  }
+
+  async function prepareSectionEntry(targetUrl, resources, loadError, generation) {
+    if (!selfChecked) {
+      const activeUrl = bookUrl;
+      const activeResources = declaredResources;
+      bookUrl = targetUrl;
+      declaredResources = resources;
+      try {
+        await validatorSelfCheck();
+        ensureSectionCurrent(generation);
+        selfChecked = true;
+      } finally {
+        bookUrl = activeUrl;
+        declaredResources = activeResources;
+      }
     }
-    eagerSvgCount = svgImages.size;
-    await Promise.all(
-      [...svgImages].map(async ([url, images]) => {
-        try {
-          await validateSvgOnce(url);
-        } catch {
-          for (const image of images) replaceFailedImage(image);
-        }
-      }),
-    );
-    for (const image of source.querySelectorAll("img")) {
-      if (!deferredFormula(image)) continue;
-      image.dataset.athaResource = image.src;
-      image.removeAttribute("src");
-      image.classList.add("atha-resource-pending");
-      image.setAttribute("aria-busy", "true");
+    const key = targetUrl.href;
+    const prepared = preparedSections.get(key);
+    if (prepared) {
+      return remember(preparedSections, key, prepared, prepared.characters);
     }
-    cachedBody = source.body;
+    const pending = sectionMarkup(targetUrl);
+    try {
+      let markup;
+      try {
+        markup = await pending;
+      } catch {
+        reject(loadError);
+      }
+      ensureSectionCurrent(generation);
+      const source = parseSafeXhtml(markup);
+      const activeUrl = bookUrl;
+      const activeResources = declaredResources;
+      bookUrl = targetUrl;
+      declaredResources = resources;
+      let styleSources;
+      try {
+        validateMarkup(source);
+        styleSources = detachSourceStyles(source);
+      } finally {
+        bookUrl = activeUrl;
+        declaredResources = activeResources;
+      }
+      const stylesheets = await Promise.all(
+        styleSources.map(async ({ css, url }) => {
+          if (css === undefined) {
+            const styleResponse = await fetch(url);
+            if (!styleResponse.ok) return "";
+            css = await styleResponse.text();
+          }
+          ensureSectionCurrent(generation);
+          return rejected(() => validateCss(css)) ? "" : css;
+        }),
+      );
+      ensureSectionCurrent(generation);
+      const svgImages = new Map();
+      for (const image of source.querySelectorAll("img[src]")) {
+        if (!isSvgImage(image) || deferredFormula(image)) continue;
+        const images = svgImages.get(image.src);
+        if (images) images.push(image);
+        else svgImages.set(image.src, [image]);
+      }
+      const sectionEagerSvgCount = svgImages.size;
+      await Promise.all(
+        [...svgImages].map(async ([url, images]) => {
+          try {
+            await validateSvgOnce(url, generation);
+          } catch {
+            for (const image of images) replaceFailedImage(image);
+          }
+        }),
+      );
+      ensureSectionCurrent(generation);
+      for (const image of source.querySelectorAll("img")) {
+        if (!deferredFormula(image)) continue;
+        image.dataset.athaResource = image.src;
+        image.removeAttribute("src");
+        image.classList.add("atha-resource-pending");
+        image.setAttribute("aria-busy", "true");
+      }
+      pendingSectionMarkup.delete(key);
+      const section = Object.freeze({
+        url: targetUrl,
+        resources,
+        body: source.body,
+        css: stylesheets.join("\n"),
+        cbz: isControlledCbzSection(source, targetUrl),
+        markdown: isControlledMarkdownSection(source, targetUrl),
+        eagerSvgCount: sectionEagerSvgCount,
+        characters: markup.length,
+      });
+      return remember(preparedSections, key, section, section.characters);
+    } catch (error) {
+      forgetPendingSection(key, pending);
+      throw error;
+    }
+  }
+
+  async function prepareSection(url, resources, loadError) {
+    const targetUrl = new URL(url);
+    const generation = sectionGeneration;
+    return prepareSectionEntry(targetUrl, resources, loadError, generation);
   }
 
   async function renderCached() {
     ensure(cachedBody, "section-load");
     renderGeneration += 1;
+    resetLateImages();
+    lastVisibleLoad = Object.freeze({
+      passes: 0,
+      generationChanged: false,
+      batches: Object.freeze([]),
+    });
     warmPromise = undefined;
     warmDurationMs = null;
     bookStyle.textContent = sourceStyles ? cachedCss : "";
@@ -831,6 +1580,8 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     book.classList.toggle("atha-markdown-section", cachedMarkdownSection);
     const imported = document.importNode(cachedBody, true);
     pendingImages.clear();
+    pendingImageGeometry.clear();
+    pendingImageLayoutSignature = "";
     const deferredImages = imported.querySelectorAll(
       "img.atha-resource-pending[data-atha-resource]",
     );
@@ -847,28 +1598,53 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
       pendingImages.set(image, url);
     }
     book.replaceChildren(...imported.childNodes);
+    nativeImageStyle.textContent = nativeImageHintCss(book);
     inlineStyles = [...book.querySelectorAll("[style]")].map((element) => [
       element,
       element.getAttribute("style"),
     ]);
     setStyles({ sourceStyles, userStylesEnabled, userStylesheet });
-    await Promise.all(
-      [...book.querySelectorAll("img")]
-        .filter((image) => !pendingImages.has(image))
-        .map(async (image) => {
-          try {
-            await image.decode();
-          } catch {
-            replaceFailedImage(image);
-          }
-        }),
-    );
+    for (const image of book.querySelectorAll(
+      "img[data-atha-intrinsic-width][data-atha-intrinsic-height]",
+    )) {
+      applyIntrinsicImageHint(image);
+    }
+    const generation = renderGeneration;
+    for (const image of [...book.querySelectorAll("img")].filter(
+      (candidate) => !pendingImages.has(candidate),
+    )) {
+      const source = image.getAttribute("src");
+      if (!source || (image.complete && image.naturalWidth === 0)) {
+        replaceFailedImage(image);
+        continue;
+      }
+      if (image.complete) continue;
+      const url = image.src;
+      const settle = (outcome) => {
+        const late = lateImages.get(image);
+        lateImages.delete(image);
+        if (generation !== renderGeneration || image.src !== url || !book.contains(image)) return;
+        if (outcome === "failed") replaceFailedImage(image);
+        if (outcome === "failed" || late?.dynamic) scheduleLateLayout(late?.anchor);
+      };
+      lateImages.set(image, {
+        anchor: { offset: 0, pageIndex: 0, scrollTop: 0 },
+        generation,
+        dynamic: !hasStableImageBox(image),
+      });
+      void waitForImage(image, settle).then((outcome) => {
+        if (outcome !== "timed-out") settle(outcome);
+      });
+    }
     await document.fonts.ready;
   }
 
   function close() {
+    sectionGeneration += 1;
     renderGeneration += 1;
+    resetLateImages();
     book.replaceChildren();
+    nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
     bookStyle.textContent = "";
     userStyle.textContent = "";
     bookUrl = undefined;
@@ -882,12 +1658,22 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     deferredImageCount = 0;
     eagerSvgCount = 0;
     lastVisibleLoadCount = 0;
+    lastVisibleLoad = Object.freeze({
+      passes: 0,
+      generationChanged: false,
+      batches: Object.freeze([]),
+    });
     warmPromise = undefined;
     warmDurationMs = null;
     pendingImages.clear();
+    pendingImageGeometry.clear();
+    pendingImageLayoutSignature = "";
     validatedCss.clear();
     validatedSvg.clear();
     readySvg.clear();
+    preparedSections.clear();
+    pendingSectionMarkup.clear();
+    sectionCacheOrder.clear();
   }
 
   function styleSnapshot() {
@@ -953,7 +1739,7 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
     return Object.freeze({
       fragmentHtml: wrapper.innerHTML,
       readerCss: snapshotReaderCss(),
-      bookCss: bookStyle.textContent,
+      bookCss: snapshotBookCss(wrapper),
       userCss: userStyle.textContent,
       presentationJson: JSON.stringify({
         schema: 1,
@@ -969,11 +1755,14 @@ export function createContent({ host, reader, readerStyleSource, fail }) {
 
   return Object.freeze({
     book,
+    activateSection,
     captureRange,
     close,
     initialize,
-    loadSection,
+    prepareSection,
     loadVisible,
+    materializePreviewImage,
+    prefetchSection,
     renderCached,
     resourceSnapshot,
     selectionRange,

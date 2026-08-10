@@ -27,7 +27,7 @@
 
 `docs` 是可交付任务的默认 gate。修改本仓库流程脚本时，在任务开始时追加 `workflow-self-check`；阅读器继续使用已有正式检查脚本，不为已停止的引擎实验保留 gate。
 
-`scripts/Invoke-Atha.ps1` 仍是项目检查入口。它现有的本机日志与全局工站日志会暂时重复；在真实流程样本证明全局日志足够前，不为消除重复改写项目 CLI。
+`scripts/check-docs.sh` 是 `docs` required gate 的 Bash 入口；它通过 `mise exec` 依次运行 `doc_guard.py` 和 `doc_length_check.py`。`scripts/check-workflow.sh` 先拒绝任何 Bash 检查脚本调用 PowerShell，再复用文档入口并运行文档守卫 self-check。旧 `scripts/Invoke-Atha.ps1` 保留为兼容入口，工站事件与报告聚合由全局 `project-workflow` 负责，不在仓库内复制实现。
 
 本项目当前不需要 dotenv 变量；Rust 版本继续由 `rust-toolchain.toml` 固定。
 
@@ -60,31 +60,14 @@
   "gates": {
     "docs": [
       [
-        "pwsh",
-        "-NoProfile",
-        "-File",
-        "scripts/Invoke-Atha.ps1",
-        "check",
-        "docs",
-        "-Activity",
-        "validation",
-        "-Scope",
-        "project-workflow"
+        "bash",
+        "scripts/check-docs.sh"
       ]
     ],
     "workflow-self-check": [
       [
-        "pwsh",
-        "-NoProfile",
-        "-File",
-        "scripts/Measure-Workflow.ps1",
-        "-Action",
-        "SelfCheck"
-      ],
-      [
-        "python",
-        "scripts/doc_guard.py",
-        "--self-check"
+        "bash",
+        "scripts/check-workflow.sh"
       ]
     ]
   },
