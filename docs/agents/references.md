@@ -136,7 +136,7 @@ adb -s "$serial" logcat --pid="$pid" -d
 
 - 版本事实：`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `mdict-rs 0.1.4` 并启用 `lzo`；经典 Kindle 词典只在 `reader::dictionary` 内实现 MOBI6、CP1252、HUFF/CDIC 与正排 INDX 的有界按需读取。
 - 官方入口：[`mdict-rs 0.1.4`](https://docs.rs/mdict-rs/0.1.4/mdict_rs/)、[固定源码](https://github.com/Initsnow/mdict-rs/tree/d4bc67d1128e9561a27b714f085ad970dfed6c09)、[`libmobi 0.12` 固定参考源码](https://github.com/bfabiszewski/libmobi/tree/85dcfe803fc2a21020ddcf15c3eb66b93d388add)。
-- 项目快速用法：`LocalDictionaries` 在应用数据根的 `Dictionaries` 目录事务导入 MDX / MDD 或经典 MOBI6 词典，按固定格式域去重，只做精确查询；MDX 链接深度有限，MDD 先解析范围与大小再流式读取，最终释义只投影净化后的纯文本。Tauri command 和日志不接收或记录源路径、查询、词头、释义或资源内容。
+- 项目快速用法：`LocalDictionaries` 在应用数据根的 `Dictionaries` 目录事务导入 MDX / MDD 或经典 MOBI6 词典，按固定格式域去重，只做精确查询；MDX 链接深度有限，MDD 先解析范围与大小再流式读取。最终释义同时投影兼容纯文本和固定元素白名单富文本；来源样式、属性、地址与资源不进入结果，排版由应用 CSS 提供。Tauri command 和日志不接收或记录源路径、查询、词头、释义或资源内容。
 - 最短检查：`bash scripts/check-dictionary-source.sh`；私有真实英文输出与 release benchmark 增加 `--private-fixtures fixtures/local`。Linux GUI 与 PCT 原生专项在实际续做前接入同一 Bash 入口；原生结果不能冒充应用 PSS。
 - 必须重查：`mdict-rs` release line / AGPL-3.0-only 分发、MDict v1 / 加密变体、Kindle ORDT / keys / names 屈折索引、富 MDD 资源、ARM64 真机性能和任何模糊或跨词典查询需求。
 

@@ -65,6 +65,7 @@ pub struct DictionaryLookup {
     pub dictionary_id: String,
     pub headword: String,
     pub definition: String,
+    pub definition_html: String,
 }
 
 #[derive(Clone, Debug)]
@@ -132,6 +133,11 @@ struct KindleIndexEntry {
     label: String,
     position: u64,
     length: u64,
+}
+
+struct SafeDefinition {
+    text: String,
+    html: String,
 }
 
 impl KindleDictionary {
@@ -299,10 +305,12 @@ impl KindleDictionary {
         if had_errors {
             return Err(DictionaryError::CorruptSource);
         }
+        let definition = safe_definition(&text)?;
         Ok(Some(DictionaryLookup {
             dictionary_id: dictionary_id.into(),
             headword: entry.label,
-            definition: safe_definition(&text)?,
+            definition: definition.text,
+            definition_html: definition.html,
         }))
     }
 
@@ -1017,10 +1025,12 @@ fn lookup_mdict(
             candidate = normalized_query(link)?;
             continue;
         }
+        let definition = safe_definition(raw)?;
         return Ok(Some(DictionaryLookup {
             dictionary_id: dictionary_id.to_owned(),
             headword: record.key,
-            definition: safe_definition(raw)?,
+            definition: definition.text,
+            definition_html: definition.html,
         }));
     }
     Err(DictionaryError::LinkDepth)
@@ -1041,7 +1051,7 @@ fn mdict_identity(
     Ok(digest.finish())
 }
 
-fn safe_definition(raw: &str) -> Result<String, DictionaryError> {
+fn safe_definition(raw: &str) -> Result<SafeDefinition, DictionaryError> {
     if raw.len() > MAX_RAW_DEFINITION_BYTES {
         return Err(DictionaryError::DefinitionTooLarge);
     }
@@ -1063,7 +1073,161 @@ fn safe_definition(raw: &str) -> Result<String, DictionaryError> {
             return Err(DictionaryError::DefinitionTooLarge);
         }
     }
-    Ok(normalized)
+    document
+        .select("frame,frameset,applet,option,optgroup,picture,img,svg,math,canvas,map,area")
+        .remove();
+    let has_rich_text = document.text().split_whitespace().next().is_some();
+
+    let fragment = document.html_root();
+    fragment.remove_all_attrs();
+    for node in fragment.descendants() {
+        if node.is_comment() {
+            node.remove_from_parent();
+            continue;
+        }
+        if !node.is_element() {
+            continue;
+        }
+        let name = node
+            .node_name()
+            .map(|name| name.to_string())
+            .unwrap_or_default();
+        let hint = [node.attr("class"), node.attr("id")]
+            .into_iter()
+            .flatten()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !safe_definition_element(&name) {
+            node.rename("span");
+        }
+        node.remove_all_attrs();
+        if let Some(role) = dictionary_role(&hint) {
+            node.set_attr("data-dictionary-role", role);
+        }
+    }
+
+    let mut html = fragment.inner_html().to_string();
+    if !normalized.is_empty() && !has_rich_text {
+        html.clear();
+    }
+    if document
+        .try_select("address,blockquote,div,dl,h1,h2,h3,h4,h5,h6,hr,ol,p,pre,table,ul")
+        .is_none()
+        && !html.trim().is_empty()
+    {
+        html = format!("<p>{html}</p>");
+    }
+    if html.len() > MAX_RAW_DEFINITION_BYTES {
+        return Err(DictionaryError::DefinitionTooLarge);
+    }
+    Ok(SafeDefinition {
+        text: normalized,
+        html,
+    })
+}
+
+fn safe_definition_element(name: &str) -> bool {
+    matches!(
+        name,
+        "a" | "abbr"
+            | "address"
+            | "b"
+            | "blockquote"
+            | "br"
+            | "cite"
+            | "code"
+            | "dd"
+            | "del"
+            | "dfn"
+            | "div"
+            | "dl"
+            | "dt"
+            | "em"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "hr"
+            | "i"
+            | "ins"
+            | "kbd"
+            | "li"
+            | "mark"
+            | "ol"
+            | "p"
+            | "pre"
+            | "q"
+            | "rp"
+            | "rt"
+            | "ruby"
+            | "s"
+            | "samp"
+            | "small"
+            | "span"
+            | "strong"
+            | "sub"
+            | "sup"
+            | "table"
+            | "tbody"
+            | "td"
+            | "tfoot"
+            | "th"
+            | "thead"
+            | "tr"
+            | "u"
+            | "ul"
+            | "var"
+            | "wbr"
+    )
+}
+
+fn dictionary_role(hint: &str) -> Option<&'static str> {
+    // ponytail: common class tokens only; add format-specific roles when real fixtures prove a gap.
+    let tokens = hint
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    let has = |choices: &[&str]| tokens.iter().any(|token| choices.contains(&token.as_str()));
+
+    if has(&["ipa", "phonetic", "phonetics", "pron", "pronunciation"]) {
+        Some("pronunciation")
+    } else if has(&["fl", "gram", "pos"])
+        || tokens
+            .windows(3)
+            .any(|part| part == ["part", "of", "speech"])
+    {
+        Some("part-of-speech")
+    } else if has(&[
+        "def",
+        "definition",
+        "definitions",
+        "meaning",
+        "sense",
+        "senses",
+    ]) {
+        Some("sense")
+    } else if has(&[
+        "ex",
+        "example",
+        "examples",
+        "quotation",
+        "quote",
+        "sentence",
+    ]) {
+        Some("example")
+    } else if has(&["domain", "label", "labels", "register", "usage"]) {
+        Some("label")
+    } else if has(&["etym", "etymology", "origin"]) {
+        Some("etymology")
+    } else if has(&["antonym", "antonyms", "syn", "synonym", "synonyms"]) {
+        Some("relation")
+    } else {
+        None
+    }
 }
 
 fn copy_source(
@@ -1521,13 +1685,53 @@ mod tests {
     use std::time::Instant;
 
     #[test]
-    fn safe_definition_drops_active_content_and_normalizes_text() {
-        assert_eq!(
-            safe_definition(
-                "<style>.secret{display:none}</style><p>Hello <b>world</b></p><script>steal()</script><form>send me</form>"
-            ),
-            Ok("Hello world".into())
+    fn safe_definition_preserves_structure_without_active_content() {
+        let definition = safe_definition(
+            "<style>.secret{display:none}</style><div class='entry' onclick='steal()'><p id='first'>Hello <b style='color:red'>world</b></p><span class='pron'>/həˈləʊ/</span><ol><li>Greeting</li></ol><table><tr><th>Kind</th><td>noun</td></tr></table><script>steal()</script><form>send me</form></div>",
+        )
+        .expect("safe definition");
+
+        assert_eq!(definition.text, "Hello world/həˈləʊ/GreetingKindnoun");
+        assert!(definition.html.contains("<p>Hello <b>world</b></p>"));
+        assert!(
+            definition
+                .html
+                .contains("data-dictionary-role=\"pronunciation\"")
         );
+        assert!(definition.html.contains("<ol><li>Greeting</li></ol>"));
+        assert!(
+            definition
+                .html
+                .contains("<table><tbody><tr><th>Kind</th><td>noun</td></tr></tbody></table>")
+        );
+        for unsafe_markup in [
+            "<script", "<style", "<form", "onclick", "style=", "class=", "id=",
+        ] {
+            assert!(
+                !definition.html.contains(unsafe_markup),
+                "kept {unsafe_markup}"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_definition_wraps_plain_text_and_flattens_unknown_elements() {
+        let definition = safe_definition("plain <made-up data-value='x'>text</made-up>")
+            .expect("safe definition");
+
+        assert_eq!(definition.text, "plain text");
+        assert_eq!(definition.html, "<p>plain <span>text</span></p>");
+    }
+
+    #[test]
+    fn rich_filter_keeps_the_legacy_text_projection() {
+        let definition = safe_definition(
+            "<div> <math><mi>formula</mi></math><svg><text>diagram</text></svg><option>choice</option> </div>",
+        )
+        .expect("safe definition");
+
+        assert_eq!(definition.text, "formuladiagramchoice");
+        assert!(definition.html.is_empty());
     }
 
     #[test]

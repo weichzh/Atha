@@ -1504,7 +1504,7 @@ textarea:focus-visible,
   right: 12px;
   bottom: calc(60px + var(--safe-area-bottom));
   left: auto;
-  width: min(440px, calc(100vw - 24px));
+  width: min(520px, calc(100vw - 24px));
   max-height: min(68dvh, calc(100dvh - 76px - var(--safe-area-top) - var(--safe-area-bottom)));
   border: 1px solid var(--ui-border);
   border-radius: 8px;
@@ -1545,15 +1545,207 @@ textarea:focus-visible,
 
 .dictionary-result {
   display: grid;
-  gap: 8px;
+  gap: 14px;
   min-width: 0;
 }
 
-.dictionary-result p {
+.dictionary-headword {
   margin: 0;
-  line-height: 1.7;
+  padding-bottom: 10px;
+  color: var(--ui-text);
+  font-family: Georgia, "Noto Serif CJK SC", "Songti SC", serif;
+  font-size: 1.55rem;
+  font-weight: 650;
+  line-height: 1.2;
+  border-bottom: 1px solid var(--ui-border);
   overflow-wrap: anywhere;
+}
+
+.dictionary-definition {
+  min-width: 0;
+  color: var(--ui-text);
+  font-family: Georgia, "Noto Serif CJK SC", "Songti SC", serif;
+  font-size: 0.98rem;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+}
+
+.dictionary-definition > :first-child {
+  margin-top: 0;
+}
+
+.dictionary-definition > :last-child {
+  margin-bottom: 0;
+}
+
+.dictionary-definition :where(p, div, address) {
+  margin-block: 0 0.82em;
+}
+
+.dictionary-definition :where(h1, h2, h3, h4, h5, h6) {
+  margin: 1.25em 0 0.45em;
+  color: var(--ui-text);
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-size: 1em;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.dictionary-definition :where(strong, b, dt, th) {
+  font-weight: 700;
+}
+
+.dictionary-definition :where(em, i, dfn, cite) {
+  font-style: italic;
+}
+
+.dictionary-definition :where(ul, ol) {
+  margin: 0.55em 0 0.9em;
+  padding-inline-start: 1.55em;
+}
+
+.dictionary-definition li {
+  margin-block: 0.3em;
+  padding-inline-start: 0.18em;
+}
+
+.dictionary-definition li::marker {
+  color: color-mix(in srgb, var(--reader-accent) 72%, var(--ui-text));
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-weight: 650;
+}
+
+.dictionary-definition dl {
+  margin: 0.6em 0 1em;
+}
+
+.dictionary-definition dt {
+  margin-top: 0.75em;
+  color: color-mix(in srgb, var(--reader-accent) 64%, var(--ui-text));
+}
+
+.dictionary-definition dd {
+  margin: 0.2em 0 0 1.25em;
+}
+
+.dictionary-definition blockquote {
+  margin: 0.85em 0;
+  padding: 0.55em 0.8em;
+  color: color-mix(in srgb, var(--ui-text) 82%, var(--ui-muted));
+  background: color-mix(in srgb, var(--reader-accent) 6%, var(--ui-surface));
+  border-inline-start: 3px solid color-mix(in srgb, var(--reader-accent) 62%, var(--ui-border));
+}
+
+.dictionary-definition table {
+  display: block;
+  width: 100%;
+  margin: 0.9em 0;
+  overflow-x: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-size: 0.9em;
+}
+
+.dictionary-definition :where(th, td) {
+  padding: 0.5em 0.65em;
+  text-align: start;
+  vertical-align: top;
+  border: 1px solid var(--ui-border);
+}
+
+.dictionary-definition th {
+  background: var(--ui-surface-muted);
+}
+
+.dictionary-definition :where(code, kbd, samp, pre) {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 0.88em;
+}
+
+.dictionary-definition :where(code, kbd, samp) {
+  padding: 0.1em 0.3em;
+  background: var(--ui-surface-muted);
+  border: 1px solid var(--ui-border);
+  border-radius: 3px;
+}
+
+.dictionary-definition pre {
+  margin: 0.8em 0;
+  padding: 0.75em;
+  overflow: auto;
   white-space: pre-wrap;
+  background: var(--ui-surface-muted);
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+}
+
+.dictionary-definition mark {
+  padding-inline: 0.12em;
+  color: inherit;
+  background: color-mix(in srgb, #f2c94c 48%, transparent);
+}
+
+.dictionary-definition hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid var(--ui-border);
+}
+
+.dictionary-definition :where(sub, sup) {
+  font-size: 0.72em;
+  line-height: 0;
+}
+
+.dictionary-definition ruby {
+  ruby-position: over;
+}
+
+.dictionary-definition rt {
+  color: var(--ui-muted);
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-size: 0.62em;
+}
+
+.dictionary-definition a {
+  color: color-mix(in srgb, var(--reader-accent) 70%, var(--ui-text));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+.dictionary-definition [data-dictionary-role="pronunciation"] {
+  color: color-mix(in srgb, var(--reader-accent) 68%, var(--ui-text));
+  font-family: "Segoe UI", "Noto Sans", sans-serif;
+}
+
+.dictionary-definition [data-dictionary-role="part-of-speech"],
+.dictionary-definition [data-dictionary-role="label"] {
+  display: inline-block;
+  margin-inline-end: 0.4em;
+  color: var(--ui-muted);
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-size: 0.78em;
+  font-weight: 650;
+  font-style: normal;
+}
+
+.dictionary-definition [data-dictionary-role="sense"] {
+  display: block;
+  margin-block: 0.55em;
+}
+
+.dictionary-definition [data-dictionary-role="example"] {
+  color: color-mix(in srgb, var(--ui-text) 74%, var(--ui-muted));
+  font-style: italic;
+}
+
+.dictionary-definition [data-dictionary-role="etymology"],
+.dictionary-definition [data-dictionary-role="relation"] {
+  display: block;
+  margin-top: 0.85em;
+  padding-top: 0.65em;
+  border-top: 1px solid var(--ui-border);
 }
 
 .dictionary-status {
@@ -2763,7 +2955,11 @@ textarea:focus-visible,
     padding: 8px 2px 24px;
   }
 
-  .dictionary-result p {
+  .dictionary-headword {
+    font-size: 1.42rem;
+  }
+
+  .dictionary-definition {
     font-size: 1rem;
     line-height: 1.75;
   }

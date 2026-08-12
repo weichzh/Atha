@@ -64,7 +64,7 @@ EPUB / CBZ / FBZ 共用 `reader::archive` 的 512 MiB 源文件与声明解压�
 
 `reader::dictionary::LocalDictionaries` 独立于普通书籍导入器，在应用数据根的 `Dictionaries` 目录事务导入、列出和移除词典。MDict v2 的 MDX 与最多四个 MDD 固定交给 `mdict-rs 0.1.4`，MDX 精确查询最多跟随八层链接；MDD 先查资源范围和 32 MiB 上限，再按块读取。经典 Kindle 只支持当前样本所需的 MOBI6、CP1252、HUFF/CDIC 与正排 INDX 精确查询，导入时按真实 HUFF 解压长度生成有界 `dictionary.offsets`，查询按稀疏首键和正文累计偏移二分后只解压目标 records；旧导入缺失 sidecar 时可重建。ORDT、自定义排序、names / keys 屈折变化、KF8 词典、DRM、全文和模糊查询稳定拒绝或不命中。
 
-词典源、查询、词头、释义和资源均属于私有内容。Tauri 只把词典 ID、查询和安全结果送入固定 command，后台 lookup 使用 blocking worker，日志只保留操作、格式、资源数、结果数、耗时与稳定错误码。释义先移除脚本、样式、表单、嵌入和媒体节点，再归一为空白受限纯文本；Svelte 面板不使用 `{@html}`，MDD 富资源首版不渲染。选区“查词”只发送当前正文选区，不建立 provider、缓存、网络或插件接口。
+词典源、查询、词头、释义和资源均属于私有内容。Tauri 只把词典 ID、查询和安全结果送入固定 command，后台 lookup 使用 blocking worker，日志只保留操作、格式、资源数、结果数、耗时与稳定错误码。释义先移除脚本、来源样式、表单、嵌入、媒体、图片和资源节点，再把未知元素降为 `span` 并删除全部来源属性；结果同时保留兼容纯文本 `definition` 与只含固定语义元素和后端生成角色标记的 `definitionHtml`。Svelte 只在这条后端白名单边界使用 `{@html}`，应用 CSS 提供段落、义项、音标、词性、列表、引用、表格、ruby 与上下标排版；来源 CSS、可点击地址和 MDD 富资源仍不渲染。选区“查词”只发送当前正文选区，不建立 provider、缓存、网络或插件接口。
 
 `Section` 是顺序内容单元；`ReadingSession` 是当前打开书籍的瞬时状态，只负责按索引打开 section、关闭内容和报告 `opening`、`content-loaded`、`layout-stable`、`closed` 或 `failed`。打开另一 section 时保留当前 live DOM，目标 XHTML 完成解析、白名单校验和资源准备后再原子替换；准备或排版失败时保留上一稳定 section 与位置。会话以共享三槽、8 Mi 字符预算的 LRU 保留已准备 detached body / CSS 或相邻 section 原始 XHTML，关闭 generation 使全部在途结果失效并释放 live DOM 与会话缓存。TOC 跳转、Locator 和耐久阅读位置不属于 R1 会话。
 
@@ -168,7 +168,7 @@ Kindle 当前最低 Bash 检查为 `mise exec -- cargo test --locked -p atha-bac
 
 ### 离线词典入口门槛
 
-`scripts/check-dictionary-source.sh` 运行公共边界测试、私有 MDict / MDD 与经典 Kindle 真实英文输出、release benchmark 和 workspace 回归；忽略目录中的 schema 1 清单固定至少三组英文查询及归一化释义 SHA-256，门禁只读取预期值，不能由本次结果自更新。Linux GUI 与 PCT 原生基准的既有结果仍是历史证据；再次验收前把对应 opt-in 场景迁入同一 Bash 入口。当前 Linux WebKitGTK 不提供闭合 Shadow DOM 的可用选区对象，因此自动化不能冒充真实选区点击；Tauri / WebView 的真实长按、直接点击、抽屉、应用 PSS 与截图仍在 PCT-AL10 单独验收。
+`scripts/check-dictionary-source.sh` 运行公共边界测试、私有 MDict / MDD 与经典 Kindle 真实英文输出、release benchmark 和 workspace 回归；忽略目录中的 schema 1 清单固定至少三组英文查询及归一化纯文本释义 SHA-256，门禁只读取预期值，不能由本次结果自更新。富文本公共测试另外固定语义结构保留、活动节点删除、未知元素降级、来源属性清除与普通文本包装。Linux GUI 与 PCT 原生基准的既有结果仍是历史证据；再次验收前把对应 opt-in 场景迁入同一 Bash 入口。当前 Linux WebKitGTK 不提供闭合 Shadow DOM 的可用选区对象，因此自动化不能冒充真实选区点击；Tauri / WebView 的真实长按、直接点击、抽屉、应用 PSS 与截图仍在 PCT-AL10 单独验收。
 
 ## 性能策略
 

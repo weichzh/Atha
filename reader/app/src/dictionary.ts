@@ -15,6 +15,7 @@ export interface DictionaryLookup {
   dictionaryId: string;
   headword: string;
   definition: string;
+  definitionHtml: string;
 }
 
 export const dictionaryAvailable =

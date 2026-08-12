@@ -144,7 +144,7 @@
     >
       <X aria-hidden="true" />
     </button>
-    <h2 id="dictionary-heading">{query || "词典"}</h2>
+    <h2 id="dictionary-heading">词典</h2>
     <div class="panel-heading-actions">
       <button
         class="icon-button"
@@ -183,8 +183,15 @@
   <div class="dictionary-content">
     {#if result}
       <article class="dictionary-result" aria-live="polite">
-        <h3 class:visually-hidden={result.headword === query}>{result.headword}</h3>
-        <p>{result.definition}</p>
+        <h3 class="dictionary-headword">{result.headword}</h3>
+        <div class="dictionary-definition">
+          {#if result.definitionHtml}
+            <!-- The backend strips active elements and every source attribute before this boundary. -->
+            {@html result.definitionHtml}
+          {:else}
+            <p>{result.definition}</p>
+          {/if}
+        </div>
       </article>
     {/if}
     <output class="dictionary-status" aria-live="polite">{status}</output>
