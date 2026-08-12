@@ -137,7 +137,6 @@ export function createDiagnostics({
   async function verifyEmptyTailColumns() {
     if (reader.dataset.readingMode === "scroll") return;
     const anchor = pagination.captureOffset();
-    const rangeRect = Range.prototype.getBoundingClientRect;
     const probes = [document.createElement("div"), document.createElement("div")];
     for (const probe of probes) {
       probe.dataset.emptyColumnProbe = "true";
@@ -147,15 +146,6 @@ export function createDiagnostics({
       probe.style.setProperty("visibility", "hidden", "important");
     }
     content.book.append(...probes);
-    Range.prototype.getBoundingClientRect = function () {
-      const rect = rangeRect.call(this);
-      return new DOMRect(
-        rect.left,
-        rect.top,
-        rect.width + reader.getBoundingClientRect().width * 3,
-        rect.height,
-      );
-    };
     let evidence;
     try {
       await pagination.resizeViewport(anchor);
@@ -170,16 +160,34 @@ export function createDiagnostics({
         scrollPages,
         expectedPages: expectedPage + 1,
         pages: pagination.snapshot().pages,
-        rangeUnionInflationPages: 3,
       });
       assert(scrollPages > evidence.expectedPages, "sample-boundary");
       assert(evidence.pages === evidence.expectedPages, "sample-boundary");
     } finally {
-      Range.prototype.getBoundingClientRect = rangeRect;
       for (const probe of probes) probe.remove();
       await pagination.resizeViewport(anchor);
     }
     return evidence;
+  }
+
+  function verifyPendingFormulaPlaceholder() {
+    const probe = document.createElement("img");
+    probe.className = "math-display atha-resource-pending";
+    probe.alt = "x".repeat(512);
+    probe.width = 24;
+    probe.height = 12;
+    content.book.append(probe);
+    try {
+      const style = getComputedStyle(probe);
+      assert(
+        style.fontSize === "0px" &&
+          style.lineHeight === "0px" &&
+          parseFloat(style.marginTop) > 0,
+        "formula-selectors",
+      );
+    } finally {
+      probe.remove();
+    }
   }
 
   async function verifyNavigation() {
@@ -1134,6 +1142,7 @@ export function createDiagnostics({
   }
 
   async function verify() {
+    verifyPendingFormulaPlaceholder();
     await verifySections();
     await verifyNavigation();
     await verifyPreferences();

@@ -1164,6 +1164,8 @@ textarea:focus-visible,
 .book img.math-display {
   box-sizing: border-box;
   max-width: none;
+  font-size: 0 !important;
+  line-height: 0 !important;
   padding: 0 !important;
   background: var(--formula-bg);
   color-scheme: light;
@@ -1188,7 +1190,7 @@ textarea:focus-visible,
 
 .book img.math-display {
   display: block;
-  margin: 0.9em auto !important;
+  margin: var(--atha-display-formula-margin) auto !important;
   break-inside: avoid;
 }
 

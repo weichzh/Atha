@@ -1,5 +1,5 @@
 ---
-description: 修复 PCT-AL10 多栏章节把内容范围误算成连续空白尾页的问题。
+description: 修复 PCT-AL10 公式占位文本扩张多栏分页并产生空白尾页的问题。
 ---
 
 # PCT 空白尾页计数修复
@@ -10,74 +10,83 @@ implemented
 
 ## Problem
 
-PCT-AL10 上的当前章节在第 10 页结束，但阅读器显示为 29 页；第 11、12 页没有任何可见内容，返回第 10 页后正文恢复。真机 UI 树仍保留正文节点，已安装 APK 也与当前候选一致，因此问题不在导入、缓存或内容丢失，而在分页总数。
+PCT-AL10 上的问题章节在第 10 页结束，但阅读器曾显示 29 页；从第 11 页起没有任何可见内容。导入结果、阅读状态和正文 DOM 均完整，故障位于华为 WebView 114 的多栏排版链路。
 
-`pagination.contentPageCount()` 当前创建从书根开头到最后一个有意义节点的整段 `Range`，再以其 `getBoundingClientRect().right` 推算页数。多栏布局中的 Range 外框会合并选中片段和完整元素盒；PCT WebView 114 因此把实际结束于第 10 列的内容范围放大到第 29 列，Navigation 随后允许用户进入不存在的空白列。
+首版候选把整章 `Range` 改成末节点 fragment 量测，本地门通过，但原位安装后同一节变为 38 页且第 36 页仍为空白。该候选证明最初的 Range 假设错误，不能作为真机完成证据。
+
+调试包通过 WebView CDP 读取不含正文的几何后确认：`content` 为延迟加载 SVG 公式而移除 `src`，保留了 `alt`、显式宽高和隐藏状态；WebView 114 仍把无 `src` 图片的长 `alt` 回退文本按正文行高分进 CSS 多栏。186 个公式因此把真实结束于第 10 列的章节扩张到第 35 列。把公式的字体和行高归零后，图片宽高不变，最后内容列立即回到第 10 列。
+
+公式首次显现后，WebView 114 还会改变最终分页几何。成功加载的固定盒图片按原设计不报告逐页布局变化，因此初次恢复可能暂时保留 11 页总数；初次可见资源完成后需要统一再计一次分页。
 
 ## Scope
 
-- 继续由 `pagination` 唯一拥有分页总数，只替换错误的整段 Range 外框量测；
-- 以最后一个有意义文本或媒体节点的实际 fragment 几何确定最后内容列，保留书源内部有内容的留白和尾部空盒过滤；
-- 在现有 diagnostics 跨章边界探针中加入 Range 外框被放大的确定性回归，不增加测试框架或依赖；
-- 让现有宽表手势夹具按视口保留足够的横向溢出，避免 DPR 2 下固定宽度使正式 Linux 门失去有效行程；
-- 运行阅读器语法、Linux GUI、公式压力、前端构建和 Android 候选构建；真机安装仍等待用户对具体候选的单独批准。
+- 保留现有 CSS 多栏分页器、整章 `Range` 计页和公式渐进加载；
+- 对待加载和已加载公式统一归零文字行盒，阻止无 `src` 图片的 `alt` 回退文本参与分栏；
+- 初次可见资源完成后统一重排一次，不把每次公式显现改成逐页重排；
+- 删除首版候选的末节点 fragment 计页和 Range monkeypatch 回归，改用公式占位样式探针；
+- 保留诊断宽表按视口产生有效横向行程的修正；
+- 完成本地、Linux GUI、公式压力、Android 包结构和 PCT-AL10 原位更新验收。
 
 ## Non-Goals
 
-- 不修改导入、缓存、Locator、手势仲裁、图片或公式加载；
-- 不改变滚动模式、DPR 模型、20,000px 原生分页阈值或阅读数据；
-- 不保存或输出私密书籍的标题、路径、正文或内容身份。
+- 不引入 Readest 分页器、额外 WebView 或新依赖；
+- 不预热整章公式，不改变三槽并发、Locator、手势仲裁、滚动模式或原生长章节阈值；
+- 不清理阅读数据，不保存或输出私密书籍的标题、路径、正文或内容身份。
 
 ## Acceptance Criteria
 
-- [x] Range 整段外框即使被人为放大，分页总数仍与独立的可见 fragment oracle 一致；
-- [x] 尾部强制分栏空盒继续不计入可到达页数，跨章向前仍落在上一节最后真实内容页；
-- [x] 当前问题章节的最后真实内容页不再产生第 11 至 29 页的可到达空白列；
-- [x] Linux GUI 阅读器门、公式压力冒烟、前端检查与 Android arm64 候选构建通过；
-- [x] PCT-AL10 原位更新后的自动翻页复测通过，或明确保留为尚未获批的真实目标验收边界。
+- [x] 问题章节首次恢复即显示 10 页，第 10 页有正文且不存在可到达的第 11 页；
+- [x] 第 6 页至第 10 页逐次翻页均只前进一页；
+- [x] 从第 10/10 页继续前进进入下一节第 1 页，回翻准确返回第 10/10 页；
+- [x] 公式继续渐进加载时，最后内容列和 10 页总数保持稳定；
+- [x] Linux GUI 阅读器门、公式压力冒烟、前端检查和 Android arm64 正式包门通过；
+- [x] PCT-AL10 原位更新保留应用数据、首次安装时间和阅读进度。
 
 ## Architecture Impact
 
 none
 
-本次不改变 Module、Interface、数据语义、信任边界、依赖或运行拓扑，只修正 `pagination` 已有职责内的内容边界量测，并复用现有 diagnostics oracle 验证。
+本次不改变 Module、Interface、数据语义、信任边界、依赖或运行拓扑，只修正公式占位的 CSS 几何，并复用现有初次分页稳定点重新计页。
 
 ## Files And Steps
 
-1. 在现有尾部空列探针中模拟 Range 外框膨胀，证明当前生产计页会偏离独立 oracle；
-2. 把生产计页收窄到最后有意义节点的实际 fragment，不扫描整段 Range 外框；
-3. 跑定向语法与 Linux GUI 门，再跑公式压力、前端和 Android 构建；
-4. 完成独立 review、事实所有者和证据记录，提交候选；获得批准后才安装到 PCT-AL10 复测。
+1. 用调试包和 CDP 对比待加载公式、已加载公式、正文 fragment、列数与 `scrollWidth`；
+2. 在公式共享样式中归零 `font-size` 与 `line-height`；
+3. 初次可见资源加载后复用 `relayoutAtOffset()` 再计页，保留逐页成功显现不重排；
+4. 恢复原有整章 Range 计页，增加公式占位样式诊断并运行正式门；
+5. 构建、签名并原位安装正式 arm64 包，在同一章节验证末页和跨节边界。
 
 ## Checks
 
-- `node --check reader/web/pagination.mjs` 与 `node --check reader/web/diagnostics.mjs`；
+- `node --check`、Node 13 项测试和 `git diff --check`；
+- `mise exec -- pnpm --dir reader/app check` 与 production build；
 - `bash scripts/check-reader-linux.sh`；
 - 既有私密 sidecar 驱动的公式压力冒烟，不输出书籍身份；
-- `mise exec -- pnpm --dir reader/app check` 与 production build；
-- Android arm64 APK 构建、包结构与签名检查；
-- `autocorrect`、docs gate、`git diff --check` 与独立 review。
+- `bash scripts/check-pct-reader.sh build`、`verify` 与获批后的 `install`；
+- `autocorrect`、docs gate 与独立 review。
 
 ## Approval
 
-用户在看到真机根因结论后明确回复“开始修复。”，批准上述分页修复范围；该批准不包含向手机安装候选。
+用户明确回复“开始修复。”批准分页修复，并进一步说明手机安装与真机验证无需重复批准。首版候选复测失败后，继续定位并修正同一根因仍在该批准范围内。
 
 ## Result
 
-`pagination.contentPageCount()` 仍只在排版稳定点运行，但不再建立从书根到最后内容的整段 Range。它先保留有意义文本与媒体节点的 DOM 顺序，再从末尾找到第一个具有真实 fragment 的节点，以该节点的 `getClientRects()` 或元素 rect 确定最后内容列；尾部隐藏且无几何的节点安全回退到前一个真实内容，空书仍保持一页。Navigation、Locator、滚动模式和原生长章节分支没有改动。
+`reader/atha-reader.css` 只为 `.math-inline` 与 `.math-display` 增加零字体和零行高；行间公式的上下间距改由当前阅读字号计算，显式图片宽高、公式倍率、可访问名称、视觉间距与渐进加载保持不变。`pagination.renderFromStart()` 在初次可见资源实际加载后复用现有稳定重排入口再计页；后续逐页公式成功显现仍不触发重排，避免 Locator 恢复造成跳页。
 
-现有尾部空列探针会在重排期间把 `Range.getBoundingClientRect()` 人为放大三个视口；生产页数仍必须等于独立逐 fragment oracle。Linux DPR 2 同时证明固定 1200px 的宽表夹具只剩不足一次手势的有效行程，因此夹具改为至少比当前列宽多 480px，不改变产品手势逻辑。
+首版候选的末节点 fragment 计页已撤回，生产逻辑恢复原有整章 Range。诊断不再篡改平台 `Range`，而是直接验证长 `alt` 的待加载公式不会形成文字行盒。
 
-与真机问题相同的本地章节在最终源码下得到 `pages=10`、`contentPages=10`、`scrollPages=10`；公式压力章节得到 1332 个已稳定公式、65 个生产页和 65 个独立内容页，继续进入原生长章节分支。最终 Android arm64 候选 SHA-256 为 `353d01345ae97a8232aad7b867387f3fa92d5b8793d678b14e9a441f0a2a0827`，签名与手机现有安装一致，但尚未安装。
+PCT-AL10 调试包最终记录 186 个公式，其中 149 个已加载、37 个待加载；正文和公式的最后几何均位于第 10 列。正式包首次恢复为第 10/10 页，自动前翻进入下一节第 1 页，自动回翻返回第 10/10 页。手机最终保留在问题章节第 10/10 页。
+
+最终 Android arm64 正式包 SHA-256 为 `5b6f985509e425a8d2754f10f3cb21a1e968334fd88b0cf7f48f870fb438c88e`，签名与既有安装一致，16 KiB ZIP 与 ELF 对齐通过。原位安装证据位于 `artifacts/local/audits/pct-reader-install-20260812T170212Z-131006`，正式包边界证据位于 `artifacts/local/audits/pct-blank-tail-final-release-20260812T1703`。
 
 ## Review
 
-以 `37d572b` 为基线完成单独的范围、标准和回归审阅；没有 blocking finding。实现只修改共享计页入口及既有诊断，未新增依赖、接口或书籍内容日志。保留的风险是新候选尚未在 PCT-AL10 上执行真实目标复测。
+以故障修复前的 `37d572b` 为基线完成范围、标准和回归审阅。审阅发现零字体会让原有 `0.9em` 行间公式间距归零，已改为由当前阅读字号写入等价 CSS 变量，并重新运行 Linux GUI、公式压力、正式包和真机边界门。最终没有 blocking finding，未新增依赖、接口或内容日志。
 
 ## Evidence And Residual Risks
 
-- 静态与本地：reader module 语法、Svelte check、Vite production build 和 Node 13 项测试通过；
-- Linux GUI：公开书完整 13 场景、每场 5 次预热和 20 次测量通过，220 个计时样本的最大帧间隔 17ms，日志隐私检查通过；
-- Linux 精确内容：问题章节为 10 / 10 / 10 个生产页、独立内容页与滚动页；公式压力冒烟为 1332 个公式、65 / 65 个生产页与内容页，公开和压力书的空尾、Range 外框膨胀及跨章边界均通过；
-- Android 候选：arm64-only、v2 / v3 签名、16 KiB ZIP 与 ELF 对齐通过，候选哈希见 Result；候选证书与现有安装证书一致；
-- 真实目标边界：手机仍运行旧 APK；未经单独批准没有安装、清数据或卸载。新候选的页数、自动翻页和自然手指体验仍需在 PCT-AL10 上验收。
+- 静态与本地：reader module 语法、Svelte check、Vite production build、Node 13 项测试和 diff 检查通过；
+- Linux GUI：公开书完整 13 场景、每场 5 次预热和 20 次测量通过，220 个计时样本的最大帧间隔为 17ms，日志隐私检查通过；
+- 公式压力：1332 个公式全部稳定，独立空尾 oracle 与生产页数同为 65；低采样 13 场景手势冒烟和日志隐私检查通过；
+- Android 正式包：arm64、v2 / v3 签名、16 KiB ZIP 与 ELF 对齐、证书一致性和保数据原位安装通过；
+- 真实目标：PCT-AL10 上的自动逐页、末页、跨节和返回链路通过。ADB swipe 不是自然手指触摸证据，实体触摸手感仍由用户日常阅读确认。
