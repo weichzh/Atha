@@ -137,6 +137,7 @@ export function createDiagnostics({
   async function verifyEmptyTailColumns() {
     if (reader.dataset.readingMode === "scroll") return;
     const anchor = pagination.captureOffset();
+    const rangeRect = Range.prototype.getBoundingClientRect;
     const probes = [document.createElement("div"), document.createElement("div")];
     for (const probe of probes) {
       probe.dataset.emptyColumnProbe = "true";
@@ -146,6 +147,15 @@ export function createDiagnostics({
       probe.style.setProperty("visibility", "hidden", "important");
     }
     content.book.append(...probes);
+    Range.prototype.getBoundingClientRect = function () {
+      const rect = rangeRect.call(this);
+      return new DOMRect(
+        rect.left,
+        rect.top,
+        rect.width + reader.getBoundingClientRect().width * 3,
+        rect.height,
+      );
+    };
     let evidence;
     try {
       await pagination.resizeViewport(anchor);
@@ -160,10 +170,12 @@ export function createDiagnostics({
         scrollPages,
         expectedPages: expectedPage + 1,
         pages: pagination.snapshot().pages,
+        rangeUnionInflationPages: 3,
       });
       assert(scrollPages > evidence.expectedPages, "sample-boundary");
       assert(evidence.pages === evidence.expectedPages, "sample-boundary");
     } finally {
+      Range.prototype.getBoundingClientRect = rangeRect;
       for (const probe of probes) probe.remove();
       await pagination.resizeViewport(anchor);
     }
@@ -1359,7 +1371,8 @@ export function createDiagnostics({
     const table = document.createElement("table");
     table.tabIndex = 0;
     table.setAttribute("aria-label", wide ? "Gesture overflow table" : "Gesture table");
-    table.style.setProperty("width", wide ? "1200px" : "100%", "important");
+    table.style.setProperty("width", wide ? "calc(100% + 480px)" : "100%", "important");
+    if (wide) table.style.setProperty("min-width", "calc(100% + 480px)", "important");
     table.style.setProperty("height", "104px", "important");
     table.style.setProperty("border-collapse", "collapse", "important");
     table.style.setProperty("pointer-events", "auto", "important");

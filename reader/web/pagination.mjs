@@ -379,7 +379,7 @@ export function createPagination({
       book,
       NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
     );
-    let lastContent = null;
+    const meaningful = [];
     while (walker.nextNode()) {
       const node = walker.currentNode;
       if (
@@ -389,15 +389,23 @@ export function createPagination({
             "img, svg, math, table, figure, hr, .atha-image-error, .atha-cbz-page-error",
           ))
       ) {
-        lastContent = node;
+        meaningful.push(node);
       }
     }
-    const range = document.createRange();
-    range.setStart(book, 0);
-    if (lastContent instanceof Text) range.setEnd(lastContent, lastContent.length);
-    else if (lastContent) range.setEndAfter(lastContent);
-    else range.setEnd(book, 0);
-    const right = range.getBoundingClientRect().right;
+    let right = left;
+    for (let index = meaningful.length - 1; index >= 0; index -= 1) {
+      const node = meaningful[index];
+      const range = document.createRange();
+      if (node instanceof Text) range.selectNodeContents(node);
+      const rects = node instanceof Text ? range.getClientRects() : node.getClientRects();
+      let found = false;
+      for (const rect of rects) {
+        if (!rect.width || !rect.height) continue;
+        right = Math.max(right, rect.right);
+        found = true;
+      }
+      if (found) break;
+    }
     book.style.transform = savedTransform;
     return Math.max(1, Math.floor((right - left - 0.5) / (pageStep * visualScale)) + 1);
   }
