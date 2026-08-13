@@ -17,7 +17,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/app/src/components/ConversationOverlay.svelte` | Atha 默认对话界面、修订/关系 dialog 与历史快照 dialog 的 DOM |
 | `reader/app/src/components/MessageComposer.svelte` | 自增高/全屏消息输入、两层工具栏和可视/Markdown 输入模式 |
 | `reader/app/src/message-editor.ts`、`message-markdown.ts` | 受限 Tiptap 扩展、链接规则及按需加载的 Markdown 双向转换 |
-| `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部五图标 |
+| `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部四图标 |
 | `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
 | `reader/app/src/components/panels/PreferencesPanel.svelte` | Readest 风格分层设置、字号滑块、排版卡片、两种阅读方式与 CSS 模块入口 |
 | `reader/app/src/components/CssEditor.svelte` | CSS 模块页可见时按需加载的 CodeMirror 6 渐进增强；隐藏 textarea 保持唯一状态入口 |
@@ -64,7 +64,6 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 │     ├─ .search
 │     ├─ .notes
 │     ├─ .progress
-│     └─ .listen-placeholder
 ├─ #selection-actions
 ├─ #annotation-note-dialog
 ├─ #message-conversation
@@ -159,3 +158,5 @@ Readest 原图、逐图观察和本次 Linux 统计实现副本位于忽略目�
 本次表格缩略图、表格全屏查看、图片全屏查看与 200% 放大原图位于忽略目录 `artifacts/local/audits/content-viewer-headless/`，并附 `SHA256SUMS`；这是 Chromium production build 的本地视觉证据，不替代 PCT-AL10 实机触摸。
 
 PCT-AL10 上 Atha 最终原生选区与词典抽屉原图、说明和 SHA-256 位于 `artifacts/local/audits/offline-dictionary-pct/`；动作栏与抽屉设计复核使用 RD-22、RD-24、RD-25 与 RD-27。阅读设置菜单、字号、布局、阅读方式和纵向滚动原图位于 `artifacts/local/audits/reader-controls-pct/`；设置层级参考本地 RD-* 原图，字号、缩进与滚动行为以同机真实交互复核。
+
+词典富文本与设置的当前真机证据位于忽略目录 `artifacts/local/audits/dictionary-pct-revalidation-20260813/`。PCT-AL10 覆盖安装同签名 arm64 release 本地测试候选后，书架和词典仍在；ADB 自动化确认底栏为目录、搜索、笔记、进度四项，选区查词呈现安全语义结构，设置页无明显遮挡并列出 85%–175% 六档字号，150% 在进程重启后保持，最终恢复 100%。该目录含私有内容，只能用于本地复核；ADB input 不等同于自然手指触摸。

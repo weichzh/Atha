@@ -24,7 +24,7 @@
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、分页 / 原生滚动、Readest 风格设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 与 PCT-AL10 自动验收已通过 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、分页、诊断、benchmark 和页面组合入口 | 已实现 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的解析、序列化、大小 / 字段 / 重复 ID 与注入式 CSS 校验边界 | 已实现 |
-| `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 本地词典管理、持久化来源 / 六档字号设置、选区查词与安全富文本词条；移动端使用 75% 高底部抽屉 | 本地构建与桌面 / 移动合成界面已验证 |
+| `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 本地词典管理、持久化来源 / 六档字号设置、选区查词与安全富文本词条；移动端使用 75% 高底部抽屉 | PCT-AL10 release 本地测试候选已自动化验证 |
 | `reader/samples.json` | 四个本地验收样本的入口、manifest、内容、搜索和边界断言清单 | M2 已验证 |
 | `p0/ffi/` | Rust/C++ 共享 C ABI 调用与所有权对照 | 本地 P0 实验 |
 | `p0/sqlite/` | SQLite、FTS5、Outbox schema 与故障检查 | 本地 P0 实验 |
@@ -103,7 +103,7 @@
 - 系统 picker 链路已在模拟器手工验证 EPUB 导入 / 打开 / 重启恢复、消息导出及全库备份 / 恢复，完成后 Picker cache 为空；manifest 不请求宽泛存储权限，设置 `allowBackup=false` 并以 API 31+ `dataExtractionRules` 排除 cloud backup 与 device transfer；
 - Android app storage 实测 hard link 返回 `PermissionDenied`。非 Android 备份继续用 hard link 提供 no-replace 发布；Android 只在 Tauri adapter 新建的独占 Picker cache 目录内使用相邻 rename。`rename` 本身不保证 no-replace，当前正确性依赖该独占目录前置条件；只有后续出现其他 Android backend 调用方或实测竞态，才研究 `renameat2` 等替代；
 - Android `ACTION_CREATE_DOCUMENT` 会先创建 provider 文档；完整 cache 制品向 content URI 复制时若失败，provider 可能留下不完整目标。Atha 会报告失败并清空自身 cache，但不能对所有 provider 承诺删除外部残留；
-- 当前通用 Android 应用最高证据仍是 x86_64 模拟器完整 picker 链路；PCT-AL10 另有 arm64 debug APK 的阅读设置、字号 / DPR、水平翻页、原生纵向滚动和跨章专项证据，以及离线词典 release 原生查词 / RSS、Tauri 应用 PSS、华为 WebView 114 原生选区和直接点击查词证据。这些都不等同于签名发布验收。
+- 当前通用 Android 应用最高证据仍是 x86_64 模拟器完整 picker 链路；PCT-AL10 另有 arm64 debug APK 的阅读设置、字号 / DPR、水平翻页、原生纵向滚动和跨章专项证据，以及离线词典 release 原生查词 / RSS 与 Tauri 应用 PSS。当前同签名 arm64 release 本地测试候选已覆盖安装并保留应用数据，ADB 自动化验证了四按钮工具栏、选区查词、安全富文本、设置页、六档字号和重启恢复；自然手指触摸仍只由富文本改造前的同机长按与直接点击证据覆盖。这些都不等同于生产签名发布验收。
 - CBZ 共用同一 Android picker、私有数据根、reader runtime 和 Locator 恢复链路；`-VerifyCbzFixture` 已验证逐页、坏页继续、日志隐私与 app PSS，并在 renderer 不能唯一归因时明确不生成数值。
 - Markdown / TXT 共用同一 picker、书根、ReaderManifest、Locator、搜索与恢复链路。Markdown 固定把 raw HTML / 活动链接 / 图片能力投影为惰性文本，代码块使用 Readest 同型 `pre-wrap` 且允许跨页；TXT 以高置信整行标题生成 TOC、按约 1 MiB 合并物理 sections。API 36 x86_64 16 KiB AVD 已用仓库 README 与私有真实 TXT 覆盖目录首 / 中 / 末、全文搜索、翻页、强停恢复、Picker cache、PSS、健康和双日志隐私；十样本只作为同环境基线，ARM64 真机仍未覆盖。
 - Android edge-to-edge 由 native `WindowInsetsCompat` 提供 `systemBars | displayCutout` 四边事实，Web 端只消费一套自有 CSS 变量；阅读态隐藏状态栏但保留导航栏，章节标题仍在 cutout 下方，工具打开时章节标题隐藏且顶部工具栏完整避让状态栏。
@@ -152,7 +152,7 @@
 | Markdown / TXT | `cargo test --locked -p atha-backend --test text_import`、`scripts/check-text-source.ps1`、`scripts/check-android-reader.ps1 -VerifyMarkdownText` | 仓库 Markdown 与私有 opt-in TXT 的 importer、安全矩阵、API 36 x86_64 16 KiB picker / 目录 / 搜索 / 翻页 / 强停恢复和十样本 TXT 相对基线已通过；未完成 ARM64 真机性能门 |
 | FB2 / FBZ、阅读统计与手势 | `node --test reader/web/reader-state.test.mjs`、`cargo test --locked -p atha-backend --test fb2_import`、`bash scripts/check-reader-linux.sh` | 动态原创 fixture 的 importer、安全矩阵、Windows-1251 与内容身份已通过；当前 Bash Linux Tauri 门验证完整导入、跨章末页、AppLog 隐私及可信自动化指针，实际指针类型为 `mouse`，实体触摸待用户实测 |
 | MOBI / AZW / AZW3 | `cargo test --locked -p atha-backend --test kindle_import`、`scripts/check-kindle-source.ps1 -VerifyLinuxGui` | `boko 0.5.0` 前置有界预检、两个私有普通 KF8、词典早拒绝和相同字节跨后缀身份已通过；真实 Linux Tauri / WebKitGTK 已验证 204 条唯一目录、搜索、重排、恢复、非空截图和 AppLog 隐私；源 flow stylesheet 与 Android ARM64 性能尚未完成 |
-| MDict / Kindle 离线词典 | `cargo test --locked -p atha-backend --test dictionary_lookup`、`bash scripts/check-dictionary-source.sh --private-fixtures fixtures/local` | 私有 MDict v2 / MDD 与经典 Kindle MOBI6 的固定英文查询 / 兼容纯文本哈希、范围读取、安全富文本矩阵和 release benchmark 已通过；Kindle HUFF 使用真实累计 record 偏移。当前 Linux 冷 / 热 P95 为 Kindle 6.296 / 5.319ms、MDict 0.877 / 0.891ms、MDD 0.459 / 0.465ms，RSS 27,644 KiB。桌面浅色、移动浅色与移动深色合成词条已验证边界、滚动和无横向溢出；既有 PCT-AL10 arm64 查词、选区和抽屉证据早于富文本变更，当前富文本尚未在真机重跑 |
+| MDict / Kindle 离线词典 | `cargo test --locked -p atha-backend --test dictionary_lookup`、`bash scripts/check-dictionary-source.sh --private-fixtures fixtures/local`、`bash scripts/check-pct-reader.sh` | 私有 MDict v2 / MDD 与经典 Kindle MOBI6 的固定英文查询 / 兼容纯文本哈希、范围读取、安全富文本矩阵和 release benchmark 已通过；Kindle HUFF 使用真实累计 record 偏移。当前 Linux 冷 / 热 P95 为 Kindle 6.296 / 5.319ms、MDict 0.877 / 0.891ms、MDD 0.459 / 0.465ms，RSS 27,644 KiB。PCT-AL10 上的同签名 arm64 release 本地测试候选通过包、权限、v3 签名、16 KiB ZIP 与 ELF 对齐检查；覆盖安装保留书架和词典，ADB 自动化确认安全富文本、无横向溢出、设置、六档字号及 150% 重启恢复，并已恢复 100%。进程限定 logcat 仅含固定查词结果数与耗时且无内容字段；release 包不可 `run-as`，因此本轮未直接读取持久 AppLog，也未重做自然手指触摸。 |
 | 公式与手势性能 | `bash scripts/check-reader-formula-performance.sh --epub <path>`、`bash scripts/check-pct-reader-fps.sh --device <serial> --duration 10` | 当前源码连续两次通过 Bash Linux Tauri 5 + 20 正式门，每轮记录 440 次动作；两轮最差聚合页面状态更新 / 点按 / 连续 rAF P95 / 最大 rAF / 稳定分别为 32 / 7 / 17 / 19 / 352ms 与 32 / 7 / 19 / 20 / 352ms。公式在测量前已全部稳定，因此不证明加载揭示体验。最终 PCT-AL10 包在公共书同节、跨节和用户公式书的六个自动前后滑窗口分别提交 11、12、13、14、15、7 个 SurfaceFlinger presentation，页面均落到预期页并在动作后进入 `no-new-buffer`；release monitor 为 raw-only，不能据此报告总体 P95 或自然手指手感 |
 
 这些结果不是 CI、安装包、生产环境或跨设备证据。源码、依赖、配置或样本变化后，应重新运行受影响的最小入口；只有最终候选才扩展到 required gate。
@@ -165,7 +165,7 @@
 | 产品回流 | 书架没有文件关联、拖放、分组或最近阅读；尚无多书 Android 排序、超大书架滚动与虚拟化性能证据 |
 | 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；CBZ 首版只有 JPEG / PNG，不含 RTL / spread / 区域标注；FB2 首版拒绝源 stylesheet、非 JPEG / PNG binary 与未知正文元素，FBZ 单成员受 16 MiB archive 上限；Kindle 首版不发布 `boko` raw API 无法读取的 KF8 flow stylesheet，也不支持 DRM、字典阅读、KFX、AZW4 或压缩字体；Markdown 不加载活动链接 / 图片，TXT 遗留编码识别是 best effort；未完成 UTF-16 EPUB、DTBook、完整 fallback、跨内容版本 Locator 重锚定或富文本迁移 |
 | 数据与设备 | 没有加密、checkpoint、全应用备份或跨设备同步 |
-| 交付 | 没有 CI、Linux / Windows 安装包或签名 Android 发布包；Linux 当前验证 debug Tauri 壳，Android 验证 x86_64 模拟器与 PCT-AL10 arm64 debug APK，不等同于签名发布验收 |
+| 交付 | 没有 CI、Linux / Windows 安装包或生产签名 Android 发布包；Linux 当前验证 debug Tauri 壳，Android 验证 x86_64 模拟器、PCT-AL10 arm64 debug 专项和同签名 release 本地测试候选，不等同于生产签名发布验收 |
 | 工程结构 | 旧 Wry / Tao host 尚未删除；reader runtime 仍由固定顺序组成单 bundle |
 | 性能证据 | 基准没有完整设备指纹，也没有跨日期重复运行统计；PCT-AL10 已有词典 release 原生查词 / RSS、Tauri 应用 PSS 与缓存打开 1ms smoke，但仍缺 SAF 首次准备 / 书籍 I/O 及通用 WebView 基准 |
 
