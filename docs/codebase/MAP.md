@@ -24,8 +24,8 @@
 | `reader/app/src-tauri/src/local_data_maintenance.rs` | 完整本地数据 picker、恢复确认、存储统计、blocking worker 与固定字段日志 adapter | Linux GUI 已验证 |
 | `reader/app/src/components/MemoryCenter.svelte` | 最近阅读、跨书消息搜索、有书跳回和缺书 / 历史 Snapshot 资料库投影 | Linux GUI 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
-| `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、分页 / 原生滚动、Readest 风格设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 与 PCT-AL10 自动验收已通过 |
-| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、分页、诊断、benchmark 和页面组合入口 | 已实现 |
+| `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、分页 / 原生滚动、宽屏工作区、Readest 风格设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 已验证宽屏工作区；既有移动界面已通过 PCT-AL10 自动验收 |
+| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、真实 frame 分页、桌面工作区绑定、诊断、benchmark 和页面组合入口 | Linux GUI 已验证 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的解析、序列化、大小 / 字段 / 重复 ID 与注入式 CSS 校验边界 | 已实现 |
 | `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 本地词典管理、持久化来源 / 六档字号设置、选区查词与安全富文本词条；移动端使用 75% 高底部抽屉 | PCT-AL10 release 本地测试候选已自动化验证 |
 | `reader/samples.json` | 四个本地验收样本的入口、manifest、内容、搜索和边界断言清单 | M2 已验证 |
@@ -99,7 +99,7 @@
 
 - 日常 GUI 使用当前 GNOME Wayland 会话中的 Tauri / WebKitGTK，不启动 Android 模拟器；发布前与移动端专项验收才恢复 Android 门禁；
 - Linux 应用根是 `tauri://localhost`，书根与封面分别是 `atha-book://localhost`、`atha-cover://localhost`；平台常量统一供路由、维护 command、前端资源和 CSP 使用；
-- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。当前 Bash 门覆盖 360 / 1000 宽度的资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot 与安全跳回，以及完整导入诊断、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。门禁请求 W3C touch Actions 并核对可信事件，但当前 WebKitGTK 实际报告 `mouse`，因此它不是实体触摸证据。
+- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。当前 Bash 门覆盖 360 / 1000 宽度的资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot 与安全跳回；阅读页另覆盖 1280 / 1600 宽屏工作区、目录 / 搜索 / Message、键鼠与焦点、Locator 重排、600 窄屏回归、页面运行时错误，以及完整导入诊断、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景和 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。门禁请求 W3C touch Actions 并核对可信事件，但当前 WebKitGTK 实际报告 `mouse`，因此它不是实体触摸证据。
 
 ### Android EPUB 纵切
 

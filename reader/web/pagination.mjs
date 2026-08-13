@@ -21,6 +21,7 @@ export function createPagination({
   }
 
   const state = { page: 0, pages: 0, fontSize: 19 };
+  const frame = reader.closest(".reader-frame");
   let fontPreviewAnchor = null;
   let settleTimer = 0;
   let settleFrame = 0;
@@ -245,7 +246,7 @@ export function createPagination({
 
   function syncViewportDeviceSize() {
     visualScale = 1 / devicePixelRatio;
-    const width = Math.max(1, Math.round(innerWidth * devicePixelRatio));
+    const width = Math.max(1, Math.round(frame.clientWidth * devicePixelRatio));
     const height = Math.max(1, Math.round(innerHeight * devicePixelRatio));
     document.documentElement.style.setProperty("--page-scale", String(visualScale));
     document.documentElement.style.setProperty("--reader-width", `${width}px`);
@@ -561,11 +562,14 @@ export function createPagination({
 
   function verifyDisplayGeometry() {
     const readerRect = reader.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
     const scale = readerRect.width / reader.clientWidth;
-    assert(Math.abs(readerRect.width - innerWidth) <= 1, "layout-cut");
+    assert(Math.abs(readerRect.left - frameRect.left) <= 1, "layout-cut");
+    assert(Math.abs(readerRect.top - frameRect.top) <= 1, "layout-cut");
+    assert(Math.abs(readerRect.width - frameRect.width) <= 1, "layout-cut");
     assert(Math.abs(readerRect.height - innerHeight) <= 1, "layout-cut");
     assert(
-      Math.abs(reader.clientWidth - Math.round(innerWidth * devicePixelRatio)) <= 1,
+      Math.abs(reader.clientWidth - Math.round(frame.clientWidth * devicePixelRatio)) <= 1,
       "layout-cut",
     );
     assert(

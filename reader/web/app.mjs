@@ -3,6 +3,14 @@ const root = document.documentElement;
 const reader = document.querySelector(".reader");
 const readerShell = document.querySelector(".reader-shell");
 const readerStartup = document.querySelector(".reader-startup");
+const desktopWorkspaceMedia = matchMedia("(min-width: 1100px)");
+const workspaceTools = ["directory", "search", "notes"].map((name) => ({
+  name,
+  panel: document.querySelector(`.reader-tool.${name}`),
+}));
+const workspacePanels = new Set(workspaceTools.map((tool) => tool.panel));
+const readerTools = [...document.querySelectorAll(".reader-tool")];
+const runtimeErrors = [];
 const errorBox = document.querySelector("#error");
 const errorDetails = Object.freeze({
   "locator-offset": "恢复阅读位置失败：文字偏移量没有对应的可见内容",
@@ -16,16 +24,132 @@ const sessionStages = Object.freeze({
 });
 
 document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+window.addEventListener("error", (event) => runtimeErrors.push(String(event.error?.message || event.message)));
+window.addEventListener("unhandledrejection", (event) =>
+  runtimeErrors.push(String(event.reason instanceof Error ? event.reason.message : event.reason)),
+);
+if (params.has("verify") || params.has("gesture-probe")) {
+  const consoleError = console.error.bind(console);
+  console.error = (...values) => {
+    runtimeErrors.push(values.map(String).join(" "));
+    consoleError(...values);
+  };
+  Object.defineProperty(globalThis, "__athaReaderRuntimeErrors", { value: runtimeErrors });
+}
 
 function closeReaderTools() {
-  root.removeAttribute("data-reader-tools");
-  for (const panel of document.querySelectorAll(".reader-tool[open]")) panel.open = false;
+  const desktop = root.hasAttribute("data-desktop-workspace");
+  if (!desktop) root.removeAttribute("data-reader-tools");
+  for (const panel of document.querySelectorAll(".reader-tool[open]")) {
+    if (!desktop || !workspacePanels.has(panel)) panel.open = false;
+  }
+}
+
+function finishReaderToolNavigation(toolName) {
+  closeReaderTools();
+  if (!root.hasAttribute("data-desktop-workspace") || root.dataset.workspacePanel === toolName) {
+    reader.focus({ preventScroll: true });
+  }
 }
 
 function toggleReaderTools() {
   annotations?.dismissSelection();
+  if (root.hasAttribute("data-desktop-workspace")) return;
   if (root.hasAttribute("data-reader-tools")) closeReaderTools();
   else root.setAttribute("data-reader-tools", "");
+}
+
+function bindDesktopWorkspace() {
+  let lastTool = workspaceTools[0];
+  let settling = false;
+  let workspaceVisible = false;
+
+  const open = (tool, focus = false) => {
+    for (const panel of readerTools) panel.open = panel === tool.panel;
+    lastTool = tool;
+    root.dataset.workspacePanel = tool.name;
+    if (focus) requestAnimationFrame(() => tool.panel.querySelector("summary")?.focus());
+  };
+  const resize = () => {
+    const visible = root.hasAttribute("data-desktop-workspace") && root.hasAttribute("data-workspace-panel");
+    if (visible === workspaceVisible) return;
+    workspaceVisible = visible;
+    if (root.hasAttribute("data-reader-ready")) window.dispatchEvent(new Event("resize"));
+  };
+  const settle = () => {
+    settling = false;
+    if (!desktopWorkspaceMedia.matches) return;
+    const active = workspaceTools.find((tool) => tool.panel.open);
+    const auxiliaryOpen = readerTools.some((panel) => panel.open && !workspacePanels.has(panel));
+    if (active) {
+      lastTool = active;
+      root.dataset.workspacePanel = active.name;
+    } else if (!auxiliaryOpen) {
+      open(lastTool);
+    } else {
+      delete root.dataset.workspacePanel;
+    }
+    resize();
+  };
+  const scheduleSettle = () => {
+    if (settling) return;
+    settling = true;
+    queueMicrotask(settle);
+  };
+  const applyViewport = () => {
+    root.toggleAttribute("data-desktop-workspace", desktopWorkspaceMedia.matches);
+    if (desktopWorkspaceMedia.matches) {
+      open(workspaceTools.find((tool) => tool.panel.open) || lastTool);
+    } else {
+      for (const tool of workspaceTools) tool.panel.open = false;
+      delete root.dataset.workspacePanel;
+    }
+    resize();
+  };
+
+  for (const [index, tool] of workspaceTools.entries()) {
+    tool.panel.querySelector("summary")?.addEventListener("keydown", (event) => {
+      const nextIndex =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? workspaceTools.length - 1
+            : event.key === "ArrowLeft"
+              ? (index + workspaceTools.length - 1) % workspaceTools.length
+              : event.key === "ArrowRight"
+                ? (index + 1) % workspaceTools.length
+                : -1;
+      if (nextIndex < 0) return;
+      event.preventDefault();
+      open(workspaceTools[nextIndex], true);
+    });
+  }
+  for (const panel of readerTools) panel.addEventListener("toggle", scheduleSettle);
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!desktopWorkspaceMedia.matches) return;
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "f"
+      ) {
+        event.preventDefault();
+        open(workspaceTools[1]);
+        requestAnimationFrame(() => document.querySelector("#search-query")?.focus());
+      } else if (
+        event.key === "Escape" &&
+        event.target.closest?.(".reader-tool.directory, .reader-tool.search, .reader-tool.notes")
+      ) {
+        event.preventDefault();
+        reader.focus({ preventScroll: true });
+      }
+    },
+    true,
+  );
+  desktopWorkspaceMedia.addEventListener("change", applyViewport);
+  applyViewport();
 }
 
 function emit(message) {
@@ -256,8 +380,7 @@ annotations = createAnnotations({
     status: document.querySelector("#annotations-status"),
   },
   onNavigate() {
-    closeReaderTools();
-    reader.focus({ preventScroll: true });
+    finishReaderToolNavigation("notes");
   },
   onOpenConversation: messageMode
     ? (conversationId, messageId, edit = false) => conversations?.open(conversationId, messageId, edit)
@@ -396,8 +519,7 @@ function bindDirectoryProjection() {
       return;
     }
     if (!navigated) return;
-    closeReaderTools();
-    reader.focus({ preventScroll: true });
+    finishReaderToolNavigation("directory");
   });
   new MutationObserver(render).observe(source, { childList: true });
   syncDirectorySelection = sync;
@@ -430,10 +552,11 @@ document.querySelectorAll("[data-close-reader-tools]").forEach((button) => {
 bindSettingsNavigation();
 let diagnostics;
 
-pagination.initialize();
+bindDesktopWorkspace();
 
 async function start() {
   await content.initialize();
+  pagination.initialize();
   const firstStableStarted = performance.now();
   await session.open();
   readingStatistics = createReadingStatistics({

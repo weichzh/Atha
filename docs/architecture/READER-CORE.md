@@ -18,7 +18,7 @@
 
 ### 应用壳与宿主
 
-产品入口采用 Tauri 2 与 Svelte 5，但每个平台仍只有一个 WebView。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。
+产品入口采用 Tauri 2 与 Svelte 5，但每个平台仍只有一个 WebView。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。至少 `1100px` 的阅读视口把既有目录、书内搜索和笔记 / Message `details` 互斥投影为固定左侧工作区，窄屏仍使用原覆盖式工具面板；两者共用同一状态、搜索、Message 和 Locator。
 
 Tauri 复用后端书根、全部已支持格式导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限；浏览器暴露策略检查 API 时，reader 会从真实文档策略复核关键能力确实不可用，WebKitGTK 未暴露该 API 时仍由原生响应头和 Rust 静态检查守住边界。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
 
@@ -138,7 +138,7 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 长期验收样本位于本机忽略目录 `fixtures/local/`。当前清单包含三个既有单章节样本，以及从《数学及其历史 (2026)》固定哈希源文件重复导出的“1.1 算术与几何”“1.2 勾股数组”“1.3 圆上的有理点”三章节 R1 样本；源 EPUB 不修改，也不提交样本内容到仓库。`scripts/export_reader_sample.py` 支持导出单章节或带 manifest 的多章节样本，`scripts/check-reader-samples.ps1` 统一运行实际 Windows host 与明暗主题截图验收。
 
-阅读页填充 WebView 视口，内部画布尺寸等于视口 CSS 像素乘 `devicePixelRatio`。用户字号以 16–40 逻辑 CSS px 保存，默认 19；Pagination 写入 `字号 × devicePixelRatio` 的内部设备像素，显示层再以 `1 / devicePixelRatio` 抵消系统 DPI，因此同一档保持可解释的 CSS 绝对大小。正文边距、栏宽、公式和图形继续使用设备像素，Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素。窗口停止调整或用户改变排版后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。控制层显隐不改变书页、正文列或 Locator 几何。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
+阅读页填充当前 `.reader-frame`，内部画布宽度等于 frame CSS 宽度乘 `devicePixelRatio`，高度仍等于 WebView CSS 高度乘 `devicePixelRatio`。用户字号以 16–40 逻辑 CSS px 保存，默认 19；Pagination 写入 `字号 × devicePixelRatio` 的内部设备像素，显示层再以 `1 / devicePixelRatio` 抵消系统 DPI，因此同一档保持可解释的 CSS 绝对大小。正文边距、栏宽、公式和图形继续使用设备像素，Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素。窗口或桌面工作区改变 frame 宽度、用户改变排版后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；同宽度工具互切不重排。短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
 
 正式内容回归覆盖 780 × 1680、960 × 720 的 DPR 1 视口，以及 390 × 840 的 DPR 2 视口。780 × 1680 不再是产品页面的固定尺寸；benchmark 记录每次运行的真实内部设备像素尺寸，以免跨布局误判性能。阅读器的一页是有受控边距的分页内容区，不是任意滚动位置的截图：不得裁切文字行、公式或图形。上下边距固定为 144 设备像素，其中包含不会被系统缩放工具栏越过的页眉页脚安全区；左右边距默认 32，并可按书选择 24 / 32 / 48。默认字号为 19 逻辑 CSS px，行距为无单位 1.8；两者均可从阅读设置调整。
 

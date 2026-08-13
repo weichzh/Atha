@@ -382,6 +382,183 @@ return Boolean(button);') == true ]] || die 'could not open a reading memory res
   open_library "$expected_books"
 }
 
+verify_desktop_workspace() {
+  local baseline resized restored search notes conversation directory keyboard narrow panel tool tool_switch
+  local baseline_anchor resized_anchor restored_anchor tool_switch_anchor
+
+  baseline=$(wait_for_script \
+    'const frame = document.querySelector(".reader-frame"); const panel = document.querySelector(".reader-tool.directory > .tool-panel"); const frameRect = frame?.getBoundingClientRect(); const panelRect = panel?.getBoundingClientRect(); const readerRect = document.querySelector(".reader")?.getBoundingClientRect(); return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, layout: Boolean(frameRect && panelRect && readerRect && panelRect.right <= frameRect.left + 1 && Math.abs(frameRect.right - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth || (panel ? panel.scrollWidth > panel.clientWidth : true), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.desktop == true and .active == "directory" and .openPanels == 1 and .layout == true and .overflow == false and .locator != null and .error == null' \
+    'desktop directory workspace did not become ready')
+  baseline_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$baseline")
+
+  webdriver_value POST "/session/$session_id/window/rect" '{"width":1600,"height":900}' >/dev/null ||
+    die 'could not resize the desktop workspace'
+  resized=$(wait_for_script \
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const panel = document.querySelector(".reader-tool.directory > .tool-panel"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const panelRect = panel?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, layout: Boolean(frameRect && readerRect && panelRect && panelRect.right <= frameRect.left + 1 && Math.abs(frameRect.right - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.desktop == true and .active == "directory" and .stable == true and .layout == true and .locator != null and .error == null' \
+    'resized desktop workspace did not stabilize')
+  resized_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$resized")
+  [[ $resized_anchor == "$baseline_anchor" ]] || die 'desktop resize did not preserve the current locator'
+
+  webdriver_value POST "/session/$session_id/window/rect" '{"width":1280,"height":800}' >/dev/null ||
+    die 'could not restore the desktop workspace size'
+  restored=$(wait_for_script \
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const panel = document.querySelector(".reader-tool.directory > .tool-panel"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const panelRect = panel?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { stable: document.documentElement.dataset.viewportStable === expected, layout: Boolean(frameRect && readerRect && panelRect && panelRect.right <= frameRect.left + 1 && Math.abs(frameRect.right - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.stable == true and .layout == true and .locator != null and .error == null' \
+    'restored desktop workspace did not stabilize')
+  restored_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$restored")
+  [[ $restored_anchor == "$baseline_anchor" ]] || die 'desktop restore did not preserve the current locator'
+
+  for tool in search notes directory; do
+    execute_sync "document.querySelector('.reader-tool.$tool > summary')?.click(); return true;" >/dev/null ||
+      die "could not click the desktop $tool tool"
+    tool_switch=$(wait_for_script \
+      'const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null };' \
+      ".active == \"$tool\" and .openPanels == 1 and .stable == true and .locator != null" \
+      "desktop $tool tool did not become active without relayout")
+  done
+  tool_switch_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$tool_switch")
+  [[ $tool_switch_anchor == "$baseline_anchor" ]] || die 'desktop tool switching changed the current locator'
+
+  [[ $(execute_sync '
+const reader = document.querySelector(".reader");
+reader?.focus();
+const event = new KeyboardEvent("keydown", {key: "f", ctrlKey: true, bubbles: true, cancelable: true});
+document.dispatchEvent(event);
+return event.defaultPrevented;') == true ]] || die 'desktop search shortcut was not handled'
+  search=$(wait_for_script \
+    'return { active: document.documentElement.dataset.workspacePanel || null, focused: document.activeElement?.id || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length };' \
+    '.active == "search" and .focused == "search-query" and .openPanels == 1' \
+    'desktop search shortcut did not focus the search input')
+
+  [[ $(execute_sync '
+const input = document.querySelector("#search-query");
+const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+setter?.call(input, "第二节正文");
+input?.dispatchEvent(new Event("input", {bubbles: true}));
+document.querySelector("#search-form")?.requestSubmit();
+return Boolean(input);') == true ]] || die 'could not submit desktop book search'
+  search=$(wait_for_script \
+    'const state = globalThis.__athaReaderDiagnostics?.snapshot().search; return { status: state?.status || null, count: state?.count || 0, options: document.querySelectorAll("#search-results option").length, active: document.documentElement.dataset.workspacePanel || null };' \
+    '.status == "complete" and .count > 0 and .options > 0 and .active == "search"' \
+    'desktop book search did not return results')
+  [[ $(execute_sync '
+const results = document.querySelector("#search-results");
+results.selectedIndex = 0;
+document.querySelector("#go-search-result")?.click();
+return results.options.length > 0;') == true ]] || die 'could not open a desktop search result'
+  wait_for_script \
+    'const search = globalThis.__athaReaderDiagnostics?.snapshot().search; return { visible: Boolean(search?.lastJump?.visible), error: document.documentElement.dataset.error || null };' \
+    '.visible == true and .error == null' \
+    'desktop search result did not navigate' >/dev/null
+
+  [[ $(execute_sync '
+const summary = document.querySelector(".reader-tool.search > summary");
+summary?.focus();
+const event = new KeyboardEvent("keydown", {key: "ArrowRight", bubbles: true, cancelable: true});
+summary?.dispatchEvent(event);
+return event.defaultPrevented;') == true ]] || die 'desktop workspace arrow navigation was not handled'
+  notes=$(wait_for_script \
+    'return { active: document.documentElement.dataset.workspacePanel || null, focused: document.activeElement === document.querySelector(".reader-tool.notes > summary"), items: document.querySelectorAll(".annotation-item-main").length, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length };' \
+    '.active == "notes" and .focused == true and .items > 0 and .openPanels == 1' \
+    'desktop notes workspace did not become ready')
+  [[ $(execute_sync '
+document.querySelector(".annotation-item-main")?.click();
+return true;') == true ]] || die 'could not open a desktop message conversation'
+  conversation=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); return { open: Boolean(overlay && !overlay.hidden), source: Boolean(document.querySelector("#message-conversation-source")?.textContent), error: document.documentElement.dataset.error || null };' \
+    '.open == true and .source == true and .error == null' \
+    'desktop message conversation did not open')
+  execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
+    die 'could not close the desktop message conversation'
+
+  execute_sync 'document.querySelector(".reader-tool.directory > summary")?.click(); return true;' >/dev/null ||
+    die 'could not switch to the desktop directory'
+  directory=$(wait_for_script \
+    'return {active: document.documentElement.dataset.workspacePanel || null, count: document.querySelectorAll("#directory-list button").length};' \
+    '.active == "directory" and .count > 1' \
+    'desktop directory did not become ready')
+  directory=$(execute_sync '
+const before = globalThis.__athaReaderDiagnostics.snapshot().session.currentIndex;
+const target = [...document.querySelectorAll("#directory-list button")]
+  .find((button) => !button.disabled && !button.hasAttribute("aria-current"));
+target?.click();
+const shortcut = new KeyboardEvent("keydown", {key: "f", ctrlKey: true, bubbles: true, cancelable: true});
+document.dispatchEvent(shortcut);
+return {before, clicked: Boolean(target), shortcut: shortcut.defaultPrevented};') || die 'could not navigate from the desktop directory'
+jq -e '.clicked == true and .shortcut == true' <<<"$directory" >/dev/null || die 'desktop directory has no alternate target or search shortcut'
+  wait_for_script \
+    'return { section: globalThis.__athaReaderDiagnostics?.snapshot().session.currentIndex ?? null, active: document.documentElement.dataset.workspacePanel || null, focused: document.activeElement?.id || null, error: document.documentElement.dataset.error || null };' \
+    ".section != $(jq '.before' <<<"$directory") and .active == \"search\" and .focused == \"search-query\" and .error == null" \
+    'desktop directory navigation stole focus from a later search shortcut' >/dev/null
+
+  keyboard=$(wait_for_script \
+    'const input = document.querySelector("#search-query"); if (document.activeElement !== input) return {focused: false}; const event = new KeyboardEvent("keydown", {key: "Escape", bubbles: true, cancelable: true}); input.dispatchEvent(event); const before = globalThis.__athaReaderDiagnostics.snapshot(); const pageEvent = new KeyboardEvent("keydown", {key: "PageDown", bubbles: true, cancelable: true}); document.querySelector(".reader")?.dispatchEvent(pageEvent); return {focused: document.activeElement === document.querySelector(".reader"), escapeHandled: event.defaultPrevented, pageHandled: pageEvent.defaultPrevented, beforeSection: before.session.currentIndex, beforePage: before.navigation.current};' \
+    '.focused == true and .escapeHandled == true and .pageHandled == true' \
+    'desktop escape or page keyboard navigation was not handled')
+  wait_for_script \
+    'const state = globalThis.__athaReaderDiagnostics?.snapshot(); return { current: state?.navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    "(.current != $(jq -c '.beforePage' <<<"$keyboard")) and .error == null" \
+    'desktop PageDown did not navigate' >/dev/null
+
+  webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
+    die 'could not resize to the narrow reader'
+  narrow=$(wait_for_script \
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), workspace: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), error: document.documentElement.dataset.error || null };' \
+    '.desktop == false and .workspace == null and .openPanels == 0 and .stable == true and .full == true and .error == null' \
+    'narrow reader did not restore the mobile tool layout')
+  for tool in directory search notes; do
+    execute_sync "
+document.documentElement.setAttribute('data-reader-tools', '');
+document.querySelector('.reader-tool.$tool > summary')?.click();
+return true;" >/dev/null || die "could not open the narrow $tool tool"
+    panel=$(wait_for_script \
+      "const details = document.querySelector('.reader-tool.$tool'); const rect = details?.querySelector('.tool-panel')?.getBoundingClientRect(); const fullscreen = '$tool' !== 'search'; return { open: Boolean(details?.open), only: document.querySelectorAll('.reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]').length === 1, layout: Boolean(rect && Math.abs(rect.left) <= 1 && Math.abs(rect.width - innerWidth) <= 2 && (fullscreen ? Math.abs(rect.top) <= 1 && Math.abs(rect.bottom - innerHeight) <= 2 : rect.top > 0 && rect.bottom <= innerHeight - 47)), overflow: Boolean(rect && details.querySelector('.tool-panel').scrollWidth > rect.width + 1) };" \
+      '.open == true and .only == true and .layout == true and .overflow == false' \
+      "narrow $tool tool no longer uses the mobile layout")
+    execute_sync "document.querySelector('.reader-tool.$tool').open = false; document.documentElement.removeAttribute('data-reader-tools'); return true;" >/dev/null ||
+      die "could not close the narrow $tool tool"
+  done
+  [[ $(execute_sync '
+document.documentElement.removeAttribute("data-reader-tools");
+const reader = document.querySelector(".reader");
+const rect = reader.getBoundingClientRect();
+const center = new PointerEvent("pointerdown", {pointerId: 51, pointerType: "mouse", isPrimary: true, button: 0, bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2});
+reader.dispatchEvent(center);
+reader.dispatchEvent(new PointerEvent("pointerup", {pointerId: 51, pointerType: "mouse", isPrimary: true, button: 0, bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2}));
+return document.documentElement.hasAttribute("data-reader-tools");') == true ]] ||
+    die 'narrow center click did not reveal the mobile tools'
+  [[ $(execute_sync '
+const reader = document.querySelector(".reader");
+const rect = reader.getBoundingClientRect();
+reader.dispatchEvent(new PointerEvent("pointerdown", {pointerId: 52, pointerType: "mouse", isPrimary: true, button: 0, bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2}));
+reader.dispatchEvent(new PointerEvent("pointerup", {pointerId: 52, pointerType: "mouse", isPrimary: true, button: 0, bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2}));
+return document.documentElement.hasAttribute("data-reader-tools");') == false ]] ||
+    die 'narrow center click did not dismiss the mobile tools'
+
+  desktop_workspace_evidence=$(jq -n \
+    --argjson searchResults "$(jq '.count' <<<"$search")" \
+    --argjson messages "$(jq '.items' <<<"$notes")" \
+    '{widths: [1280, 1600], tools: ["directory", "search", "notes"], searchResults: $searchResults, messages: $messages, locatorStable: true, keyboard: true, narrowRegression: true}')
+}
+
+verify_reader_runtime_errors() {
+  local errors sentinel
+  sentinel=$(execute_sync '
+const before = globalThis.__athaReaderRuntimeErrors?.length ?? -1;
+console.error("atha-reader-console-probe");
+const after = globalThis.__athaReaderRuntimeErrors?.length ?? -1;
+globalThis.__athaReaderRuntimeErrors?.pop();
+return {before, after};') || die 'could not probe reader console error collection'
+  jq -e '.before >= 0 and .after == .before + 1' <<<"$sentinel" >/dev/null ||
+    die "reader console errors are not observable (state: $(jq -c . <<<"$sentinel"))"
+  errors=$(execute_sync 'return globalThis.__athaReaderRuntimeErrors || null;') ||
+    die 'could not inspect reader runtime errors'
+  jq -e 'type == "array" and length == 0' <<<"$errors" >/dev/null ||
+    die "reader emitted runtime errors (state: $(jq -c . <<<"$errors"))"
+}
+
 open_book() {
   local kind=$1 arguments script
   arguments=$(jq -cn --arg kind "$kind" '[$kind]')
@@ -547,7 +724,7 @@ const done = arguments[arguments.length - 1];
 globalThis.__athaReaderDiagnostics
   .beginGestureProbe(arguments[0], arguments[1], arguments[2], arguments[3])
   .then((value) => done({ ok: true, value }))
-  .catch(() => done({ ok: false }));
+  .catch((error) => done({ ok: false, code: error instanceof Error ? error.message : "gesture-setup" }));
 JS
   read -r -d '' finish_script <<'JS' || true
 const done = arguments[arguments.length - 1];
@@ -564,8 +741,9 @@ JS
         --argjson direction "$direction" \
         '[$target, $action, $mode, $direction]')
       begin=$(execute_async "$begin_script" "$arguments") || die "gesture setup failed for $scenario"
-      jq -e '.ok == true and (.value.id | type == "number")' <<<"$begin" >/dev/null ||
-        die "gesture setup failed for $scenario"
+      if ! jq -e '.ok == true and (.value.id | type == "number")' <<<"$begin" >/dev/null; then
+        die "gesture setup failed for $scenario (state: $(jq -c . <<<"$begin"))"
+      fi
       gesture_active=1
       perform_touch_action "$(jq -c '.value' <<<"$begin")" "$action" ||
         die "trusted pointer action failed for $scenario"
@@ -931,14 +1109,27 @@ done
 webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
   die 'could not restore the reader window size'
 
-say 'running public verify, boundary, and gesture diagnostics'
+say 'running public desktop workspace, verify, boundary, and gesture diagnostics'
+webdriver_value POST "/session/$session_id/window/rect" '{"width":1280,"height":800}' >/dev/null ||
+  die 'could not size the desktop reader workspace'
 open_book public
+wait_for_script \
+  'const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const panel = document.querySelector(".directory-panel")?.getBoundingClientRect(); return {desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, layout: Boolean(frame && panel && panel.right <= frame.left + 1 && Math.abs(frame.right - innerWidth) <= 2), error: document.documentElement.dataset.error || null};' \
+  '.desktop == true and .active == "directory" and .layout == true and .error == null' \
+  'normal desktop reader startup did not produce the workspace' >/dev/null
+webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
+  die 'could not size the reader for diagnostics'
 enable_diagnostics
+webdriver_value POST "/session/$session_id/window/rect" '{"width":1280,"height":800}' >/dev/null ||
+  die 'could not reopen the desktop reader workspace'
+desktop_workspace_evidence=null
+verify_desktop_workspace
 pending_formula_queue=$(pending_formula_queue_probe)
 open_gesture_section "$public_boundary_entry" >/dev/null
 public_boundary=$(previous_boundary_probe)
 open_gesture_section "$public_boundary_entry" >/dev/null
 run_gesture_gate public
+verify_reader_runtime_errors
 
 formula_shape=null
 formula_boundary=null
@@ -960,6 +1151,7 @@ if [[ -n $formula_epub ]]; then
   formula_boundary=$(previous_boundary_probe)
   open_gesture_section "$formula_entry" >/dev/null
   run_gesture_gate private
+  verify_reader_runtime_errors
 fi
 
 verify_gesture_performance
@@ -977,6 +1169,7 @@ jq -n \
   --arg browserVersion "$browser_version" \
   --argjson books "$expected_books" \
   --argjson pendingFormulaQueue "$pending_formula_queue" \
+  --argjson desktopWorkspace "$desktop_workspace_evidence" \
   --argjson publicBoundary "$public_boundary" \
   --argjson formulaShape "$formula_shape" \
   --argjson formulaBoundary "$formula_boundary" \
@@ -987,6 +1180,7 @@ jq -n \
     webview: ("WebKitGTK " + $browserVersion),
     books: $books,
     verifyDiagnostics: true,
+    desktopWorkspace: $desktopWorkspace,
     pendingFormulaQueue: $pendingFormulaQueue,
     publicBoundary: $publicBoundary,
     formulaShape: $formulaShape,

@@ -9,6 +9,7 @@
   --reader-content-bottom: 144px;
   --reader-width: 780px;
   --reader-height: 1680px;
+  --workspace-width: 320px;
   --page-scale: 1;
   --reader-brightness: 1;
   --reader-accent: #1497e8;
@@ -3085,6 +3086,69 @@ textarea:focus-visible,
 
   .theme-swatches {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  :root[data-desktop-workspace] .reader-controls {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  :root[data-desktop-workspace][data-workspace-panel] .reader-frame {
+    width: calc(100% - var(--workspace-width));
+    margin-left: var(--workspace-width);
+  }
+
+  :root[data-desktop-workspace] .toolbar {
+    right: auto;
+    width: var(--workspace-width);
+  }
+
+  :root[data-desktop-workspace] .reader-tool.directory > .tool-panel,
+  :root[data-desktop-workspace] .reader-tool.search > .tool-panel,
+  :root[data-desktop-workspace] .reader-tool.notes > .tool-panel {
+    top: calc(48px + var(--safe-area-top));
+    right: auto;
+    bottom: calc(48px + var(--safe-area-bottom));
+    left: 0;
+    width: var(--workspace-width);
+    height: auto;
+    max-height: none;
+    padding: 12px;
+    border: 0;
+    border-right: 1px solid var(--ui-border);
+    border-radius: 0;
+    background: var(--ui-surface);
+    box-shadow: none;
+  }
+
+  :root[data-desktop-workspace] .reader-tool.search > .tool-panel {
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  }
+
+  :root[data-desktop-workspace] .directory-panel .panel-heading,
+  :root[data-desktop-workspace] .notes-panel .panel-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  :root[data-desktop-workspace] .directory-panel .panel-heading h2,
+  :root[data-desktop-workspace] .notes-panel .panel-heading h2 {
+    grid-column: 1;
+    text-align: left;
+  }
+
+  :root[data-desktop-workspace] .directory-panel .panel-back,
+  :root[data-desktop-workspace] .notes-panel .panel-back {
+    display: none;
+  }
+
+  :root[data-desktop-workspace] .annotation-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-desktop-workspace] .search-panel select {
+    min-height: 0;
   }
 }
 
