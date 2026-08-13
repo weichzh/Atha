@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Clock3, Headphones, List, Search, SquarePen } from "@lucide/svelte";
+  import { Clock3, List, Search, SquarePen } from "@lucide/svelte";
 
   import DirectoryPanel from "../panels/DirectoryPanel.svelte";
   import NotesPanel from "../panels/NotesPanel.svelte";
@@ -32,13 +32,4 @@
     </summary>
     <ProgressPanel />
   </details>
-  <button
-    class="icon-button listen-placeholder"
-    type="button"
-    aria-label="听书（尚未实现）"
-    title="听书（尚未实现）"
-    disabled
-  >
-    <Headphones aria-hidden="true" />
-  </button>
 </nav>

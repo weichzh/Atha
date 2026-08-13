@@ -1358,7 +1358,7 @@ textarea:focus-visible,
 .toolbar {
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   height: calc(48px + var(--safe-area-bottom));
   min-height: calc(48px + var(--safe-area-bottom));
   align-items: center;
@@ -1417,11 +1417,6 @@ textarea:focus-visible,
 
 #add-bookmark[aria-pressed="true"] {
   color: var(--reader-accent);
-}
-
-.listen-placeholder {
-  place-self: center;
-  opacity: 0.52;
 }
 
 .tool-panel {

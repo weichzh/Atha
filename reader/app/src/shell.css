@@ -66,10 +66,6 @@
   color: var(--ui-text);
 }
 
-.listen-placeholder {
-  color: var(--ui-muted);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .reader-controls {
     transition: none;

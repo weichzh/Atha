@@ -107,7 +107,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 阅读设置 | `.preferences-backdrop`、`.preferences-panel`、`.settings-list`、`.settings-view`、`.reading-mode-cards`、`.module-settings`、`.css-editor-*` |
 | 主题 | `reader/atha-reader.css` 顶部语义令牌及 `data-theme="light|paper|dark"` 覆盖 |
 
-图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `BottomToolbar.svelte` 决定；`.toolbar` 固定为五等分。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
+图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `BottomToolbar.svelte` 决定；`.toolbar` 固定为四等分。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
 
 ## 交互连接
 
@@ -130,7 +130,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 ## 当前有意暂缓
 
-- 听书只有禁用图标，没有播放逻辑；
+- TTS 暂缓，当前不提供界面入口、播放逻辑或持久化字段；
 - 标注颜色、样式、notebook 与同步没有阅读界面入口；
 - 桌面横屏和大屏布局尚未设计；
 - 当前使用 Lucide Svelte 图标、原生表单控件和按需加载的 Tiptap 消息编辑器；尚未引入通用 UI 组件库或动效框架。
