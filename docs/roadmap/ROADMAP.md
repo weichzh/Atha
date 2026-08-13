@@ -26,18 +26,21 @@ schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词�
 
 公开往返、损坏输入、prepared / publishing / committed 恢复、空间总计、owned root reparse-point 拒绝、两级删除、浏览器状态事务、Linux Tauri 360 / 1000 宽度管理界面和私有词典内容无输出往返已通过。Android 只复用既有 SAF bridge，本阶段没有把 Linux / 本地结果称为 PCT-AL10 资料库验收，也没有引入同步 schema、provider registry 或第二套数据根。
 
-## Now：跨书阅读记忆中心
+## Done：跨书阅读记忆中心
 
-先把现有 Message、阅读统计和书架投影为最近阅读与全局消息搜索；从结果跳回原书必须验证当前书籍和 Locator，书籍缺失时只展示已存 Snapshot，不伪造可跳转状态。该切片先复用 MessageStore 查询、SourceSnapshot 和现有书架 DTO，不建立新数据库、全文索引、同步模型或独立“知识库”事实。
+资料库已从现有 schema 1 阅读统计投影最近阅读，并在 MessageStore 既有 FTS5 上提供跨书消息搜索。搜索结果复用 Edition、当前根 Anchor 和 SourceSnapshot；只有完整内容身份仍在书架时才出现“跳回原书”，阅读器再次验证 Edition、根 Message、Locator 和正文位置后才定位对话，缺书结果只提供当前与历史 Snapshot。
 
-验收需覆盖有书 / 缺书、当前 / 历史 Anchor、删除墓碑、跨书结果排序、搜索隐私和移动 / 桌面入口；只有当前投影无法满足可测性能时才增加查询或索引。
+实现未增加数据库、索引、统计 schema、同步模型或独立知识库事实。公开测试覆盖跨 Edition 排序、短查询、命中与根消息墓碑；Linux Tauri 真壳覆盖 360 / 1000 宽度、最近阅读、有书 / 缺书搜索结果、当前 / 历史 Snapshot、安全跳回和 AppLog 隐私。
+
+## Now：桌面阅读工作区
+
+在宽屏把目录、书内搜索和消息投影为可共存侧栏，并补齐键鼠导航；继续复用同一 ReaderManifest、Locator、Message 和阅读状态，不建立桌面专用第二套状态或阅读内核。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
 ## Next
 
-1. 桌面阅读工作区：宽屏导航、目录 / 搜索 / 消息侧栏和键鼠操作；继续复用同一阅读内核，不建立桌面专用第二套状态。
-2. 日常入口与内部可安装候选：拖放导入、文件关联、列表视图，再建立内部桌面与 Android 安装包门禁。
+1. 日常入口与内部可安装候选：拖放导入、文件关联、列表视图，再建立内部桌面与 Android 安装包门禁。
 
 ## Later
 
@@ -70,6 +73,7 @@ schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词�
 | CSS 社区模块边界 | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md` |
 | 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/architecture/READER-CORE.md` |
 | 完整本地数据生命周期 | `.atha-data` 完整备份 / 恢复、恢复日志、分类占用、两级删除和 Linux 真壳管理界面 | `docs/decisions/ADR-0010-local-data-lifecycle.md`、`docs/architecture/READER-CORE.md` |
+| 跨书阅读记忆中心 | 最近阅读、跨书 Message 搜索、有书安全跳回、缺书及历史 Snapshot | `docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md` |
 | 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 

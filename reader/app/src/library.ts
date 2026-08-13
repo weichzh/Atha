@@ -54,6 +54,20 @@ export interface StorageUsage {
   totalBytes: number;
 }
 
+export interface RecentReading {
+  book: LibraryBook;
+  durationMs: number;
+  lastReadDate: string;
+}
+
+export interface ReadingMemoryJump {
+  messageId: string;
+  rootMessageId: string;
+  conversationId: string;
+  editionId: string;
+  canonicalLocator: string;
+}
+
 interface PendingBookDeletion {
   id: string;
 }
@@ -222,6 +236,35 @@ export function groupLibraryBooksByProgress(books: LibraryBook[], startedIds: Se
     reading: books.filter((book) => startedIds.has(book.id)),
     unread: books.filter((book) => !startedIds.has(book.id)),
   };
+}
+
+export function readRecentBooks(
+  books: LibraryBook[],
+  storage?: StorageReader | null,
+): RecentReading[] | null {
+  try {
+    const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+    if (!target) return null;
+    const raw = target.getItem("atha.reader.statistics.v1");
+    if (raw === null) return [];
+    if (!validStorageRecord("atha.reader.statistics.v1", raw)) return null;
+    const statistics = JSON.parse(raw) as {
+      books: { contentVersion: string; durationMs: number; lastReadDate: string }[];
+    };
+    const byId = new Map(books.map((book) => [book.id, book]));
+    return statistics.books
+      .flatMap((entry) => {
+        const book = byId.get(entry.contentVersion);
+        return book ? [{ book, durationMs: entry.durationMs, lastReadDate: entry.lastReadDate }] : [];
+      })
+      .sort(
+        (left, right) =>
+          right.lastReadDate.localeCompare(left.lastReadDate) ||
+          left.book.id.localeCompare(right.book.id),
+      );
+  } catch {
+    return null;
+  }
 }
 
 export function validateLocalDataState(state: BrowserState): boolean {
@@ -437,6 +480,25 @@ export function readStorageUsage(browserState: BrowserState): Promise<StorageUsa
 export async function openBook(id: string): Promise<void> {
   const launch = await invoke<ReaderLaunch>("open_library_book", { id });
   location.assign(launch.href);
+}
+
+export async function openReadingMemoryHit(hit: ReadingMemoryJump): Promise<void> {
+  if (
+    !/^[a-f0-9]{64}$/.test(hit.editionId) ||
+    ![hit.messageId, hit.rootMessageId, hit.conversationId].every((id) =>
+      /^[a-f0-9]{32}$/.test(id)
+    ) ||
+    parseLocator(hit.canonicalLocator)?.contentVersion !== hit.editionId
+  ) {
+    throw new Error("invalid-reading-memory-hit");
+  }
+  const launch = await invoke<ReaderLaunch>("open_library_book", { id: hit.editionId });
+  const memory = new URLSearchParams({
+    "memory-conversation": hit.conversationId,
+    "memory-message": hit.messageId,
+    "memory-root": hit.rootMessageId,
+  });
+  location.assign(`${launch.href}&${memory}`);
 }
 
 export function removeBook(id: string): Promise<LibraryBook[]> {

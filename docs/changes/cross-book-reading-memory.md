@@ -4,7 +4,7 @@ description: 跨书阅读记忆中心的范围、验收、实现与关闭证据�
 
 # 跨书阅读记忆中心
 
-Status: accepted
+Status: implemented
 
 ## Problem
 
@@ -54,12 +54,23 @@ Status: accepted
 
 ## Result
 
-实施后回填。
+- 资料库新增“书架 / 阅读记忆”同层导航，从严格 schema 1 统计记录投影当前书架最近阅读；损坏或不可访问统计明确降级，不把旧书或缺书伪造成可继续阅读；
+- MessageStore 在既有 `message_search` 上增加跨 Edition 只读查询，连接当前修订、Edition、未删除根 Message 与当前 Anchor；短查询与 FTS 查询都有稳定排序和 200 条上限，不增加数据库或索引；
+- 有书结果按完整内容身份打开当前书籍，并在阅读页复核 Edition、根 Message 和 Locator / 唯一重锚后打开命中对话；缺书结果不显示跳回动作；
+- 资料库与阅读页复用同一 Snapshot HTML、CSS、资源和 Shadow Root 安全渲染函数，可切换当前与历史 SourceCapture；
+- 三个阅读记忆 command 只允许资料库根路由，现有消息写入和书内查询仍只允许阅读路由。
 
 ## Review
 
-候选提交前执行 Standards 与 Spec 两轴独立审查并回填。
+- Spec 独立审查对照本 change 的 Scope、Acceptance 与 Non-goals 逐项复核，zero findings；
+- Standards 独立审查复核 FTS / 墓碑、command ACL、Snapshot 不可信内容、深链校验与隐私日志，zero findings；
+- 两轴审查未发现需修改的 blocking finding。
 
 ## Evidence And Residual Risks
 
-实施后回填；至少区分 backend / Node 单元证据、Linux Tauri 真壳证据，以及未执行的 Windows / PCT-AL10 边界。
+- `bash scripts/check-memory-center.sh` 通过：MessageStore 22 项、书架 / 最近阅读 Node 10 项、Snapshot / 深链 Node 检查、Svelte check / build、Tauri 12 项和 command ACL；
+- `cargo clippy --locked -p atha-backend -p atha-reader-app --all-targets -- -D warnings` 通过；
+- `bash scripts/check-reader-linux.sh` 通过：WebKitGTK 0.55.1，在 360 / 1000 宽度验证最近阅读、有书 / 缺书搜索、当前 / 历史 Snapshot 与安全跳回；既有 13 个手势场景、220 个有效测量和 AppLog 隐私继续通过；
+- 上述最高证据为隔离数据下的 Linux Tauri 真壳，不是 Windows WebView2、Android 或 PCT-AL10 移动专项；自动化请求 touch Actions，但 WebKitGTK 实际报告 `mouse`；
+- 搜索直接复用当前 FTS5 并限制 200 条；只有真实大库证明查询或渲染性能不足时才考虑分页、索引或虚拟化；
+- 最近阅读沿用按本地日期记录的 `lastReadDate`，不能在同一天内表达精确打开顺序；当前产品没有耐久 `lastOpenedAt`，本阶段不为排序增加新事实。

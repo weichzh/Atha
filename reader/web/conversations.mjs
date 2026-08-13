@@ -38,11 +38,7 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
   } catch {
     throw new Error("invalid-message-snapshot");
   }
-  if (
-    parsed?.schema === 1 &&
-    parsed.legacy === true &&
-    Object.keys(parsed).length === 2
-  ) {
+  if (parsed?.schema === 1 && parsed.legacy === true && Object.keys(parsed).length === 2) {
     return Object.freeze({
       theme: prefersDark ? "dark" : "light",
       brightness: 100,
@@ -78,6 +74,82 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
   });
 }
 
+export async function renderSnapshotElement(capture, store) {
+  const presentation = parseSnapshotPresentation(
+    capture.snapshot.presentationJson,
+    globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches,
+  );
+  const resources = new Map();
+  for (const resource of capture.snapshot.resources) {
+    const data = await store.snapshotResource(capture.source.id, resource.path);
+    resources.set(resource.path, await resourceDataUrl(data));
+  }
+  const parsed = safeSnapshotFragment(capture.snapshot.fragmentHtml, new Set(resources.keys()));
+  for (const image of parsed.querySelectorAll("img[src], image[href]")) {
+    const attribute = image.localName === "img" ? "src" : "href";
+    image.setAttribute(attribute, resources.get(image.getAttribute(attribute)));
+  }
+  const host = document.createElement("div");
+  host.dataset.theme = presentation.theme;
+  host.style.filter = `brightness(${presentation.brightness / 100})`;
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  const css = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss}\n${capture.snapshot.userCss}`;
+  if (!isSnapshotCssSafe(css)) throw new Error("invalid-message-snapshot");
+  style.textContent = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss.replace(/:root\b/g, ":host")}\n${capture.snapshot.userCss}`;
+  const book = document.createElement("article");
+  book.className = "book";
+  book.dataset.theme = presentation.theme;
+  if (presentation.fontFamily !== "book") book.dataset.fontFamily = presentation.fontFamily;
+  book.style.fontSize = `${presentation.fontSize}px`;
+  book.style.setProperty("--reader-line-height", `${presentation.lineHeightPx}px`);
+  book.append(...document.importNode(parsed, true).childNodes);
+  shadow.append(style, book);
+  return host;
+}
+
+function safeSnapshotFragment(html, resourcePaths) {
+  const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  const referenced = new Set();
+  if (
+    parsed.querySelector(
+      "script,iframe,object,embed,form,input,button,select,textarea,video,audio,source,track,style,link,meta,base",
+    )
+  ) {
+    throw new Error("invalid-message-snapshot");
+  }
+  for (const element of parsed.body.querySelectorAll("*")) {
+    const resourceAttribute =
+      element.localName === "img" ? "src" : element.localName === "image" ? "href" : null;
+    const resourcePath = resourceAttribute && element.getAttribute(resourceAttribute);
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase();
+      if (
+        name.startsWith("on") ||
+        ["srcset", "style"].includes(name) ||
+        (name === "href" && resourceAttribute !== "href") ||
+        (name === "src" && resourceAttribute !== "src")
+      ) {
+        throw new Error("invalid-message-snapshot");
+      }
+    }
+    if (resourceAttribute && (!resourcePath || !resourcePaths.has(resourcePath))) {
+      throw new Error("invalid-message-snapshot");
+    }
+    if (resourcePath) referenced.add(resourcePath);
+  }
+  if (referenced.size !== resourcePaths.size) throw new Error("invalid-message-snapshot");
+  return parsed.body;
+}
+
+function resourceDataUrl(data) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result), { once: true });
+    reader.addEventListener("error", reject, { once: true });
+    reader.readAsDataURL(new Blob([new Uint8Array(data.bytes)], { type: data.mediaType }));
+  });
+}
 export function messagePreview(message) {
   if (message.deleted) return "这条消息已删除";
   return message.text || message.source?.selectedText || "仅标注原文";
@@ -152,6 +224,17 @@ export function formatMessageTime(value) {
 export function formatMessageFeedTime(value) {
   if (!Number.isFinite(value)) return "";
   return MESSAGE_DATE_TIME_FORMAT.format(new Date(value));
+}
+
+export function validConversationTarget(conversation, editionId, expectedRootId = null) {
+  const sourceRoot = conversation?.messages?.find(
+    (message) => message.source && !message.deleted,
+  );
+  return Boolean(
+    conversation?.editionId === editionId &&
+      sourceRoot &&
+      (!expectedRootId || sourceRoot.id === expectedRootId),
+  );
 }
 
 export function createConversations({
@@ -410,13 +493,22 @@ export function createConversations({
     }
   }
 
-  async function open(conversationId, messageId = null, edit = false) {
+  async function open(
+    conversationId,
+    messageId = null,
+    edit = false,
+    expectedRootId = null,
+    navigationFailed = false,
+  ) {
     try {
       scopeGeneration += 1;
       scope = "mark";
       feedConversations = [];
       await window.athaEnsureMessageComposer?.();
       conversation = await store.conversation(conversationId);
+      if (!validConversationTarget(conversation, editionId, expectedRootId)) {
+        throw new Error("invalid-message-conversation");
+      }
       anchorSection = conversation.messages.find((message) => message.source)?.source?.section || null;
       parentId =
         conversation.messages.find((message) => message.id === messageId && !message.deleted)?.id ||
@@ -435,6 +527,7 @@ export function createConversations({
       setFullscreen(false);
       renderConversation();
       closeTools();
+      if (navigationFailed) report("当前原文位置已失效，可查看历史引用", true);
       requestAnimationFrame(() => {
         if (parentId) {
           controls.list
@@ -506,81 +599,8 @@ export function createConversations({
     controls.historyDialog.showModal();
   }
 
-  function safeSnapshotFragment(html, resourcePaths) {
-    const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
-    const referenced = new Set();
-    if (
-      parsed.querySelector(
-        "script,iframe,object,embed,form,input,button,select,textarea,video,audio,source,track,style,link,meta,base",
-      )
-    ) {
-      throw new Error("invalid-message-snapshot");
-    }
-    for (const element of parsed.body.querySelectorAll("*")) {
-      const resourceAttribute =
-        element.localName === "img" ? "src" : element.localName === "image" ? "href" : null;
-      const resourcePath = resourceAttribute && element.getAttribute(resourceAttribute);
-      for (const attribute of [...element.attributes]) {
-        const name = attribute.name.toLowerCase();
-        if (
-          name.startsWith("on") ||
-          ["srcset", "style"].includes(name) ||
-          (name === "href" && resourceAttribute !== "href") ||
-          (name === "src" && resourceAttribute !== "src")
-        ) {
-          throw new Error("invalid-message-snapshot");
-        }
-      }
-      if (resourceAttribute && (!resourcePath || !resourcePaths.has(resourcePath))) {
-        throw new Error("invalid-message-snapshot");
-      }
-      if (resourcePath) referenced.add(resourcePath);
-    }
-    if (referenced.size !== resourcePaths.size) throw new Error("invalid-message-snapshot");
-    return parsed.body;
-  }
-
-  function resourceDataUrl(data) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.addEventListener("load", () => resolve(reader.result), { once: true });
-      reader.addEventListener("error", reject, { once: true });
-      reader.readAsDataURL(new Blob([new Uint8Array(data.bytes)], { type: data.mediaType }));
-    });
-  }
-
   async function renderSnapshot(capture) {
-    const presentation = parseSnapshotPresentation(
-      capture.snapshot.presentationJson,
-      globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches,
-    );
-    const resources = new Map();
-    for (const resource of capture.snapshot.resources) {
-      const data = await store.snapshotResource(capture.source.id, resource.path);
-      resources.set(resource.path, await resourceDataUrl(data));
-    }
-    const parsed = safeSnapshotFragment(capture.snapshot.fragmentHtml, new Set(resources.keys()));
-    for (const image of parsed.querySelectorAll("img[src], image[href]")) {
-      const attribute = image.localName === "img" ? "src" : "href";
-      image.setAttribute(attribute, resources.get(image.getAttribute(attribute)));
-    }
-    const host = document.createElement("div");
-    host.dataset.theme = presentation.theme;
-    host.style.filter = `brightness(${presentation.brightness / 100})`;
-    const shadow = host.attachShadow({ mode: "open" });
-    const style = document.createElement("style");
-    const css = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss}\n${capture.snapshot.userCss}`;
-    if (!isSnapshotCssSafe(css)) throw new Error("invalid-message-snapshot");
-    style.textContent = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss.replace(/:root\b/g, ":host")}\n${capture.snapshot.userCss}`;
-    const book = document.createElement("article");
-    book.className = "book";
-    book.dataset.theme = presentation.theme;
-    if (presentation.fontFamily !== "book") book.dataset.fontFamily = presentation.fontFamily;
-    book.style.fontSize = `${presentation.fontSize}px`;
-    book.style.setProperty("--reader-line-height", `${presentation.lineHeightPx}px`);
-    book.append(...document.importNode(parsed, true).childNodes);
-    shadow.append(style, book);
-    controls.snapshotContent.replaceChildren(host);
+    controls.snapshotContent.replaceChildren(await renderSnapshotElement(capture, store));
   }
 
   async function showSnapshots(message) {

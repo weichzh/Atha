@@ -113,6 +113,20 @@ export interface MessageSearchHit {
   text: string;
 }
 
+export interface ReadingMemoryHit {
+  messageId: string;
+  rootMessageId: string;
+  conversationId: string;
+  editionId: string;
+  title: string;
+  authors: string[];
+  section: string;
+  selectedText: string;
+  text: string;
+  canonicalLocator: string;
+  updatedAt: number;
+}
+
 export interface RevisionView {
   id: string;
   kind: "source-only" | "text";
@@ -209,4 +223,17 @@ export const messageClient = Object.freeze({
     invoke<boolean>("message_export", { editionId, conversationId }),
 });
 
+export const readingMemoryClient = Object.freeze({
+  search: (query: string) =>
+    invoke<ReadingMemoryHit[]>("reading_memory_search", { query }),
+  sourceCaptures: (rootMessageId: string) =>
+    invoke<SourceCaptureView[]>("reading_memory_source_captures", { rootMessageId }),
+  snapshotResource: (sourceId: string, sourcePath: string) =>
+    invoke<{ mediaType: string; contentHash: string; bytes: number[] }>(
+      "reading_memory_snapshot_resource",
+      { sourceId, sourcePath },
+    ),
+});
+
 export type MessageClient = typeof messageClient;
+export type ReadingMemoryClient = typeof readingMemoryClient;

@@ -6,6 +6,7 @@ import {
   isSnapshotCssSafe,
   linkedMessagePreviews,
   parseSnapshotPresentation,
+  validConversationTarget,
 } from "./conversations.mjs";
 
 const captured = parseSnapshotPresentation(
@@ -55,6 +56,24 @@ for (const css of [
 ]) {
   assert.equal(isSnapshotCssSafe(css), false);
 }
+
+const targetConversation = {
+  editionId: "11".repeat(32),
+  messages: [{ id: "aa".repeat(16), source: { selectedText: "原文" }, deleted: false }],
+};
+assert.equal(
+  validConversationTarget(targetConversation, "11".repeat(32), "aa".repeat(16)),
+  true,
+);
+assert.equal(validConversationTarget(targetConversation, "22".repeat(32)), false);
+assert.equal(validConversationTarget(targetConversation, "11".repeat(32), "bb".repeat(16)), false);
+assert.equal(
+  validConversationTarget(
+    { ...targetConversation, messages: [{ ...targetConversation.messages[0], deleted: true }] },
+    "11".repeat(32),
+  ),
+  false,
+);
 
 const rootMessage = {
   id: "root",

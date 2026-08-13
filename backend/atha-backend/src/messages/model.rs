@@ -264,6 +264,22 @@ pub struct MessageSearchHit {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReadingMemoryHit {
+    pub message_id: String,
+    pub root_message_id: String,
+    pub conversation_id: String,
+    pub edition_id: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    pub section: String,
+    pub selected_text: String,
+    pub text: String,
+    pub canonical_locator: String,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SnapshotResourceView {
     pub path: String,
     pub media_type: String,

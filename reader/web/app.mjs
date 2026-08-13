@@ -404,6 +404,26 @@ function bindDirectoryProjection() {
   render();
 }
 
+async function openReadingMemoryLink() {
+  if (!messageMode || !conversations) return;
+  const conversationId = params.get("memory-conversation");
+  const messageId = params.get("memory-message");
+  const rootMessageId = params.get("memory-root");
+  if (!conversationId && !messageId && !rootMessageId) return;
+  if (![conversationId, messageId, rootMessageId].every((id) => /^[a-f0-9]{32}$/.test(id || ""))) {
+    return;
+  }
+  const navigation = await annotations.go(rootMessageId);
+  root.dataset.readingMemoryNavigation = navigation.ok ? "ok" : "snapshot-only";
+  await conversations.open(
+    conversationId,
+    messageId,
+    false,
+    rootMessageId,
+    !navigation.ok,
+  );
+}
+
 document.querySelectorAll("[data-close-reader-tools]").forEach((button) => {
   button.addEventListener("click", closeReaderTools);
 });
@@ -499,6 +519,7 @@ async function start() {
   contentActions.bind();
   structuredActions.bind();
   interaction.bind();
+  await openReadingMemoryLink();
   revealReader();
   diagnostics.recordFirstStable(firstStableStarted);
 

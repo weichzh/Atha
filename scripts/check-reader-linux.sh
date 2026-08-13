@@ -306,6 +306,82 @@ button?.click();
 return Boolean(button);') == true ]] || die 'could not leave library selection'
 }
 
+verify_reading_memory() {
+  local overview searched snapshot history jump
+  overview=$(execute_sync '
+const button = [...document.querySelectorAll(".library-sections button")]
+  .find((item) => item.textContent.trim() === "阅读记忆");
+button?.click();
+const controls = [...document.querySelectorAll(".memory-center button, .memory-center input")];
+return {
+  entered: Boolean(button),
+  heading: document.querySelector(".memory-heading h1")?.textContent || "",
+  recent: document.querySelectorAll(".memory-recent-list > button").length,
+  overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  clipped: controls.some((control) => control.scrollWidth > control.clientWidth || control.scrollHeight > control.clientHeight)
+};') || die 'could not enter reading memory'
+  jq -e '
+    .entered == true and .heading == "阅读记忆" and .recent == 1 and
+    .overflow == false and .clipped == false
+  ' <<<"$overview" >/dev/null || die "reading memory overview is incomplete (state: $(jq -c . <<<"$overview"))"
+
+  [[ $(execute_sync '
+const input = document.querySelector(".memory-search-form input");
+const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+setter?.call(input, "公共记忆");
+input?.dispatchEvent(new Event("input", { bubbles: true }));
+document.querySelector(".memory-search-form")?.requestSubmit();
+return Boolean(input);') == true ]] || die 'could not submit reading memory search'
+  searched=$(wait_for_script \
+    'const rows = [...document.querySelectorAll(".memory-result")]; return { count: rows.length, jumpCount: rows.filter((row) => [...row.querySelectorAll("footer button")].some((button) => button.textContent.includes("跳回原书"))).length, snapshotCount: rows.filter((row) => [...row.querySelectorAll("footer button")].some((button) => button.textContent.includes("历史引用"))).length, missingCount: rows.filter((row) => row.querySelector("footer > span")?.textContent.includes("原书不在资料库")).length, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, clipped: [...document.querySelectorAll(".memory-center button")].some((button) => button.scrollWidth > button.clientWidth || button.scrollHeight > button.clientHeight) };' \
+    '.count == 2 and .jumpCount == 1 and .snapshotCount == 2 and .missingCount == 1 and .overflow == false and .clipped == false' \
+    'reading memory results did not become ready')
+  jq -e '.count == 2' <<<"$searched" >/dev/null ||
+    die "reading memory search is incomplete (state: $(jq -c . <<<"$searched"))"
+
+  [[ $(execute_sync '
+const row = [...document.querySelectorAll(".memory-result")]
+  .find((item) => item.querySelector("h3")?.textContent === "Atha FB2 Gate");
+const button = [...(row?.querySelectorAll("footer button") || [])]
+  .find((item) => item.textContent.includes("历史引用"));
+button?.click();
+return Boolean(button);') == true ]] || die 'could not open reading memory snapshot'
+  snapshot=$(wait_for_script \
+    'const dialog = document.querySelector(".memory-snapshot-dialog"); const versions = [...(dialog?.querySelectorAll("nav button") || [])]; const host = dialog?.querySelector(".memory-snapshot-content > div"); return { open: Boolean(dialog?.open), versions: versions.length, current: versions.filter((button) => button.getAttribute("aria-current") === "page").length, rendered: Boolean(host?.shadowRoot?.querySelector(".book")), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, dialogOverflow: dialog ? dialog.scrollWidth > dialog.clientWidth : true };' \
+    '.open == true and .versions == 2 and .current == 1 and .rendered == true and .overflow == false and .dialogOverflow == false' \
+    'current reading memory snapshot did not render')
+  jq -e '.rendered == true' <<<"$snapshot" >/dev/null ||
+    die "current reading memory snapshot is incomplete (state: $(jq -c . <<<"$snapshot"))"
+
+  [[ $(execute_sync '
+const button = [...document.querySelectorAll(".memory-snapshot-dialog nav button")]
+  .find((item) => item.textContent.includes("历史引用"));
+button?.click();
+return Boolean(button);') == true ]] || die 'could not select historical reading memory snapshot'
+  history=$(wait_for_script \
+    'const dialog = document.querySelector(".memory-snapshot-dialog"); const selected = dialog?.querySelector("nav button[aria-current=page]"); const host = dialog?.querySelector(".memory-snapshot-content > div"); return { historical: Boolean(selected?.textContent.includes("历史引用")), rendered: Boolean(host?.shadowRoot?.querySelector(".book")), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };' \
+    '.historical == true and .rendered == true and .overflow == false' \
+    'historical reading memory snapshot did not render')
+  jq -e '.historical == true' <<<"$history" >/dev/null ||
+    die "historical reading memory snapshot is incomplete (state: $(jq -c . <<<"$history"))"
+
+  [[ $(execute_sync '
+document.querySelector(".memory-snapshot-dialog")?.close();
+const row = [...document.querySelectorAll(".memory-result")]
+  .find((item) => item.querySelector("h3")?.textContent === "Atha FB2 Gate");
+const button = [...(row?.querySelectorAll("footer button") || [])]
+  .find((item) => item.textContent.includes("跳回原书"));
+button?.click();
+return Boolean(button);') == true ]] || die 'could not open a reading memory result'
+  jump=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); return { reader: location.pathname.endsWith("/index.html"), ready: document.documentElement.hasAttribute("data-reader-ready"), navigation: document.documentElement.dataset.readingMemoryNavigation || null, conversation: Boolean(overlay && !overlay.hidden), sourceAvailable: Boolean(document.querySelector("#message-conversation-source")?.textContent), error: document.documentElement.dataset.error || null };' \
+    '.reader == true and .ready == true and .navigation == "ok" and .conversation == true and .sourceAvailable == true and .error == null' \
+    'reading memory result did not validate and open')
+  jq -e '.navigation == "ok"' <<<"$jump" >/dev/null ||
+    die "reading memory result is incomplete (state: $(jq -c . <<<"$jump"))"
+  open_library "$expected_books"
+}
+
 open_book() {
   local kind=$1 arguments script
   arguments=$(jq -cn --arg kind "$kind" '[$kind]')
@@ -696,7 +772,18 @@ jq -e '.schema == 1 and (.sections | length) == 4 and (.resources | length) == 1
   "$public_manifest" >/dev/null || die 'public FB2 manifest shape is invalid'
 public_boundary_entry=$(jq -er '.sections[1].href' "$public_manifest") ||
   die 'public FB2 manifest has no boundary section'
+memory_section=$(jq -er '.sections[2].id' "$public_manifest") ||
+  die 'public FB2 manifest has no reading memory section'
+ATHA_READING_MEMORY_GATE_ROOT=$library_root \
+ATHA_READING_MEMORY_GATE_EDITION=$public_id \
+ATHA_READING_MEMORY_GATE_SECTION=$memory_section \
+  mise exec -- cargo test --locked -p atha-backend --test message_reading \
+    seeds_reading_memory_gui_fixture -- --ignored --exact
 printf '%s\n' "$repo_root/.tmp/fb2-gate.fb2" 'fb2-gate.fb2' >>"$privacy_file"
+printf '%s\n' \
+  '公共记忆中的可跳转笔记' '公共记忆中的缺书笔记' \
+  '正文重点' '第二节正文' '缺失原书引用' \
+  '已移出的公共书籍' '公共作者' >>"$privacy_file"
 add_record_privacy_tokens "$public_record"
 
 expected_books=1
@@ -824,11 +911,22 @@ wait_for_script \
   ".ready == \"complete\" and .cards == $expected_books" \
   'initial library did not become ready' >/dev/null
 
-say 'verifying local-data management at mobile and desktop widths'
+memory_statistics=$(jq -cn --arg id "$public_id" '{
+  schema: 1,
+  days: [{date: "2026-08-13", durationMs: 90000}],
+  books: [{contentVersion: $id, durationMs: 90000, lastReadDate: "2026-08-13"}]
+}')
+memory_statistics_args=$(jq -cn --arg value "$memory_statistics" '[$value]')
+[[ $(execute_sync '
+localStorage.setItem("atha.reader.statistics.v1", arguments[0]);
+return true;' "$memory_statistics_args") == true ]] || die 'could not seed reading memory statistics'
+
+say 'verifying local-data management and reading memory at mobile and desktop widths'
 for width in 360 1000; do
   webdriver_value POST "/session/$session_id/window/rect" \
     "{\"width\":$width,\"height\":760}" >/dev/null || die 'could not resize the library window'
   verify_library_management
+  verify_reading_memory
 done
 webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
   die 'could not restore the reader window size'

@@ -3,15 +3,59 @@ use std::time::Instant;
 use atha_backend::messages::{
     ConversationView, CreatedMessage, CreatedRevision, CreatedRoot, CreatedSource, EditionInput,
     LegacyImport, LegacyImportResult, MessageError, MessageRelationships, MessageSearch,
-    MessageSearchHit, ReplyDraft, ReselectDraft, RevisionView, RichTextInput, RootMessageDraft,
-    RootMessageView, SnapshotResourceData, SourceCaptureView,
+    MessageSearchHit, ReadingMemoryHit, ReplyDraft, ReselectDraft, RevisionView, RichTextInput,
+    RootMessageDraft, RootMessageView, SnapshotResourceData, SourceCaptureView,
 };
 use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
-    ReaderRuntime, begin_local_data_operation, is_reader_url, platform_file::PickerOutput,
+    ReaderRuntime, begin_local_data_operation, is_reader_url,
+    message_maintenance::require_library_window, platform_file::PickerOutput,
 };
+
+#[tauri::command]
+pub(crate) async fn reading_memory_search(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    query: String,
+) -> Result<Vec<ReadingMemoryHit>, String> {
+    require_library_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
+    runtime
+        .messages
+        .reading_memory_search(&query)
+        .map_err(message_error("reading-memory-search"))
+}
+
+#[tauri::command]
+pub(crate) async fn reading_memory_source_captures(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    root_message_id: String,
+) -> Result<Vec<SourceCaptureView>, String> {
+    require_library_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
+    runtime
+        .messages
+        .source_captures(&root_message_id)
+        .map_err(message_error("reading-memory-source-captures"))
+}
+
+#[tauri::command]
+pub(crate) async fn reading_memory_snapshot_resource(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    source_id: String,
+    source_path: String,
+) -> Result<SnapshotResourceData, String> {
+    require_library_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
+    runtime
+        .messages
+        .read_snapshot_resource(&source_id, &source_path)
+        .map_err(message_error("reading-memory-snapshot-resource"))
+}
 
 #[tauri::command]
 pub(crate) async fn message_roots(

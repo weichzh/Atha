@@ -206,13 +206,11 @@ impl MessageStore {
 
     pub fn search(&self, search: MessageSearch) -> Result<Vec<MessageSearchHit>, MessageError> {
         let edition = decode_hex::<32>(&search.edition_id)?;
-        let text = search.text.trim();
-        if text.is_empty()
-            || text.chars().count() > 256
-            || search
-                .section
-                .as_ref()
-                .is_some_and(|section| section.is_empty() || section.len() > 256)
+        let text = validate_search_text(&search.text)?;
+        if search
+            .section
+            .as_ref()
+            .is_some_and(|section| section.is_empty() || section.len() > 256)
         {
             return Err(MessageError::InvalidInput);
         }
@@ -253,6 +251,115 @@ impl MessageStore {
             .map_err(|_| MessageError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| MessageError::Database)
+    }
+
+    pub fn reading_memory_search(
+        &self,
+        query: &str,
+    ) -> Result<Vec<ReadingMemoryHit>, MessageError> {
+        let text = validate_search_text(query)?;
+        let connection = self.connect()?;
+        let (sql, term) = if text.chars().count() < 3 {
+            (
+                "SELECT lower(hex(m.id)), lower(hex(root.id)), lower(hex(c.id)),
+                        lower(hex(e.id)), e.title, e.authors_json, anchor.section_id,
+                        anchor.selected_text, revision.plain_text,
+                        anchor.current_locator_json, m.updated_at_ms
+                 FROM message_search
+                 JOIN message m ON lower(hex(m.id)) = message_search.message_id
+                 JOIN message_revision revision
+                   ON revision.id = m.current_revision_id AND revision.message_id = m.id
+                 JOIN conversation c ON c.id = m.conversation_id
+                 JOIN edition e ON e.id = c.edition_id
+                 JOIN message root
+                   ON root.id = c.root_message_id AND root.conversation_id = c.id
+                 JOIN source_anchor anchor
+                   ON anchor.id = root.current_source_anchor_id AND anchor.message_id = root.id
+                 WHERE m.deleted_at_ms IS NULL AND root.deleted_at_ms IS NULL
+                   AND (message_search.selected_text LIKE ?1 ESCAPE '\\'
+                     OR message_search.plain_text LIKE ?1 ESCAPE '\\')
+                 ORDER BY m.updated_at_ms DESC, message_search.message_id
+                 LIMIT 200",
+                format!("%{}%", escape_like(text)),
+            )
+        } else {
+            (
+                "SELECT lower(hex(m.id)), lower(hex(root.id)), lower(hex(c.id)),
+                        lower(hex(e.id)), e.title, e.authors_json, anchor.section_id,
+                        anchor.selected_text, revision.plain_text,
+                        anchor.current_locator_json, m.updated_at_ms
+                 FROM message_search
+                 JOIN message m ON lower(hex(m.id)) = message_search.message_id
+                 JOIN message_revision revision
+                   ON revision.id = m.current_revision_id AND revision.message_id = m.id
+                 JOIN conversation c ON c.id = m.conversation_id
+                 JOIN edition e ON e.id = c.edition_id
+                 JOIN message root
+                   ON root.id = c.root_message_id AND root.conversation_id = c.id
+                 JOIN source_anchor anchor
+                   ON anchor.id = root.current_source_anchor_id AND anchor.message_id = root.id
+                 WHERE message_search MATCH ?1
+                   AND m.deleted_at_ms IS NULL AND root.deleted_at_ms IS NULL
+                 ORDER BY rank, m.updated_at_ms DESC, message_search.message_id
+                 LIMIT 200",
+                format!("\"{}\"", text.replace('"', "\"\"")),
+            )
+        };
+        let mut statement = connection
+            .prepare(sql)
+            .map_err(|_| MessageError::Database)?;
+        let rows = statement
+            .query_map(params![term], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, i64>(10)?,
+                ))
+            })
+            .map_err(|_| MessageError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| MessageError::Database)?;
+        rows.into_iter()
+            .map(
+                |(
+                    message_id,
+                    root_message_id,
+                    conversation_id,
+                    edition_id,
+                    title,
+                    authors_json,
+                    section,
+                    selected_text,
+                    text,
+                    canonical_locator,
+                    updated_at,
+                )| {
+                    let authors = serde_json::from_str::<Vec<String>>(&authors_json)
+                        .map_err(|_| MessageError::CorruptData)?;
+                    Ok(ReadingMemoryHit {
+                        message_id,
+                        root_message_id,
+                        conversation_id,
+                        edition_id,
+                        title,
+                        authors,
+                        section,
+                        selected_text,
+                        text,
+                        canonical_locator,
+                        updated_at,
+                    })
+                },
+            )
+            .collect()
     }
 
     pub fn revisions(&self, message_id: &str) -> Result<Vec<RevisionView>, MessageError> {
@@ -399,6 +506,15 @@ fn escape_like(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_")
+}
+
+fn validate_search_text(value: &str) -> Result<&str, MessageError> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > 256 {
+        Err(MessageError::InvalidInput)
+    } else {
+        Ok(value)
+    }
 }
 
 fn snapshot_resources(

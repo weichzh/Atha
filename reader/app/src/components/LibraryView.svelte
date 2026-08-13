@@ -8,12 +8,16 @@
     CircleCheck,
     Ellipsis,
     HardDrive,
+    Library,
+    MessageSquareText,
     Plus,
     Search,
     Trash2,
     X,
   } from "@lucide/svelte";
   import { onMount } from "svelte";
+
+  import MemoryCenter from "./MemoryCenter.svelte";
 
   import {
     backupLocalData,
@@ -67,6 +71,7 @@
   let managementMenu: HTMLDetailsElement | undefined;
   let storageDialog: HTMLDialogElement | undefined;
   let storageUsage: StorageUsage | null = null;
+  let section: "library" | "memory" = "library";
   let visibleBooks: LibraryBook[] = [];
   let progressGroups = { reading: [] as LibraryBook[], unread: [] as LibraryBook[] };
   let allVisibleSelected = false;
@@ -120,6 +125,14 @@
 
   function closeManagementMenu() {
     managementMenu?.removeAttribute("open");
+  }
+
+  function setSection(next: "library" | "memory") {
+    if (loading || busy || next === section) return;
+    if (selecting) cancelSelection();
+    closeManagementMenu();
+    status = "";
+    section = next;
   }
 
   async function chooseBooks() {
@@ -438,12 +451,36 @@
 {/snippet}
 
 <main
-  class:library-selecting={selecting}
+  class:library-selecting={selecting && section === "library"}
   class="library-shell"
-  aria-label="Atha 书架"
+  aria-label="Atha 资料库"
   aria-busy={loading || busy}
 >
   <header class="library-header">
+    <nav class="library-sections" aria-label="资料库主导航">
+      <button
+        type="button"
+        class:active={section === "library"}
+        aria-current={section === "library" ? "page" : undefined}
+        onclick={() => setSection("library")}
+        disabled={loading || busy}
+      >
+        <Library aria-hidden="true" />
+        <span>书架</span>
+      </button>
+      <button
+        type="button"
+        class:active={section === "memory"}
+        aria-current={section === "memory" ? "page" : undefined}
+        onclick={() => setSection("memory")}
+        disabled={loading || busy}
+      >
+        <MessageSquareText aria-hidden="true" />
+        <span>阅读记忆</span>
+      </button>
+    </nav>
+
+    {#if section === "library"}
     <div class="library-search-bar">
       <label class="library-search-field">
         <Search aria-hidden="true" />
@@ -518,8 +555,12 @@
         </button>
       {/each}
     </nav>
+    {/if}
   </header>
 
+  {#if section === "memory"}
+    <MemoryCenter {books} disabled={loading || busy} />
+  {:else}
   {#if startedBookIds === null}
     <p class="library-progress-notice" role="status">无法读取本机阅读进度，进度视图暂不可用。</p>
   {/if}
@@ -629,5 +670,6 @@
         <progress aria-label={workLabel}></progress>
       </div>
     </div>
+  {/if}
   {/if}
 </main>

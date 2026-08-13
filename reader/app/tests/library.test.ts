@@ -9,6 +9,7 @@ import {
   filterLibraryBooks,
   groupLibraryBooksByProgress,
   openFailureMessage,
+  readRecentBooks,
   readStartedBookIds,
   replaceLocalDataState,
   removeBooksSerially,
@@ -142,6 +143,42 @@ test("progress view accepts only a strict same-book progress record", () => {
 
   assert.equal(
     readStartedBookIds(books, {
+      getItem() {
+        throw new Error("storage-disabled");
+      },
+    }),
+    null,
+  );
+});
+
+test("recent reading uses strict statistics and only current library books", () => {
+  const storage = new TestStorage([
+    [
+      "atha.reader.statistics.v1",
+      JSON.stringify({
+        schema: 1,
+        days: [{ date: "2026-08-13", durationMs: 90_000 }],
+        books: [
+          { contentVersion: ids[0], durationMs: 60_000, lastReadDate: "2026-08-12" },
+          { contentVersion: ids[1], durationMs: 30_000, lastReadDate: "2026-08-13" },
+          { contentVersion: "d".repeat(64), durationMs: 10_000, lastReadDate: "2026-08-13" },
+        ],
+      }),
+    ],
+  ]);
+  assert.deepEqual(readRecentBooks(books, storage), [
+    { book: books[0], durationMs: 30_000, lastReadDate: "2026-08-13" },
+    { book: books[1], durationMs: 60_000, lastReadDate: "2026-08-12" },
+  ]);
+  assert.deepEqual(readRecentBooks(books, new TestStorage()), []);
+
+  storage.setItem(
+    "atha.reader.statistics.v1",
+    JSON.stringify({ schema: 1, days: [], books: [{ contentVersion: ids[0] }] }),
+  );
+  assert.equal(readRecentBooks(books, storage), null);
+  assert.equal(
+    readRecentBooks(books, {
       getItem() {
         throw new Error("storage-disabled");
       },

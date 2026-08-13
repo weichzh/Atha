@@ -120,12 +120,20 @@ fn snapshot_for(selected_text: &str) -> SourceSnapshotInput {
 }
 
 fn set_anchor_text(anchor: &mut SourceAnchorInput, selected_text: &str) {
+    set_anchor_for_edition(anchor, &edition(), selected_text);
+}
+
+fn set_anchor_for_edition(
+    anchor: &mut SourceAnchorInput,
+    edition: &EditionInput,
+    selected_text: &str,
+) {
     let end = 10 + selected_text.encode_utf16().count();
     anchor.selected_text = selected_text.into();
     anchor.content_hash = text_hash(selected_text);
     anchor.canonical_locator = serde_json::json!({
         "schema": 1,
-        "contentVersion": edition().content_version,
+        "contentVersion": edition.content_version,
         "start": { "section": anchor.section, "offset": 10 },
         "end": { "section": anchor.section, "offset": end }
     })
@@ -781,6 +789,164 @@ fn search_indexes_only_current_undeleted_revisions_and_filters_sections() {
     assert_eq!(current[0].section, "section-1");
     assert!(old.is_empty());
     assert!(deleted.is_empty());
+}
+
+#[test]
+fn reading_memory_search_projects_cross_book_results_and_excludes_tombstones() {
+    let root = TestRoot::new("reading-memory-search");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let first = store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: snapshot(),
+            text: Some("共同记忆的第一条笔记".into()),
+        })
+        .expect("create first root");
+    let reply = store
+        .reply(ReplyDraft {
+            conversation_id: first.conversation_id.clone(),
+            reply_to_message_id: first.message_id.clone(),
+            text: "共同记忆的回复".into(),
+            rich_text: None,
+            reference_ids: Vec::new(),
+        })
+        .expect("create reply");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let other_edition = EditionInput {
+        content_version: "22".repeat(32),
+        title: "另一本文集".into(),
+        authors: vec!["另一位作者".into()],
+    };
+    let mut other_anchor = anchor();
+    other_anchor.section = "other-section".into();
+    set_anchor_for_edition(&mut other_anchor, &other_edition, "共同记忆");
+    let other = store
+        .create_root(RootMessageDraft {
+            edition: other_edition.clone(),
+            anchor: other_anchor.clone(),
+            snapshot: snapshot_for("共同记忆"),
+            text: Some("共同记忆的第二条笔记".into()),
+        })
+        .expect("create other root");
+
+    let hits = store
+        .reading_memory_search("共同记忆")
+        .expect("search all editions");
+    assert_eq!(hits.len(), 3);
+    assert_eq!(hits[0].edition_id, other_edition.content_version);
+    assert_eq!(hits[0].title, other_edition.title);
+    assert_eq!(hits[0].authors, other_edition.authors);
+    assert_eq!(hits[0].root_message_id, other.message_id);
+    assert_eq!(hits[0].canonical_locator, other_anchor.canonical_locator);
+    let reply_hit = hits
+        .iter()
+        .find(|hit| hit.message_id == reply.message_id)
+        .expect("reply hit");
+    assert_eq!(reply_hit.root_message_id, first.message_id);
+    assert_eq!(reply_hit.conversation_id, first.conversation_id);
+
+    store
+        .delete(&other.message_id, &other.revision_id)
+        .expect("delete other root");
+    let after_root_delete = store
+        .reading_memory_search("共同记忆")
+        .expect("search after root deletion");
+    assert_eq!(after_root_delete.len(), 2);
+    assert!(
+        after_root_delete
+            .iter()
+            .all(|hit| hit.edition_id == edition().content_version)
+    );
+
+    store
+        .delete(&reply.message_id, &reply.revision_id)
+        .expect("delete reply");
+    let after_reply_delete = store
+        .reading_memory_search("共同记忆")
+        .expect("search after reply deletion");
+    assert_eq!(after_reply_delete.len(), 1);
+    assert_eq!(after_reply_delete[0].message_id, first.message_id);
+    assert_eq!(
+        store.reading_memory_search(" "),
+        Err(atha_backend::messages::MessageError::InvalidInput)
+    );
+}
+
+#[test]
+#[ignore = "seeds the isolated public fixture consumed by the Linux GUI gate"]
+fn seeds_reading_memory_gui_fixture() {
+    let data_root =
+        PathBuf::from(std::env::var_os("ATHA_READING_MEMORY_GATE_ROOT").expect("memory gate root"));
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let temporary = fs::canonicalize(repository.join(".tmp")).expect("resolve .tmp root");
+    let resolved = fs::canonicalize(&data_root).expect("resolve memory gate root");
+    assert!(resolved.starts_with(temporary));
+    let content_version =
+        std::env::var("ATHA_READING_MEMORY_GATE_EDITION").expect("memory gate edition");
+    assert!(
+        content_version.len() == 64
+            && content_version
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    );
+    let section = std::env::var("ATHA_READING_MEMORY_GATE_SECTION").expect("memory gate section");
+    assert!(!section.is_empty() && section.len() <= 256);
+    let store = MessageStore::open(data_root).expect("open memory gate store");
+    let present_edition = EditionInput {
+        content_version,
+        title: "Atha FB2 Gate".into(),
+        authors: vec!["Ada Lin".into()],
+    };
+    let mut historical_anchor = anchor();
+    historical_anchor.section = section.clone();
+    set_anchor_for_edition(&mut historical_anchor, &present_edition, "正文重点");
+    let present = store
+        .create_root(RootMessageDraft {
+            edition: present_edition.clone(),
+            anchor: historical_anchor,
+            snapshot: snapshot_for("正文重点"),
+            text: Some("公共记忆中的可跳转笔记".into()),
+        })
+        .expect("create present memory");
+    let original = store
+        .source_captures(&present.message_id)
+        .expect("read present source");
+    let mut current_anchor = anchor();
+    current_anchor.section = section;
+    set_anchor_for_edition(&mut current_anchor, &present_edition, "第二节正文");
+    current_anchor.canonical_locator = serde_json::json!({
+        "schema": 1,
+        "contentVersion": present_edition.content_version,
+        "start": { "section": current_anchor.section, "offset": 0 },
+        "end": { "section": current_anchor.section, "offset": 5 }
+    })
+    .to_string();
+    store
+        .reselect(ReselectDraft {
+            message_id: present.message_id,
+            expected_source_id: original[0].source.id.clone(),
+            anchor: current_anchor,
+            snapshot: snapshot_for("第二节正文"),
+        })
+        .expect("create historical source version");
+
+    let missing_edition = EditionInput {
+        content_version: "33".repeat(32),
+        title: "已移出的公共书籍".into(),
+        authors: vec!["公共作者".into()],
+    };
+    let mut missing_anchor = anchor();
+    missing_anchor.section = "missing-section".into();
+    set_anchor_for_edition(&mut missing_anchor, &missing_edition, "缺失原书引用");
+    store
+        .create_root(RootMessageDraft {
+            edition: missing_edition,
+            anchor: missing_anchor,
+            snapshot: snapshot_for("缺失原书引用"),
+            text: Some("公共记忆中的缺书笔记".into()),
+        })
+        .expect("create missing memory");
 }
 
 #[test]

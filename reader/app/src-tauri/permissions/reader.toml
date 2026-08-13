@@ -24,6 +24,9 @@ commands.allow = [
   "rollback_local_data_restore",
   "abort_local_data_restore",
   "local_data_storage_usage",
+  "reading_memory_search",
+  "reading_memory_source_captures",
+  "reading_memory_snapshot_resource",
 ]
 
 [[permission]]
