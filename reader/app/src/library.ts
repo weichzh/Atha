@@ -117,7 +117,9 @@ export function readAppTheme(storage?: StorageReader | null): AppTheme {
   try {
     const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
     if (!target) return "system";
-    const value: unknown = JSON.parse(target.getItem(APP_APPEARANCE_KEY) ?? "null");
+    const raw = target.getItem(APP_APPEARANCE_KEY);
+    if (!raw || raw.length > 1_024) return "system";
+    const value: unknown = JSON.parse(raw);
     const theme = value && typeof value === "object" ? Reflect.get(value, "theme") : null;
     return (
       value &&

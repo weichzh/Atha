@@ -590,7 +590,7 @@ export function createAnnotations({
       }, SELECTION_CHANGE_SETTLE_MS);
     });
     controls.selectionActions.addEventListener("pointerdown", (event) => event.preventDefault());
-    controls.lookup.addEventListener("click", () => {
+    controls.lookup?.addEventListener("click", () => {
       if (!dispatchDictionaryLookup(pendingSelection)) return fail("annotation-selection");
       finishSelection();
     });

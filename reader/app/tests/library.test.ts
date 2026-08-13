@@ -207,6 +207,8 @@ test("application appearance stays separate from reader preferences", () => {
 
   storage.setItem("atha.app.appearance.v1", JSON.stringify({ schema: 1, theme: "paper" }));
   assert.equal(readAppTheme(storage), "system");
+  storage.setItem("atha.app.appearance.v1", " ".repeat(1_025));
+  assert.equal(readAppTheme(storage), "system");
   assert.throws(() => writeAppTheme("paper" as never, storage), /invalid-app-theme/);
 });
 
