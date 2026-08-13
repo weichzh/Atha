@@ -66,7 +66,7 @@ Atha 即将进入 Android 分发、多格式解析、词典和 CSS 社区阶段�
 - package 元数据：根 / member Cargo manifest、P0 manifest 与 `reader/app/package.json`；
 - 稳定事实：`README.md`、`CONTEXT.md`；
 - 依赖规则：`docs/architecture/DESIGN-GUIDE.md`；
-- 当前证据与 review：`docs/changes/project-agpl-license.md`。
+- 历史证据与 review：Git 历史和 `project-workflow` 关闭收据。
 
 ## 相关资料
 

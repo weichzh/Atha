@@ -127,22 +127,24 @@ fn imports_repository_markdown_as_a_readable_book() {
 }
 
 #[test]
-fn imports_existing_research_markdown_without_a_generated_book_fixture() {
+fn imports_existing_architecture_markdown_without_a_generated_book_fixture() {
     let root = TestRoot::new();
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/research/epub2-ncx-library-assessment.md");
+    let source =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/architecture/READER-CORE.md");
     let library = LocalLibrary::open(root.0.join("library")).expect("open library");
 
-    let imported = library.import(&source).expect("import research Markdown");
-    assert_eq!(imported.title, "EPUB2 / NCX 最小兼容与成熟库评估");
+    let imported = library
+        .import(&source)
+        .expect("import architecture Markdown");
+    assert_eq!(imported.title, "阅读内核");
     let manifest = read_manifest(&library, &imported.id);
     assert_eq!(manifest["sections"].as_array().map(Vec::len), Some(1));
     assert!(
         manifest["toc"]
             .as_array()
-            .expect("research TOC")
+            .expect("architecture TOC")
             .iter()
-            .any(|item| item["label"] == "规范兼容边界")
+            .any(|item| item["label"] == "兼容性契约")
     );
 }
 

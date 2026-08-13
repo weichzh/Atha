@@ -16,7 +16,7 @@ $privateTxtEnvironmentName = 'ATHA_LOCAL_TXT_SAMPLE'
 $privateTxtTest = 'imports_private_local_txt_sample'
 $markdownSources = @(
     (Join-Path $repoRoot 'README.md'),
-    (Join-Path $repoRoot 'docs/research/epub2-ncx-library-assessment.md')
+    (Join-Path $repoRoot 'docs/architecture/READER-CORE.md')
 )
 
 if ($BackendOnly -and ($PreparedMarkdownBookRoot.Count -gt 0 -or -not [string]::IsNullOrWhiteSpace($PreparedPrivateTxtBookRoot))) {

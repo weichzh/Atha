@@ -111,7 +111,7 @@ adb -s "$serial" logcat --pid="$pid" -d
 ## Markdown / TXT
 
 - 版本事实：`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `pulldown-cmark 0.13.4`、`chardetng 1.0.0`、`encoding_rs 0.8.35` 和 `regex 1.13.1`。
-- 官方入口：[`pulldown-cmark` 0.13.4](https://docs.rs/pulldown-cmark/0.13.4/)、[`chardetng` 1.0.0](https://docs.rs/chardetng/1.0.0/)、[`encoding_rs` 0.8.35](https://docs.rs/encoding_rs/0.8.35/)、[`regex` 1.13.1](https://docs.rs/regex/1.13.1/)；格式取舍见 `docs/research/markdown-txt-format-assessment.md`。
+- 官方入口：[`pulldown-cmark` 0.13.4](https://docs.rs/pulldown-cmark/0.13.4/)、[`chardetng` 1.0.0](https://docs.rs/chardetng/1.0.0/)、[`encoding_rs` 0.8.35](https://docs.rs/encoding_rs/0.8.35/)、[`regex` 1.13.1](https://docs.rs/regex/1.13.1/)；已采纳的格式取舍与内容边界由 `docs/architecture/READER-CORE.md` 维护。
 - 项目快速用法：`reader::text` 直接生成现有 ReaderManifest / BookRoot。Markdown raw HTML 转义，链接 / 图片只保留惰性文本；TXT 只在至少两个高置信整行标题时生成章节 TOC，并按约 1 MiB 合并物理 sections。相同字节的 Markdown / TXT 使用不同固定身份域；EPUB / CBZ 身份不变。
 - 最短检查：`mise exec -- cargo test --locked -p atha-backend --test text_import`；恢复 Markdown / TXT GUI 路线前先把对应场景接入统一 Bash Linux runner，私有 TXT 只通过显式 opt-in 使用且不输出路径、标题、正文或哈希。
 - 必须重查：parser / decoder release line、`encoding_rs` 的复合 SPDX、章节规则与真实语料、ARM64 Android 性能、Markdown 新增活动资源能力及 ReaderManifest section / TOC 上限。
