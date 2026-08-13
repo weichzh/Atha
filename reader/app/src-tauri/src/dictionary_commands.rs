@@ -4,7 +4,7 @@ use atha_backend::reader::dictionary::{DictionaryError, DictionaryLookup, LocalD
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::{ReaderRuntime, platform_file};
+use crate::{ReaderRuntime, begin_local_data_operation, platform_file};
 
 const MAX_IMPORT_FILES: usize = 5;
 const MAX_PICKER_BYTES: u64 = 256 * 1024 * 1024;
@@ -13,6 +13,7 @@ const MAX_PICKER_BYTES: u64 = 256 * 1024 * 1024;
 pub(crate) fn list_local_dictionaries(
     runtime: State<'_, ReaderRuntime>,
 ) -> Result<Vec<LocalDictionary>, String> {
+    let _operation = begin_local_data_operation(&runtime)?;
     let started = Instant::now();
     runtime
         .dictionaries
@@ -63,6 +64,7 @@ pub(crate) async fn import_local_dictionary(
         .filter(|input| input.suffix() == "mdd")
         .map(|input| input.path().to_path_buf())
         .collect::<Vec<PathBuf>>();
+    let _operation = begin_local_data_operation(&runtime)?;
     let dictionaries = runtime.dictionaries.clone();
     let started = Instant::now();
     tauri::async_runtime::spawn_blocking(move || {
@@ -101,6 +103,7 @@ pub(crate) async fn lookup_local_dictionary(
     dictionary_id: String,
     query: String,
 ) -> Result<Option<DictionaryLookup>, String> {
+    let _operation = begin_local_data_operation(&runtime)?;
     let dictionaries = runtime.dictionaries.clone();
     let started = Instant::now();
     tauri::async_runtime::spawn_blocking(move || {
@@ -124,6 +127,7 @@ pub(crate) fn remove_local_dictionary(
     runtime: State<'_, ReaderRuntime>,
     dictionary_id: String,
 ) -> Result<Vec<LocalDictionary>, String> {
+    let _operation = begin_local_data_operation(&runtime)?;
     let started = Instant::now();
     runtime
         .dictionaries

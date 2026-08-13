@@ -34,11 +34,15 @@ Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持�
 
 ## 本地书架与应用内导入
 
-Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB、CBZ、FB2 / FBZ、MOBI / AZW / AZW3、Markdown 或 TXT。`reader::library::LocalLibrary` 是书架边界，只暴露列出、登记、导入、打开、读取封面和移除；已知 `.epub`、`.cbz`、`.fb2` / `.fbz`、`.mobi` / `.azw` / `.azw3`、`.md` / `.markdown`、`.txt` 严格分派到对应 importer。Android content URI 由 Tauri 内置 PathPlugin 经 `ContentResolver` 取得显示文件名，只保留允许列表后缀后复制到 Picker cache；provider 不返回可用后缀时稳定拒绝，不从 URI 或正文猜格式。加入书架时只把源文件耐久写入 `SourceBooks`、计算既有内容身份并写受限记录；首次打开在 blocking worker 中调用同一 importer 发布 `ImportedBooks`，以后直接打开缓存。同进程准备由共享锁串行发布，缓存命中先核对格式 marker 与元数据，再核对 manifest 及其声明的全部 section / resource；EPUB v2 至 v5 完整缓存都可读，有耐久源时才尝试把 v2 至 v4 升级到 v5，失败仍回退旧缓存。缺失、空 section 或损坏产物由任一同身份耐久后缀重建。再次登记同一内容可原子修复身份异常的耐久源或重建书架记录。EPUB / CBZ 保持原始文件 SHA-256，Markdown / TXT 使用各自格式域，FB2 / FBZ 使用解包后 FB2 XML 与固定格式域生成身份，Kindle 三种后缀使用同一固定格式域，因此相同字节不会因封装后缀产生副本。移除只删除书架记录，不删除耐久源、导入产物或阅读状态，因此再次导入可恢复同一内容身份。
+Tauri 无启动书籍参数时显示 Svelte 书架，并通过官方文件对话框选择一个或多个 EPUB、CBZ、FB2 / FBZ、MOBI / AZW / AZW3、Markdown 或 TXT。`reader::library::LocalLibrary` 是书架边界，只暴露列出、登记、导入、打开、读取封面、移出书架和删除本地书籍数据；已知 `.epub`、`.cbz`、`.fb2` / `.fbz`、`.mobi` / `.azw` / `.azw3`、`.md` / `.markdown`、`.txt` 严格分派到对应 importer。Android content URI 由 Tauri 内置 PathPlugin 经 `ContentResolver` 取得显示文件名，只保留允许列表后缀后复制到 Picker cache；provider 不返回可用后缀时稳定拒绝，不从 URI 或正文猜格式。加入书架时只把源文件耐久写入 `SourceBooks`、计算既有内容身份并写受限记录；首次打开在 blocking worker 中调用同一 importer 发布 `ImportedBooks`，以后直接打开缓存。同进程准备由共享锁串行发布，缓存命中先核对格式 marker 与元数据，再核对 manifest 及其声明的全部 section / resource；EPUB v2 至 v5 完整缓存都可读，有耐久源时才尝试把 v2 至 v4 升级到 v5，失败仍回退旧缓存。缺失、空 section 或损坏产物由任一同身份耐久后缀重建。再次登记同一内容可原子修复身份异常的耐久源或重建书架记录。EPUB / CBZ 保持原始文件 SHA-256，Markdown / TXT 使用各自格式域，FB2 / FBZ 使用解包后 FB2 XML 与固定格式域生成身份，Kindle 三种后缀使用同一固定格式域，因此相同字节不会因封装后缀产生副本。移出书架只删除书架记录；删除本地数据还删除同身份耐久源、导入缓存和本书浏览器状态，但始终保留 Message、Anchor、Snapshot 与资产。
 
 EPUB importer 从 OPF 有界提取标题、至多 16 位作者和一个受支持的封面资源；EPUB2 的 `meta name="cover"` 与 EPUB3 的 `cover-image` 最终投影为同一封面字段。CBZ 只消费可选 `ComicInfo.xml` 中有界的 `Title`、`Writer` 与唯一有效 `FrontCover`。FB2 从 `description/title-info` 有界投影书名、作者和封面引用。无效、冲突或超限的可选元数据不会扩大受信任内容边界；无封面时由壳层显示占位。Svelte 只接收书籍身份、标题、作者、封面可用性、导入时间和是否已准备，不接收源路径、缓存路径或书籍内容。未准备书籍首次打开时显示原生不定进度条；完成后从 importer 元数据补齐标题、作者和封面。宿主随后把动态 `atha-book` 根切换到已校验缓存；`atha-cover` 根据书架记录和已发布元数据只读提供封面。书架沿用 Readest 的选择文件、内容哈希去重、耐久目录和打开链路，不采用其同步、分组、转换队列、多来源或全局状态结构。
 
-书架搜索与排序只投影内存中的受限 `LibraryBook[]`：搜索匹配标题 / 作者，默认保持后端导入顺序，另提供稳定的书名与作者顺序。进度页只读同源 schema 1 进度记录，并复用阅读器的内容版本、Locator、大小和精确字段约束；合法同书记录只表示“在读”，缺失或无效记录表示“未开始”，存储不可访问时禁用进度投影而不伪造状态。显式选择模式复用单本移出 command 串行完成当前结果全选与批量移出；普通模式没有常驻删除按钮。封面使用浏览器原生 lazy loading / async decoding，移动端保持三列，未引入虚拟列表、同步状态或新 DTO。
+书架搜索与排序只投影内存中的受限 `LibraryBook[]`：搜索匹配标题 / 作者，默认保持后端导入顺序，另提供稳定的书名与作者顺序。进度页只读同源 schema 1 进度记录，并复用阅读器的内容版本、Locator、大小和精确字段约束；合法同书记录只表示“在读”，缺失或无效记录表示“未开始”，存储不可访问时禁用进度投影而不伪造状态。显式选择模式串行完成当前结果全选、批量移出或批量删除本地数据；普通模式没有常驻破坏性按钮。封面使用浏览器原生 lazy loading / async decoding，移动端保持三列，未引入虚拟列表、同步状态或新 DTO。
+
+`backend::local_data::LocalData` 是应用级本地数据协调边界。schema 1 `.atha-data` 只包含规范化书架记录、全部 `SourceBooks`、离线词典、嵌套 MessageStore `.atha-backup` 和生产 localStorage allowlist；`ImportedBooks`、Picker cache 与日志不进入制品。恢复在当前数据根内完成唯一 entry、路径、数量、容量、哈希、书源身份、词典、MessageStore 和浏览器状态校验，再以同文件系统目录切换和 SQLite Online Backup 发布。`prepared` 表示尚未发布，第一次目录切换前耐久写入 `publishing` marker；启动看到未提交发布时回滚，`committed` 等待 WebView 同步替换浏览器状态并确认；文件数上限 100,000，总展开上限 8 GiB，浏览器状态上限 16 MiB。
+
+资料库管理菜单提供完整备份、完整恢复和书籍文件、阅读缓存、消息与快照、词典、阅读设置的分类占用。批量选择同时提供“移出书架”和“删除本地数据”，使用不同确认文案；恢复的浏览器状态替换失败会回写操作前 allowlist，删除则保留耐久 intent 与已经完成的定点清理，在重载后幂等续做，两者都不读取或改写其他 origin 数据。缺少耐久原文件的旧书架项不会伪装成完整备份，界面要求用户重新选择原文件补齐后再试。Tauri `local_data_maintenance` 只接受主窗口资料库根路由，SAF 继续复用 `platform_file`，产品日志只记录操作、固定阶段、稳定错误码和耗时。
 
 ## 书籍输入与阅读会话
 
@@ -160,7 +164,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### FB2 / FBZ 入口门槛
 
-`scripts/check-reader-linux.sh` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖完整导入诊断、跨 section 回退、当前手势矩阵和 AppLog 隐私。手势矩阵请求 W3C touch Pointer Actions，逐次核对真实命中、`isTrusted`、左右点按 / 横拖、媒体误开、纵向意图、宽表双向内部滚动与双向边界移交，并记录 WebKitGTK 实际返回的 `pointerType`。当前 Linux WebKitGTK 把请求的 touch 映射为 `mouse`，因此该门只算可信自动化指针与性能证据，不冒充实体触摸；PCT-AL10 自动滑动与 SurfaceFlinger presentation 另作真实目标证据。
+`scripts/check-reader-linux.sh` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳，覆盖 360 / 1000 宽度的资料库管理、存储分类和两级删除布局，以及完整导入诊断、跨 section 回退、当前手势矩阵和 AppLog 隐私。手势矩阵请求 W3C touch Pointer Actions，逐次核对真实命中、`isTrusted`、左右点按 / 横拖、媒体误开、纵向意图、宽表双向内部滚动与双向边界移交，并记录 WebKitGTK 实际返回的 `pointerType`。当前 Linux WebKitGTK 把请求的 touch 映射为 `mouse`，因此该门只算可信自动化指针与性能证据，不冒充实体触摸；PCT-AL10 自动滑动与 SurfaceFlinger presentation 另作真实目标证据。
 
 ### Kindle 入口门槛
 

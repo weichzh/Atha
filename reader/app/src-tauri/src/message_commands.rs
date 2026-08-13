@@ -9,7 +9,9 @@ use atha_backend::messages::{
 use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::{ReaderRuntime, is_reader_url, platform_file::PickerOutput};
+use crate::{
+    ReaderRuntime, begin_local_data_operation, is_reader_url, platform_file::PickerOutput,
+};
 
 #[tauri::command]
 pub(crate) async fn message_roots(
@@ -19,6 +21,7 @@ pub(crate) async fn message_roots(
     section: Option<String>,
 ) -> Result<Vec<RootMessageView>, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .roots(&edition_id, section.as_deref())
@@ -32,6 +35,7 @@ pub(crate) async fn message_edition_context(
     content_version: String,
 ) -> Result<EditionInput, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     let current = runtime
         .current_edition
         .read()
@@ -54,6 +58,7 @@ pub(crate) async fn message_conversation(
     conversation_id: String,
 ) -> Result<ConversationView, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .conversation(&conversation_id)
@@ -68,6 +73,7 @@ pub(crate) async fn message_conversations(
     section: Option<String>,
 ) -> Result<Vec<ConversationView>, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .conversations(&edition_id, section.as_deref())
@@ -81,6 +87,7 @@ pub(crate) async fn message_create_root(
     draft: RootMessageDraft,
 ) -> Result<CreatedRoot, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .create_root(draft)
@@ -97,6 +104,7 @@ pub(crate) async fn message_revise(
     rich_text: Option<RichTextInput>,
 ) -> Result<CreatedRevision, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     match rich_text {
         Some(rich_text) => {
             runtime
@@ -117,6 +125,7 @@ pub(crate) async fn message_reply(
     draft: ReplyDraft,
 ) -> Result<CreatedMessage, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .reply(draft)
@@ -131,6 +140,7 @@ pub(crate) async fn message_delete(
     expected_revision_id: String,
 ) -> Result<(), String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .delete(&message_id, &expected_revision_id)
@@ -144,6 +154,7 @@ pub(crate) async fn message_search(
     search: MessageSearch,
 ) -> Result<Vec<MessageSearchHit>, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .search(search)
@@ -157,6 +168,7 @@ pub(crate) async fn message_relationships(
     message_id: String,
 ) -> Result<MessageRelationships, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .relationships(&message_id)
@@ -170,6 +182,7 @@ pub(crate) async fn message_revisions(
     message_id: String,
 ) -> Result<Vec<RevisionView>, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .revisions(&message_id)
@@ -183,6 +196,7 @@ pub(crate) async fn message_source_captures(
     message_id: String,
 ) -> Result<Vec<SourceCaptureView>, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .source_captures(&message_id)
@@ -197,6 +211,7 @@ pub(crate) async fn message_snapshot_resource(
     source_path: String,
 ) -> Result<SnapshotResourceData, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .read_snapshot_resource(&source_id, &source_path)
@@ -210,6 +225,7 @@ pub(crate) async fn message_reselect(
     draft: ReselectDraft,
 ) -> Result<CreatedSource, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .reselect(draft)
@@ -225,6 +241,7 @@ pub(crate) async fn message_reanchor(
     current_locator: String,
 ) -> Result<(), String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .reanchor_source(&source_id, &expected_locator, &current_locator)
@@ -238,6 +255,7 @@ pub(crate) async fn message_import_legacy(
     input: LegacyImport,
 ) -> Result<LegacyImportResult, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
         .import_legacy_annotations(input)
@@ -253,6 +271,7 @@ pub(crate) async fn message_export(
     conversation_id: Option<String>,
 ) -> Result<bool, String> {
     require_reader_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     let Some(selected) = app
         .dialog()
         .file()

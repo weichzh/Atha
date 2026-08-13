@@ -48,8 +48,10 @@ SQLite 与本地内容寻址资产是消息事实源。产品界面只通过应�
 
 - 按 Edition 或单 Conversation 导出的 `.zip` 是自包含交换制品，只覆盖所选业务范围，不包含完整数据库状态，也没有恢复语义；
 - `.atha-backup` 是 schema 1 的完整 MessageStore 恢复制品，只包含 Online Backup API 生成的一致 `Messages.sqlite3`、严格 manifest 和该快照引用的全部且仅有内容寻址资产；
-- 恢复是全量替换，不做 merge。backend 在正式写入前校验 entry 集合与容量、哈希、当前 database schema 精确签名、SQLite / 外键完整性、消息关系、Edition / 修订 / Locator / Snapshot 内容、Outbox、旧迁移凭据、FTS NULL-safe 精确投影和资产引用集合；未完成的数据库 copy 由 SQLite 回滚；
-- 资料库页只负责选择文件、显示忙碌 / 取消 / 错误状态并确认替换全部消息事实；Tauri `message_maintenance` 只接受主窗口资料库根路由，制品与事务规则不进入前端。
+- 恢复是全量替换，不做 merge。backend 在正式写入前校验 entry 集合与容量、哈希、当前 database schema 精确签名、SQLite / 外键完整性、消息关系、Edition / 修订 / Locator / Snapshot 内容、Outbox、旧迁移凭据、FTS NULL-safe 精确投影和资产引用集合；未完成的数据库 copy 由 SQLite 回滚，完成后立即清理新数据库未引用的旧资产；
+- `MessageStore::validate_backup` 让应用级恢复在触碰正式消息事实前复用同一完整校验；schema 1 `.atha-data` 把一份 `.atha-backup` 作为唯一消息成员，与书架、耐久书源、词典和浏览器状态一起协调发布；
+- 资料库页的主入口只提供完整 `.atha-data` 备份与恢复；原 `.atha-backup` command 和制品继续作为 MessageStore 的兼容维护接口。两者都只允许主窗口资料库根路由，ZIP、SQLite 与恢复日志不进入前端；
+- “移出书架”和“删除本地数据”都不物理删除 Message、修订、Anchor、Snapshot 或资产。书籍文件缺失时历史引用仍以 Snapshot 呈现，重新导入同一内容身份后才重新获得当前原书跳转。
 
 ## 关联语义
 
@@ -67,7 +69,7 @@ SQLite 与本地内容寻址资产是消息事实源。产品界面只通过应�
 - 不为 AI 预先定义固定技能清单、工具协议或权限 UI；
 - 不把消息记录做成脱离书籍语境的通用聊天产品。
 - 当前不提供附件、图片、表格、公式、AI 写作或网络发送；这些能力需分别解决本地资源生命周期、导出和不可信内容边界后再进入正文 schema。
-- 完整消息备份不包含 EPUB、书架、阅读进度或偏好，也不提供加密、云端、计划任务、增量或合并恢复。
+- 独立 `.atha-backup` 不包含 EPUB、书架、阅读进度或偏好；应用级 `.atha-data` 只嵌套它，不改变 MessageStore schema。两种制品都不提供加密、云端、计划任务、增量或合并恢复。
 
 ## 相关文档
 
@@ -75,3 +77,4 @@ SQLite 与本地内容寻址资产是消息事实源。产品界面只通过应�
 - 阅读内核：`docs/architecture/READER-CORE.md`
 - 数据库基线：`docs/codebase/DATABASE.md`
 - 完整消息备份 / 恢复：`docs/decisions/ADR-0006-message-store-backup-restore.md`
+- 应用级本地数据生命周期：`docs/decisions/ADR-0010-local-data-lifecycle.md`

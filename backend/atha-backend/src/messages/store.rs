@@ -9,6 +9,8 @@ use std::{
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
+use crate::{create_real_directory, is_reparse_point};
+
 use super::{
     model::{MessageError, PreparedResource, SnapshotResourceInput, StoreHealth},
     schema::{SCHEMA_V1, SCHEMA_V2},
@@ -28,9 +30,12 @@ pub struct MessageStore {
 
 impl MessageStore {
     pub fn open(data_root: impl AsRef<Path>) -> Result<Self, MessageError> {
-        let root = data_root.as_ref().join("Messages");
+        let data_root = data_root.as_ref();
+        let root = data_root.join("Messages");
         let assets = root.join("Assets");
-        fs::create_dir_all(&assets).map_err(|_| MessageError::InvalidRoot)?;
+        create_real_directory(data_root).map_err(|_| MessageError::InvalidRoot)?;
+        create_real_directory(&root).map_err(|_| MessageError::InvalidRoot)?;
+        create_real_directory(&assets).map_err(|_| MessageError::InvalidRoot)?;
         let store = Self {
             database: root.join(DATABASE_NAME),
             assets,
@@ -184,7 +189,7 @@ impl MessageStore {
         result
     }
 
-    fn recover_assets(&self) -> Result<(), MessageError> {
+    pub(crate) fn recover_assets(&self) -> Result<(), MessageError> {
         self.ensure_assets_directory()?;
         let mut connection = self.connect()?;
         let transaction = connection
@@ -265,7 +270,10 @@ impl MessageStore {
         }
         let path = self.assets.join(asset_name);
         let metadata = fs::symlink_metadata(&path).map_err(|_| MessageError::CorruptData)?;
-        if !metadata.file_type().is_file() || metadata.len() != byte_length {
+        if !metadata.file_type().is_file()
+            || is_reparse_point(&metadata)
+            || metadata.len() != byte_length
+        {
             return Err(MessageError::CorruptData);
         }
         let bytes = fs::read(path).map_err(|_| MessageError::CorruptData)?;
@@ -276,6 +284,11 @@ impl MessageStore {
     }
 
     fn ensure_assets_directory(&self) -> Result<(), MessageError> {
+        let root = self.database.parent().ok_or(MessageError::InvalidRoot)?;
+        let root_metadata = fs::symlink_metadata(root).map_err(|_| MessageError::InvalidRoot)?;
+        if !root_metadata.file_type().is_dir() || is_reparse_point(&root_metadata) {
+            return Err(MessageError::InvalidRoot);
+        }
         let metadata = fs::symlink_metadata(&self.assets).map_err(|_| MessageError::InvalidRoot)?;
         if !metadata.file_type().is_dir() || is_reparse_point(&metadata) {
             return Err(MessageError::InvalidRoot);
@@ -328,6 +341,12 @@ impl MessageStore {
     }
 
     pub(crate) fn connect(&self) -> Result<Connection, MessageError> {
+        self.ensure_assets_directory()?;
+        match fs::symlink_metadata(&self.database) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(metadata) if metadata.file_type().is_file() && !is_reparse_point(&metadata) => {}
+            _ => return Err(MessageError::InvalidRoot),
+        }
         let connection = Connection::open(&self.database).map_err(|_| MessageError::Database)?;
         connection
             .pragma_update(None, "foreign_keys", true)
@@ -344,17 +363,4 @@ fn is_asset_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-#[cfg(windows)]
-fn is_reparse_point(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse_point(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
 }

@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
+  captureLocalDataState,
+  applyBookLocalStateDeletion,
+  deleteBooksSerially,
   filterLibraryBooks,
   groupLibraryBooksByProgress,
   openFailureMessage,
   readStartedBookIds,
+  replaceLocalDataState,
   removeBooksSerially,
+  validateLocalDataState,
+  withoutBookLocalState,
+  type BrowserState,
   type LibraryBook,
 } from "../src/library.ts";
 
@@ -27,6 +35,55 @@ function progress(id: string) {
       start: { section: "chapter-1", offset: 12 },
     }),
   });
+}
+
+function annotation(id: string, contentVersion: string, selectedText = "x") {
+  return {
+    id,
+    type: "highlight",
+    note: "",
+    createdAt: 1,
+    updatedAt: 1,
+    deletedAt: null,
+    sourceAnchor: {
+      schema: 1,
+      canonicalLocator: JSON.stringify({
+        schema: 1,
+        contentVersion,
+        start: { section: "chapter-1", offset: 0 },
+        end: { section: "chapter-1", offset: selectedText.length },
+      }),
+      selectedText,
+      prefixText: "",
+      suffixText: "",
+      contentHash: createHash("sha256").update(selectedText).digest("hex"),
+    },
+  };
+}
+
+function application(theme = "system") {
+  return JSON.stringify({
+    schema: 1,
+    preferences: {
+      theme,
+      brightness: 100,
+      fontSize: 19,
+      fontFamily: "book",
+      density: "standard",
+    },
+  });
+}
+
+function bookPreferences() {
+  return {
+    sourceStyles: true,
+    userStylesEnabled: true,
+    readingMode: "paged",
+    pageMargin: "standard",
+    paragraphIndent: "none",
+    paragraphSpacing: "book",
+    styleModules: [],
+  };
 }
 
 test("library projection searches locally and keeps deterministic views", () => {
@@ -115,3 +172,421 @@ test("first-open errors keep deterministic format guidance", () => {
   );
   assert.equal(openFailureMessage({ code: "encrypted-epub" }), "无法打开书籍");
 });
+
+test("local data capture is production-only, sorted, and strict", () => {
+  const storage = new TestStorage([
+    ["unrelated", "keep"],
+    ["atha.reader.probe.application.v1", application()],
+    [`atha.reader.progress.${ids[0].slice(0, 16)}.v1`, progress(ids[0])],
+    ["atha.reader.application.v1", application()],
+  ]);
+  const state = captureLocalDataState(storage);
+  assert.deepEqual(state.records.map((record) => record.key), [
+    "atha.reader.application.v1",
+    `atha.reader.progress.${ids[0].slice(0, 16)}.v1`,
+  ]);
+  assert.equal(validateLocalDataState(state), true);
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{ key: "atha.reader.probe.application.v1", value: "{}" }],
+    }),
+    false,
+  );
+  for (const [key, value] of [
+    [
+      "atha.reader.statistics.v1",
+      { schema: 1, days: [{ date: "2026-02-30", durationMs: 1 }], books: [] },
+    ],
+    [
+      `atha.reader.book.${ids[0].slice(0, 16)}.v1`,
+      {
+        schema: 1,
+        bookmarks: [],
+        preferences: {
+          ...bookPreferences(),
+          styleModules: [{ id: "unsafe", name: "Unsafe", group: "", enabled: true, css: "@import 'x';" }],
+        },
+      },
+    ],
+    [
+      `atha.reader.annotations.${ids[0].slice(0, 16)}.v1`,
+      { schema: 1, items: [{ id: "partial" }] },
+    ],
+  ] as const) {
+    assert.equal(
+      validateLocalDataState({ schema: 1, records: [{ key, value: JSON.stringify(value) }] }),
+      false,
+    );
+  }
+
+  storage.setItem("atha.reader.application.v1", "{}");
+  assert.throws(() => captureLocalDataState(storage), /invalid-browser-state/);
+});
+
+test("browser state replacement rolls storage back after a write failure", () => {
+  const previous = application("light");
+  const next = application("dark");
+  const storage = new TestStorage([
+    ["atha.reader.application.v1", previous],
+    ["unrelated", "keep"],
+  ]);
+  storage.failValue = next;
+  assert.throws(
+    () =>
+      replaceLocalDataState(
+        { schema: 1, records: [{ key: "atha.reader.application.v1", value: next }] },
+        storage,
+      ),
+    /browser-state-write-failed/,
+  );
+  assert.equal(storage.getItem("atha.reader.application.v1"), previous);
+  assert.equal(storage.getItem("unrelated"), "keep");
+});
+
+test("physical book deletion removes only that book's browser state", async () => {
+  const statistics = {
+    schema: 1,
+    days: [{ date: "2026-08-13", durationMs: 60_000 }],
+    books: [
+      { contentVersion: ids[0], durationMs: 60_000, lastReadDate: "2026-08-13" },
+      { contentVersion: ids[1], durationMs: 30_000, lastReadDate: "2026-08-12" },
+    ],
+  };
+  const state: BrowserState = {
+    schema: 1,
+    records: [
+      { key: "atha.reader.application.v1", value: application() },
+      {
+        key: `atha.reader.book.${ids[0].slice(0, 16)}.v1`,
+        value: JSON.stringify({ schema: 1, bookmarks: [], preferences: bookPreferences() }),
+      },
+      {
+        key: `atha.reader.progress.${ids[0].slice(0, 16)}.v1`,
+        value: progress(ids[0]),
+      },
+      { key: "atha.reader.statistics.v1", value: JSON.stringify(statistics) },
+    ],
+  };
+  const next = withoutBookLocalState(state, ids[0]);
+  assert.deepEqual(next.records.map((record) => record.key), [
+    "atha.reader.application.v1",
+    "atha.reader.statistics.v1",
+  ]);
+  assert.deepEqual(JSON.parse(next.records[1].value), {
+    ...statistics,
+    books: [statistics.books[1]],
+  });
+
+  const storage = new TestStorage(state.records.map((record) => [record.key, record.value]));
+  const calls: string[] = [];
+  const result = await deleteBooksSerially(
+    [ids[0]],
+    storage,
+    async (id) => {
+      calls.push(id);
+      return { id };
+    },
+    async (id) => {
+      return books.filter((book) => book.id !== id);
+    },
+  );
+  assert.deepEqual(calls, [ids[0]]);
+  assert.deepEqual(result.removedIds, [ids[0]]);
+  assert.equal(storage.getItem(`atha.reader.progress.${ids[0].slice(0, 16)}.v1`), null);
+  assert.equal(storage.getItem("atha.reader.application.v1"), state.records[0].value);
+
+  const failedStorage = new TestStorage(state.records.map((record) => [record.key, record.value]));
+  const failed = await deleteBooksSerially(
+    [ids[0]],
+    failedStorage,
+    async () => {
+      throw new Error("delete-failed");
+    },
+  );
+  assert.deepEqual(failed.removedIds, []);
+  assert.deepEqual(failed.remainingIds, [ids[0]]);
+  assert.equal(failed.pendingRecovery, true);
+  assert.equal(
+    failedStorage.getItem(`atha.reader.progress.${ids[0].slice(0, 16)}.v1`),
+    state.records[2].value,
+  );
+
+  const writeFailedStorage = new TestStorage(
+    state.records.map((record) => [record.key, record.value]),
+  );
+  writeFailedStorage.failValue = JSON.stringify({
+    ...statistics,
+    books: [statistics.books[1]],
+  });
+  let finished = false;
+  const writeFailed = await deleteBooksSerially(
+    [ids[0]],
+    writeFailedStorage,
+    async (id) => ({ id }),
+    async () => {
+      finished = true;
+      return [];
+    },
+  );
+  assert.deepEqual(writeFailed.remainingIds, [ids[0]]);
+  assert.equal(writeFailed.pendingRecovery, true);
+  assert.equal(finished, false);
+  assert.equal(
+    writeFailedStorage.getItem(`atha.reader.progress.${ids[0].slice(0, 16)}.v1`),
+    null,
+  );
+});
+
+test("book deletion handles path keys without rewriting unrelated state", () => {
+  const pathKey = "0123456789abcdef";
+  const otherKey = ids[1].slice(0, 16);
+  const pathProgress = progress(ids[0]);
+  const storage = new TestStorage([
+    ["atha.reader.application.v1", application()],
+    [`atha.reader.book.${pathKey}.v1`, JSON.stringify({ schema: 1, bookmarks: [], preferences: bookPreferences() })],
+    [`atha.reader.progress.${pathKey}.v1`, pathProgress],
+    [`atha.reader.progress.${otherKey}.v1`, progress(ids[1])],
+  ]);
+  const before = captureLocalDataState(storage);
+  applyBookLocalStateDeletion(before, ids[0], storage);
+  assert.equal(storage.getItem(`atha.reader.book.${pathKey}.v1`), null);
+  assert.equal(storage.getItem(`atha.reader.progress.${pathKey}.v1`), null);
+  assert.equal(storage.getItem(`atha.reader.progress.${otherKey}.v1`), progress(ids[1]));
+  assert.equal(storage.getItem("atha.reader.application.v1"), application());
+
+  applyBookLocalStateDeletion(captureLocalDataState(storage), ids[0], storage);
+  assert.equal(storage.getItem(`atha.reader.progress.${otherKey}.v1`), progress(ids[1]));
+
+  const bookmark = (id: string, contentVersion: string) => ({
+    id,
+    label: id,
+    locator: JSON.stringify({
+      schema: 1,
+      contentVersion,
+      start: { section: "chapter-1", offset: 1 },
+    }),
+  });
+  const currentPreferences = { ...bookPreferences(), pageMargin: "wide" };
+  const oldAnnotation = annotation("old-note", ids[0]);
+  const currentAnnotation = annotation("current-note", ids[1]);
+  const reusedPath = new TestStorage([
+    [`atha.reader.book.${pathKey}.v1`, JSON.stringify({
+      schema: 1,
+      bookmarks: [bookmark("old", ids[0]), bookmark("current", ids[1])],
+      preferences: currentPreferences,
+    })],
+    [`atha.reader.annotations.${pathKey}.v1`, JSON.stringify({
+      schema: 1,
+      items: [oldAnnotation, currentAnnotation],
+    })],
+    [`atha.reader.progress.${pathKey}.v1`, progress(ids[1])],
+  ]);
+  applyBookLocalStateDeletion(captureLocalDataState(reusedPath), ids[1], reusedPath);
+  assert.equal(reusedPath.getItem(`atha.reader.progress.${pathKey}.v1`), null);
+  assert.deepEqual(JSON.parse(reusedPath.getItem(`atha.reader.book.${pathKey}.v1`)!), {
+    schema: 1,
+    bookmarks: [bookmark("old", ids[0])],
+    preferences: bookPreferences(),
+  });
+  assert.deepEqual(
+    JSON.parse(reusedPath.getItem(`atha.reader.annotations.${pathKey}.v1`)!).items,
+    [oldAnnotation],
+  );
+  applyBookLocalStateDeletion(captureLocalDataState(reusedPath), ids[0], reusedPath);
+  assert.equal(reusedPath.getItem(`atha.reader.book.${pathKey}.v1`), null);
+  assert.equal(reusedPath.getItem(`atha.reader.annotations.${pathKey}.v1`), null);
+
+  const staleOnly = new TestStorage([
+    [`atha.reader.book.${pathKey}.v1`, JSON.stringify({
+      schema: 1,
+      bookmarks: [bookmark("stale", ids[0])],
+      preferences: currentPreferences,
+    })],
+    [`atha.reader.progress.${pathKey}.v1`, progress(ids[1])],
+  ]);
+  applyBookLocalStateDeletion(captureLocalDataState(staleOnly), ids[0], staleOnly);
+  assert.deepEqual(JSON.parse(staleOnly.getItem(`atha.reader.book.${pathKey}.v1`)!), {
+    schema: 1,
+    bookmarks: [],
+    preferences: currentPreferences,
+  });
+  assert.equal(staleOnly.getItem(`atha.reader.progress.${pathKey}.v1`), progress(ids[1]));
+});
+
+test("local data accepts owner-sized CJK annotations and rejects syntactically empty CSS", () => {
+  const selectedText = "中".repeat(4_096);
+  const contentHash = createHash("sha256").update(selectedText).digest("hex");
+  const items = Array.from({ length: 300 }, (_, index) => ({
+    id: `large-${index}`,
+    type: "highlight",
+    note: "",
+    createdAt: index + 1,
+    updatedAt: index + 1,
+    deletedAt: null,
+    sourceAnchor: {
+      schema: 1,
+      canonicalLocator: JSON.stringify({
+        schema: 1,
+        contentVersion: ids[0],
+        start: { section: "chapter-1", offset: 0 },
+        end: { section: "chapter-1", offset: 4_096 },
+      }),
+      selectedText,
+      prefixText: "",
+      suffixText: "",
+      contentHash,
+    },
+  }));
+  const annotations = JSON.stringify({ schema: 1, items });
+  assert.ok(annotations.length < 2 * 1024 * 1024);
+  assert.ok(new TextEncoder().encode(annotations).byteLength > 2 * 1024 * 1024);
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{ key: `atha.reader.annotations.${ids[0].slice(0, 16)}.v1`, value: annotations }],
+    }),
+    true,
+  );
+  const pathKey = "0123456789abcdef";
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{ key: `atha.reader.progress.${pathKey}.v1`, value: progress(ids[0]) }],
+    }),
+    true,
+  );
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [
+        { key: `atha.reader.annotations.${pathKey}.v1`, value: annotations },
+        { key: `atha.reader.progress.${pathKey}.v1`, value: progress(ids[1]) },
+      ],
+    }),
+    true,
+  );
+  const oversizedLegacyCss = `/*${"汉".repeat(22_000)}*/`;
+  assert.ok(new TextEncoder().encode(oversizedLegacyCss).byteLength > 65_536);
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{
+        key: `atha.reader.book.${pathKey}.v1`,
+        value: JSON.stringify({
+          schema: 1,
+          bookmarks: [],
+          preferences: {
+            ...bookPreferences(),
+            styleModules: [{
+              id: "legacy-user-css",
+              name: "原有自定义样式",
+              group: "迁移",
+              enabled: false,
+              css: oversizedLegacyCss,
+            }],
+          },
+        }),
+      }],
+    }),
+    true,
+  );
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{
+        key: `atha.reader.book.${pathKey}.v1`,
+        value: JSON.stringify({
+          schema: 1,
+          bookmarks: [],
+          preferences: {
+            sourceStyles: true,
+            userStylesEnabled: true,
+            userStylesheet: oversizedLegacyCss,
+          },
+        }),
+      }],
+    }),
+    true,
+  );
+  const dictionary = JSON.stringify({ schema: 1, dictionaryId: "", fontScale: 1 }).padEnd(1_025, " ");
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{ key: "atha.reader.dictionary.preferences.v1", value: dictionary }],
+    }),
+    false,
+  );
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{
+        key: `atha.reader.book.${ids[0].slice(0, 16)}.v1`,
+        value: JSON.stringify({
+          schema: 1,
+          bookmarks: [],
+          preferences: {
+            ...bookPreferences(),
+            styleModules: [{ id: "invalid", name: "Invalid", group: "", enabled: true, css: "not css" }],
+          },
+        }),
+      }],
+    }),
+    false,
+  );
+  const oversizedBook = JSON.stringify({
+    schema: 1,
+    bookmarks: [],
+    preferences: {
+      ...bookPreferences(),
+      styleModules: Array.from({ length: 17 }, (_, index) => ({
+        id: `module-${index}`,
+        name: `Module ${index}`,
+        group: "",
+        enabled: false,
+        css: "x".repeat(32_768),
+      })),
+    },
+  });
+  assert.ok(oversizedBook.length > 524_288);
+  assert.equal(
+    validateLocalDataState({
+      schema: 1,
+      records: [{ key: `atha.reader.book.${ids[0].slice(0, 16)}.v1`, value: oversizedBook }],
+    }),
+    false,
+  );
+});
+
+class TestStorage {
+  readonly values = new Map<string, string>();
+  failValue: string | null = null;
+
+  constructor(entries: Iterable<readonly [string, string]> = []) {
+    for (const [key, value] of entries) this.values.set(key, value);
+  }
+
+  get length() {
+    return this.values.size;
+  }
+
+  key(index: number) {
+    return [...this.values.keys()][index] ?? null;
+  }
+
+  getItem(key: string) {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string) {
+    if (value === this.failValue) {
+      this.failValue = null;
+      throw new Error("quota");
+    }
+    this.values.set(key, value);
+  }
+
+  removeItem(key: string) {
+    this.values.delete(key);
+  }
+}

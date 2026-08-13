@@ -2,20 +2,28 @@
   import {
     Archive,
     ArchiveRestore,
+    BookMinus,
     BookOpen,
     Circle,
     CircleCheck,
     Ellipsis,
+    HardDrive,
     Plus,
     Search,
     Trash2,
+    X,
   } from "@lucide/svelte";
   import { onMount } from "svelte";
 
   import {
-    backupMessages,
+    backupLocalData,
+    abortLocalDataRestore,
+    captureLocalDataState,
+    commitLocalDataRestore,
     coverUrl,
+    deleteBooksSerially,
     filterLibraryBooks,
+    finishLocalDataRestore,
     groupLibraryBooksByProgress,
     importBooks,
     importFailureMessage,
@@ -23,11 +31,19 @@
     listBooks,
     openBook,
     openFailureMessage,
+    pendingLocalDataRestore,
+    prepareLocalDataRestore,
     readStartedBookIds,
+    readStorageUsage,
+    replaceLocalDataState,
+    resumeBookDataDeletions,
     removeBooksSerially,
-    restoreMessages,
+    rollbackLocalDataRestore,
+    validateLocalDataState,
     type LibraryBook,
     type LibraryViewMode,
+    type BrowserState,
+    type StorageUsage,
   } from "../library";
 
   const views: { value: LibraryViewMode; label: string }[] = [
@@ -49,6 +65,8 @@
   let failedCovers = new Set<string>();
   let startedBookIds: Set<string> | null = new Set();
   let managementMenu: HTMLDetailsElement | undefined;
+  let storageDialog: HTMLDialogElement | undefined;
+  let storageUsage: StorageUsage | null = null;
   let visibleBooks: LibraryBook[] = [];
   let progressGroups = { reading: [] as LibraryBook[], unread: [] as LibraryBook[] };
   let allVisibleSelected = false;
@@ -81,10 +99,15 @@
     syncSafeAreaInsets();
     globalThis.addEventListener("atha-safe-area-change", syncSafeAreaInsets);
     try {
+      if (libraryAvailable) {
+        await resumePendingRestore();
+        await resumeBookDataDeletions();
+      }
       books = await listBooks();
       refreshProgress();
     } catch {
-      status = "无法读取本地书架。";
+      status = "无法完成本地资料恢复，请重新启动 Atha 后重试。";
+      busy = true;
     } finally {
       loading = false;
     }
@@ -135,15 +158,18 @@
     if (busy) return;
     closeManagementMenu();
     if (!libraryAvailable) {
-      status = "请在 Atha 桌面应用中备份消息。";
+      status = "请在 Atha 应用中备份资料库。";
       return;
     }
     busy = true;
-    status = "正在创建消息备份…";
+    status = "正在创建资料库备份…";
     try {
-      status = (await backupMessages()) ? "消息备份已保存。" : "已取消消息备份。";
-    } catch {
-      status = "无法创建消息备份。";
+      const browserState = captureLocalDataState();
+      status = (await backupLocalData(browserState)) ? "资料库备份已保存。" : "已取消备份。";
+    } catch (error) {
+      status = String(error).includes("missing-book-source")
+        ? "有书籍缺少原文件，请重新选择原文件加入书架后再备份。"
+        : "无法创建资料库备份，请检查本地数据和可用空间。";
     } finally {
       busy = false;
     }
@@ -153,22 +179,108 @@
     if (busy) return;
     closeManagementMenu();
     if (!libraryAvailable) {
-      status = "请在 Atha 桌面应用中恢复消息。";
+      status = "请在 Atha 应用中恢复资料库。";
       return;
     }
-    if (!confirm("恢复会替换全部标注、笔记和对话。请先关闭其他 Atha 窗口。继续？")) {
-      status = "已取消消息恢复。";
+    if (!confirm("恢复会替换当前书架、书籍文件、词典、消息和阅读状态。继续？")) {
+      status = "已取消恢复。";
       return;
     }
     busy = true;
-    status = "正在验证并恢复消息备份…";
+    workLabel = "正在验证资料库…";
+    let token = "";
+    let previous: BrowserState | null = null;
     try {
-      status = (await restoreMessages()) ? "消息已从备份恢复。" : "已取消消息恢复。";
+      previous = captureLocalDataState();
+      const prepared = await prepareLocalDataRestore(previous);
+      if (!prepared) {
+        status = "已取消恢复。";
+        return;
+      }
+      token = prepared.token;
+      if (!validateLocalDataState(prepared.browserState)) {
+        const invalidToken = token;
+        token = "";
+        await abortLocalDataRestore(invalidToken);
+        throw new Error("invalid-browser-state");
+      }
+      workLabel = "正在恢复资料库…";
+      const committed = await commitLocalDataRestore(token);
+      replaceLocalDataState(committed.browserState);
+      await finishLocalDataRestore(token);
+      token = "";
+      books = await listBooks();
+      failedCovers = new Set();
+      refreshProgress();
+      cancelSelection();
+      status = "资料库已恢复。";
     } catch {
-      status = "无法恢复：备份无效、数据库正被占用，或文件不可读取。";
+      if (token) {
+        try {
+          const rollback = await rollbackLocalDataRestore(token);
+          replaceLocalDataState(rollback);
+          await finishLocalDataRestore(token);
+          token = "";
+        } catch {
+          // The durable pending restore will be retried on the next launch.
+        }
+      }
+      status = "无法恢复：备份无效、数据正被占用，或本机存储不可写。";
+    } finally {
+      workLabel = "";
+      busy = false;
+    }
+  }
+
+  async function resumePendingRestore(): Promise<boolean> {
+    const pending = await pendingLocalDataRestore();
+    if (!pending) return false;
+    if (pending.rollback) {
+      replaceLocalDataState(pending.browserState);
+      await finishLocalDataRestore(pending.token);
+      status = "上次恢复未完成，已还原原资料库。";
+      return true;
+    }
+    try {
+      if (!validateLocalDataState(pending.browserState)) throw new Error("invalid-browser-state");
+      replaceLocalDataState(pending.browserState);
+      await finishLocalDataRestore(pending.token);
+      status = "资料库恢复已完成。";
+    } catch {
+      const rollback = await rollbackLocalDataRestore(pending.token);
+      replaceLocalDataState(rollback);
+      await finishLocalDataRestore(pending.token);
+      status = "上次恢复未完成，已还原原资料库。";
+    }
+    return true;
+  }
+
+  async function showStorage() {
+    if (busy) return;
+    closeManagementMenu();
+    busy = true;
+    status = "";
+    try {
+      storageUsage = await readStorageUsage(captureLocalDataState());
+      storageDialog?.showModal();
+    } catch {
+      status = "无法读取本地存储占用。";
     } finally {
       busy = false;
     }
+  }
+
+  function formatBytes(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes / 1024;
+    let unit = units[0];
+    for (const next of units.slice(1)) {
+      if (value < 1024) break;
+      value /= 1024;
+      unit = next;
+    }
+    return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${unit}`;
   }
 
   async function read(book: LibraryBook) {
@@ -248,6 +360,37 @@
     }
   }
 
+  async function deleteSelected() {
+    const ids = books.filter((book) => selectedIds.has(book.id)).map((book) => book.id);
+    if (busy || ids.length === 0) return;
+    if (!confirm(`删除已选 ${ids.length} 本书的本地文件和阅读状态？笔记、标注消息和原文快照会保留。`)) {
+      return;
+    }
+    busy = true;
+    status = "正在删除本地数据…";
+    try {
+      const result = await deleteBooksSerially(ids);
+      if (result.pendingRecovery) {
+        status = "删除尚未确认，Atha 将重新载入并继续恢复。";
+        location.reload();
+        return;
+      }
+      if (result.books) books = result.books;
+      selectedIds = new Set(result.remainingIds);
+      refreshProgress();
+      if (result.remainingIds.length === 0) {
+        selecting = false;
+        status = `已删除 ${result.removedIds.length} 本书的本地数据。`;
+      } else if (result.removedIds.length === 0) {
+        status = `无法删除已选的 ${result.remainingIds.length} 本书。`;
+      } else {
+        status = `已删除 ${result.removedIds.length} 本，另 ${result.remainingIds.length} 本未能删除。`;
+      }
+    } finally {
+      busy = false;
+    }
+  }
+
   function markCoverFailed(id: string) {
     failedCovers = new Set(failedCovers).add(id);
   }
@@ -266,7 +409,7 @@
       disabled={busy}
     >
       <span class="library-cover">
-        {#if book.hasCover && !failedCovers.has(book.id)}
+        {#if book.prepared && book.hasCover && !failedCovers.has(book.id)}
           <img
             src={coverUrl(book.id)}
             alt="书籍封面"
@@ -321,11 +464,15 @@
         <div class="library-management-menu" aria-label="书架管理">
           <button type="button" onclick={backup} disabled={busy}>
             <Archive aria-hidden="true" />
-            <span>备份消息</span>
+            <span>备份资料库</span>
           </button>
           <button type="button" onclick={restore} disabled={busy}>
             <ArchiveRestore aria-hidden="true" />
-            <span>恢复消息</span>
+            <span>恢复资料库</span>
+          </button>
+          <button type="button" onclick={showStorage} disabled={busy}>
+            <HardDrive aria-hidden="true" />
+            <span>存储占用</span>
           </button>
         </div>
       </details>
@@ -438,12 +585,38 @@
 
   {#if selecting}
     <div class="library-selection-bar" role="toolbar" aria-label="批量操作">
-      <button type="button" onclick={removeSelected} disabled={busy || selectedIds.size === 0}>
-        <Trash2 aria-hidden="true" />
+      <button class="library-remove-action" type="button" onclick={removeSelected} disabled={busy || selectedIds.size === 0}>
+        <BookMinus aria-hidden="true" />
         <span>移出书架</span>
+      </button>
+      <button class="library-delete-action" type="button" onclick={deleteSelected} disabled={busy || selectedIds.size === 0}>
+        <Trash2 aria-hidden="true" />
+        <span>删除本地数据</span>
       </button>
     </div>
   {/if}
+
+  <dialog class="library-storage-dialog" bind:this={storageDialog} onclose={() => (storageUsage = null)}>
+    <header>
+      <div>
+        <HardDrive aria-hidden="true" />
+        <h2>存储占用</h2>
+      </div>
+      <button type="button" aria-label="关闭存储占用" title="关闭" onclick={() => storageDialog?.close()}>
+        <X aria-hidden="true" />
+      </button>
+    </header>
+    {#if storageUsage}
+      <dl>
+        <div><dt>书籍文件</dt><dd>{formatBytes(storageUsage.booksBytes)}</dd></div>
+        <div><dt>阅读缓存</dt><dd>{formatBytes(storageUsage.cacheBytes)}</dd></div>
+        <div><dt>消息与快照</dt><dd>{formatBytes(storageUsage.messagesBytes)}</dd></div>
+        <div><dt>离线词典</dt><dd>{formatBytes(storageUsage.dictionariesBytes)}</dd></div>
+        <div><dt>阅读设置</dt><dd>{formatBytes(storageUsage.preferencesBytes)}</dd></div>
+        <div class="library-storage-total"><dt>合计</dt><dd>{formatBytes(storageUsage.totalBytes)}</dd></div>
+      </dl>
+    {/if}
+  </dialog>
 
   {#if status}
     <p class="library-status" role="status">{status}</p>

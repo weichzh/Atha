@@ -11,6 +11,7 @@
 | `.cargo/config.toml` | RsProxy sparse index 与 Cargo 网络配置 | 已配置 |
 | `Cargo.toml`、`Cargo.lock` | 正式 virtual workspace 与锁文件 | M3 已验证 |
 | `backend/atha-backend/` | 正式后端库、书根资源边界、全部已支持书籍格式、本地离线词典、书架、消息数据库与阅读遥测校验 | Linux 本地已验证 |
+| `backend/atha-backend/src/local_data.rs` | schema 1 `.atha-data`、严格制品校验、跨书架 / 书源 / 词典 / MessageStore 的 staging、恢复日志、占用统计与启动恢复 | Linux 本地已验证 |
 | `backend/atha-backend/src/reader/dictionary.rs` | MDict v2 与经典 Kindle MOBI6 词典的事务导入、HUFF 累计偏移 sidecar、固定格式分派、精确查词、MDD 范围读取和安全富文本 / 纯文本双投影 | 私有英文输出与公共安全矩阵已验证 |
 | `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；离线搜索 / 进度 / 排序 / 批量选择书架、应用壳、能力清单、受控协议和打包配置 | Linux / Windows / Android 已验证 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry、固定字段平台日志与 protocol adapter | 已验证 |
@@ -19,7 +20,8 @@
 | `reader/app/src-tauri/src/runtime_diagnostics.rs` | Windows Recorder 与移动端交互诊断的目标平台选择；固定事件 token 由 backend 统一校验 | Windows / Android 已验证 |
 | `reader/app/src-tauri/gen/android/`、`tauri.android.conf.json` | Tauri 官方 Android 工程、min SDK 26、compile / target SDK 36、manifest、应用图标与暗色系统栏样式 | x86_64 debug 已验证 |
 | `reader/app/src-tauri/src/message_commands.rs` | 消息 IPC adapter；统一阅读路由校验、DTO 转发、稳定错误和原生导出 dialog | 已验证 |
-| `reader/app/src-tauri/src/message_maintenance.rs` | 全库消息维护 IPC adapter；统一资料库根路由、备份 / 恢复 dialog 与 blocking worker | 已验证 |
+| `reader/app/src-tauri/src/message_maintenance.rs` | 资料库根路由校验与兼容 MessageStore-only 维护 IPC adapter | 已验证 |
+| `reader/app/src-tauri/src/local_data_maintenance.rs` | 完整本地数据 picker、恢复确认、存储统计、blocking worker 与固定字段日志 adapter | Linux GUI 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、分页 / 原生滚动、Readest 风格设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 与 PCT-AL10 自动验收已通过 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、分页、诊断、benchmark 和页面组合入口 | 已实现 |
@@ -44,6 +46,7 @@
 | `scripts/check-text-source.ps1` | Markdown / TXT backend、前端与保留桌面 host 的本地格式回归；私有 TXT 仅由显式环境变量 opt-in | 本地已验证 |
 | `scripts/check-fb2-source.ps1` | 动态原创 FB2 / FBZ、安全矩阵、workspace / Svelte / Tauri build 与 opt-in Linux Tauri WebDriver 纵切 | Linux GUI 已通过 |
 | `scripts/check-dictionary-source.sh` | 公共行为、私有 MDict / Kindle 兼容与 release benchmark 的 Bash 入口 | Linux 私有英文输出与性能已验证 |
+| `scripts/check-local-data.sh` | 完整资料库往返、恶意输入、恢复日志、两级删除、前端状态事务和可选私有词典往返门 | Linux 本地已验证 |
 | `scripts/check-message-reading.ps1` | 正式消息集成测试、前端检查/build、Tauri/host 测试及 command / permission 映射 | 已通过 |
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/check-cbz-source.ps1` | 动态原创 CBZ、workspace Rust 检查、导入形状与 Windows WebView2 import probe | Windows 已通过 |
@@ -63,6 +66,7 @@
 - 离线词典的 MDict v2 固定使用带 `lzo` 的 `mdict-rs 0.1.4`，经典 Kindle 只保留一个有界具体 parser；`dom_query` 复用为释义语义白名单和兼容纯文本投影，没有新增 sanitizer、provider registry、词典 factory、网络或句柄缓存；
 - 根锁文件包含正式后端导入、消息数据库、`fs2 0.4.3`、Tauri 官方日志 / 文件系统插件与固定版本的 Wry/Tao 承载依赖，P0 继续保留独立锁文件；
 - `backend::messages::MessageStore` 拥有 schema v2 只向前迁移、WAL、外键、FTS5、事务 Outbox、内容寻址资产、旧标注迁移、自包含交换导出及 schema 1 完整备份 / 恢复；维护锁通过 `fs2::FileExt` 实现，因为 Rust 1.97.1 的标准库 Unix 文件锁在 Android 返回 `Unsupported`。
+- `backend::local_data::LocalData` 复用现有 ZIP、SHA-256、MessageStore Online Backup 和 `fs2`，协调 schema 1 `.atha-data`、8 GiB / 100,000 文件预算、同文件系统目录切换与 prepared / publishing / committed 恢复；应用根及全部 owned root 必须是实际目录，symlink、junction 与其他 reparse point 在备份、恢复或删除前拒绝；没有增加依赖、repository、provider 或同步 schema。
 
 ### HTML 阅读切片
 
@@ -72,7 +76,7 @@
 - `reader::epub` 的公开 interface 是 `import_epub`：`mod` 编排内容哈希、原子缓存和本地图片的有界原生宽高提示，`package` 拥有 container、OPF2 / OPF3 spine、navigation 和 schema 1 计划；OPF2 只从 `spine@toc` 找到有界 NCX，把嵌套 `navPoint` 按前序拍平成现有 TOC，OPF3 继续使用唯一 XHTML nav；v2 / v3 / v4 / v5 完整缓存都可读，有耐久源时把 v2 至 v4 按需升级到 v5；XHTML 由 OPF media type 判定，同一源字节跨路径得到相同缓存根和状态键；
 - `reader::cbz::import_cbz` 只接受 JPEG / PNG，按路径分段自然序生成一图一 XHTML section 与声明资源；`ComicInfo.xml` 只投影 `Title`、`Writer` 与唯一有效 `FrontCover`，`imagesize` 校验类型和像素预算，WebView decode 失败时显示可导航坏页；
 - `reader::fb2::import_fb2` 以 `quick-xml` 两遍有界流式解析直接 FB2 或单根成员 FBZ，投影 metadata、正文 / notes sections、目录、内部链接和 JPEG / PNG 图片；DTD、处理指令、外链、源 stylesheet、主动内容、未知正文元素、损坏引用与资源越界稳定拒绝；
-- `reader::library::LocalLibrary` 以允许列表扩展名严格分派 EPUB / CBZ / FB2 / FBZ / MOBI / AZW / AZW3 / Markdown / TXT；Android content URI 由 Tauri PathPlugin 读取显示文件名后保留同一允许列表后缀，不从 URI 或正文猜格式。EPUB / CBZ 保持裸 SHA-256 身份，FB2 / FBZ 共享解包 XML 的固定格式域身份，Kindle 三后缀共享一个格式域，Markdown / TXT 用不同固定格式域隔离相同字节；加入书架只把源写入 `SourceBooks` 并登记，首次打开在 blocking worker 中调用既有 importer，同进程只发布一次准备结果；后续按精确 marker、元数据和 manifest 声明验证并复用 `ImportedBooks`，不完整缓存从任一同身份耐久后缀重建；再次登记复用同身份健康源，以验证后的 staging 原子覆盖身份异常源，并重建损坏记录；每书一份兼容 JSON 提供 `list`、`stage`、`import`、`open`、`cover` 和 `remove`，移除记录不删除耐久源、导入缓存或阅读状态；
+- `reader::library::LocalLibrary` 以允许列表扩展名严格分派 EPUB / CBZ / FB2 / FBZ / MOBI / AZW / AZW3 / Markdown / TXT；Android content URI 由 Tauri PathPlugin 读取显示文件名后保留同一允许列表后缀，不从 URI 或正文猜格式。EPUB / CBZ 保持裸 SHA-256 身份，FB2 / FBZ 共享解包 XML 的固定格式域身份，Kindle 三后缀共享一个格式域，Markdown / TXT 用不同固定格式域隔离相同字节；加入书架只把源写入 `SourceBooks` 并登记，首次打开在 blocking worker 中调用既有 importer，同进程只发布一次准备结果；后续按精确 marker、元数据和 manifest 声明验证并复用 `ImportedBooks`，不完整缓存从任一同身份耐久后缀重建；再次登记复用同身份健康源，以验证后的 staging 原子覆盖身份异常源，并重建损坏记录；每书一份兼容 JSON 提供 `list`、`stage`、`import`、`open`、`cover` 和 `remove`，移出只删记录；删除本地数据使用耐久 intent 的 `prepare` / `pending` / `resume` / `finish` 协议，按内容版本过滤复用路径键中的书签和标注、清理当前书偏好，幂等移除同身份耐久源和缓存，并在浏览器状态确认后才清除 intent；
 - `reader::dictionary::LocalDictionaries` 在独立 `Dictionaries` 目录按固定格式域事务导入 MDX / MDD 或经典 MOBI6，MDict 复用成熟 reader，Kindle 以稀疏索引只读目标 records；精确查询结果同时生成兼容纯文本和固定元素白名单富文本，来源脚本、样式、属性与资源均不进入结果，Tauri 日志不记录路径、查询、词头、释义或资源；
 - 词典结果页以齿轮进入同一面板的设置子页；浏览器本地 schema 1 设置只保存 64 位当前词典 ID 和 Readest 对照的 85%、100%、115%、130%、150%、175% 释义字号，重载恢复且不改变正文偏好。损坏设置或已移除来源回退到首个可用本地词典，存储失败只影响持久化，不阻止本次查词；
 - `atha`、`atha-book` 与 `atha-cover` 自定义协议只提供应用资源、当前书根与已登记封面；Windows / Android 使用 `https://*.localhost`，Linux 使用 `<scheme>://localhost`。同书校验比较协议与 host，不能依赖 custom scheme 恒为 `null` 的 `URL.origin`；导航、新窗口、下载与外部请求默认拒绝；
@@ -87,13 +91,13 @@
 - Windows 窗口与壳层控件使用系统逻辑像素，默认内部尺寸为 430 × 820，最小为 360 × 640，可自由调整和最大化；窗口变化经 Navigation 队列恢复 Locator；
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
 - Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、应用壳和对话 DOM，书架只对受限 DTO 做本地标题 / 作者搜索、严格进度二态、稳定排序与显式批量选择；Vite 直接拼接十九份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle，CodeMirror chunk 只在进入 CSS 模块页后加载；
-- Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle、固定字段平台日志与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目和 `prepared`，不返回源路径或内容，首次打开在 blocking worker 准备；`message_commands` adapter 统一校验当前阅读窗口并转发受限 DTO，`message_maintenance` adapter 只接受资料库根路由并在 blocking worker 执行全库备份 / 恢复；动态 `atha-book` 在共享读锁内读取当前书根，不再逐资源深拷贝，独立 `atha-cover` 只读提供已登记封面；阅读器遥测复用后端白名单解析和共享 diagnostics，reader failure 额外携带固定阶段；官方日志插件只持久化 `atha::` target 的启动、书架、消息内部存储故障、reader 首稳 / ready / failure 和 protocol 5xx 固定字段事件，1 MiB 轮转并保留三份，不记录书籍或消息内容；预期输入、并发和安全拒绝保持静默；消息专项检查精确核对 handler 注册与 permission；
+- Tauri `lib.rs` 组合状态、窗口、protocol、lifecycle、固定字段平台日志与 command 注册，并暂时保留 library、telemetry 与 protocol adapter；书架 command 只向可信壳暴露受限书目和 `prepared`，不返回源路径或内容，首次打开在 blocking worker 准备；`message_commands` adapter 统一校验当前阅读窗口并转发受限 DTO，兼容 `message_maintenance` 和完整资料库 `local_data_maintenance` 都只接受资料库根路由；后者复用 Picker / SAF bridge，在 blocking worker 执行备份、恢复和占用统计。动态 `atha-book` 在共享读锁内读取当前书根，不再逐资源深拷贝，独立 `atha-cover` 只读提供已登记封面；阅读器遥测复用后端白名单解析和共享 diagnostics，reader failure 额外携带固定阶段；官方日志插件只持久化 `atha::` target 的启动、书架、消息或本地数据内部存储故障、reader 首稳 / ready / failure 和 protocol 5xx 固定字段事件，1 MiB 轮转并保留三份，不记录路径、书籍、浏览器状态或消息内容；预期输入、并发和安全拒绝保持静默；专项检查精确核对 handler 注册与 permission；
 
 ### Linux Tauri 目标
 
 - 日常 GUI 使用当前 GNOME Wayland 会话中的 Tauri / WebKitGTK，不启动 Android 模拟器；发布前与移动端专项验收才恢复 Android 门禁；
 - Linux 应用根是 `tauri://localhost`，书根与封面分别是 `atha-book://localhost`、`atha-cover://localhost`；平台常量统一供路由、维护 command、前端资源和 CSP 使用；
-- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。当前 Bash 门覆盖完整导入诊断、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。门禁请求 W3C touch Actions 并核对可信事件，但当前 WebKitGTK 实际报告 `mouse`，因此它不是实体触摸证据。
+- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。当前 Bash 门覆盖 360 / 1000 宽度的资料库管理、存储分类和两级删除布局，以及完整导入诊断、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。门禁请求 W3C touch Actions 并核对可信事件，但当前 WebKitGTK 实际报告 `mouse`，因此它不是实体触摸证据。
 
 ### Android EPUB 纵切
 

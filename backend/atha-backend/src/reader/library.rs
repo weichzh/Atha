@@ -1,6 +1,7 @@
 //! Content-addressed local library over imported reader roots.
 
 use std::{
+    collections::HashSet,
     error::Error,
     fmt, fs,
     fs::{File, OpenOptions},
@@ -10,6 +11,8 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+
+use crate::{create_real_directory, is_reparse_point};
 
 use super::{
     cbz,
@@ -24,6 +27,10 @@ const MAX_TITLE_CHARS: usize = 512;
 const MAX_AUTHOR_CHARS: usize = 512;
 const MAX_AUTHORS: usize = 16;
 const BOOK_METADATA: &str = ".atha-book.json";
+pub(crate) const BOOK_EXTENSIONS: [&str; 10] = [
+    "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
+];
+const DELETE_PREFIX: &str = ".atha-delete-";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +41,12 @@ pub struct LibraryBook {
     pub has_cover: bool,
     pub imported_at: u64,
     pub prepared: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingBookDeletion {
+    pub id: String,
 }
 
 #[derive(Debug)]
@@ -79,12 +92,15 @@ struct ImportedSource {
     cover_path: Option<String>,
 }
 
+type DurableLibraryState = (Vec<StoredBook>, Vec<(PathBuf, String)>);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibraryError {
     InvalidRoot,
     InvalidBookId,
     UnknownBook,
     CorruptRecord,
+    MissingSource,
     MissingCover,
     ReadFailed,
     WriteFailed,
@@ -103,14 +119,17 @@ impl LocalLibrary {
         let records = root.join("Library");
         let imports = root.join("ImportedBooks");
         let sources = root.join("SourceBooks");
-        fs::create_dir_all(&records).map_err(|_| LibraryError::InvalidRoot)?;
-        fs::create_dir_all(&imports).map_err(|_| LibraryError::InvalidRoot)?;
-        fs::create_dir_all(&sources).map_err(|_| LibraryError::InvalidRoot)?;
-        Ok(Self {
+        create_real_directory(root).map_err(|_| LibraryError::InvalidRoot)?;
+        create_real_directory(&records).map_err(|_| LibraryError::InvalidRoot)?;
+        create_real_directory(&imports).map_err(|_| LibraryError::InvalidRoot)?;
+        create_real_directory(&sources).map_err(|_| LibraryError::InvalidRoot)?;
+        let library = Self {
             records,
             imports,
             sources,
-        })
+        };
+        library.recover_deletions()?;
+        Ok(library)
     }
 
     pub fn list(&self) -> Result<Vec<LibraryBook>, LibraryError> {
@@ -326,6 +345,133 @@ impl LocalLibrary {
         fs::remove_file(path).map_err(|_| LibraryError::WriteFailed)
     }
 
+    pub fn prepare_local_data_deletion(
+        &self,
+        id: &str,
+    ) -> Result<PendingBookDeletion, LibraryError> {
+        let record = self.record_path(id)?;
+        if !record.is_file() {
+            return Err(LibraryError::UnknownBook);
+        }
+        let intent = self.deletion_intent(id)?;
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&intent)
+            .and_then(|file| file.sync_all())
+            .map_err(|_| LibraryError::WriteFailed)?;
+        sync_directory(self.records.parent().ok_or(LibraryError::InvalidRoot)?)?;
+        self.remove_book_files(id)?;
+        Ok(PendingBookDeletion { id: id.into() })
+    }
+
+    pub fn finish_local_data_deletion(&self, id: &str) -> Result<(), LibraryError> {
+        let intent = self.deletion_intent(id)?;
+        if !intent.is_file() {
+            return Err(LibraryError::UnknownBook);
+        }
+        self.remove_book_files(id)?;
+        remove_path_if_exists(&intent)?;
+        sync_directory(self.records.parent().ok_or(LibraryError::InvalidRoot)?)
+    }
+
+    pub fn pending_local_data_deletions(&self) -> Result<Vec<PendingBookDeletion>, LibraryError> {
+        let mut deletions = Vec::new();
+        let root = self.records.parent().ok_or(LibraryError::InvalidRoot)?;
+        for entry in fs::read_dir(root).map_err(|_| LibraryError::ReadFailed)? {
+            let entry = entry.map_err(|_| LibraryError::ReadFailed)?;
+            let name = entry.file_name();
+            let Some(id) = name
+                .to_str()
+                .and_then(|value| value.strip_prefix(DELETE_PREFIX))
+            else {
+                continue;
+            };
+            let metadata =
+                fs::symlink_metadata(entry.path()).map_err(|_| LibraryError::ReadFailed)?;
+            if !metadata.file_type().is_file() || !valid_id(id) {
+                return Err(LibraryError::CorruptRecord);
+            }
+            deletions.push(PendingBookDeletion { id: id.into() });
+        }
+        deletions.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(deletions)
+    }
+
+    pub fn resume_local_data_deletion(&self, id: &str) -> Result<(), LibraryError> {
+        if !self.deletion_intent(id)?.is_file() {
+            return Err(LibraryError::UnknownBook);
+        }
+        self.remove_book_files(id)
+    }
+
+    pub(crate) fn write_backup_state(
+        &self,
+        target_root: impl AsRef<Path>,
+    ) -> Result<(), LibraryError> {
+        let target_records = target_root.as_ref().join("Library");
+        let target_sources = target_root.as_ref().join("SourceBooks");
+        fs::create_dir(&target_records).map_err(|_| LibraryError::WriteFailed)?;
+        fs::create_dir(&target_sources).map_err(|_| LibraryError::WriteFailed)?;
+        let (mut records, sources) = self.durable_state()?;
+        let source_ids = sources
+            .iter()
+            .filter_map(|(_, name)| name.split_once('.').map(|(id, _)| id))
+            .collect::<HashSet<_>>();
+        if records
+            .iter()
+            .any(|record| !source_ids.contains(record.id.as_str()))
+        {
+            return Err(LibraryError::MissingSource);
+        }
+        for record in &mut records {
+            if let Some(imported) =
+                read_imported_metadata(&self.imports.join(&record.id), &record.id)
+            {
+                if let Some(title) = imported
+                    .title
+                    .as_deref()
+                    .map(normalize_text)
+                    .filter(|value| !value.is_empty())
+                {
+                    record.title = truncate(&title, MAX_TITLE_CHARS);
+                }
+                let authors = imported
+                    .authors
+                    .iter()
+                    .map(|value| truncate(&normalize_text(value), MAX_AUTHOR_CHARS))
+                    .filter(|value| !value.is_empty())
+                    .take(MAX_AUTHORS)
+                    .collect::<Vec<_>>();
+                if !authors.is_empty() {
+                    record.authors = authors;
+                }
+                record.cover_path = imported.cover_path;
+            }
+            write_record(&target_records.join(format!("{}.json", record.id)), record)?;
+        }
+        for (source, name) in sources {
+            fs::copy(source, target_sources.join(name)).map_err(|_| LibraryError::WriteFailed)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_durable_state(&self) -> Result<(), LibraryError> {
+        let (records, sources) = self.durable_state()?;
+        let source_ids = sources
+            .iter()
+            .filter_map(|(_, name)| name.split_once('.').map(|(id, _)| id))
+            .collect::<HashSet<_>>();
+        if records
+            .iter()
+            .any(|record| !source_ids.contains(record.id.as_str()))
+        {
+            Err(LibraryError::MissingSource)
+        } else {
+            Ok(())
+        }
+    }
+
     fn record_path(&self, id: &str) -> Result<PathBuf, LibraryError> {
         if !valid_id(id) {
             return Err(LibraryError::InvalidBookId);
@@ -349,15 +495,132 @@ impl LocalLibrary {
             .filter(|name| self.sources.join(name).is_file())
             .cloned()
             .collect::<Vec<_>>();
-        for extension in [
-            "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
-        ] {
+        for extension in BOOK_EXTENSIONS {
             let name = format!("{}.{extension}", record.id);
             if self.sources.join(&name).is_file() && !paths.contains(&name) {
                 paths.push(name);
             }
         }
         paths
+    }
+
+    fn source_paths_for_id(&self, id: &str) -> Vec<PathBuf> {
+        BOOK_EXTENSIONS
+            .into_iter()
+            .map(|extension| self.sources.join(format!("{id}.{extension}")))
+            .filter(|path| path.is_file())
+            .collect()
+    }
+
+    fn deletion_intent(&self, id: &str) -> Result<PathBuf, LibraryError> {
+        if !valid_id(id) {
+            return Err(LibraryError::InvalidBookId);
+        }
+        Ok(self
+            .records
+            .parent()
+            .ok_or(LibraryError::InvalidRoot)?
+            .join(format!("{DELETE_PREFIX}{id}")))
+    }
+
+    fn recover_deletions(&self) -> Result<(), LibraryError> {
+        let root = self.records.parent().ok_or(LibraryError::InvalidRoot)?;
+        for entry in fs::read_dir(root).map_err(|_| LibraryError::InvalidRoot)? {
+            let entry = entry.map_err(|_| LibraryError::InvalidRoot)?;
+            let metadata =
+                fs::symlink_metadata(entry.path()).map_err(|_| LibraryError::InvalidRoot)?;
+            let name = entry.file_name();
+            let Some(id) = name
+                .to_str()
+                .and_then(|name| name.strip_prefix(DELETE_PREFIX))
+            else {
+                continue;
+            };
+            if !metadata.file_type().is_file() || !valid_id(id) {
+                return Err(LibraryError::InvalidRoot);
+            }
+            self.remove_book_files(id)?;
+        }
+        Ok(())
+    }
+
+    fn remove_book_files(&self, id: &str) -> Result<(), LibraryError> {
+        self.ensure_roots()?;
+        remove_path_if_exists(&self.imports.join(id))?;
+        for path in self.source_paths_for_id(id) {
+            remove_path_if_exists(&path)?;
+        }
+        remove_path_if_exists(&self.record_path(id)?)?;
+        sync_directory(&self.imports)?;
+        sync_directory(&self.sources)?;
+        sync_directory(&self.records)
+    }
+
+    fn durable_state(&self) -> Result<DurableLibraryState, LibraryError> {
+        self.ensure_roots()?;
+        let mut records = Vec::new();
+        for entry in fs::read_dir(&self.records).map_err(|_| LibraryError::ReadFailed)? {
+            let entry = entry.map_err(|_| LibraryError::ReadFailed)?;
+            let metadata =
+                fs::symlink_metadata(entry.path()).map_err(|_| LibraryError::ReadFailed)?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or(LibraryError::CorruptRecord)?
+                .to_owned();
+            if record_temporary(&name) {
+                continue;
+            }
+            if !metadata.file_type().is_file()
+                || is_reparse_point(&metadata)
+                || entry
+                    .path()
+                    .extension()
+                    .is_none_or(|extension| extension != "json")
+            {
+                return Err(LibraryError::CorruptRecord);
+            }
+            records.push(read_record(&entry.path())?);
+        }
+        records.sort_by(|left, right| left.id.cmp(&right.id));
+
+        let mut sources = Vec::new();
+        for entry in fs::read_dir(&self.sources).map_err(|_| LibraryError::ReadFailed)? {
+            let entry = entry.map_err(|_| LibraryError::ReadFailed)?;
+            let metadata =
+                fs::symlink_metadata(entry.path()).map_err(|_| LibraryError::ReadFailed)?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or(LibraryError::CorruptRecord)?
+                .to_owned();
+            if name.starts_with(".source.staging-") {
+                continue;
+            }
+            let (id, extension) = name.rsplit_once('.').ok_or(LibraryError::CorruptRecord)?;
+            if !metadata.file_type().is_file()
+                || is_reparse_point(&metadata)
+                || !valid_source_path(&name, id)
+                || source_identity(&entry.path(), extension)? != id
+            {
+                return Err(LibraryError::CorruptRecord);
+            }
+            sources.push((entry.path(), name));
+        }
+        sources.sort_by(|left, right| left.1.cmp(&right.1));
+        Ok((records, sources))
+    }
+
+    fn ensure_roots(&self) -> Result<(), LibraryError> {
+        let root = self.records.parent().ok_or(LibraryError::InvalidRoot)?;
+        if [root, &self.records, &self.imports, &self.sources]
+            .into_iter()
+            .all(real_directory)
+        {
+            Ok(())
+        } else {
+            Err(LibraryError::InvalidRoot)
+        }
     }
 }
 
@@ -382,10 +645,11 @@ impl StoredBook {
             authors: imported_authors
                 .filter(|authors| !authors.is_empty())
                 .unwrap_or_else(|| self.authors.clone()),
-            has_cover: imported
-                .and_then(|metadata| metadata.cover_path.as_ref())
-                .or(self.cover_path.as_ref())
-                .is_some(),
+            has_cover: prepared
+                && imported
+                    .and_then(|metadata| metadata.cover_path.as_ref())
+                    .or(self.cover_path.as_ref())
+                    .is_some(),
             imported_at: self.imported_at,
             prepared,
         }
@@ -399,6 +663,7 @@ impl LibraryError {
             Self::InvalidBookId => "invalid-library-book-id",
             Self::UnknownBook => "unknown-library-book",
             Self::CorruptRecord => "corrupt-library-record",
+            Self::MissingSource => "missing-library-source",
             Self::MissingCover => "missing-library-cover",
             Self::ReadFailed => "library-read-failed",
             Self::WriteFailed => "library-write-failed",
@@ -508,9 +773,7 @@ fn source_extension(source: &Path) -> Result<&str, LibraryError> {
         .extension()
         .and_then(|value| value.to_str())
         .ok_or(LibraryError::UnsupportedSource)?;
-    for supported in [
-        "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
-    ] {
+    for supported in BOOK_EXTENSIONS {
         if extension.eq_ignore_ascii_case(supported) {
             return Ok(supported);
         }
@@ -559,6 +822,37 @@ fn copy_source(source: &Path, sources: &Path, extension: &str) -> Result<PathBuf
     Ok(temporary)
 }
 
+fn remove_path_if_exists(path: &Path) -> Result<(), LibraryError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() && !is_reparse_point(&metadata) => {
+            fs::remove_dir_all(path).map_err(|_| LibraryError::WriteFailed)
+        }
+        Ok(metadata) if metadata.file_type().is_file() => {
+            fs::remove_file(path).map_err(|_| LibraryError::WriteFailed)
+        }
+        Ok(_) => Err(LibraryError::WriteFailed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(LibraryError::WriteFailed),
+    }
+}
+
+fn real_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_type().is_dir() && !is_reparse_point(&metadata))
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<(), LibraryError> {
+    File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| LibraryError::WriteFailed)
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> Result<(), LibraryError> {
+    Ok(())
+}
+
 fn open_root(path: &Path) -> Result<BookRoot, LibraryError> {
     let root = BookRoot::new(path).map_err(LibraryError::Resource)?;
     root.read(&format!("/{READER_MANIFEST}"))
@@ -567,8 +861,15 @@ fn open_root(path: &Path) -> Result<BookRoot, LibraryError> {
 }
 
 fn read_imported_metadata(path: &Path, id: &str) -> Option<ImportedMetadata> {
-    let metadata: ImportedMetadata =
-        serde_json::from_slice(&fs::read(path.join(BOOK_METADATA)).ok()?).ok()?;
+    if !real_directory(path) {
+        return None;
+    }
+    let metadata_path = path.join(BOOK_METADATA);
+    let file = fs::symlink_metadata(&metadata_path).ok()?;
+    if !file.file_type().is_file() || is_reparse_point(&file) {
+        return None;
+    }
+    let metadata: ImportedMetadata = serde_json::from_slice(&fs::read(metadata_path).ok()?).ok()?;
     if metadata.schema != 1
         || metadata.content_version != id
         || metadata
@@ -599,7 +900,14 @@ fn has_import_marker(path: &Path, id: &str) -> bool {
 }
 
 fn read_record(path: &Path) -> Result<StoredBook, LibraryError> {
-    if !path.is_file() {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            LibraryError::UnknownBook
+        } else {
+            LibraryError::ReadFailed
+        }
+    })?;
+    if !metadata.file_type().is_file() || is_reparse_point(&metadata) {
         return Err(LibraryError::UnknownBook);
     }
     let record = serde_json::from_slice::<StoredBook>(
@@ -663,6 +971,16 @@ fn valid_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn record_temporary(name: &str) -> bool {
+    let Some((id, suffix)) = name.split_once('.') else {
+        return false;
+    };
+    valid_id(id)
+        && suffix
+            .strip_suffix(".tmp")
+            .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn valid_source_path(value: &str, id: &str) -> bool {

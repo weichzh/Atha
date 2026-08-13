@@ -200,7 +200,7 @@ summary {
   margin: 0;
   font-size: 27px;
   font-weight: 680;
-  letter-spacing: -0.035em;
+  letter-spacing: 0;
 }
 
 .library-primary-actions {
@@ -330,7 +330,7 @@ summary {
   margin: 0 0 9px;
   font-size: 22px;
   font-weight: 650;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
 }
 
 .library-empty p,
@@ -509,6 +509,7 @@ summary {
   min-height: 76px;
   align-items: center;
   justify-content: center;
+  gap: 24px;
   padding: 6px 20px max(6px, var(--safe-area-bottom));
   border-top: 1px solid var(--library-border);
   background: #1b1b1d;
@@ -523,15 +524,110 @@ summary {
   gap: 3px;
   border: 0;
   background: transparent;
-  color: #ef4c52;
+  color: #c8c8cc;
   cursor: pointer;
   font-size: 13px;
+}
+
+.library-selection-bar .library-delete-action {
+  color: #ef5b61;
 }
 
 .library-selection-bar svg {
   width: 25px;
   height: 25px;
   stroke-width: 1.7;
+}
+
+.library-storage-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  box-sizing: border-box;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--library-border);
+  border-radius: 8px;
+  background: var(--library-surface-raised);
+  color: var(--library-text);
+  box-shadow: 0 18px 54px rgb(0 0 0 / 58%);
+}
+
+.library-storage-dialog::backdrop {
+  background: rgb(0 0 0 / 68%);
+}
+
+.library-storage-dialog > header {
+  display: flex;
+  min-height: 60px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px 0 18px;
+  border-bottom: 1px solid var(--library-border);
+}
+
+.library-storage-dialog > header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.library-storage-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.library-storage-dialog header svg {
+  width: 20px;
+  height: 20px;
+}
+
+.library-storage-dialog header button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--library-muted);
+  cursor: pointer;
+}
+
+.library-storage-dialog dl {
+  margin: 0;
+  padding: 8px 18px 14px;
+}
+
+.library-storage-dialog dl > div {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+}
+
+.library-storage-dialog dt,
+.library-storage-dialog dd {
+  margin: 0;
+  font-size: 14px;
+}
+
+.library-storage-dialog dd {
+  color: var(--library-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-storage-dialog .library-storage-total {
+  border-bottom: 0;
+  color: var(--library-text);
+  font-weight: 650;
+}
+
+.library-storage-dialog .library-storage-total dd {
+  color: inherit;
 }
 
 .library-status {
@@ -642,6 +738,14 @@ summary {
 
   .library-grid {
     column-gap: 12px;
+  }
+
+  .library-selection-bar {
+    gap: 4px;
+  }
+
+  .library-selection-bar button {
+    min-width: 132px;
   }
 }
 

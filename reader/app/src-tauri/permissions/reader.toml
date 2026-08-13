@@ -5,14 +5,25 @@ commands.allow = ["reader_event"]
 
 [[permission]]
 identifier = "allow-library-commands"
-description = "允许资料库主窗口管理本地书架及消息存储备份与恢复。"
+description = "允许资料库主窗口管理本地书架及完整本地数据生命周期。"
 commands.allow = [
   "list_library_books",
   "import_library_books",
   "open_library_book",
   "remove_library_book",
+  "delete_library_book_data",
+  "pending_library_book_deletions",
+  "finish_library_book_deletion",
   "backup_message_store",
   "restore_message_store",
+  "backup_local_data",
+  "prepare_local_data_restore",
+  "commit_local_data_restore",
+  "pending_local_data_restore",
+  "finish_local_data_restore",
+  "rollback_local_data_restore",
+  "abort_local_data_restore",
+  "local_data_storage_usage",
 ]
 
 [[permission]]

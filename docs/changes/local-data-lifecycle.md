@@ -6,7 +6,7 @@ description: 完整本地数据备份、恢复、占用统计和书籍两级删�
 
 ## Status
 
-accepted
+implemented
 
 用户已批准按路线图进入实现；本 change 将“完整本地数据生命周期”收敛为一个可独立验收的纵向切片。
 
@@ -77,14 +77,23 @@ present
 
 ## Result
 
-待实施。
+- 新增 schema 1 `.atha-data` 协调层，备份规范化书架、全部耐久书源、离线词典、嵌套 MessageStore 完整备份和生产浏览器状态；导入缓存、Picker cache 与日志保持排除；
+- 备份、恢复和物理删除统一拒绝 owned root 的 symlink、junction 与其他 reparse point；缺少耐久书源的旧书架项返回专用错误并提示重新选择原文件补齐；
+- 恢复在正式写入前完成严格 ZIP、哈希、书源身份、词典、MessageStore 和浏览器状态校验；prepared 日志、publishing / commit marker、目录 rollback 与 WebView 确认把启动中止收敛到恢复前或恢复后；
+- 书架新增完整备份 / 恢复、六类存储占用和两级批量操作；删除本地数据清理本书源、缓存和浏览器状态，同时保留 Message、Anchor、Snapshot 与其他书 / 全局状态；
+- 新命令已进入既有主窗口 capability，Linux 真壳在 360 / 1000 宽度验证管理菜单、存储分类和两个删除动作，无横向溢出或文字裁切。
 
 ## Review
 
-待实施后独立评审。
+实现以 `fd9b6a4` 为固定点完成 Standards 与 Spec 两轴独立审查，最终均为 zero findings。复审期间已收紧部分发布后的恢复中止、路径复用时的浏览器偏好归属、owned root reparse point、缺失耐久书源、孤立消息附件和严格导入临时文件残留处理，并补齐相应回归检查与契约说明。
 
 ## Evidence And Residual Risks
 
-- 当前批准只建立本地 / Linux 证据；PCT-AL10 的 SAF 资料库往返与自然触摸不在本 change 的完成声明内。
+- `bash scripts/check-local-data.sh --private-fixtures fixtures/local` 通过：公开 backend 12 项、backend 恢复 / 并发 unit 3 项、MessageStore 21 项、前端状态 9 项、Svelte check / build、Tauri 12 项，以及私有 MDict 内容无输出完整往返；
+- `cargo clippy --locked -p atha-backend -p atha-reader-app --all-targets -- -D warnings` 通过；
+- `bash scripts/check-reader-linux.sh` 正式配置通过：WebKitGTK 0.55.1、13 个场景、每场景 5 次预热 / 20 次测量，共 220 个有效测量；资料库管理与 AppLog 隐私通过。该证据是 Linux Tauri 真壳，不是实体触摸；
+- 当前批准只建立本地 / Linux 证据；PCT-AL10 的 SAF 资料库往返与自然触摸不在本 change 的完成声明内；
 - 外部 Android provider 在最终 content URI 复制失败时仍可能留下不完整外部文档；应用自身 Picker cache 会清理，但不能替 provider 删除残留。
-- schema 1 不加密、不签名，也不跨版本猜测迁移；用户必须自行保护备份文件。
+- schema 1 不加密、不签名，也不跨版本猜测迁移；用户必须自行保护备份文件；
+- 只有旧导入缓存而没有 `SourceBooks` 耐久原文件的兼容书架仍可继续阅读，但不能生成“完整资料库”制品；重新选择原文件加入书架即可按同一内容身份补齐后备份；
+- 书籍删除先耐久写入按书 intent，再幂等删除书架记录、耐久书源和导入缓存；浏览器状态清理并确认后才移除 intent，异常中止由下次书架启动继续完成。

@@ -14,6 +14,8 @@ use encoding_rs::WINDOWS_1252;
 use mdict_rs::{MddFile, MdxFile};
 use serde::{Deserialize, Serialize};
 
+use crate::{create_real_directory, is_reparse_point};
+
 use super::source::{SourceDigest, SourceError, hash_file};
 
 const DICTIONARY_SCHEMA: u8 = 1;
@@ -709,8 +711,10 @@ fn pdb_title(header: &[u8]) -> Option<String> {
 
 impl LocalDictionaries {
     pub fn open(data_root: impl AsRef<Path>) -> Result<Self, DictionaryError> {
-        let root = data_root.as_ref().join("Dictionaries");
-        fs::create_dir_all(&root).map_err(|_| DictionaryError::InvalidRoot)?;
+        let data_root = data_root.as_ref();
+        let root = data_root.join("Dictionaries");
+        create_real_directory(data_root).map_err(|_| DictionaryError::InvalidRoot)?;
+        create_real_directory(&root).map_err(|_| DictionaryError::InvalidRoot)?;
         Ok(Self { root })
     }
 
@@ -846,9 +850,157 @@ impl LocalDictionaries {
     }
 
     pub fn remove(&self, dictionary_id: &str) -> Result<(), DictionaryError> {
+        self.ensure_root()?;
         let directory = self.directory(dictionary_id)?;
+        if !real_directory(&directory) {
+            return Err(DictionaryError::CorruptRecord);
+        }
         read_record(&directory)?;
         fs::remove_dir_all(directory).map_err(|_| DictionaryError::WriteFailed)
+    }
+
+    pub(crate) fn write_backup_state(
+        &self,
+        target_root: impl AsRef<Path>,
+    ) -> Result<(), DictionaryError> {
+        let files = self.durable_files()?;
+        let target = target_root.as_ref().join("Dictionaries");
+        fs::create_dir(&target).map_err(|_| DictionaryError::WriteFailed)?;
+        for (source, id, name) in files {
+            let directory = target.join(id);
+            if !directory.exists() {
+                fs::create_dir(&directory).map_err(|_| DictionaryError::WriteFailed)?;
+            }
+            fs::copy(source, directory.join(name)).map_err(|_| DictionaryError::WriteFailed)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_durable_state(&self) -> Result<(), DictionaryError> {
+        self.durable_files().map(|_| ())
+    }
+
+    fn durable_files(&self) -> Result<Vec<(PathBuf, String, String)>, DictionaryError> {
+        self.ensure_root()?;
+        let mut files = Vec::new();
+        for entry in fs::read_dir(&self.root).map_err(|_| DictionaryError::ReadFailed)? {
+            let entry = entry.map_err(|_| DictionaryError::ReadFailed)?;
+            let metadata =
+                fs::symlink_metadata(entry.path()).map_err(|_| DictionaryError::ReadFailed)?;
+            let id = entry
+                .file_name()
+                .to_str()
+                .ok_or(DictionaryError::CorruptRecord)?
+                .to_owned();
+            if id.starts_with(".staging-") {
+                continue;
+            }
+            if !metadata.file_type().is_dir() || is_reparse_point(&metadata) || !valid_id(&id) {
+                return Err(DictionaryError::CorruptRecord);
+            }
+            let directory = entry.path();
+            let record = read_record(&directory)?;
+            let expected = match record.format {
+                DictionaryFormat::Mdict => {
+                    let mut names = vec![RECORD_FILE.to_owned(), MDX_FILE.to_owned()];
+                    names.extend((0..record.resource_count).map(resource_name));
+                    let mdx_hash = hash_file(
+                        &directory.join(MDX_FILE),
+                        MDICT_PART_IDENTITY_DOMAIN,
+                        MAX_DICTIONARY_BYTES,
+                    )
+                    .map_err(source_error)?;
+                    let mut resource_hashes = Vec::with_capacity(record.resource_count);
+                    let mdx = MdxFile::open(directory.join(MDX_FILE)).map_err(map_mdict_error)?;
+                    if mdx.len() != record.entry_count {
+                        return Err(DictionaryError::CorruptRecord);
+                    }
+                    for index in 0..record.resource_count {
+                        let path = directory.join(resource_name(index));
+                        MddFile::open(&path).map_err(map_mdict_error)?;
+                        resource_hashes.push(
+                            hash_file(&path, MDICT_PART_IDENTITY_DOMAIN, MAX_DICTIONARY_BYTES)
+                                .map_err(source_error)?,
+                        );
+                    }
+                    if mdict_identity(&mdx_hash, resource_hashes)? != record.id {
+                        return Err(DictionaryError::CorruptRecord);
+                    }
+                    names
+                }
+                DictionaryFormat::KindleMobi6 => {
+                    let mut digest =
+                        SourceDigest::new(KINDLE_IDENTITY_DOMAIN, MAX_DICTIONARY_BYTES);
+                    digest.update(b"mobi\0").map_err(source_error)?;
+                    let mut source = File::open(directory.join(KINDLE_FILE))
+                        .map_err(|_| DictionaryError::CorruptSource)?;
+                    let mut buffer = [0_u8; 64 * 1024];
+                    loop {
+                        let read = source
+                            .read(&mut buffer)
+                            .map_err(|_| DictionaryError::CorruptSource)?;
+                        if read == 0 {
+                            break;
+                        }
+                        digest.update(&buffer[..read]).map_err(source_error)?;
+                    }
+                    if digest.finish() != record.id {
+                        return Err(DictionaryError::CorruptRecord);
+                    }
+                    let dictionary = KindleDictionary::open_imported(&directory.join(KINDLE_FILE))?;
+                    if dictionary.entry_count != record.entry_count || record.resource_count != 0 {
+                        return Err(DictionaryError::CorruptRecord);
+                    }
+                    vec![
+                        RECORD_FILE.to_owned(),
+                        KINDLE_FILE.to_owned(),
+                        KINDLE_OFFSETS_FILE.to_owned(),
+                    ]
+                }
+            };
+            let mut actual = Vec::new();
+            let mut source_bytes = 0_u64;
+            for file in fs::read_dir(&directory).map_err(|_| DictionaryError::ReadFailed)? {
+                let file = file.map_err(|_| DictionaryError::ReadFailed)?;
+                let metadata =
+                    fs::symlink_metadata(file.path()).map_err(|_| DictionaryError::ReadFailed)?;
+                let name = file
+                    .file_name()
+                    .to_str()
+                    .ok_or(DictionaryError::CorruptRecord)?
+                    .to_owned();
+                if !metadata.file_type().is_file() || is_reparse_point(&metadata) {
+                    return Err(DictionaryError::CorruptRecord);
+                }
+                if matches!(name.as_str(), MDX_FILE | KINDLE_FILE) || name.starts_with("resource-")
+                {
+                    source_bytes = source_bytes
+                        .checked_add(metadata.len())
+                        .ok_or(DictionaryError::SourceTooLarge)?;
+                    if source_bytes > MAX_DICTIONARY_BYTES {
+                        return Err(DictionaryError::SourceTooLarge);
+                    }
+                }
+                actual.push(name.clone());
+                files.push((file.path(), id.clone(), name));
+            }
+            actual.sort();
+            let mut expected = expected;
+            expected.sort();
+            if actual != expected {
+                return Err(DictionaryError::CorruptRecord);
+            }
+        }
+        files.sort_by(|left, right| (&left.1, &left.2).cmp(&(&right.1, &right.2)));
+        Ok(files)
+    }
+
+    fn ensure_root(&self) -> Result<(), DictionaryError> {
+        if self.root.parent().is_some_and(real_directory) && real_directory(&self.root) {
+            Ok(())
+        } else {
+            Err(DictionaryError::InvalidRoot)
+        }
     }
 
     fn import_mdict_staged(
@@ -1267,8 +1419,18 @@ fn copy_source(
 }
 
 fn read_record(directory: &Path) -> Result<StoredDictionary, DictionaryError> {
+    if !real_directory(directory) {
+        return Err(DictionaryError::UnknownDictionary);
+    }
     let path = directory.join(RECORD_FILE);
-    if !path.is_file() {
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            DictionaryError::UnknownDictionary
+        } else {
+            DictionaryError::ReadFailed
+        }
+    })?;
+    if !metadata.file_type().is_file() || is_reparse_point(&metadata) {
         return Err(DictionaryError::UnknownDictionary);
     }
     let record = serde_json::from_slice::<StoredDictionary>(
@@ -1280,6 +1442,11 @@ fn read_record(directory: &Path) -> Result<StoredDictionary, DictionaryError> {
         return Err(DictionaryError::CorruptRecord);
     }
     Ok(record)
+}
+
+fn real_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_type().is_dir() && !is_reparse_point(&metadata))
 }
 
 fn write_record(directory: &Path, record: &StoredDictionary) -> Result<(), DictionaryError> {

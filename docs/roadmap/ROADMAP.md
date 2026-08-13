@@ -20,19 +20,24 @@
 
 未实现的 TTS 假入口已经移除；PCT-AL10 上的词典富文本与设置也已完成同签名覆盖安装后的真实目标自动化复核。
 
-## Now：完整本地数据生命周期
+## Done：完整本地数据生命周期
 
-交付应用级备份与恢复、存储占用，以及“移出书架”和“删除本地数据”的明确语义。备份包含耐久书源、书架、进度、偏好、消息和离线词典，不包含可重建导入缓存、临时文件与日志；恢复先完整校验再原子切换，失败不得破坏当前资料库。
+schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词典、MessageStore 完整备份和生产浏览器状态，并排除导入缓存、临时文件与日志。恢复先完成路径、容量、哈希和各事实所有者的语义校验，再以 staging、rollback、恢复日志和浏览器确认发布；书架同时提供分类占用，以及语义不同的“移出书架”和“删除本地数据”。
 
-先复用现有 `LocalLibrary`、MessageStore 维护包、偏好记录和 Android SAF bridge，不引入同步 schema、provider registry 或第二套数据根。验收必须覆盖成功往返、损坏 / 越界备份拒绝、空间统计一致性、两级删除的数据保留边界和重启恢复。
+公开往返、损坏输入、prepared / publishing / committed 恢复、空间总计、owned root reparse-point 拒绝、两级删除、浏览器状态事务、Linux Tauri 360 / 1000 宽度管理界面和私有词典内容无输出往返已通过。Android 只复用既有 SAF bridge，本阶段没有把 Linux / 本地结果称为 PCT-AL10 资料库验收，也没有引入同步 schema、provider registry 或第二套数据根。
+
+## Now：跨书阅读记忆中心
+
+先把现有 Message、阅读统计和书架投影为最近阅读与全局消息搜索；从结果跳回原书必须验证当前书籍和 Locator，书籍缺失时只展示已存 Snapshot，不伪造可跳转状态。该切片先复用 MessageStore 查询、SourceSnapshot 和现有书架 DTO，不建立新数据库、全文索引、同步模型或独立“知识库”事实。
+
+验收需覆盖有书 / 缺书、当前 / 历史 Anchor、删除墓碑、跨书结果排序、搜索隐私和移动 / 桌面入口；只有当前投影无法满足可测性能时才增加查询或索引。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
 ## Next
 
-1. 跨书阅读记忆中心：最近阅读、全局搜索，以及从消息定位回原书；书籍缺失时保留可读快照，不伪造可跳转状态。
-2. 桌面阅读工作区：宽屏导航、目录 / 搜索 / 消息侧栏和键鼠操作；继续复用同一阅读内核，不建立桌面专用第二套状态。
-3. 日常入口与内部可安装候选：最近阅读、拖放导入、文件关联、列表视图，再建立内部桌面与 Android 安装包门禁。
+1. 桌面阅读工作区：宽屏导航、目录 / 搜索 / 消息侧栏和键鼠操作；继续复用同一阅读内核，不建立桌面专用第二套状态。
+2. 日常入口与内部可安装候选：拖放导入、文件关联、列表视图，再建立内部桌面与 Android 安装包门禁。
 
 ## Later
 
@@ -64,6 +69,7 @@
 | CSS 编辑与模块管理 | 可视排版、按需 CodeMirror 6、实时预览、32 个有界模块、筛选 / 排序 / 批量启停 / JSON 交换、旧状态迁移、失败回退与 Linux 真 GUI 门 | `docs/architecture/READER-CORE.md` |
 | CSS 社区模块边界 | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md` |
 | 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/architecture/READER-CORE.md` |
+| 完整本地数据生命周期 | `.atha-data` 完整备份 / 恢复、恢复日志、分类占用、两级删除和 Linux 真壳管理界面 | `docs/decisions/ADR-0010-local-data-lifecycle.md`、`docs/architecture/READER-CORE.md` |
 | 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 

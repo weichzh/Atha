@@ -5,7 +5,7 @@ use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
-    ReaderRuntime,
+    ReaderRuntime, begin_local_data_operation,
     platform_file::{PickerInput, PickerOutput},
 };
 
@@ -16,6 +16,7 @@ pub(crate) async fn backup_message_store(
     runtime: State<'_, ReaderRuntime>,
 ) -> Result<bool, String> {
     require_library_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     let Some(selected) = app
         .dialog()
         .file()
@@ -53,6 +54,7 @@ pub(crate) async fn restore_message_store(
     runtime: State<'_, ReaderRuntime>,
 ) -> Result<bool, String> {
     require_library_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
     let Some(selected) = app
         .dialog()
         .file()
@@ -96,10 +98,14 @@ fn log_maintenance(operation: &str, result: &Result<(), (&'static str, String)>,
 }
 
 pub(crate) fn is_library_url(url: &str) -> bool {
-    url == crate::TAURI_LIBRARY_PAGE
+    let page = crate::TAURI_LIBRARY_PAGE;
+    url == page
+        || page
+            .strip_suffix('/')
+            .map_or_else(|| url.strip_suffix('/') == Some(page), |root| url == root)
 }
 
-fn require_library_window(window: &WebviewWindow) -> Result<(), String> {
+pub(crate) fn require_library_window(window: &WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|_| "reader-url")?;
     if window.label() == "main" && is_library_url(url.as_str()) {
         Ok(())
@@ -115,6 +121,10 @@ mod tests {
     #[test]
     fn only_library_root_can_run_maintenance_commands() {
         assert!(is_library_url(crate::TAURI_LIBRARY_PAGE));
+        let alternate = crate::TAURI_LIBRARY_PAGE
+            .strip_suffix('/')
+            .map_or_else(|| format!("{}/", crate::TAURI_LIBRARY_PAGE), str::to_owned);
+        assert!(is_library_url(&alternate));
         assert!(!is_library_url(&format!(
             "{}/index.html",
             crate::TAURI_LIBRARY_PAGE.trim_end_matches('/')

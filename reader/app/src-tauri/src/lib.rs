@@ -10,12 +10,13 @@ use std::{
 use std::{env, fs, process};
 
 use atha_backend::{
+    local_data::{LocalData, LocalDataOperationGuard},
     messages::{EditionInput, MessageStore},
     reader::{
         MAX_SOURCE_BYTES, READER_PAGE,
         dictionary::LocalDictionaries,
         epub::READER_MANIFEST,
-        library::{LibraryBook, LibraryError, LocalLibrary},
+        library::{LibraryBook, LibraryError, LocalLibrary, PendingBookDeletion},
         resources::{BookRoot, Resource, ResourceError},
         telemetry::{MetricStage, ReaderEvent, parse_reader_event, safe_event},
     },
@@ -36,6 +37,7 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 mod dictionary_commands;
+mod local_data_maintenance;
 mod message_commands;
 mod message_maintenance;
 mod platform_file;
@@ -69,6 +71,7 @@ struct ReaderRuntime {
     current_edition: RwLock<Option<EditionInput>>,
     dictionaries: LocalDictionaries,
     library: LocalLibrary,
+    local_data: LocalData,
     messages: MessageStore,
 }
 
@@ -253,6 +256,7 @@ fn list_library_books(
     window: WebviewWindow,
     runtime: State<'_, ReaderRuntime>,
 ) -> Result<Vec<LibraryBook>, String> {
+    let _operation = begin_local_data_operation(&runtime)?;
     let started = Instant::now();
     let _ = window.set_title("Atha");
     runtime
@@ -285,6 +289,7 @@ async fn import_library_books(
     if paths.len() > MAX_IMPORT_FILES {
         return Err("invalid-library-import".into());
     }
+    let _operation = begin_local_data_operation(&runtime)?;
     let selected_count = paths.len();
     let started = Instant::now();
     let library = runtime.library.clone();
@@ -360,6 +365,7 @@ async fn open_library_book(
     runtime: State<'_, ReaderRuntime>,
     id: String,
 ) -> Result<ReaderLaunch, String> {
+    let _operation = begin_local_data_operation(&runtime)?;
     let started = Instant::now();
     let library = runtime.library.clone();
     let open_id = id.clone();
@@ -424,6 +430,7 @@ fn remove_library_book(
     runtime: State<'_, ReaderRuntime>,
     id: String,
 ) -> Result<Vec<LibraryBook>, String> {
+    let _operation = begin_local_data_operation(&runtime)?;
     let started = Instant::now();
     runtime
         .library
@@ -433,6 +440,87 @@ fn remove_library_book(
         .library
         .list()
         .map_err(|error| library_command_error("remove", "list", &started, error))
+}
+
+#[tauri::command]
+async fn delete_library_book_data(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    id: String,
+) -> Result<PendingBookDeletion, String> {
+    message_maintenance::require_library_window(&window)?;
+    let _operation = runtime
+        .local_data
+        .deletion_guard()
+        .map_err(|error| error.code().to_owned())?;
+    let started = Instant::now();
+    let library = runtime.library.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let pending = library
+            .prepare_local_data_deletion(&id)
+            .map_err(|error| library_command_error("delete", "data", &started, error))?;
+        Ok(pending)
+    })
+    .await
+    .map_err(|_| "library-delete-task".to_owned())?
+}
+
+#[tauri::command]
+fn pending_library_book_deletions(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+) -> Result<Vec<PendingBookDeletion>, String> {
+    message_maintenance::require_library_window(&window)?;
+    let _operation = runtime
+        .local_data
+        .coordination_guard()
+        .map_err(|error| error.code().to_owned())?;
+    let pending = runtime
+        .library
+        .pending_local_data_deletions()
+        .map_err(|error| library_command_error("delete", "pending", &Instant::now(), error))?;
+    for deletion in &pending {
+        runtime
+            .library
+            .resume_local_data_deletion(&deletion.id)
+            .map_err(|error| library_command_error("delete", "resume", &Instant::now(), error))?;
+    }
+    Ok(pending)
+}
+
+#[tauri::command]
+fn finish_library_book_deletion(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    id: String,
+) -> Result<Vec<LibraryBook>, String> {
+    message_maintenance::require_library_window(&window)?;
+    let _operation = runtime
+        .local_data
+        .coordination_guard()
+        .map_err(|error| error.code().to_owned())?;
+    let started = Instant::now();
+    runtime
+        .library
+        .finish_local_data_deletion(&id)
+        .map_err(|error| library_command_error("delete", "finish", &started, error))?;
+    runtime
+        .library
+        .list()
+        .map_err(|error| library_command_error("delete", "list", &started, error))
+}
+
+pub(crate) fn require_local_data_ready(runtime: &ReaderRuntime) -> Result<(), String> {
+    begin_local_data_operation(runtime).map(|_| ())
+}
+
+pub(crate) fn begin_local_data_operation(
+    runtime: &ReaderRuntime,
+) -> Result<LocalDataOperationGuard, String> {
+    runtime
+        .local_data
+        .operation_guard()
+        .map_err(|error| error.code().to_owned())
 }
 
 fn library_command_error(
@@ -471,7 +559,7 @@ pub fn run() {
 fn try_run() -> Result<(), Box<dyn Error>> {
     let startup = Instant::now();
     #[cfg(windows)]
-    let launch = windows_launch_state(startup)?;
+    let launch = windows_launch_state(startup, recover_windows_local_data()?)?;
     #[cfg(not(windows))]
     let launch = LaunchState {
         book: None,
@@ -483,14 +571,14 @@ fn try_run() -> Result<(), Box<dyn Error>> {
         diagnostics: None,
     };
     let current_book = Arc::new(RwLock::new(launch.book));
-    let app_path = launch.app_path;
-    let window_title = launch.window_title;
-    let launch_mode = launch.mode;
-    let verify_sample = launch.verify_sample;
+    let mut app_path = launch.app_path;
+    let mut window_title = launch.window_title;
+    let mut launch_mode = launch.mode;
+    let mut verify_sample = launch.verify_sample;
     #[cfg(windows)]
     let hold_after_verify = launch.hold_after_verify;
-    let current_edition = launch.edition;
-    let diagnostics = launch.diagnostics;
+    let mut current_edition = launch.edition;
+    let mut diagnostics = launch.diagnostics;
 
     tauri::Builder::default()
         .plugin(
@@ -517,12 +605,23 @@ fn try_run() -> Result<(), Box<dyn Error>> {
             import_library_books,
             open_library_book,
             remove_library_book,
+            delete_library_book_data,
+            pending_library_book_deletions,
+            finish_library_book_deletion,
             dictionary_commands::list_local_dictionaries,
             dictionary_commands::import_local_dictionary,
             dictionary_commands::lookup_local_dictionary,
             dictionary_commands::remove_local_dictionary,
             message_maintenance::backup_message_store,
             message_maintenance::restore_message_store,
+            local_data_maintenance::backup_local_data,
+            local_data_maintenance::prepare_local_data_restore,
+            local_data_maintenance::commit_local_data_restore,
+            local_data_maintenance::pending_local_data_restore,
+            local_data_maintenance::finish_local_data_restore,
+            local_data_maintenance::rollback_local_data_restore,
+            local_data_maintenance::abort_local_data_restore,
+            local_data_maintenance::local_data_storage_usage,
             message_commands::message_roots,
             message_commands::message_edition_context,
             message_commands::message_conversation,
@@ -559,6 +658,36 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                         "event=application_start stage=cache outcome=failed code=picker-cache-cleanup"
                     );
                 }
+                let messages = MessageStore::open(&data_root).inspect_err(|error| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=state outcome=failed code={}",
+                        error.code()
+                    );
+                })?;
+                let local_data = LocalData::open(&data_root).inspect_err(|error| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=state outcome=failed code={}",
+                        error.code()
+                    );
+                })?;
+                local_data.recover(&messages).inspect_err(|error| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=recovery outcome=failed code={}",
+                        error.code()
+                    );
+                })?;
+                let pending_restore = local_data.pending_restore()?.is_some();
+                drop(messages);
+                let messages = MessageStore::open(&data_root).inspect_err(|error| {
+                    log::error!(
+                        target: "atha::startup",
+                        "event=application_start stage=state outcome=failed code={}",
+                        error.code()
+                    );
+                })?;
                 let library = LocalLibrary::open(&data_root).inspect_err(|error| {
                     log::error!(
                         target: "atha::startup",
@@ -573,13 +702,15 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                         error.code()
                     );
                 })?;
-                let messages = MessageStore::open(&data_root).inspect_err(|error| {
-                    log::error!(
-                        target: "atha::startup",
-                        "event=application_start stage=state outcome=failed code={}",
-                        error.code()
-                    );
-                })?;
+                if pending_restore || !library.pending_local_data_deletions()?.is_empty() {
+                    app_path = "index.html".into();
+                    window_title = "Atha";
+                    launch_mode = "library";
+                    verify_sample = false;
+                    current_edition = None;
+                    diagnostics = None;
+                    *current_book.write().map_err(|_| "reader-state")? = None;
+                }
                 app.manage(ReaderRuntime {
                     diagnostics: Mutex::new(diagnostics),
                     verify_sample,
@@ -589,6 +720,7 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                     current_edition: RwLock::new(current_edition),
                     dictionaries,
                     library,
+                    local_data,
                     messages,
                 });
                 build_main_window(app, &app_path, window_title)?;
@@ -630,8 +762,11 @@ fn try_run() -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(windows)]
-fn windows_launch_state(startup: Instant) -> Result<LaunchState, Box<dyn Error>> {
-    let arguments = if env::args_os().len() > 1 {
+fn windows_launch_state(
+    startup: Instant,
+    force_library: bool,
+) -> Result<LaunchState, Box<dyn Error>> {
+    let arguments = if !force_library && env::args_os().len() > 1 {
         Some(Arguments::parse()?)
     } else {
         None
@@ -659,6 +794,20 @@ fn windows_launch_state(startup: Instant) -> Result<LaunchState, Box<dyn Error>>
         edition: prepared.as_ref().and_then(|reader| reader.edition.clone()),
         diagnostics: prepared.map(|reader| reader.diagnostics),
     })
+}
+
+#[cfg(windows)]
+fn recover_windows_local_data() -> Result<bool, Box<dyn Error>> {
+    let root =
+        PathBuf::from(env::var_os("LOCALAPPDATA").ok_or("missing LOCALAPPDATA")?).join("Atha");
+    let messages = MessageStore::open(&root)?;
+    let data = LocalData::open(&root)?;
+    data.recover(&messages)?;
+    let pending_restore = data.pending_restore()?.is_some();
+    let pending_deletion = !LocalLibrary::open(&root)?
+        .pending_local_data_deletions()?
+        .is_empty();
+    Ok(pending_restore || pending_deletion)
 }
 
 #[cfg(windows)]
@@ -1012,6 +1161,7 @@ mod tests {
         for error in [
             LibraryError::InvalidBookId,
             LibraryError::UnknownBook,
+            LibraryError::MissingSource,
             LibraryError::MissingCover,
             LibraryError::UnsupportedSource,
             LibraryError::Resource(ResourceError::InvalidPath),

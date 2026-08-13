@@ -37,6 +37,7 @@ const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BACKUP_ASSETS: usize = 65_536;
 // ponytail: 8 GiB local-backup ceiling; make configurable only when real stores approach it.
 pub const MAX_BACKUP_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -84,6 +85,34 @@ impl MessageStore {
             MessageError::Restore
         })?;
         self.restore_backup_locked(source.as_ref())
+    }
+
+    pub(crate) fn validate_backup(
+        &self,
+        source: impl AsRef<Path>,
+        max_files: usize,
+        max_bytes: u64,
+    ) -> Result<(), MessageError> {
+        let maintenance = self
+            .maintenance_file()
+            .map_err(|_| MessageError::InvalidBackup)?;
+        fs2::FileExt::try_lock_shared(&maintenance).map_err(|_| MessageError::InvalidBackup)?;
+        let manifest = inspect_backup_with_budget(source.as_ref(), max_files, max_bytes)?;
+        let database_temp = self.assets.join(format!(
+            ".atha-asset-validate-{}.sqlite3.tmp",
+            temp_suffix()
+        ));
+        let result = (|| {
+            extract_database(source.as_ref(), &database_temp, &manifest.database)?;
+            let staged = Connection::open_with_flags(
+                &database_temp,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|_| MessageError::InvalidBackup)?;
+            validate_staged_backup(source.as_ref(), &staged, &manifest)
+        })();
+        let _ = fs::remove_file(database_temp);
+        result
     }
 
     fn create_backup_locked(&self, target: &Path) -> Result<(), MessageError> {
@@ -174,25 +203,8 @@ impl MessageStore {
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )
             .map_err(|_| MessageError::InvalidBackup)?;
-            let database_assets = validate_database(&staged, MessageError::InvalidBackup)?;
-            if database_assets != manifest.assets {
-                return Err(MessageError::InvalidBackup);
-            }
             stage = "content-verify";
-            let mut content_archive = open_archive(source)?;
-            validate_message_content(
-                &staged,
-                |name, length| {
-                    read_asset_entry(
-                        &mut content_archive,
-                        &BackupAsset {
-                            content_hash: name.to_owned(),
-                            byte_length: length,
-                        },
-                    )
-                },
-                MessageError::InvalidBackup,
-            )?;
+            validate_staged_backup(source, &staged, &manifest)?;
 
             stage = "asset-restore";
             if !manifest.assets.is_empty() {
@@ -217,7 +229,10 @@ impl MessageStore {
             destination
                 .busy_timeout(Duration::from_millis(100))
                 .map_err(|_| MessageError::Restore)?;
-            copy_database(&staged, &mut destination, MessageError::Restore)
+            copy_database(&staged, &mut destination, MessageError::Restore)?;
+            drop(destination);
+            let _ = self.recover_assets();
+            Ok(())
         })();
         let _ = fs::remove_file(&database_temp);
         if let Err(error) = result {
@@ -225,6 +240,48 @@ impl MessageStore {
         }
         result
     }
+}
+
+fn backup_usage(
+    manifest: &BackupManifest,
+    manifest_bytes: u64,
+) -> Result<(usize, u64), MessageError> {
+    let expanded = manifest
+        .assets
+        .iter()
+        .try_fold(
+            manifest_bytes
+                .checked_add(manifest.database.byte_length)
+                .ok_or(MessageError::InvalidBackup)?,
+            |total, asset| total.checked_add(asset.byte_length),
+        )
+        .ok_or(MessageError::InvalidBackup)?;
+    Ok((manifest.assets.len() + 2, expanded))
+}
+
+fn validate_staged_backup(
+    source: &Path,
+    staged: &Connection,
+    manifest: &BackupManifest,
+) -> Result<(), MessageError> {
+    let database_assets = validate_database(staged, MessageError::InvalidBackup)?;
+    if database_assets != manifest.assets {
+        return Err(MessageError::InvalidBackup);
+    }
+    let mut content_archive = open_archive(source)?;
+    validate_message_content(
+        staged,
+        |name, length| {
+            read_asset_entry(
+                &mut content_archive,
+                &BackupAsset {
+                    content_hash: name.to_owned(),
+                    byte_length: length,
+                },
+            )
+        },
+        MessageError::InvalidBackup,
+    )
 }
 
 fn log_message_failure(operation: &'static str, stage: &'static str, error: MessageError) {
@@ -281,6 +338,14 @@ fn write_backup(
 }
 
 fn inspect_backup(path: &Path) -> Result<BackupManifest, MessageError> {
+    inspect_backup_with_budget(path, MAX_BACKUP_ASSETS + 2, MAX_BACKUP_BYTES)
+}
+
+fn inspect_backup_with_budget(
+    path: &Path,
+    max_files: usize,
+    max_bytes: u64,
+) -> Result<BackupManifest, MessageError> {
     let mut archive = open_archive(path)?;
     if archive.len() < 2
         || archive.len() > MAX_BACKUP_ASSETS + 2
@@ -326,6 +391,10 @@ fn inspect_backup(path: &Path) -> Result<BackupManifest, MessageError> {
         manifest_bytes.len() as u64,
         MessageError::InvalidBackup,
     )?;
+    let (files, bytes) = backup_usage(&manifest, manifest_bytes.len() as u64)?;
+    if files > max_files || bytes > max_bytes {
+        return Err(MessageError::InvalidBackup);
+    }
 
     let mut expected = HashSet::with_capacity(manifest.assets.len() + 2);
     expected.insert(MANIFEST_ENTRY.to_owned());

@@ -259,6 +259,53 @@ open_library() {
     'seeded library did not become ready' >/dev/null
 }
 
+verify_library_management() {
+  local menu storage selection
+  menu=$(execute_sync '
+const details = document.querySelector(".library-management");
+details?.querySelector("summary")?.click();
+return {
+  open: Boolean(details?.open),
+  labels: [...(details?.querySelectorAll(".library-management-menu button") || [])].map((button) => button.textContent.trim()),
+  overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+};') || die 'could not inspect library management'
+  jq -e '
+    .open == true and .overflow == false and
+    .labels == ["备份资料库", "恢复资料库", "存储占用"]
+  ' <<<"$menu" >/dev/null || die "library management is incomplete (state: $(jq -c . <<<"$menu"))"
+
+  [[ $(execute_sync '
+const button = [...document.querySelectorAll(".library-management-menu button")]
+  .find((item) => item.textContent.includes("存储占用"));
+button?.click();
+return Boolean(button);') == true ]] || die 'could not open storage usage'
+  storage=$(wait_for_script \
+    'const dialog = document.querySelector(".library-storage-dialog"); const rows = [...(dialog?.querySelectorAll("dl > div") || [])]; return { open: Boolean(dialog?.open), rows: rows.length, labels: rows.map((row) => row.querySelector("dt")?.textContent || ""), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, dialogOverflow: dialog ? dialog.scrollWidth > dialog.clientWidth : true };' \
+    '.open == true and .rows == 6 and .overflow == false and .dialogOverflow == false' \
+    'storage usage did not become ready')
+  jq -e '
+    .labels == ["书籍文件", "阅读缓存", "消息与快照", "离线词典", "阅读设置", "合计"]
+  ' <<<"$storage" >/dev/null || die "storage usage categories are incomplete (state: $(jq -c . <<<"$storage"))"
+
+  [[ $(execute_sync '
+document.querySelector(".library-storage-dialog")?.close();
+const button = [...document.querySelectorAll(".library-primary-actions button")]
+  .find((item) => item.textContent.includes("选择"));
+button?.click();
+return Boolean(button);') == true ]] || die 'could not enter library selection'
+  selection=$(wait_for_script \
+    'const buttons = [...document.querySelectorAll(".library-selection-bar button")]; const rects = buttons.map((button) => button.getBoundingClientRect()); return { count: buttons.length, labels: buttons.map((button) => button.textContent.trim()), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, clipped: buttons.some((button) => button.scrollWidth > button.clientWidth || button.scrollHeight > button.clientHeight), inViewport: rects.every((rect) => rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight), separated: rects.length == 2 && rects[0].right <= rects[1].left };' \
+    '.count == 2 and .overflow == false and .clipped == false and .inViewport == true and .separated == true' \
+    'library deletion actions do not fit the viewport')
+  jq -e '.labels == ["移出书架", "删除本地数据"]' <<<"$selection" >/dev/null ||
+    die "library deletion actions are incomplete (state: $(jq -c . <<<"$selection"))"
+  [[ $(execute_sync '
+const button = [...document.querySelectorAll(".library-selection-header button")]
+  .find((item) => item.textContent.trim() === "取消");
+button?.click();
+return Boolean(button);') == true ]] || die 'could not leave library selection'
+}
+
 open_book() {
   local kind=$1 arguments script
   arguments=$(jq -cn --arg kind "$kind" '[$kind]')
@@ -747,10 +794,44 @@ display_state=$(execute_sync \
 jq -e '.visibility == "visible" and .width > 0 and .height > 0' <<<"$display_state" >/dev/null ||
   die 'Linux GUI target has no active display; connect the GNOME desktop and retry.'
 
+read -r -d '' initial_library_commands <<'JS' || true
+const done = arguments[arguments.length - 1];
+(async () => {
+  try {
+    const pending = await window.__TAURI_INTERNALS__.invoke("pending_local_data_restore");
+    const deletions = await window.__TAURI_INTERNALS__.invoke("pending_library_book_deletions");
+    const books = await window.__TAURI_INTERNALS__.invoke("list_library_books");
+    done({
+      pending: { ok: true, value: pending },
+      deletions: { ok: true, count: deletions.length },
+      books: { ok: true, count: books.length },
+    });
+  } catch (error) {
+    done({ pending: { ok: false, code: String(error) } });
+  }
+})();
+JS
+initial_commands=$(execute_async "$initial_library_commands") || die 'could not probe library commands'
+jq -e --argjson books "$expected_books" '
+  .pending.ok == true and .pending.value == null and
+  .deletions.ok == true and .deletions.count == 0 and
+  .books.ok == true and .books.count == $books
+' <<<"$initial_commands" >/dev/null ||
+  die "initial library commands failed (state: $(jq -c . <<<"$initial_commands"))"
+
 wait_for_script \
-  'return { ready: document.readyState, cards: document.querySelectorAll(".library-book-open").length };' \
+  'return { ready: document.readyState, cards: document.querySelectorAll(".library-book-open").length, href: location.href, status: document.querySelector(".library-status")?.textContent || null };' \
   ".ready == \"complete\" and .cards == $expected_books" \
   'initial library did not become ready' >/dev/null
+
+say 'verifying local-data management at mobile and desktop widths'
+for width in 360 1000; do
+  webdriver_value POST "/session/$session_id/window/rect" \
+    "{\"width\":$width,\"height\":760}" >/dev/null || die 'could not resize the library window'
+  verify_library_management
+done
+webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
+  die 'could not restore the reader window size'
 
 say 'running public verify, boundary, and gesture diagnostics'
 open_book public

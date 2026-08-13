@@ -28,8 +28,8 @@ Atha 的耐久数据分别由 `LocalLibrary`、`LocalDictionaries`、MessageStor
 2. schema 1 `.atha-data` 是严格 ZIP。`manifest.json` 记录排序后的已知文件路径、长度和 SHA-256；内容只允许规范化 `Library/` 记录、`SourceBooks/`、`Dictionaries/`、嵌套 `Messages.atha-backup` 与 `BrowserState.json`。总解压上限 8 GiB、文件数 100,000、浏览器状态 16 MiB。
 3. `ImportedBooks`、Picker cache、日志和未知文件不进入制品。书架记录在备份时合并当前已验证 metadata，恢复后即使缓存为空仍保留书名和作者；封面与正文在首次打开时由耐久源重建。
 4. 恢复先在当前数据根内解压到独占 staging，复用书架源身份、词典 reader、MessageStore 完整备份和浏览器 key allowlist 做语义验证。任何正式 rename 前创建旧 MessageStore 备份，并原子写入 `prepared` 恢复日志与浏览器前后状态。
-5. `Library`、`SourceBooks`、`Dictionaries` 和 `ImportedBooks` 通过同文件系统目录 rename 切换，MessageStore 继续只经 ADR-0006 的 Online Backup API 替换。日志在全部 backend 发布成功后变为 `committed`；浏览器状态确认后才删除 rollback。启动看到 `prepared` 必须恢复旧目录与旧 MessageStore，看到 `committed` 则阻止普通书架操作，直到 WebView 幂等应用新状态并确认或显式回滚。
-6. localStorage 只备份生产 allowlist key。替换先保留旧快照，任一同步写失败立即回写旧集合；书籍物理删除只清理本书偏好、书签、进度、遗留标注和统计中的本书项，不改全局偏好或其他书状态。
+5. `Library`、`SourceBooks`、`Dictionaries` 和 `ImportedBooks` 通过同文件系统目录 rename 切换，MessageStore 继续只经 ADR-0006 的 Online Backup API 替换。第一次目录切换前耐久写入 `publishing` marker，全部 backend 发布成功后再写 `committed`；浏览器状态确认后才删除 rollback。启动看到未提交发布必须恢复旧目录与旧 MessageStore，看到 `committed` 则阻止普通书架操作，直到 WebView 幂等应用新状态并确认或显式回滚。
+6. localStorage 只备份生产 allowlist key。资料库恢复替换先保留旧快照，任一同步写失败立即回写旧集合；书籍物理删除使用耐久 intent 单调清理本书偏好、书签、进度、遗留标注和统计中的本书项，失败时保留已完成步骤并在重载后幂等续做，不改全局偏好或其他书状态。
 7. “移出书架”仍只删除书架记录，保留源、缓存、阅读状态和 Message；“删除本地数据”删除记录、同身份源、缓存与本书浏览器状态，但保留 Message、SourceAnchor、SourceSnapshot 和资产。重新导入同一内容可重新建立可跳转书籍身份。
 8. Tauri Adapter 负责主书架 origin、dialog、SAF cache、blocking worker 和固定字段日志；Svelte 负责确认文案、状态事务与重载，不解释 ZIP、SQLite 或文件布局。
 
@@ -52,8 +52,9 @@ Atha 的耐久数据分别由 `LocalLibrary`、`LocalDictionaries`、MessageStor
 ## 风险与缓解
 
 - ZIP 路径穿越、bomb、重复或 overlapping entry：精确 allowlist、唯一 entry、数量 / 单项 / 总量预算和流式哈希；不通用解压未知路径。
-- 书架记录与源伪造：恢复 staging 上复用内容身份与记录校验；缺少耐久源的书架项拒绝。
-- 恢复中止：第一次 rename 前耐久发布日志和旧消息备份；`prepared` 启动回滚，`committed` 等待浏览器确认。
+- 书架记录与源伪造：恢复 staging 上复用内容身份与记录校验；缺少耐久源的书架项拒绝，备份入口提示重新选择原文件补齐。
+- 数据根越界：应用根及 `Library`、`SourceBooks`、`ImportedBooks`、`Dictionaries`、`Messages` / `Assets` 必须是实际目录，symlink、junction 与其他 reparse point 在备份、恢复或删除前拒绝。
+- 恢复中止：prepare 阶段耐久保存旧消息，第一次 rename 前再写 `publishing` marker；未提交发布启动回滚，`committed` 等待浏览器确认。
 - 浏览器存储 quota / 禁用：同步替换失败回写旧快照并调用 backend rollback；pending 状态不允许继续普通书架操作。
 - 删除误解：界面分别说明保留项；破坏性操作二次确认，Message 与 Snapshot 永不由书籍文件删除路径物理清除。
 - 隐私：manifest 只含路径类别、长度与哈希，产品日志不记录 archive 路径、书名、ID、浏览器 key/value 或内容哈希。
