@@ -35,7 +35,8 @@
 ## 事实与验证
 
 - 不可信书籍默认拒绝脚本、网络、路径越界和未知资源；
-- WebView2 是当前唯一阅读渲染技术；外部引擎达到浏览器兼容、选择与性能门槛后才重新研究；
+- 当前阅读渲染统一使用平台 WebView：Windows 使用 WebView2，Linux 使用 WebKitGTK，Android 使用 system WebView；外部独立引擎达到浏览器兼容、选择与性能门槛后才重新研究；
+- PCT-AL10 真机操作以 `docs/agents/references.md` 的项目流程为入口，不依赖用户级 `android-cli` skill，也不得把 `android install` 或 `adb install` 当作华为静默安装方案；
 - 静态、本地、真实目标和生产等价证据必须明确区分；
 - 不得把代码阅读、截图或本地结果说成未执行的真实验收。
 
