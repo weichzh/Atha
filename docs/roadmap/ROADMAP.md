@@ -36,9 +36,15 @@ schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词�
 
 目录、书内搜索和消息已经在宽屏投影为与书页共存的互斥左侧工作区，并补齐键鼠与焦点导航。分页使用真实 reader frame，经既有 Navigation / Locator 在工作区出现、隐藏和窗口变化后恢复正文位置；窄屏继续复用覆盖式工具面板，没有建立桌面专用状态或阅读内核。
 
-## Now：日常入口与内部可安装候选
+## Done：日常入口与内部可安装候选
 
-补齐拖放导入、桌面文件关联和书架列表视图，再建立内部桌面与 Android 安装包门禁；只组合已有 importer、LocalLibrary 和打包能力。
+桌面资料库已经补齐原生拖放、网格 / 列表视图和冷启动文件关联；三个入口共用既有 importer、LocalLibrary、去重、失败投影和内容安全边界，没有增加队列、单实例服务或书架状态。
+
+Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联、重复关联、普通启动与完整多视口真壳回归；PCT-AL10 内部候选已通过同包同签名非降级覆盖安装、16 KiB、首次安装时间保持和启动烟测。Windows 仍只有打包配置静态检查，这些内部候选均未发布，也不等同于生产签名验收。
+
+## Now：内部候选观察与平台补证
+
+当前不新增产品功能。先用内部候选收集日常入口问题；下一份 change 只从真实缺口中选择一个纵向切片，优先级依次是 Windows NSIS 文件关联实机验收、真实 OS 鼠标拖放、PCT-AL10 自然触摸与移动功能 / 性能补证，最后才是生产签名、自动更新和正式分发。
 
 数据丢失、内容安全、引用错位和 Android 性能回归始终高于体验扩展。每一项只在前一切片关闭后进入 `Now`，不预建跨格式工厂、社区服务或同步 schema。
 
@@ -75,6 +81,7 @@ schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词�
 | 完整本地数据生命周期 | `.atha-data` 完整备份 / 恢复、恢复日志、分类占用、两级删除和 Linux 真壳管理界面 | `docs/decisions/ADR-0010-local-data-lifecycle.md`、`docs/architecture/READER-CORE.md` |
 | 跨书阅读记忆中心 | 最近阅读、跨书 Message 搜索、有书安全跳回、缺书及历史 Snapshot | `docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md` |
 | 桌面阅读工作区 | 宽屏目录 / 搜索 / Message 侧栏、键鼠焦点、真实 frame 分页与窄屏回归 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
+| 日常入口与内部候选 | 桌面拖放、网格 / 列表、冷启动文件关联、Linux AppImage 与 PCT-AL10 内部候选门 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
 | 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
 

@@ -11,13 +11,17 @@ export interface LibraryBook {
 }
 
 export interface ImportFailure {
-  name: string;
   code: string;
 }
 
 export interface ImportReport {
   books: LibraryBook[];
   failures: ImportFailure[];
+}
+
+export interface StartupImport {
+  bookId: string | null;
+  failed: boolean;
 }
 
 export type LibraryViewMode = "default" | "progress" | "title" | "author";
@@ -431,6 +435,15 @@ export async function listBooks(): Promise<LibraryBook[]> {
 export async function importBooks(): Promise<ImportReport | null> {
   if (!libraryAvailable) return null;
   return invoke<ImportReport | null>("import_library_books");
+}
+
+export async function importBookPaths(paths: string[]): Promise<ImportReport> {
+  return invoke<ImportReport>("import_library_paths", { paths });
+}
+
+export async function takeStartupImport(): Promise<StartupImport | null> {
+  if (!libraryAvailable) return null;
+  return invoke<StartupImport | null>("take_startup_import");
 }
 
 export function backupMessages(): Promise<boolean> {

@@ -1,13 +1,15 @@
 use std::{
     borrow::Cow,
     error::Error,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex, RwLock},
     time::Instant,
 };
 
+#[cfg(desktop)]
+use std::{env, ffi::OsString};
 #[cfg(windows)]
-use std::{env, fs, process};
+use std::{fs, process};
 
 use atha_backend::{
     local_data::{LocalData, LocalDataOperationGuard},
@@ -34,7 +36,7 @@ use tauri::{
     http::{Request, Response, StatusCode, header},
     webview::NewWindowResponse,
 };
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, FilePath};
 
 mod dictionary_commands;
 mod local_data_maintenance;
@@ -60,7 +62,35 @@ const TAURI_READER_ORIGIN: &str = "https://tauri.localhost";
 #[cfg(not(any(windows, target_os = "android")))]
 const TAURI_READER_ORIGIN: &str = "tauri://localhost";
 const MAX_IMPORT_FILES: usize = 32;
+#[cfg(desktop)]
+const MAX_IMPORT_PATH_CHARS: usize = 32_768;
+#[cfg(desktop)]
+const READER_GUI_GATE_SIZES: [(u32, u32); 5] = [
+    (360, 760),
+    (600, 760),
+    (1000, 760),
+    (1280, 800),
+    (1600, 900),
+];
+const BOOK_EXTENSIONS: [&str; 10] = [
+    "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
+];
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), clipboard-read=(), clipboard-write=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()";
+
+#[cfg(desktop)]
+fn parse_reader_gui_gate_size(value: &str) -> Option<(u32, u32)> {
+    let (width, height) = value.split_once('x')?;
+    let size = (width.parse().ok()?, height.parse().ok()?);
+    READER_GUI_GATE_SIZES.contains(&size).then_some(size)
+}
+
+#[cfg(desktop)]
+fn reader_gui_gate_size() -> Option<(u32, u32)> {
+    (env::var_os("ATHA_READER_GUI_GATE").as_deref() == Some(std::ffi::OsStr::new("1")))
+        .then(|| env::var("ATHA_READER_GUI_VIEWPORT").ok())
+        .flatten()
+        .and_then(|value| parse_reader_gui_gate_size(&value))
+}
 
 struct ReaderRuntime {
     diagnostics: Mutex<Option<RuntimeDiagnostics>>,
@@ -73,6 +103,7 @@ struct ReaderRuntime {
     library: LocalLibrary,
     local_data: LocalData,
     messages: MessageStore,
+    startup_import: Mutex<Option<StartupImport>>,
 }
 
 #[cfg(windows)]
@@ -98,7 +129,6 @@ struct LaunchState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportFailure {
-    name: String,
     code: &'static str,
 }
 
@@ -107,6 +137,18 @@ struct ImportFailure {
 struct ImportReport {
     books: Vec<LibraryBook>,
     failures: Vec<ImportFailure>,
+}
+
+struct StagedLibraryFiles {
+    report: ImportReport,
+    first_book_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartupImport {
+    book_id: Option<String>,
+    failed: bool,
 }
 
 #[derive(Serialize)]
@@ -268,16 +310,16 @@ fn list_library_books(
 #[tauri::command]
 async fn import_library_books(
     app: AppHandle,
+    window: WebviewWindow,
     runtime: State<'_, ReaderRuntime>,
 ) -> Result<Option<ImportReport>, String> {
+    message_maintenance::require_library_window(&window)?;
     let Some(paths) = app
         .dialog()
         .file()
         .add_filter(
             "EPUB / CBZ / FB2 / FBZ / MOBI / AZW / AZW3 / Markdown / TXT",
-            &[
-                "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
-            ],
+            &BOOK_EXTENSIONS,
         )
         .blocking_pick_files()
     else {
@@ -290,63 +332,62 @@ async fn import_library_books(
         return Err("invalid-library-import".into());
     }
     let _operation = begin_local_data_operation(&runtime)?;
-    let selected_count = paths.len();
+    let staged = stage_library_files_async(app, runtime.library.clone(), paths).await?;
+    Ok(Some(staged.report))
+}
+
+#[tauri::command]
+#[cfg(desktop)]
+async fn import_library_paths(
+    app: AppHandle,
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    paths: Vec<String>,
+) -> Result<ImportReport, String> {
+    message_maintenance::require_library_window(&window)?;
+    let paths = dropped_library_paths(paths)?;
+    let _operation = begin_local_data_operation(&runtime)?;
+    let staged = stage_library_files_async(app, runtime.library.clone(), paths).await?;
+    Ok(staged.report)
+}
+
+#[tauri::command]
+fn take_startup_import(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+) -> Result<Option<StartupImport>, String> {
+    message_maintenance::require_library_window(&window)?;
+    runtime
+        .startup_import
+        .lock()
+        .map_err(|_| "reader-state".to_owned())
+        .map(|mut startup| startup.take())
+}
+
+#[cfg(desktop)]
+fn dropped_library_paths(paths: Vec<String>) -> Result<Vec<FilePath>, String> {
+    if paths.is_empty()
+        || paths.len() > MAX_IMPORT_FILES
+        || paths.iter().any(|path| {
+            path.is_empty() || path.chars().count() > MAX_IMPORT_PATH_CHARS || path.contains('\0')
+        })
+    {
+        return Err("invalid-library-import".into());
+    }
+    Ok(paths
+        .into_iter()
+        .map(|path| FilePath::Path(PathBuf::from(path)))
+        .collect())
+}
+
+async fn stage_library_files_async(
+    app: AppHandle,
+    library: LocalLibrary,
+    paths: Vec<FilePath>,
+) -> Result<StagedLibraryFiles, String> {
     let started = Instant::now();
-    let library = runtime.library.clone();
-    let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut failures = Vec::new();
-        for selected in paths {
-            let name = selected
-                .clone()
-                .into_path()
-                .map_or_else(|_| "书籍".into(), |path| display_name(&path));
-            let input =
-                match platform_file::PickerInput::open_book(&app, selected, MAX_SOURCE_BYTES) {
-                    Ok(input) => input,
-                    Err(_) => {
-                        log::warn!(
-                            target: "atha::library",
-                            "operation=import stage=picker-input outcome=failed code={}",
-                            "invalid-library-source"
-                        );
-                        failures.push(ImportFailure {
-                            name,
-                            code: "invalid-library-source",
-                        });
-                        continue;
-                    }
-                };
-            if let Err(error) = library.stage_with_title_hint(input.path(), input.title_hint()) {
-                log::warn!(
-                    target: "atha::library",
-                    "operation=import stage=backend outcome=failed code={}",
-                    error.code()
-                );
-                failures.push(ImportFailure {
-                    name,
-                    code: error.code(),
-                });
-            }
-        }
-        let books = library.list().map_err(|error| {
-            log::error!(
-                target: "atha::library",
-                "operation=import stage=list outcome=failed code={} duration_ms={}",
-                error.code(),
-                started.elapsed().as_millis()
-            );
-            error.code().to_owned()
-        })?;
-        log::info!(
-            target: "atha::library",
-            "operation=import outcome={} count={} failure_count={} duration_ms={}",
-            if failures.is_empty() { "ok" } else { "partial" },
-            selected_count - failures.len(),
-            failures.len(),
-            started.elapsed().as_millis()
-        );
-        Ok(Some(ImportReport { books, failures }))
+        stage_library_files(&app, &library, paths, started)
     })
     .await
     .map_err(|_| {
@@ -357,6 +398,67 @@ async fn import_library_books(
         );
         "library-import-task".to_owned()
     })?
+}
+
+fn stage_library_files(
+    app: &AppHandle,
+    library: &LocalLibrary,
+    paths: Vec<FilePath>,
+    started: Instant,
+) -> Result<StagedLibraryFiles, String> {
+    let selected_count = paths.len();
+    let mut failures = Vec::new();
+    let mut first_book_id = None;
+    for selected in paths {
+        let input = match platform_file::PickerInput::open_book(app, selected, MAX_SOURCE_BYTES) {
+            Ok(input) => input,
+            Err(_) => {
+                log::warn!(
+                    target: "atha::library",
+                    "operation=import stage=picker-input outcome=failed code=invalid-library-source"
+                );
+                failures.push(ImportFailure {
+                    code: "invalid-library-source",
+                });
+                continue;
+            }
+        };
+        match library.stage_with_title_hint(input.path(), input.title_hint()) {
+            Ok(book) => {
+                first_book_id.get_or_insert(book.id);
+            }
+            Err(error) => {
+                log::warn!(
+                    target: "atha::library",
+                    "operation=import stage=backend outcome=failed code={}",
+                    error.code()
+                );
+                failures.push(ImportFailure { code: error.code() });
+                continue;
+            }
+        };
+    }
+    let books = library.list().map_err(|error| {
+        log::error!(
+            target: "atha::library",
+            "operation=import stage=list outcome=failed code={} duration_ms={}",
+            error.code(),
+            started.elapsed().as_millis()
+        );
+        error.code().to_owned()
+    })?;
+    log::info!(
+        target: "atha::library",
+        "operation=import outcome={} count={} failure_count={} duration_ms={}",
+        if failures.is_empty() { "ok" } else { "partial" },
+        selected_count - failures.len(),
+        failures.len(),
+        started.elapsed().as_millis()
+    );
+    Ok(StagedLibraryFiles {
+        report: ImportReport { books, failures },
+        first_book_id,
+    })
 }
 
 #[tauri::command]
@@ -551,6 +653,28 @@ const fn is_internal_library_error(error: LibraryError) -> bool {
     )
 }
 
+#[cfg(desktop)]
+fn associated_book_paths(values: impl IntoIterator<Item = OsString>) -> Option<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for value in values {
+        if paths.len() == MAX_IMPORT_FILES {
+            return None;
+        }
+        let path = match value.to_str() {
+            Some(value) if value.starts_with("file:") => {
+                tauri::Url::parse(value).ok()?.to_file_path().ok()?
+            }
+            _ => PathBuf::from(value),
+        };
+        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+        if !BOOK_EXTENSIONS.contains(&extension.as_str()) {
+            return None;
+        }
+        paths.push(path);
+    }
+    (!paths.is_empty()).then_some(paths)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     try_run().expect("Atha Tauri reader failed");
@@ -558,8 +682,15 @@ pub fn run() {
 
 fn try_run() -> Result<(), Box<dyn Error>> {
     let startup = Instant::now();
+    #[cfg(desktop)]
+    let mut associated_paths = associated_book_paths(env::args_os().skip(1));
+    #[cfg(not(desktop))]
+    let mut associated_paths: Option<Vec<PathBuf>> = None;
     #[cfg(windows)]
-    let launch = windows_launch_state(startup, recover_windows_local_data()?)?;
+    let launch = windows_launch_state(
+        startup,
+        recover_windows_local_data()? || associated_paths.is_some(),
+    )?;
     #[cfg(not(windows))]
     let launch = LaunchState {
         book: None,
@@ -603,6 +734,9 @@ fn try_run() -> Result<(), Box<dyn Error>> {
             reader_event,
             list_library_books,
             import_library_books,
+            #[cfg(desktop)]
+            import_library_paths,
+            take_startup_import,
             open_library_book,
             remove_library_book,
             delete_library_book_data,
@@ -705,7 +839,9 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                         error.code()
                     );
                 })?;
-                if pending_restore || !library.pending_local_data_deletions()?.is_empty() {
+                let pending_deletion = !library.pending_local_data_deletions()?.is_empty();
+                let mut startup_import = None;
+                if pending_restore || pending_deletion {
                     app_path = "index.html".into();
                     window_title = "Atha";
                     launch_mode = "library";
@@ -713,6 +849,29 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                     current_edition = None;
                     diagnostics = None;
                     *current_book.write().map_err(|_| "reader-state")? = None;
+                    if associated_paths.is_some() {
+                        startup_import = Some(StartupImport {
+                            book_id: None,
+                            failed: true,
+                        });
+                    }
+                } else if let Some(paths) = associated_paths.take() {
+                    let selected = paths.into_iter().map(FilePath::Path).collect();
+                    startup_import = match stage_library_files(
+                        app.handle(),
+                        &library,
+                        selected,
+                        Instant::now(),
+                    ) {
+                        Ok(staged) => Some(StartupImport {
+                            book_id: staged.first_book_id,
+                            failed: !staged.report.failures.is_empty(),
+                        }),
+                        Err(_) => Some(StartupImport {
+                            book_id: None,
+                            failed: true,
+                        }),
+                    };
                 }
                 app.manage(ReaderRuntime {
                     diagnostics: Mutex::new(diagnostics),
@@ -725,6 +884,7 @@ fn try_run() -> Result<(), Box<dyn Error>> {
                     library,
                     local_data,
                     messages,
+                    startup_import: Mutex::new(startup_import),
                 });
                 build_main_window(app, &app_path, window_title)?;
                 Ok(())
@@ -864,6 +1024,13 @@ fn build_main_window(
             .general_autofill_enabled(false)
             .zoom_hotkeys_enabled(false)
             .prevent_overflow()
+    };
+
+    #[cfg(desktop)]
+    let window = if let Some((width, height)) = reader_gui_gate_size() {
+        window.inner_size(f64::from(width), f64::from(height))
+    } else {
+        window
     };
 
     window.build()?;
@@ -1069,16 +1236,6 @@ fn resource_response(
         .expect("valid resource response")
 }
 
-fn display_name(path: &Path) -> String {
-    path.file_name()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("书籍")
-        .chars()
-        .take(256)
-        .collect()
-}
-
 fn empty_response(status: StatusCode) -> Response<Cow<'static, [u8]>> {
     Response::builder()
         .status(status)
@@ -1123,6 +1280,15 @@ mod tests {
         assert!(is_app_navigation_url(TAURI_LIBRARY_PAGE));
         assert!(is_app_navigation_url(TAURI_READER_PAGE));
         assert!(!is_app_navigation_url("https://example.com/"));
+    }
+
+    #[test]
+    fn gui_gate_accepts_only_declared_viewports() {
+        assert_eq!(parse_reader_gui_gate_size("600x760"), Some((600, 760)));
+        assert_eq!(parse_reader_gui_gate_size("1600x900"), Some((1600, 900)));
+        assert_eq!(parse_reader_gui_gate_size("800x600"), None);
+        assert_eq!(parse_reader_gui_gate_size("1280x760"), None);
+        assert_eq!(parse_reader_gui_gate_size("wide"), None);
     }
 
     #[test]
@@ -1172,5 +1338,35 @@ mod tests {
         ] {
             assert!(!is_internal_library_error(error));
         }
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn file_association_arguments_are_only_supported_book_paths() {
+        let paths = associated_book_paths([
+            OsString::from("/tmp/one.EPUB"),
+            OsString::from("file:///tmp/two%20words.fb2"),
+        ])
+        .expect("book arguments");
+        assert_eq!(
+            paths,
+            [
+                PathBuf::from("/tmp/one.EPUB"),
+                PathBuf::from("/tmp/two words.fb2")
+            ]
+        );
+        assert!(associated_book_paths([OsString::from("--epub")]).is_none());
+        assert!(associated_book_paths([OsString::from("/tmp/book.pdf")]).is_none());
+        assert!(associated_book_paths(std::iter::empty()).is_none());
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn dropped_paths_have_a_small_explicit_boundary() {
+        assert!(dropped_library_paths(vec!["/tmp/book.epub".into()]).is_ok());
+        assert!(dropped_library_paths(Vec::new()).is_err());
+        assert!(dropped_library_paths(vec!["bad\0path.epub".into()]).is_err());
+        assert!(dropped_library_paths(vec!["x".repeat(MAX_IMPORT_PATH_CHARS + 1)]).is_err());
+        assert!(dropped_library_paths(vec!["book.epub".into(); MAX_IMPORT_FILES + 1]).is_err());
     }
 }

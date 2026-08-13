@@ -294,9 +294,11 @@ verify_apk() {
   local apk=$1
   [[ -f "$apk" ]] || die "APK not found: $apk"
 
-  local badging signatures
+  local badging launch_activity signatures
   badging=$($aapt2 dump badging "$apk")
   grep -q "^package: name='$package'" <<<"$badging" || die 'Unexpected Android package id.'
+  launch_activity=$(sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p" <<<"$badging" | head -n 1)
+  [[ "$launch_activity" == "$package."* ]] || die 'Unexpected Android launch activity.'
   grep -qx "minSdkVersion:'26'" <<<"$badging" || die 'Unexpected Android minSdkVersion.'
   grep -qx "targetSdkVersion:'36'" <<<"$badging" || die 'Unexpected Android targetSdkVersion.'
   grep -qx "native-code: 'arm64-v8a'" <<<"$badging" || die 'APK is not arm64-v8a-only.'
@@ -594,6 +596,41 @@ install_apk() {
     die 'PackageInstaller session is not terminal after commit.'
   }
 
+  local launch_activity launch_output pid focused focused_package focused_activity
+  launch_activity=$(
+    $aapt2 dump badging "$apk" |
+      sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p" |
+      head -n 1
+  )
+  "$adb_bin" -s "$device" shell am force-stop "$package" >/dev/null
+  launch_output="$evidence_dir/launch.txt"
+  if ! "$adb_bin" -s "$device" shell am start -W -n "$package/$launch_activity" \
+    >"$launch_output" 2>&1; then
+    failure_reason=post_install_launch_failed
+    die 'Installed candidate did not start.'
+  fi
+  grep -q '^Status: ok' "$launch_output" || {
+    failure_reason=post_install_launch_failed
+    die 'Installed candidate did not report a successful start.'
+  }
+  sleep 3
+  pid=$("$adb_bin" -s "$device" shell pidof "$package" | tr -d '\r' | cut -d' ' -f1)
+  [[ "$pid" =~ ^[0-9]+$ ]] || {
+    failure_reason=post_install_process_missing
+    die 'Installed candidate did not remain running.'
+  }
+  focused=$(current_component) || {
+    failure_reason=post_install_activity_missing
+    die 'Installed candidate has no focused activity.'
+  }
+  focused_package=${focused%%/*}
+  focused_activity=${focused#*/}
+  [[ "$focused_package" == "$package" ]] &&
+    [[ "$focused_activity" == "$launch_activity" || "$package$focused_activity" == "$launch_activity" ]] || {
+    failure_reason=post_install_activity_mismatch
+    die 'Installed candidate did not become the focused activity.'
+  }
+
   {
     printf 'installed=true\n'
     printf 'session_state=%s\n' "$committed_session_state"
@@ -603,6 +640,8 @@ install_apk() {
     printf 'certificate_matches_candidate=true\n'
     printf 'first_install_time_preserved=true\n'
     printf 'data_clear_requested=false\n'
+    printf 'process_running=true\n'
+    printf 'main_activity_focused=true\n'
   } >"$evidence_dir/result.txt"
   session_active=0
   printf 'installed=true\nevidence=%s\n' "$evidence_rel"

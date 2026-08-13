@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["appimage"],
+    "category": "Reference",
+    "shortDescription": "Atha local-first reader",
+    "icon": ["icons/icon.png"],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "desktopTemplate": "atha.desktop.hbs"
+      }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["epub"],
+        "name": "EPUB book",
+        "mimeType": "application/epub+zip",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["cbz"],
+        "name": "Comic book archive",
+        "mimeType": "application/vnd.comicbook+zip",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["fb2"],
+        "name": "FictionBook",
+        "mimeType": "application/x-fictionbook+xml",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["fbz"],
+        "name": "Compressed FictionBook",
+        "mimeType": "application/x-fictionbook+zip",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["mobi", "azw"],
+        "name": "Mobipocket book",
+        "mimeType": "application/x-mobipocket-ebook",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["azw3"],
+        "name": "Kindle Format 8 book",
+        "mimeType": "application/vnd.amazon.mobi8-ebook",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["md", "markdown"],
+        "name": "Markdown document",
+        "mimeType": "text/markdown",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["txt"],
+        "name": "Plain text document",
+        "mimeType": "text/plain",
+        "role": "Viewer"
+      }
+    ]
+  }
+}

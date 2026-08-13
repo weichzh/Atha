@@ -98,11 +98,8 @@ fn log_maintenance(operation: &str, result: &Result<(), (&'static str, String)>,
 }
 
 pub(crate) fn is_library_url(url: &str) -> bool {
-    let page = crate::TAURI_LIBRARY_PAGE;
-    url == page
-        || page
-            .strip_suffix('/')
-            .map_or_else(|| url.strip_suffix('/') == Some(page), |root| url == root)
+    let root = crate::TAURI_LIBRARY_PAGE.trim_end_matches('/');
+    matches!(url.strip_prefix(root), Some("" | "/"))
 }
 
 pub(crate) fn require_library_window(window: &WebviewWindow) -> Result<(), String> {

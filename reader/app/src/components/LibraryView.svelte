@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import {
     Archive,
     ArchiveRestore,
@@ -6,9 +7,12 @@
     BookOpen,
     Circle,
     CircleCheck,
+    Download,
     Ellipsis,
+    Grid2X2,
     HardDrive,
     Library,
+    List as ListIcon,
     MessageSquareText,
     Plus,
     Search,
@@ -29,6 +33,7 @@
     filterLibraryBooks,
     finishLocalDataRestore,
     groupLibraryBooksByProgress,
+    importBookPaths,
     importBooks,
     importFailureMessage,
     libraryAvailable,
@@ -43,7 +48,9 @@
     resumeBookDataDeletions,
     removeBooksSerially,
     rollbackLocalDataRestore,
+    takeStartupImport,
     validateLocalDataState,
+    type ImportReport,
     type LibraryBook,
     type LibraryViewMode,
     type BrowserState,
@@ -72,6 +79,8 @@
   let storageDialog: HTMLDialogElement | undefined;
   let storageUsage: StorageUsage | null = null;
   let section: "library" | "memory" = "library";
+  let layout: "grid" | "list" = "grid";
+  let dragActive = false;
   let visibleBooks: LibraryBook[] = [];
   let progressGroups = { reading: [] as LibraryBook[], unread: [] as LibraryBook[] };
   let allVisibleSelected = false;
@@ -83,8 +92,10 @@
   $: allVisibleSelected =
     visibleBooks.length > 0 && visibleBooks.every((book) => selectedIds.has(book.id));
 
-  onMount(async () => {
+  onMount(() => {
     const systemBars = Reflect.get(globalThis, "AthaSystemBars");
+    let mounted = true;
+    let stopDragDrop: (() => void) | undefined;
     systemBars?.setReadingMode?.(false, true);
     const syncSafeAreaInsets = () => {
       try {
@@ -103,6 +114,39 @@
     };
     syncSafeAreaInsets();
     globalThis.addEventListener("atha-safe-area-change", syncSafeAreaInsets);
+    void initializeLibrary();
+    if (libraryAvailable) {
+      void getCurrentWebview()
+        .onDragDropEvent((event) => {
+          if (!mounted) return;
+          const payload = event.payload;
+          if (payload.type === "enter") {
+            dragActive = !loading && !busy && payload.paths.length > 0;
+          } else if (payload.type === "over") {
+            dragActive = !loading && !busy;
+          } else if (payload.type === "drop") {
+            dragActive = false;
+            void addDroppedBooks(payload.paths);
+          } else {
+            dragActive = false;
+          }
+        })
+        .then((unlisten) => {
+          if (mounted) stopDragDrop = unlisten;
+          else unlisten();
+        })
+        .catch(() => {
+          if (mounted) status = "无法启用拖放导入，可继续使用导入按钮。";
+        });
+    }
+    return () => {
+      mounted = false;
+      stopDragDrop?.();
+      globalThis.removeEventListener("atha-safe-area-change", syncSafeAreaInsets);
+    };
+  });
+
+  async function initializeLibrary() {
     try {
       if (libraryAvailable) {
         await resumePendingRestore();
@@ -110,13 +154,22 @@
       }
       books = await listBooks();
       refreshProgress();
+      const startup = await takeStartupImport();
+      if (startup?.bookId) {
+        const book = books.find((item) => item.id === startup.bookId);
+        if (book) {
+          await read(book);
+          return;
+        }
+      }
+      if (startup?.failed) status = "无法打开关联的书籍，请改用导入按钮重试。";
     } catch {
       status = "无法完成本地资料恢复，请重新启动 Atha 后重试。";
       busy = true;
     } finally {
       loading = false;
     }
-  });
+  }
 
   function refreshProgress() {
     startedBookIds = readStartedBookIds(books);
@@ -141,11 +194,23 @@
       status = "请在 Atha 应用中选择 EPUB、CBZ、FB2、FBZ、Kindle、Markdown 或 TXT。";
       return;
     }
+    await addBooks(importBooks);
+  }
+
+  async function addDroppedBooks(paths: string[]) {
+    if (loading || busy || paths.length === 0) return;
+    if (selecting) cancelSelection();
+    closeManagementMenu();
+    section = "library";
+    await addBooks(() => importBookPaths(paths));
+  }
+
+  async function addBooks(importer: () => Promise<ImportReport | null>) {
     busy = true;
     status = "";
     workLabel = "正在加入书架…";
     try {
-      const report = await importBooks();
+      const report = await importer();
       if (!report) {
         status = "";
         return;
@@ -155,12 +220,11 @@
       if (report.failures.length === 0) {
         status = "已加入书架。";
       } else {
-        status = report.failures
-          .map((failure) => `${failure.name}：${importFailureMessage(failure.code)}`)
+        status = [...new Set(report.failures.map((failure) => importFailureMessage(failure.code)))]
           .join("；");
       }
     } catch {
-      status = "无法导入所选书籍。";
+      status = "无法加入这些书籍。";
     } finally {
       workLabel = "";
       busy = false;
@@ -452,6 +516,7 @@
 
 <main
   class:library-selecting={selecting && section === "library"}
+  class:library-list-view={layout === "list" && section === "library"}
   class="library-shell"
   aria-label="Atha 资料库"
   aria-busy={loading || busy}
@@ -530,6 +595,28 @@
       <div class="library-titlebar">
         <h1>书架</h1>
         <div class="library-primary-actions">
+          <div class="library-layout-switch" role="group" aria-label="书架布局">
+            <button
+              type="button"
+              aria-label="网格视图"
+              title="网格视图"
+              aria-pressed={layout === "grid"}
+              onclick={() => (layout = "grid")}
+              disabled={loading || busy}
+            >
+              <Grid2X2 aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="列表视图"
+              title="列表视图"
+              aria-pressed={layout === "list"}
+              onclick={() => (layout = "list")}
+              disabled={loading || busy}
+            >
+              <ListIcon aria-hidden="true" />
+            </button>
+          </div>
           <button type="button" onclick={chooseBooks} disabled={busy}>
             <Plus aria-hidden="true" />
             <span>导入</span>
@@ -661,6 +748,14 @@
 
   {#if status}
     <p class="library-status" role="status">{status}</p>
+  {/if}
+
+  {#if dragActive}
+    <div class="library-drop-overlay" role="status" aria-live="polite">
+      <Download aria-hidden="true" />
+      <strong>松开以加入书架</strong>
+      <span>EPUB、CBZ、FB2、FBZ、Kindle、Markdown 或 TXT</span>
+    </div>
   {/if}
 
   {#if workLabel}

@@ -9,6 +9,7 @@ description = "允许资料库主窗口管理本地书架及完整本地数据�
 commands.allow = [
   "list_library_books",
   "import_library_books",
+  "take_startup_import",
   "open_library_book",
   "remove_library_book",
   "delete_library_book_data",
@@ -28,6 +29,12 @@ commands.allow = [
   "reading_memory_source_captures",
   "reading_memory_snapshot_resource",
 ]
+
+[[permission]]
+identifier = "allow-desktop-library-path-import"
+description = "允许桌面资料库主窗口导入原生拖放路径。"
+platforms = ["macOS", "windows", "linux"]
+commands.allow = ["import_library_paths"]
 
 [[permission]]
 identifier = "allow-dictionary-commands"

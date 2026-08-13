@@ -4,8 +4,11 @@
   "description": "Atha 应用壳允许本地书籍与词典选择、书架管理、消息管理和受限阅读事件。",
   "windows": ["main"],
   "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "allow-reader-event",
     "allow-library-commands",
+    "allow-desktop-library-path-import",
     "allow-dictionary-commands",
     "allow-message-commands"
   ]

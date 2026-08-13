@@ -2,7 +2,7 @@
 
 ## 仓库状态
 
-当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、FB2 / FBZ、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核。Linux Tauri / WebKitGTK 已成为日常 GUI 目标，FB2 书架、目录、搜索与恢复通过正式 Linux WebDriver 入口；Android 保留已有 EPUB2、CBZ、Markdown 与 TXT 的模拟器纵切，仅在发布前或移动端专项验收时启动。直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
+当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、FB2 / FBZ、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核。Linux Tauri / WebKitGTK 已成为日常 GUI 目标，资料库拖放、网格 / 列表、文件关联候选、阅读记忆、桌面工作区与阅读回归通过正式 Linux WebDriver 入口；Android 保留既有模拟器纵切，并有 PCT-AL10 内部候选覆盖安装与启动证据。直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
 
 ## 顶层结构
 
@@ -13,8 +13,8 @@
 | `backend/atha-backend/` | 正式后端库、书根资源边界、全部已支持书籍格式、本地离线词典、书架、消息数据库与阅读遥测校验 | Linux 本地已验证 |
 | `backend/atha-backend/src/local_data.rs` | schema 1 `.atha-data`、严格制品校验、跨书架 / 书源 / 词典 / MessageStore 的 staging、恢复日志、占用统计与启动恢复 | Linux 本地已验证 |
 | `backend/atha-backend/src/reader/dictionary.rs` | MDict v2 与经典 Kindle MOBI6 词典的事务导入、HUFF 累计偏移 sidecar、固定格式分派、精确查词、MDD 范围读取和安全富文本 / 纯文本双投影 | 私有英文输出与公共安全矩阵已验证 |
-| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、最近阅读、跨书消息搜索、应用壳、能力清单、受控协议和打包配置 | Linux / Windows / Android 已验证 |
-| `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、telemetry、固定字段平台日志与 protocol adapter | 已验证 |
+| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、最近阅读、跨书消息搜索、应用壳、能力清单、受控协议和平台打包配置 | Linux AppImage 与 PCT 内部候选已验证；Windows 配置静态检查 |
+| `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、桌面拖放 / 冷启动 staging、telemetry、固定字段平台日志与 protocol adapter | Linux GUI 与 AppImage 启动已验证 |
 | `reader/app/src-tauri/src/dictionary_commands.rs` | 离线词典 picker、Tauri command、blocking adapter 与 internal-only 固定字段日志策略 | Linux GUI 已验证 |
 | `reader/app/src-tauri/src/platform_file.rs` | 普通路径与 Android SAF content URI 共用的流式 Picker cache bridge；RAII / 启动清理和输入大小边界 | Android 模拟器已验证 |
 | `reader/app/src-tauri/src/runtime_diagnostics.rs` | Windows Recorder 与移动端交互诊断的目标平台选择；固定事件 token 由 backend 统一校验 | Windows / Android 已验证 |
@@ -22,6 +22,7 @@
 | `reader/app/src-tauri/src/message_commands.rs` | 消息 IPC adapter；区分阅读页读写与资料库阅读记忆只读路由、DTO 转发、稳定错误和原生导出 dialog | 已验证 |
 | `reader/app/src-tauri/src/message_maintenance.rs` | 资料库根路由校验与兼容 MessageStore-only 维护 IPC adapter | 已验证 |
 | `reader/app/src-tauri/src/local_data_maintenance.rs` | 完整本地数据 picker、恢复确认、存储统计、blocking worker 与固定字段日志 adapter | Linux GUI 已验证 |
+| `reader/app/src/components/LibraryView.svelte`、`reader/app/src/library.ts` | 系统选择器 / 桌面拖放共用导入结果、网格 / 列表书架、冷启动一次性打开及既有书架管理投影 | Linux GUI 已验证 |
 | `reader/app/src/components/MemoryCenter.svelte` | 最近阅读、跨书消息搜索、有书跳回和缺书 / 历史 Snapshot 资料库投影 | Linux GUI 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、分页 / 原生滚动、宽屏工作区、Readest 风格设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 已验证宽屏工作区；既有移动界面已通过 PCT-AL10 自动验收 |
@@ -36,6 +37,8 @@
 | `scripts/check-p0-sqlite.ps1` | 重建数据库并验证事务、FTS 与 10k 冒烟 | 已通过 |
 | `scripts/check-reader-slice.ps1` | 构建实际 host，运行安全、布局和性能验收 | M2 已通过 |
 | `scripts/check-reader-formula-performance.sh` | 通过忽略 sidecar 锁定私密公式压力样本，复用 Bash Linux Tauri 手势矩阵执行 5 次预热与 20 次逐场景 P95 benchmark | Linux GUI 正式门已通过 |
+| `scripts/check-reader-linux.sh`、`scripts/check-reader-candidate.sh` | 隔离 Linux Tauri 多启动视口、可信指针与资料库 / 阅读回归；干净构建、解包并以 AppImage 候选完成完整门禁 | Linux AppImage 已通过 |
+| `scripts/check-pct-reader.sh` | arm64 APK 构建、签名、package / 权限 / 16 KiB 校验，以及显式 PCT-AL10 serial 的同签名非降级安全更新 | PCT-AL10 内部候选覆盖安装已通过 |
 | `scripts/export_reader_sample.py` | 安全、可重复地从 EPUB 导出单章节、带 manifest 的多章节或 fixture-only 全 XHTML 验收样本 | M2 已通过 |
 | `scripts/Serve-ReaderValidation.ps1` | 只读环回提供同一阅读页、manifest 和书根资源 | M2 R1 已通过 |
 | `scripts/check-reader-samples.ps1` | 四样本实际 host、内容交互、状态、搜索、标注与明暗主题截图总验收 | M2 已通过 |
@@ -99,7 +102,8 @@
 
 - 日常 GUI 使用当前 GNOME Wayland 会话中的 Tauri / WebKitGTK，不启动 Android 模拟器；发布前与移动端专项验收才恢复 Android 门禁；
 - Linux 应用根是 `tauri://localhost`，书根与封面分别是 `atha-book://localhost`、`atha-cover://localhost`；平台常量统一供路由、维护 command、前端资源和 CSP 使用；
-- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。当前 Bash 门覆盖 360 / 1000 宽度的资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot 与安全跳回；阅读页另覆盖 1280 / 1600 宽屏工作区、目录 / 搜索 / Message、键鼠与焦点、Locator 重排、600 窄屏回归、页面运行时错误，以及完整导入诊断、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景和 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。门禁请求 W3C touch Actions 并核对可信事件，但当前 WebKitGTK 实际报告 `mouse`，因此它不是实体触摸证据。
+- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。测试专用启动尺寸只允许 360 / 600 / 1000 / 1280 / 1600 五个已声明视口，避免把当前不生效的 WebDriver resize 当成证据。当前 Bash 门覆盖拖放事件、空 / 有书架、网格 / 列表、资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot、安全跳回、宽屏工作区和窄屏回归；阅读页继续覆盖完整导入诊断、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。当前 WebKitGTK 的 touch Actions 会挂起，门禁明确请求并核对可信 `mouse` Pointer Actions，因此它不是实体触摸证据。
+- `scripts/check-reader-candidate.sh` 从干净目录构建唯一 AppImage，检查 desktop MIME、Windows 扩展声明与 Android 关联隔离；随后直接驱动解包的候选 `AppRun` 完成冷启动文件关联、重复关联、普通启动与完整多视口真壳回归，不回退 debug 产物。
 
 ### Android EPUB 纵切
 
@@ -109,7 +113,7 @@
 - 系统 picker 链路已在模拟器手工验证 EPUB 导入 / 打开 / 重启恢复、消息导出及全库备份 / 恢复，完成后 Picker cache 为空；manifest 不请求宽泛存储权限，设置 `allowBackup=false` 并以 API 31+ `dataExtractionRules` 排除 cloud backup 与 device transfer；
 - Android app storage 实测 hard link 返回 `PermissionDenied`。非 Android 备份继续用 hard link 提供 no-replace 发布；Android 只在 Tauri adapter 新建的独占 Picker cache 目录内使用相邻 rename。`rename` 本身不保证 no-replace，当前正确性依赖该独占目录前置条件；只有后续出现其他 Android backend 调用方或实测竞态，才研究 `renameat2` 等替代；
 - Android `ACTION_CREATE_DOCUMENT` 会先创建 provider 文档；完整 cache 制品向 content URI 复制时若失败，provider 可能留下不完整目标。Atha 会报告失败并清空自身 cache，但不能对所有 provider 承诺删除外部残留；
-- 当前通用 Android 应用最高证据仍是 x86_64 模拟器完整 picker 链路；PCT-AL10 另有 arm64 debug APK 的阅读设置、字号 / DPR、水平翻页、原生纵向滚动和跨章专项证据，以及离线词典 release 原生查词 / RSS 与 Tauri 应用 PSS。当前同签名 arm64 release 本地测试候选已覆盖安装并保留应用数据，ADB 自动化验证了四按钮工具栏、选区查词、安全富文本、设置页、六档字号和重启恢复；自然手指触摸仍只由富文本改造前的同机长按与直接点击证据覆盖。这些都不等同于生产签名发布验收。
+- 当前通用 Android 应用最高证据仍是 x86_64 模拟器完整 picker 链路；PCT-AL10 另有 arm64 debug APK 的阅读设置、字号 / DPR、水平翻页、原生纵向滚动和跨章专项证据，以及离线词典 release 原生查词 / RSS 与 Tauri 应用 PSS。当前同签名 arm64 release 本地测试候选已覆盖安装并保留应用数据，ADB 自动化验证了四按钮工具栏、选区查词、安全富文本、设置页、六档字号和重启恢复；日常入口候选另通过 package、SDK、权限、签名、16 KiB ZIP / ELF、非降级与首次安装时间检查，并在不请求清数据、首次安装时间保持的覆盖安装后确认主进程和 `MainActivity` 启动，但未重新实测书架或设置连续性。自然手指触摸仍只由富文本改造前的同机长按与直接点击证据覆盖；这些都不等同于生产签名发布验收。
 - CBZ 共用同一 Android picker、私有数据根、reader runtime 和 Locator 恢复链路；`-VerifyCbzFixture` 已验证逐页、坏页继续、日志隐私与 app PSS，并在 renderer 不能唯一归因时明确不生成数值。
 - Markdown / TXT 共用同一 picker、书根、ReaderManifest、Locator、搜索与恢复链路。Markdown 固定把 raw HTML / 活动链接 / 图片能力投影为惰性文本，代码块使用 Readest 同型 `pre-wrap` 且允许跨页；TXT 以高置信整行标题生成 TOC、按约 1 MiB 合并物理 sections。API 36 x86_64 16 KiB AVD 已用仓库 README 与私有真实 TXT 覆盖目录首 / 中 / 末、全文搜索、翻页、强停恢复、Picker cache、PSS、健康和双日志隐私；十样本只作为同环境基线，ARM64 真机仍未覆盖。
 - Android edge-to-edge 由 native `WindowInsetsCompat` 提供 `systemBars | displayCutout` 四边事实，Web 端只消费一套自有 CSS 变量；阅读态隐藏状态栏但保留导航栏，章节标题仍在 cutout 下方，工具打开时章节标题隐藏且顶部工具栏完整避让状态栏。
@@ -152,6 +156,7 @@
 | 阅读内核 | `scripts/check-reader-samples.ps1`、`scripts/check-reader-gate.ps1` | 真实 Windows WebView2 困难样本、恢复、内存与性能门槛 |
 | 产品入口 | `scripts/check-tauri-reader.ps1`、`scripts/check-library-shelf.ps1` | 真实 Windows Tauri / WebView2 本地链路 |
 | 离线书架 | `node --test reader/app/tests/library.test.ts`、`scripts/check-library-shelf.ps1`、`scripts/check-android-reader.ps1 -VerifyLibraryShelfUi` | 搜索 / 排序 / 严格进度 / 部分失败逻辑，Windows 真壳与四视口渲染，以及 API 35 x86_64 16 KiB AVD 单书交互、截图和双日志隐私检查 |
+| 日常入口与内部候选 | `bash scripts/check-reader-candidate.sh`、`bash scripts/check-pct-reader.sh` | Linux AppImage 的 metadata 与 `AppRun` 冷启动关联 / 重复 / 普通启动 / 完整多视口真壳回归；PCT-AL10 同签名非降级覆盖安装、16 KiB 与启动烟测。Windows 仅静态配置，均非生产发布验收 |
 | 消息与数据 | `scripts/check-message-reading.ps1`、`scripts/check-tauri-reader.ps1` | 真实 Windows Tauri / WebView2 消息闭环，以及本地集成测试、前端构建、Tauri seam 与权限检查 |
 | Android EPUB 纵切 | `scripts/check-android-reader.ps1`；活动 change 记录的消息 SAF opt-in 链路 | API 35 x86_64 16 KiB 模拟器上的构建、安装、冷启动、系统 picker 导入 / 打开 / 重启持久，以及消息 export / backup / restore；不是 ARM 真机性能证据 |
 | EPUB2 / NCX 子集 | `cargo test -p atha-backend --test epub_import`、EPUBCheck 5.3.0、`scripts/check-android-reader.ps1 -VerifyEpub2NcxFixture` | 动态原创 fixture 通过规范 oracle；Windows WebView2 与 API 35 x86_64 16 KiB Android 模拟器已验证目录跳转和强停后同一 section / page 恢复 |
@@ -169,10 +174,10 @@
 
 | 类别 | 当前缺口 |
 | --- | --- |
-| 产品回流 | 书架没有文件关联、拖放或分组；尚无多书 Android 排序、跨书阅读记忆移动专项、超大书架滚动与虚拟化性能证据 |
+| 产品回流 | 书架尚无分组；没有运行中实例文件转交、多书 Android 排序、跨书阅读记忆移动专项、超大书架滚动与虚拟化性能证据 |
 | 格式与引用 | EPUB2 首版仍是 UTF-8 XHTML / NCX 子集；CBZ 首版只有 JPEG / PNG，不含 RTL / spread / 区域标注；FB2 首版拒绝源 stylesheet、非 JPEG / PNG binary 与未知正文元素，FBZ 单成员受 16 MiB archive 上限；Kindle 首版不发布 `boko` raw API 无法读取的 KF8 flow stylesheet，也不支持 DRM、字典阅读、KFX、AZW4 或压缩字体；Markdown 不加载活动链接 / 图片，TXT 遗留编码识别是 best effort；未完成 UTF-16 EPUB、DTBook、完整 fallback、跨内容版本 Locator 重锚定或富文本迁移 |
 | 数据与设备 | 没有加密、checkpoint、全应用备份或跨设备同步 |
-| 交付 | 没有 CI、Linux / Windows 安装包或生产签名 Android 发布包；Linux 当前验证 debug Tauri 壳，Android 验证 x86_64 模拟器、PCT-AL10 arm64 debug 专项和同签名 release 本地测试候选，不等同于生产签名发布验收 |
+| 交付 | 没有 CI、Windows 安装包、生产签名 Android 发布包、自动更新或正式分发；Linux 只有内部 AppImage 候选，Android 有 x86_64 模拟器、PCT-AL10 arm64 debug 专项和同签名 release 本地测试候选，均不等同于生产签名发布验收 |
 | 工程结构 | 旧 Wry / Tao host 尚未删除；reader runtime 仍由固定顺序组成单 bundle |
 | 性能证据 | 基准没有完整设备指纹，也没有跨日期重复运行统计；PCT-AL10 已有词典 release 原生查词 / RSS、Tauri 应用 PSS 与缓存打开 1ms smoke，但仍缺 SAF 首次准备 / 书籍 I/O 及通用 WebView 基准 |
 

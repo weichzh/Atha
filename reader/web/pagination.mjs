@@ -455,7 +455,13 @@ export function createPagination({
   }
 
   function nextFrame() {
-    return new Promise((resolve) => requestAnimationFrame(resolve));
+    return new Promise((resolve) => {
+      const fallback = setTimeout(resolve, 100);
+      requestAnimationFrame(() => {
+        clearTimeout(fallback);
+        resolve();
+      });
+    });
   }
 
   async function waitForStableLayout(operationStage) {
