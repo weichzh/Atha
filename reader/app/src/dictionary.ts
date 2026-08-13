@@ -18,6 +18,66 @@ export interface DictionaryLookup {
   definitionHtml: string;
 }
 
+export const dictionaryFontScales = [0.85, 1, 1.15, 1.3, 1.5, 1.75] as const;
+export type DictionaryFontScale = (typeof dictionaryFontScales)[number];
+
+export interface DictionaryPreferences {
+  dictionaryId: string;
+  fontScale: DictionaryFontScale;
+}
+
+interface StorageReader {
+  getItem(key: string): string | null;
+}
+
+interface StorageWriter {
+  setItem(key: string, value: string): void;
+}
+
+const preferencesKey = "atha.reader.dictionary.preferences.v1";
+const defaultPreferences: DictionaryPreferences = { dictionaryId: "", fontScale: 1 };
+
+function validDictionaryId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function validFontScale(value: unknown): value is DictionaryFontScale {
+  return dictionaryFontScales.includes(value as DictionaryFontScale);
+}
+
+export function readDictionaryPreferences(storage?: StorageReader | null): DictionaryPreferences {
+  try {
+    const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+    const raw = target?.getItem(preferencesKey);
+    if (!raw || raw.length > 1024) return { ...defaultPreferences };
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || (value as { schema?: unknown }).schema !== 1) {
+      return { ...defaultPreferences };
+    }
+    const stored = value as { dictionaryId?: unknown; fontScale?: unknown };
+    return {
+      dictionaryId: validDictionaryId(stored.dictionaryId) ? stored.dictionaryId : "",
+      fontScale: validFontScale(stored.fontScale) ? stored.fontScale : 1,
+    };
+  } catch {
+    return { ...defaultPreferences };
+  }
+}
+
+export function writeDictionaryPreferences(
+  preferences: DictionaryPreferences,
+  storage?: StorageWriter | null,
+): boolean {
+  try {
+    const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+    if (!target) return false;
+    target.setItem(preferencesKey, JSON.stringify({ schema: 1, ...preferences }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const dictionaryAvailable =
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 

@@ -24,7 +24,7 @@
 | `reader/atha-reader.html`、`reader/atha-reader.css` | 唯一阅读页结构、分页 / 原生滚动、Readest 风格设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 与 PCT-AL10 自动验收已通过 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、分页、诊断、benchmark 和页面组合入口 | 已实现 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的解析、序列化、大小 / 字段 / 重复 ID 与注入式 CSS 校验边界 | 已实现 |
-| `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 本地词典管理、当前词典选择、选区查词与安全富文本词条；移动端使用 75% 高底部抽屉 | 本地构建与三视口合成界面已验证 |
+| `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 本地词典管理、持久化来源 / 六档字号设置、选区查词与安全富文本词条；移动端使用 75% 高底部抽屉 | 本地构建与桌面 / 移动合成界面已验证 |
 | `reader/samples.json` | 四个本地验收样本的入口、manifest、内容、搜索和边界断言清单 | M2 已验证 |
 | `p0/ffi/` | Rust/C++ 共享 C ABI 调用与所有权对照 | 本地 P0 实验 |
 | `p0/sqlite/` | SQLite、FTS5、Outbox schema 与故障检查 | 本地 P0 实验 |
@@ -74,6 +74,7 @@
 - `reader::fb2::import_fb2` 以 `quick-xml` 两遍有界流式解析直接 FB2 或单根成员 FBZ，投影 metadata、正文 / notes sections、目录、内部链接和 JPEG / PNG 图片；DTD、处理指令、外链、源 stylesheet、主动内容、未知正文元素、损坏引用与资源越界稳定拒绝；
 - `reader::library::LocalLibrary` 以允许列表扩展名严格分派 EPUB / CBZ / FB2 / FBZ / MOBI / AZW / AZW3 / Markdown / TXT；Android content URI 由 Tauri PathPlugin 读取显示文件名后保留同一允许列表后缀，不从 URI 或正文猜格式。EPUB / CBZ 保持裸 SHA-256 身份，FB2 / FBZ 共享解包 XML 的固定格式域身份，Kindle 三后缀共享一个格式域，Markdown / TXT 用不同固定格式域隔离相同字节；加入书架只把源写入 `SourceBooks` 并登记，首次打开在 blocking worker 中调用既有 importer，同进程只发布一次准备结果；后续按精确 marker、元数据和 manifest 声明验证并复用 `ImportedBooks`，不完整缓存从任一同身份耐久后缀重建；再次登记复用同身份健康源，以验证后的 staging 原子覆盖身份异常源，并重建损坏记录；每书一份兼容 JSON 提供 `list`、`stage`、`import`、`open`、`cover` 和 `remove`，移除记录不删除耐久源、导入缓存或阅读状态；
 - `reader::dictionary::LocalDictionaries` 在独立 `Dictionaries` 目录按固定格式域事务导入 MDX / MDD 或经典 MOBI6，MDict 复用成熟 reader，Kindle 以稀疏索引只读目标 records；精确查询结果同时生成兼容纯文本和固定元素白名单富文本，来源脚本、样式、属性与资源均不进入结果，Tauri 日志不记录路径、查询、词头、释义或资源；
+- 词典结果页以齿轮进入同一面板的设置子页；浏览器本地 schema 1 设置只保存 64 位当前词典 ID 和 Readest 对照的 85%、100%、115%、130%、150%、175% 释义字号，重载恢复且不改变正文偏好。损坏设置或已移除来源回退到首个可用本地词典，存储失败只影响持久化，不阻止本次查词；
 - `atha`、`atha-book` 与 `atha-cover` 自定义协议只提供应用资源、当前书根与已登记封面；Windows / Android 使用 `https://*.localhost`，Linux 使用 `<scheme>://localhost`。同书校验比较协议与 host，不能依赖 custom scheme 恒为 `null` 的 `URL.origin`；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
 - 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`interaction` 以一次序列一个 owner 仲裁翻页、横向溢出和内容激活，`pagination` 用单个 rAF 写入拖动预览，长章节改写原生横向滚动，并缓存稳定页与当前 section 的 fragment 偏移；`session` 保留 live DOM 直到目标准备和排版完成，失败时恢复上一稳定内容与位置；`content` 用共享三槽和 8 Mi 字符预算复用已校验 detached section 或相邻 XHTML 原文，并以 generation 与 Promise identity 拒绝关闭后的在途回写；`reader-state` 拥有偏好、书签、进度和应用级阅读统计记录；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式执行当前页优先校验、解码、章节内短期复用和稳定书内几何缓存，成功显现不触发逐页重排，初次可见资源加载后由 `pagination` 统一再计一次，失败替换才在首次布局变化前捕获 Locator；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条/本章/本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 只组合流程并禁用默认右键菜单；
