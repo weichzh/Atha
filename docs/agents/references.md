@@ -5,10 +5,10 @@
 ## Tauri 2
 
 - 版本事实：`reader/app/package.json`、`reader/app/src-tauri/Cargo.toml` 与 `Cargo.lock`。
-- 官方入口：[从前端调用 Rust](https://v2.tauri.app/develop/calling-rust/)、[Rust API](https://docs.rs/tauri/latest/tauri/)。
-- 项目快速用法：前端统一通过 `reader/app/src/messages.ts` 调用；Rust command 位于 `reader/app/src-tauri/src/lib.rs` 并在 `generate_handler!` 注册。可能阻塞的工作使用 async command；读取器 command 保留 `WebviewWindow` 来源校验并返回 `Result`。
-- 最短检查：`pnpm --dir reader/app check`、`pnpm --dir reader/app build`、`cargo test -p atha-reader-app`。
-- 必须重查：command 参数映射、async 或主线程行为、state、window/webview、IPC 权限和插件 API。
+- 官方入口：[从前端调用 Rust](https://v2.tauri.app/develop/calling-rust/)、[Rust API](https://docs.rs/tauri/latest/tauri/)、[Webview 拖放 API](https://v2.tauri.app/reference/javascript/api/namespacewebview/#ondragdropevent)、[打包与文件关联配置](https://v2.tauri.app/reference/config/#bundleconfig)、[单实例插件](https://v2.tauri.app/plugin/single-instance/)。
+- 项目快速用法：前端统一通过 `reader/app/src/messages.ts` 或对应领域 adapter 调用；Rust command 位于 `reader/app/src-tauri/src/lib.rs` 并在 `generate_handler!` 注册。可能阻塞的工作使用 async command；读取器 command 保留 `WebviewWindow` 来源校验并返回 `Result`。桌面文件拖放使用 Tauri 原生 Webview 事件并在组件卸载时取消监听；路径只交给有来源、数量和长度校验的 LocalLibrary command，不授予前端通用 fs scope。文件关联由平台打包配置声明，启动参数仍经过现有 importer；没有运行中实例转交需求时不增加 single-instance 依赖。
+- 最短检查：`pnpm --dir reader/app check`、`pnpm --dir reader/app build`、`cargo test -p atha-reader-app`；桌面候选使用 `bash scripts/check-reader-candidate.sh`。
+- 必须重查：command 参数映射、async 或主线程行为、state、window/webview、IPC 权限、拖放事件、平台文件关联、bundle metadata、插件 API 和运行中实例转交需求。
 
 ## Tauri Logging
 
