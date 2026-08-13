@@ -10,12 +10,17 @@
 
   import BottomToolbar from "./chrome/BottomToolbar.svelte";
   import ConversationOverlay from "./ConversationOverlay.svelte";
+  import DictionaryPanel from "./panels/DictionaryPanel.svelte";
   import TopToolbar from "./chrome/TopToolbar.svelte";
 </script>
 
 <section class="reader-controls" aria-label="阅读工具">
   <TopToolbar />
   <BottomToolbar />
+  <details class="reader-tool dictionary" name="reader-panel">
+    <summary hidden aria-hidden="true"></summary>
+    <DictionaryPanel />
+  </details>
 </section>
 
 <div id="selection-actions" class="selection-actions" role="toolbar" aria-label="选中文字操作" hidden>

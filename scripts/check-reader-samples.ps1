@@ -486,9 +486,18 @@ try {
                     Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#content-dialog-image').complete && document.querySelector('#content-dialog-image').naturalWidth > 0")
                     $previewScreenshot = Join-Path $screenshots "$($sample.id)-$theme-preview.png"
                     Invoke-AgentBrowser @('--session', $session, 'screenshot', $previewScreenshot)
-                    Invoke-AgentBrowser @('--session', $session, 'press', 'Escape')
+                    $imagePreviewPoint = Get-AgentBrowserScriptValue -Session $session -Script '(() => { const rect = document.querySelector("#content-dialog-image").getBoundingClientRect(); return [Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2)]; })()' | ConvertFrom-Json
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$imagePreviewPoint[0], [string]$imagePreviewPoint[1])
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
                     $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
-                    if ($previewState.open -or -not $previewState.focusRestored) { throw 'Escape did not close the image preview and restore focus.' }
+                    if (-not $previewState.open) { throw 'Clicking the preview image closed it.' }
+                    $previewBackdropPoint = Get-AgentBrowserScriptValue -Session $session -Script '(() => { const rect = document.querySelector("#content-dialog-viewport").getBoundingClientRect(); return [Math.round(rect.left + 8), Math.round(rect.bottom - 8)]; })()' | ConvertFrom-Json
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'move', [string]$previewBackdropPoint[0], [string]$previewBackdropPoint[1])
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'down', 'left')
+                    Invoke-AgentBrowser @('--session', $session, 'mouse', 'up', 'left')
+                    $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
+                    if ($previewState.open -or -not $previewState.focusRestored) { throw 'Clicking the image backdrop did not close the preview and restore focus.' }
                     if ((Get-AgentBrowserScriptValue -Session $session -Script "globalThis.__athaReaderDiagnostics.focusMedia('ordinary')") -ne 'true') { throw 'Ordinary image focus failed.' }
                     Invoke-AgentBrowser @('--session', $session, 'press', 'Space')
                     $previewState = Get-AgentBrowserScriptValue -Session $session -Script 'globalThis.__athaReaderDiagnostics.previewState()' | ConvertFrom-Json
@@ -553,6 +562,8 @@ try {
     visible: !toolbar.hidden,
     insideViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
     noteControlsInPanel: document.querySelectorAll('.notes-panel textarea, .notes-panel form, .notes-panel #add-annotation').length,
+    topbarDictionary: Boolean(document.querySelector('.top-toolbar .reader-tool.dictionary')),
+    settingsIcon: Boolean(document.querySelector('.top-toolbar .reader-tool.preferences > summary svg, .top-toolbar .reader-tool.preferences > summary .fluent-icon')),
   };
 })()
 '@ | ConvertFrom-Json
@@ -560,7 +571,9 @@ try {
                             (@($selectionUi.actions) -join ',') -ne '复制,标注,笔记' -or
                             -not $selectionUi.visible -or
                             -not $selectionUi.insideViewport -or
-                            $selectionUi.noteControlsInPanel -ne 0
+                            $selectionUi.noteControlsInPanel -ne 0 -or
+                            $selectionUi.topbarDictionary -or
+                            -not $selectionUi.settingsIcon
                         ) {
                             throw "Selection actions are invalid: $($selectionUi | ConvertTo-Json -Compress)"
                         }
@@ -607,7 +620,10 @@ try {
                         Invoke-AgentBrowser @('--session', $session, 'select', '#font-size', '32')
                         [void](Get-AgentBrowserScriptValue -Session $session -Script "document.documentElement.setAttribute('data-reader-tools', ''); true")
                         Invoke-AgentBrowser @('--session', $session, 'click', '.notes > summary')
-                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const panel = document.querySelector('.notes-panel').getBoundingClientRect(); return document.querySelectorAll('#annotations .annotation-item').length === 1 && panel.left === 0 && panel.top === 0 && panel.right === innerWidth && panel.bottom === innerHeight; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const panel = document.querySelector('.notes-panel').getBoundingClientRect(); const back = document.querySelector('.notes-panel [data-close-reader-tools]'); const rect = back.getBoundingClientRect(); return document.querySelectorAll('#annotations .annotation-item').length === 1 && panel.left === 0 && panel.top === 0 && panel.right === innerWidth && panel.bottom === innerHeight && back.querySelector('svg, .fluent-icon') && rect.width >= 44 && rect.height >= 44 && document.querySelector('#message-export-all').getBoundingClientRect().height === 0; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes-actions > summary')
+                        Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "(() => { const button = document.querySelector('#message-export-all'); const rect = button.getBoundingClientRect(); return document.querySelector('.notes-actions').open && button.textContent.trim() === '导出笔记' && rect.width >= 44 && rect.height >= 44; })()")
+                        Invoke-AgentBrowser @('--session', $session, 'click', '.notes-actions > summary')
                         Invoke-AgentBrowser @('--session', $session, 'screenshot', (Join-Path $screenshots 'math-history-r1-light-annotation.png'))
                         Invoke-AgentBrowser @('--session', $session, 'click', '#annotations .annotation-item-edit')
                         Invoke-AgentBrowser @('--session', $session, 'wait', '--fn', "document.querySelector('#annotation-note-dialog').open && document.querySelector('#annotation-note-heading').textContent === '编辑笔记' && document.querySelector('#annotation-note').value === '真实阅读笔记'")

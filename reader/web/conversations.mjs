@@ -678,6 +678,9 @@ export function createConversations({
   }
 
   function bind() {
+    const setExportLabel = (label) => {
+      controls.exportAllButton.querySelector("[data-export-label]").textContent = label;
+    };
     controls.close.addEventListener("click", close);
     controls.fullscreen.addEventListener("click", () => {
       setFullscreen(controls.overlay.dataset.fullscreen !== "true");
@@ -741,11 +744,11 @@ export function createConversations({
     controls.exportAllButton.addEventListener("click", async () => {
       try {
         if (!(await store.export(editionId, null))) return;
-        controls.exportAllButton.textContent = "已导出";
-        setTimeout(() => (controls.exportAllButton.textContent = "导出"), 1600);
+        setExportLabel("已导出");
+        setTimeout(() => setExportLabel("导出笔记"), 1600);
       } catch {
-        controls.exportAllButton.textContent = "导出失败";
-        setTimeout(() => (controls.exportAllButton.textContent = "导出"), 1600);
+        setExportLabel("导出失败");
+        setTimeout(() => setExportLabel("导出笔记"), 1600);
       }
     });
     controls.list.addEventListener("click", (event) => {

@@ -3,6 +3,8 @@ const root = document.documentElement;
 const reader = document.querySelector(".reader");
 const readerShell = document.querySelector(".reader-shell");
 const readerStartup = document.querySelector(".reader-startup");
+const contentDialog = document.querySelector("#content-dialog");
+const contentDialogViewport = document.querySelector("#content-dialog-viewport");
 const desktopWorkspaceMedia = matchMedia("(min-width: 1100px)");
 const workspaceTools = ["directory", "search", "notes"].map((name) => ({
   name,
@@ -547,7 +549,12 @@ async function openReadingMemoryLink() {
 }
 
 document.querySelectorAll("[data-close-reader-tools]").forEach((button) => {
-  button.addEventListener("click", closeReaderTools);
+  button.addEventListener("click", () => finishReaderToolNavigation(root.dataset.workspacePanel));
+});
+contentDialog.addEventListener("click", (event) => {
+  if (event.target === contentDialogViewport && contentDialog.classList.contains("media-preview")) {
+    contentDialog.close();
+  }
 });
 bindSettingsNavigation();
 let diagnostics;

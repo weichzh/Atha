@@ -30,7 +30,7 @@
             </button>
             <details class="reader-tool preferences" name="reader-panel">
               <summary class="icon-button" aria-label="阅读设置" title="阅读设置">
-                <span class="fluent-icon" aria-hidden="true">&#xE712;</span>
+                <span class="fluent-icon" aria-hidden="true">&#xE713;</span>
               </summary>
               <div class="tool-panel preferences-panel" data-settings-root data-settings-view="menu">
                 <section class="settings-view settings-menu" data-settings-page="menu">
@@ -371,6 +371,17 @@
                   <span class="fluent-icon" aria-hidden="true">&#xE72B;</span>
                 </button>
                 <h2 id="annotation-heading">笔记</h2>
+                <details class="notes-actions">
+                  <summary class="icon-button" aria-label="更多操作" title="更多操作">
+                    <span class="fluent-icon" aria-hidden="true">&#xE712;</span>
+                  </summary>
+                  <div class="notes-actions-menu">
+                    <button id="message-export-all" type="button">
+                      <span class="fluent-icon" aria-hidden="true">&#xE896;</span>
+                      <span data-export-label>导出笔记</span>
+                    </button>
+                  </div>
+                </details>
               </header>
               <div class="annotation-filters">
                 <input id="annotation-filter-query" type="search" maxlength="128" autocomplete="off" placeholder="搜索笔记与标注" aria-label="搜索笔记与标注" />
@@ -427,14 +438,20 @@
         </form>
       </dialog>
       <dialog id="content-dialog" aria-labelledby="content-dialog-title">
-        <h2 id="content-dialog-title"></h2>
-        <p id="content-dialog-body"></p>
-        <img id="content-dialog-image" hidden alt="" />
-        <div id="content-dialog-table" tabindex="0" aria-label="表格预览" hidden></div>
-        <pre id="content-dialog-code" tabindex="0" aria-label="代码预览" hidden></pre>
-        <form method="dialog">
-          <button id="close-content-dialog" value="close">关闭</button>
-        </form>
+        <header class="content-dialog-heading">
+          <h2 id="content-dialog-title">内容预览</h2>
+          <form method="dialog">
+            <button id="close-content-dialog" class="content-dialog-icon-button" value="close" aria-label="关闭" title="关闭">
+              <span class="fluent-icon" aria-hidden="true">&#xE711;</span>
+            </button>
+          </form>
+        </header>
+        <div id="content-dialog-viewport">
+          <p id="content-dialog-body"></p>
+          <img id="content-dialog-image" hidden alt="" />
+          <div id="content-dialog-table" role="region" tabindex="0" aria-label="表格预览" hidden></div>
+          <pre id="content-dialog-code" role="region" tabindex="0" aria-label="代码预览" hidden></pre>
+        </div>
       </dialog>
     </main>
   </body>

@@ -430,15 +430,57 @@ function Invoke-LibraryBrowserCheck {
             }
         }
 
-        Invoke-Checked 'agent-browser' @('--session', $session, 'click', '.library-management summary')
-        Invoke-Checked 'agent-browser' @('--session', $session, 'wait', '--fn', 'document.querySelector(".library-management")?.open===true')
-        $menu = @(& agent-browser --session $session eval '(()=>{const menu=document.querySelector(".library-management-menu");const rect=menu?.getBoundingClientRect();return {visible:Boolean(rect&&rect.width&&rect.height),inside:Boolean(rect&&rect.left>=0&&rect.right<=innerWidth),buttons:[...menu.querySelectorAll("button")].every(button=>{const box=button.getBoundingClientRect();return box.width>=44&&box.height>=44})}})()') -join "`n"
-        if ($LASTEXITCODE -ne 0) { throw 'agent-browser management-menu check failed.' }
-        $menuResult = $menu | ConvertFrom-Json
-        if (-not $menuResult.visible -or -not $menuResult.inside -or -not $menuResult.buttons) {
-            throw "Invalid library management menu geometry: $menu"
+        Invoke-Checked 'agent-browser' @(
+            '--session', $session, 'find', 'role', 'button', 'click', '--name', '设置'
+        )
+        Invoke-Checked 'agent-browser' @('--session', $session, 'wait', '--text', '阅读默认')
+        $settings = @(& agent-browser --session $session eval '(()=>{const page=document.querySelector(".library-settings");const rect=page?.getBoundingClientRect();const controls=[...page.querySelectorAll("button,select")];return {visible:Boolean(rect&&rect.width&&rect.height),inside:Boolean(rect&&rect.left>=0&&rect.right<=innerWidth),labels:[...page.querySelectorAll("#local-data-settings-heading + .library-data-actions button")].map(button=>button.textContent.trim()),dictionaryActions:[...page.querySelectorAll(".dictionary-settings-actions button")].map(button=>button.textContent.trim()),readingDefault:Boolean([...page.querySelectorAll("button")].find(button=>button.textContent.trim()==="恢复阅读默认")),fontScales:page.querySelectorAll("select[aria-label=词典释义字号] option").length,themeModes:[...page.querySelectorAll(".library-theme-control button")].map(button=>button.textContent.trim()),themeChecked:page.querySelector(".library-theme-control [aria-checked=true]")?.textContent.trim(),controls:controls.every(control=>{const box=control.getBoundingClientRect();return box.width>=44&&box.height>=40}),search:document.querySelector(".library-search-field"),legacyMenu:document.querySelector(".library-management")}})()') -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw 'agent-browser settings check failed.' }
+        $settingsResult = $settings | ConvertFrom-Json
+        if (
+            -not $settingsResult.visible -or -not $settingsResult.inside -or -not $settingsResult.controls -or
+            ($settingsResult.labels -join ',') -ne '备份资料库,恢复资料库,存储占用' -or
+            ($settingsResult.dictionaryActions -join ',') -ne '导入词典,移除当前词典' -or
+            -not $settingsResult.readingDefault -or
+            ($settingsResult.themeModes -join ',') -ne '跟随系统,浅色,深色' -or
+            @('跟随系统', '浅色', '深色') -notcontains $settingsResult.themeChecked -or
+            $settingsResult.fontScales -ne 6 -or
+            $null -ne $settingsResult.search -or $null -ne $settingsResult.legacyMenu
+        ) {
+            throw "Invalid application settings geometry: $settings"
         }
-        Invoke-Checked 'agent-browser' @('--session', $session, 'click', '.library-management summary')
+        Invoke-Checked 'agent-browser' @(
+            '--session', $session, 'find', 'role', 'radio', 'click', '--name', '浅色'
+        )
+        $theme = @(& agent-browser --session $session eval '(()=>{const shell=document.querySelector(".library-shell");const style=getComputedStyle(shell);return {shell:shell.dataset.appTheme,root:document.documentElement.dataset.appTheme,stored:JSON.parse(localStorage.getItem("atha.app.appearance.v1"))?.theme,background:style.backgroundColor,color:style.color}})()') -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw 'agent-browser application theme check failed.' }
+        $themeResult = $theme | ConvertFrom-Json
+        if (
+            $themeResult.shell -ne 'light' -or $themeResult.root -ne 'light' -or
+            $themeResult.stored -ne 'light' -or $themeResult.background -ne 'rgb(246, 246, 248)' -or
+            $themeResult.color -ne 'rgb(29, 29, 31)'
+        ) {
+            throw "Application theme did not stay separate and persist: $theme"
+        }
+        Invoke-Checked 'agent-browser' @(
+            '--session', $session, 'find', 'role', 'radio', 'click', '--name', '跟随系统'
+        )
+        $readingDefaults = @(& agent-browser --session $session eval '(()=>{const appearance=localStorage.getItem("atha.app.appearance.v1");localStorage.setItem("atha.reader.application.v1",JSON.stringify({schema:1,preferences:{theme:"paper",brightness:90,fontSize:24,fontFamily:"serif",density:"compact"}}));const originalConfirm=globalThis.confirm;globalThis.confirm=()=>true;[...document.querySelectorAll(".library-settings button")].find(button=>button.textContent.trim()==="恢复阅读默认")?.click();globalThis.confirm=originalConfirm;return {appearanceUnchanged:localStorage.getItem("atha.app.appearance.v1")===appearance,preferences:JSON.parse(localStorage.getItem("atha.reader.application.v1"))?.preferences}})()') -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw 'agent-browser reading defaults check failed.' }
+        $readingDefaultsResult = $readingDefaults | ConvertFrom-Json
+        if (
+            -not $readingDefaultsResult.appearanceUnchanged -or
+            $readingDefaultsResult.preferences.theme -ne 'system' -or
+            $readingDefaultsResult.preferences.brightness -ne 100 -or
+            $readingDefaultsResult.preferences.fontSize -ne 19 -or
+            $readingDefaultsResult.preferences.fontFamily -ne 'book' -or
+            $readingDefaultsResult.preferences.density -ne 'standard'
+        ) {
+            throw "Reading defaults did not reset independently: $readingDefaults"
+        }
+        Invoke-Checked 'agent-browser' @(
+            '--session', $session, 'find', 'role', 'button', 'click', '--name', '书架'
+        )
 
         foreach ($viewport in @(
             @{ Width = 360; Height = 800 },

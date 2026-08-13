@@ -606,23 +606,80 @@ return true;
   fi
 }
 
-verify_library_management() {
-  local menu storage selection
-  menu=$(execute_sync '
-const details = document.querySelector(".library-management");
-details?.querySelector("summary")?.click();
+verify_library_settings() {
+  local settings theme storage selection
+  [[ $(execute_sync '
+const button = [...document.querySelectorAll(".library-sections button")]
+  .find((item) => item.textContent.trim() === "设置");
+button?.click();
+return Boolean(button);') == true ]] || die 'could not enter application settings'
+  settings=$(wait_for_script '
+const page = document.querySelector(".library-settings");
+const controls = [...(page?.querySelectorAll("button, select") || [])];
 return {
-  open: Boolean(details?.open),
-  labels: [...(details?.querySelectorAll(".library-management-menu button") || [])].map((button) => button.textContent.trim()),
+  heading: page?.querySelector("h1")?.textContent || "",
+  labels: [...(page?.querySelectorAll("#local-data-settings-heading + .library-data-actions button") || [])].map((button) => button.textContent.trim()),
+  dictionaryActions: [...(page?.querySelectorAll(".dictionary-settings-actions button") || [])].map((button) => button.textContent.trim()),
+  readingDefault: Boolean([...page?.querySelectorAll("button") || []].find((button) => button.textContent.trim() === "恢复阅读默认")),
+  fontScales: page?.querySelectorAll("select[aria-label=词典释义字号] option").length || 0,
+  themeModes: [...(page?.querySelectorAll(".library-theme-control button") || [])].map((button) => button.textContent.trim()),
+  themeChecked: page?.querySelector(".library-theme-control [aria-checked=true]")?.textContent.trim() || "",
+  controls: controls.every((control) => control.getBoundingClientRect().height >= 40),
+  search: Boolean(document.querySelector(".library-search-field")),
+  legacyMenu: Boolean(document.querySelector(".library-management")),
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
-};') || die 'could not inspect library management'
+};' \
+    '.heading == "设置" and .labels == ["备份资料库","恢复资料库","存储占用"] and .dictionaryActions == ["导入词典","移除当前词典"] and .readingDefault == true and .fontScales == 6 and .themeModes == ["跟随系统","浅色","深色"] and (.themeChecked == "跟随系统" or .themeChecked == "浅色" or .themeChecked == "深色") and .controls == true and .search == false and .legacyMenu == false and .overflow == false' \
+    'application settings did not become ready') || die 'could not inspect application settings'
   jq -e '
-    .open == true and .overflow == false and
+    .heading == "设置" and .overflow == false and
     .labels == ["备份资料库", "恢复资料库", "存储占用"]
-  ' <<<"$menu" >/dev/null || die "library management is incomplete (state: $(jq -c . <<<"$menu"))"
+  ' <<<"$settings" >/dev/null || die "application settings are incomplete (state: $(jq -c . <<<"$settings"))"
 
   [[ $(execute_sync '
-const button = [...document.querySelectorAll(".library-management-menu button")]
+globalThis.__athaReaderPreferencesBeforeAppTheme = localStorage.getItem("atha.reader.application.v1");
+const button = [...document.querySelectorAll(".library-theme-control button")]
+  .find((item) => item.textContent.trim() === "浅色");
+button?.click();
+return Boolean(button);') == true ]] || die 'could not choose the light application theme'
+  theme=$(wait_for_script '
+const shell = document.querySelector(".library-shell");
+const style = getComputedStyle(shell);
+return {
+  shell: shell?.dataset.appTheme || "",
+  root: document.documentElement.dataset.appTheme || "",
+  stored: JSON.parse(localStorage.getItem("atha.app.appearance.v1") || "null")?.theme || "",
+  readerUnchanged: localStorage.getItem("atha.reader.application.v1") === globalThis.__athaReaderPreferencesBeforeAppTheme,
+  background: style.backgroundColor,
+  color: style.color,
+  overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+};' \
+    '.shell == "light" and .root == "light" and .stored == "light" and .readerUnchanged == true and .background == "rgb(246, 246, 248)" and .color == "rgb(29, 29, 31)" and .overflow == false' \
+    'independent application theme did not become ready') || die 'could not inspect the application theme'
+  [[ $(execute_sync '
+const button = [...document.querySelectorAll(".library-theme-control button")]
+  .find((item) => item.textContent.trim() === "跟随系统");
+button?.click();
+return Boolean(button);') == true ]] || die 'could not restore the system application theme'
+  [[ $(execute_sync '
+const appearance = localStorage.getItem("atha.app.appearance.v1");
+localStorage.setItem("atha.reader.application.v1", JSON.stringify({
+  schema: 1,
+  preferences: {theme: "paper", brightness: 90, fontSize: 24, fontFamily: "serif", density: "compact"}
+}));
+const originalConfirm = globalThis.confirm;
+globalThis.confirm = () => true;
+const button = [...document.querySelectorAll(".library-settings button")]
+  .find((item) => item.textContent.trim() === "恢复阅读默认");
+button?.click();
+globalThis.confirm = originalConfirm;
+const preferences = JSON.parse(localStorage.getItem("atha.reader.application.v1") || "null")?.preferences;
+return Boolean(button) && localStorage.getItem("atha.app.appearance.v1") === appearance &&
+  JSON.stringify(preferences) === JSON.stringify({theme: "system", brightness: 100, fontSize: 19, fontFamily: "book", density: "standard"});') == true ]] ||
+    die 'reading defaults did not reset independently from application appearance'
+
+  [[ $(execute_sync '
+const button = [...document.querySelectorAll(".library-data-actions button")]
   .find((item) => item.textContent.includes("存储占用"));
 button?.click();
 return Boolean(button);') == true ]] || die 'could not open storage usage'
@@ -636,6 +693,9 @@ return Boolean(button);') == true ]] || die 'could not open storage usage'
 
   [[ $(execute_sync '
 document.querySelector(".library-storage-dialog")?.close();
+const library = [...document.querySelectorAll(".library-sections button")]
+  .find((item) => item.textContent.trim() === "书架");
+library?.click();
 const button = [...document.querySelectorAll(".library-primary-actions button")]
   .find((item) => item.textContent.includes("选择"));
 button?.click();
@@ -901,6 +961,84 @@ return {before, after};') || die 'could not probe reader console error collectio
     die 'could not inspect reader runtime errors'
   jq -e 'type == "array" and length == 0' <<<"$errors" >/dev/null ||
     die "reader emitted runtime errors (state: $(jq -c . <<<"$errors"))"
+}
+
+verify_reader_interface_navigation() {
+  local media image_point backdrop_point preview notes menu closed
+  media=$(execute_async '
+const done = arguments[arguments.length - 1];
+Promise.resolve(globalThis.__athaReaderDiagnostics?.mediaPoint("ordinary"))
+  .then((value) => done({ok: Boolean(value), value}))
+  .catch(() => done({ok: false}));') || die 'could not locate the public reader image'
+  jq -e '.ok == true and (.value.x | type == "number") and (.value.y | type == "number")' \
+    <<<"$media" >/dev/null || die 'public reader image is unavailable for preview navigation'
+  perform_pointer_action "$(jq -c '.value' <<<"$media")" tap ||
+    die 'could not open the image preview with a trusted pointer'
+  wait_for_script \
+    'return {open: document.querySelector("#content-dialog")?.open, media: document.querySelector("#content-dialog")?.classList.contains("media-preview")};' \
+    '.open == true and .media == true' \
+    'image preview did not open' >/dev/null
+
+  image_point=$(execute_sync '
+const rect = document.querySelector("#content-dialog-image")?.getBoundingClientRect();
+return rect ? {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2} : null;') ||
+    die 'could not locate the preview image'
+  perform_pointer_action "$image_point" tap || die 'could not click the preview image'
+  preview=$(execute_sync 'return globalThis.__athaReaderDiagnostics.previewState();') ||
+    die 'could not inspect the image preview'
+  jq -e '.open == true' <<<"$preview" >/dev/null || die 'clicking the preview image closed it'
+
+  backdrop_point=$(execute_sync '
+const rect = document.querySelector("#content-dialog-viewport")?.getBoundingClientRect();
+return rect ? {x: rect.left + 8, y: rect.bottom - 8} : null;') ||
+    die 'could not locate the image backdrop'
+  perform_pointer_action "$backdrop_point" tap || die 'could not click the image backdrop'
+  preview=$(wait_for_script \
+    'return globalThis.__athaReaderDiagnostics.previewState();' \
+    '.open == false and .focusRestored == true' \
+    'image backdrop did not close the preview')
+
+  [[ $(execute_sync '
+document.documentElement.setAttribute("data-reader-tools", "");
+document.querySelector(".reader-tool.notes > summary")?.click();
+return true;') == true ]] || die 'could not open notes'
+  notes=$(wait_for_script '
+const panel = document.querySelector(".notes-panel");
+const back = panel?.querySelector("[data-close-reader-tools]");
+const backRect = back?.getBoundingClientRect();
+return {
+  open: document.querySelector(".reader-tool.notes")?.open,
+  backIcon: Boolean(back?.querySelector("svg")),
+  backVisible: Boolean(backRect && backRect.width >= 44 && backRect.height >= 44),
+  exportHidden: document.querySelector("#message-export-all")?.getClientRects().length == 0,
+  topbarDictionary: Boolean(document.querySelector(".top-toolbar .reader-tool.dictionary")),
+  settingsIcon: Boolean(document.querySelector(".top-toolbar .reader-tool.preferences > summary svg")),
+  overflow: panel ? panel.scrollWidth > panel.clientWidth : true
+};' \
+    '.open == true and .backIcon == true and .backVisible == true and .exportHidden == true and .topbarDictionary == false and .settingsIcon == true and .overflow == false' \
+    'notes navigation did not become ready')
+
+  [[ $(execute_sync 'document.querySelector(".notes-actions > summary")?.click(); return true;') == true ]] ||
+    die 'could not open the notes actions'
+  menu=$(wait_for_script '
+const details = document.querySelector(".notes-actions");
+const button = document.querySelector("#message-export-all");
+const rect = button?.getBoundingClientRect();
+return {open: details?.open, label: button?.textContent.trim(), visible: Boolean(rect && rect.width >= 44 && rect.height >= 44)};' \
+    '.open == true and .label == "导出笔记" and .visible == true' \
+    'notes export action did not become ready')
+  closed=$(execute_sync '
+document.querySelector(".notes-actions > summary")?.click();
+document.querySelector(".notes-panel [data-close-reader-tools]")?.click();
+return {
+  open: document.querySelector(".reader-tool.notes")?.open,
+  focused: document.activeElement === document.querySelector(".reader")
+};') || die 'could not return from notes'
+  jq -e '.open == false and .focused == true' <<<"$closed" >/dev/null ||
+    die 'notes back button did not return to reading'
+
+  jq -cn --argjson preview "$preview" --argjson notes "$notes" --argjson menu "$menu" \
+    '{imageBackdrop: $preview, notes: $notes, exportMenu: $menu, contextualDictionary: true}'
 }
 
 open_book() {
@@ -1511,8 +1649,9 @@ verify_library_entry
 say 'running public verify, boundary, and trusted gesture diagnostics'
 open_book public
 enable_diagnostics
-pending_formula_queue=$(pending_formula_queue_probe)
 open_gesture_section "$public_boundary_entry" >/dev/null
+interface_navigation=$(verify_reader_interface_navigation)
+pending_formula_queue=$(pending_formula_queue_probe)
 public_boundary=$(previous_boundary_probe)
 open_gesture_section "$public_boundary_entry" >/dev/null
 webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
@@ -1557,7 +1696,7 @@ done
 say 'verifying local-data management and reading memory at mobile and desktop widths'
 for width in 360 1000; do
   set_window_size "$width" 760
-  verify_library_management
+  verify_library_settings
   verify_reading_memory
 done
 set_window_size 600 760
@@ -1600,6 +1739,7 @@ jq -n \
   --argjson books "$expected_books" \
   --argjson libraryEntry "$library_entry_evidence" \
   --argjson fileAssociation "$association_evidence" \
+  --argjson interfaceNavigation "$interface_navigation" \
   --argjson pendingFormulaQueue "$pending_formula_queue" \
   --argjson desktopWorkspace "$desktop_workspace_evidence" \
   --argjson publicBoundary "$public_boundary" \
@@ -1613,6 +1753,7 @@ jq -n \
     books: $books,
     libraryEntry: $libraryEntry,
     fileAssociation: $fileAssociation,
+    interfaceNavigation: $interfaceNavigation,
     verifyDiagnostics: true,
     desktopWorkspace: $desktopWorkspace,
     pendingFormulaQueue: $pendingFormulaQueue,

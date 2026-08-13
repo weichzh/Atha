@@ -1535,82 +1535,10 @@ textarea:focus-visible,
   overscroll-behavior: contain;
 }
 
-.dictionary-settings {
-  display: grid;
-  min-height: 0;
-  padding: 0 2px 4px;
-  gap: 18px;
-  align-content: start;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.dictionary-settings-section {
-  display: grid;
-}
-
-.dictionary-settings-section > h3 {
-  padding: 4px 0 6px;
-  color: var(--ui-muted);
-  font-size: 0.82rem;
-  font-weight: 650;
-}
-
-.dictionary-settings-select,
-.dictionary-font-scale {
-  min-width: 0;
-  padding: 8px 34px 8px 10px;
-  border: 1px solid var(--ui-border);
-  border-radius: 6px;
-}
-
-.dictionary-settings-select {
-  width: 100%;
-}
-
-.dictionary-font-scale {
-  width: 112px;
-}
-
-.dictionary-settings-meta,
 .dictionary-result-source {
   color: var(--ui-muted);
   font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   font-size: 0.8rem;
-}
-
-.dictionary-settings-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.dictionary-settings-actions button {
-  display: inline-flex;
-  min-width: 0;
-  padding: 8px 12px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid var(--ui-border);
-  border-radius: 6px;
-}
-
-.dictionary-settings-actions svg {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-}
-
-.dictionary-settings-actions span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dictionary-settings-status {
-  display: grid;
-  gap: 4px;
 }
 
 .dictionary-result {
@@ -1914,6 +1842,62 @@ textarea:focus-visible,
 
 .notes-panel {
   grid-template-rows: 56px auto minmax(0, 1fr) auto;
+}
+
+.notes-actions {
+  position: relative;
+  grid-column: 3;
+  list-style: none;
+}
+
+.notes-actions > summary {
+  list-style: none;
+}
+
+.notes-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.notes-actions-menu {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  width: 168px;
+  padding: 4px;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  background: var(--ui-surface);
+  box-shadow: 0 12px 32px var(--ui-shadow);
+}
+
+.notes-actions:not([open]) .notes-actions-menu {
+  display: none;
+}
+
+.notes-actions-menu button {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-text);
+  text-align: left;
+}
+
+.notes-actions-menu button:hover {
+  background: var(--ui-surface-muted);
+}
+
+.notes-actions-menu svg,
+.notes-actions-menu .fluent-icon {
+  width: 19px;
+  height: 19px;
+  font-size: 19px;
 }
 
 .annotation-filters {
@@ -3019,10 +3003,6 @@ textarea:focus-visible,
     font-size: 1.05rem;
   }
 
-  .dictionary-settings {
-    padding-bottom: max(18px, var(--safe-area-bottom));
-  }
-
   .dictionary-result {
     padding: 8px 2px 24px;
   }
@@ -3141,6 +3121,10 @@ textarea:focus-visible,
   :root[data-desktop-workspace] .directory-panel .panel-back,
   :root[data-desktop-workspace] .notes-panel .panel-back {
     display: none;
+  }
+
+  :root[data-desktop-workspace] .notes-panel .notes-actions {
+    grid-column: 2;
   }
 
   :root[data-desktop-workspace] .annotation-filters {
@@ -3265,9 +3249,11 @@ textarea:focus-visible,
   background: var(--ui-surface-muted);
 }
 
-.content-dialog-icon-button svg {
+.content-dialog-icon-button svg,
+.content-dialog-icon-button .fluent-icon {
   width: 22px;
   height: 22px;
+  font-size: 22px;
   stroke-width: 1.8;
 }
 

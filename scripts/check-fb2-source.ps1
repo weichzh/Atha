@@ -676,14 +676,6 @@ return true;
 
         if (-not [string]::IsNullOrWhiteSpace($DictionaryQuery)) {
             $queryLiteral = ConvertTo-Json $DictionaryQuery -Compress
-            [void](Wait-WebDriverScript -BaseUrl $baseUrl -Session $session -Failure 'Offline dictionary list did not become ready.' -Script @'
-return {
-  status: document.documentElement.dataset.status || null,
-  error: document.documentElement.dataset.error || null,
-  dictionaries: document.querySelectorAll('.dictionary-source option').length,
-  message: document.querySelector('.dictionary-status')?.textContent || ''
-};
-'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.dictionaries -eq 1 })
             [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @"
 globalThis.dispatchEvent(new CustomEvent('atha:dictionary-lookup', { detail: { query: $queryLiteral } }));
 return true;
@@ -694,20 +686,19 @@ const rect = panel?.getBoundingClientRect();
 return {
   status: document.documentElement.dataset.status || null,
   error: document.documentElement.dataset.error || null,
-  dictionaries: document.querySelectorAll('.dictionary-source option').length,
-  title: document.querySelector('.dictionary-source option:checked')?.textContent || '',
   headword: document.querySelector('.dictionary-result h3')?.textContent || '',
   definition: document.querySelector('.dictionary-result p')?.textContent || '',
   message: document.querySelector('.dictionary-status')?.textContent || '',
   tools: document.documentElement.hasAttribute('data-reader-tools'),
   open: document.querySelector('.reader-tool.dictionary').open,
+  contextualOnly: !document.querySelector('.top-toolbar .reader-tool.dictionary') && document.querySelector('.reader-tool.dictionary > summary')?.hidden,
   contained: Boolean(rect && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight)
 };
-'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.dictionaries -eq 1 -and $value.headword -and $value.definition -and $value.tools -and $value.open }
+'@ -Accepted { param($value) $value.status -eq 'pass' -and $value.headword -and $value.definition -and $value.tools -and $value.open -and $value.contextualOnly }
             if (-not $dictionary.contained -or $dictionary.message) {
                 throw 'Offline dictionary panel overflowed or reported an error.'
             }
-            [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.querySelector('.reader-tool.dictionary > summary').click(); return true;")
+            [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script "document.querySelector('.dictionary-panel .panel-close').click(); return true;")
         }
 
         [void](Invoke-WebDriverScript -BaseUrl $baseUrl -Session $session -Script @'

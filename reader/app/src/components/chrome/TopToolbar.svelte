@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { ArrowLeft, Bookmark, BookOpenText, Ellipsis } from "@lucide/svelte";
+  import { ArrowLeft, Bookmark, Settings } from "@lucide/svelte";
 
-  import DictionaryPanel from "../panels/DictionaryPanel.svelte";
   import PreferencesPanel from "../panels/PreferencesPanel.svelte";
 </script>
 
@@ -10,12 +9,6 @@
     <ArrowLeft aria-hidden="true" />
   </button>
   <div class="top-toolbar-actions">
-    <details class="reader-tool dictionary" name="reader-panel">
-      <summary class="icon-button" aria-label="词典" title="词典">
-        <BookOpenText aria-hidden="true" />
-      </summary>
-      <DictionaryPanel />
-    </details>
     <button
       id="add-bookmark"
       class="icon-button"
@@ -28,7 +21,7 @@
     </button>
     <details class="reader-tool preferences" name="reader-panel">
       <summary class="icon-button" aria-label="阅读设置" title="阅读设置">
-        <Ellipsis aria-hidden="true" />
+        <Settings aria-hidden="true" />
       </summary>
       <PreferencesPanel />
     </details>

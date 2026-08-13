@@ -25,6 +25,7 @@ export interface StartupImport {
 }
 
 export type LibraryViewMode = "default" | "progress" | "title" | "author";
+export type AppTheme = "system" | "light" | "dark";
 
 export interface BatchRemoveResult {
   books: LibraryBook[] | null;
@@ -81,6 +82,7 @@ interface ReaderLaunch {
 }
 
 type StorageReader = Pick<Storage, "getItem">;
+type StorageWriter = Pick<Storage, "setItem">;
 type StorageAccess = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 
 const MAX_STATE_LENGTH = 524_288;
@@ -88,6 +90,15 @@ const MAX_LOCATOR_LENGTH = 2_048;
 const MAX_TEXT_OFFSET = 2_147_483_647;
 const MAX_BROWSER_STATE_BYTES = 16 * 1024 * 1024;
 const MAX_BROWSER_RECORDS = 10_000;
+const APP_APPEARANCE_KEY = "atha.app.appearance.v1";
+const APP_THEMES: AppTheme[] = ["system", "light", "dark"];
+const DEFAULT_READER_APPLICATION_PREFERENCES = {
+  theme: "system",
+  brightness: 100,
+  fontSize: 19,
+  fontFamily: "book",
+  density: "standard",
+} as const;
 const DEFAULT_BOOK_PREFERENCES = {
   sourceStyles: true,
   userStylesEnabled: true,
@@ -101,6 +112,52 @@ const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base"
 
 export const libraryAvailable =
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+
+export function readAppTheme(storage?: StorageReader | null): AppTheme {
+  try {
+    const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+    if (!target) return "system";
+    const value: unknown = JSON.parse(target.getItem(APP_APPEARANCE_KEY) ?? "null");
+    const theme = value && typeof value === "object" ? Reflect.get(value, "theme") : null;
+    return (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      exactKeys(value, ["schema", "theme"]) &&
+      Reflect.get(value, "schema") === 1 &&
+      APP_THEMES.includes(theme as AppTheme)
+    )
+      ? (theme as AppTheme)
+      : "system";
+  } catch {
+    return "system";
+  }
+}
+
+export function writeAppTheme(theme: AppTheme, storage?: StorageWriter | null): void {
+  if (!APP_THEMES.includes(theme)) throw new Error("invalid-app-theme");
+  const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+  if (!target) throw new Error("browser-storage-unavailable");
+  target.setItem(APP_APPEARANCE_KEY, JSON.stringify({ schema: 1, theme }));
+}
+
+export function resetReaderApplicationPreferences(
+  storage?: Pick<Storage, "getItem" | "setItem"> | null,
+): boolean {
+  try {
+    const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+    if (!target) return false;
+    const raw = target.getItem("atha.reader.application.v1");
+    if (raw !== null && !validStorageRecord("atha.reader.application.v1", raw)) return false;
+    target.setItem(
+      "atha.reader.application.v1",
+      JSON.stringify({ schema: 1, preferences: DEFAULT_READER_APPLICATION_PREFERENCES }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function normalized(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase();

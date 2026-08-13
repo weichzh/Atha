@@ -9,11 +9,14 @@ import {
   filterLibraryBooks,
   groupLibraryBooksByProgress,
   openFailureMessage,
+  readAppTheme,
   readRecentBooks,
+  resetReaderApplicationPreferences,
   readStartedBookIds,
   replaceLocalDataState,
   removeBooksSerially,
   validateLocalDataState,
+  writeAppTheme,
   withoutBookLocalState,
   type BrowserState,
   type LibraryBook,
@@ -185,6 +188,49 @@ test("recent reading uses strict statistics and only current library books", () 
     }),
     null,
   );
+});
+
+test("application appearance stays separate from reader preferences", () => {
+  const storage = new TestStorage([["atha.reader.application.v1", application("paper")]]);
+  assert.equal(readAppTheme(storage), "system");
+
+  writeAppTheme("light", storage);
+  assert.equal(readAppTheme(storage), "light");
+  assert.equal(JSON.parse(storage.getItem("atha.reader.application.v1")!).preferences.theme, "paper");
+  assert.deepEqual(JSON.parse(storage.getItem("atha.app.appearance.v1")!), {
+    schema: 1,
+    theme: "light",
+  });
+  assert.deepEqual(captureLocalDataState(storage).records.map((record) => record.key), [
+    "atha.reader.application.v1",
+  ]);
+
+  storage.setItem("atha.app.appearance.v1", JSON.stringify({ schema: 1, theme: "paper" }));
+  assert.equal(readAppTheme(storage), "system");
+  assert.throws(() => writeAppTheme("paper" as never, storage), /invalid-app-theme/);
+});
+
+test("application settings reset reading defaults without touching app appearance", () => {
+  const storage = new TestStorage([
+    ["atha.app.appearance.v1", JSON.stringify({ schema: 1, theme: "dark" })],
+    ["atha.reader.application.v1", application("paper")],
+  ]);
+  assert.equal(resetReaderApplicationPreferences(storage), true);
+  assert.deepEqual(JSON.parse(storage.getItem("atha.reader.application.v1")!), {
+    schema: 1,
+    preferences: {
+      theme: "system",
+      brightness: 100,
+      fontSize: 19,
+      fontFamily: "book",
+      density: "standard",
+    },
+  });
+  assert.equal(readAppTheme(storage), "dark");
+
+  storage.setItem("atha.reader.application.v1", "{}");
+  assert.equal(resetReaderApplicationPreferences(storage), false);
+  assert.equal(storage.getItem("atha.reader.application.v1"), "{}");
 });
 
 test("serial removal stops on failure and reports unprocessed books", async () => {

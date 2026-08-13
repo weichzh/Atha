@@ -8,7 +8,6 @@
     Circle,
     CircleCheck,
     Download,
-    Ellipsis,
     Grid2X2,
     HardDrive,
     Library,
@@ -16,12 +15,14 @@
     MessageSquareText,
     Plus,
     Search,
+    Settings,
     Trash2,
     X,
   } from "@lucide/svelte";
   import { onMount } from "svelte";
 
   import MemoryCenter from "./MemoryCenter.svelte";
+  import DictionarySettings from "./panels/DictionarySettings.svelte";
 
   import {
     backupLocalData,
@@ -42,14 +43,18 @@
     openFailureMessage,
     pendingLocalDataRestore,
     prepareLocalDataRestore,
+    readAppTheme,
     readStartedBookIds,
     readStorageUsage,
+    resetReaderApplicationPreferences,
     replaceLocalDataState,
     resumeBookDataDeletions,
     removeBooksSerially,
     rollbackLocalDataRestore,
     takeStartupImport,
     validateLocalDataState,
+    writeAppTheme,
+    type AppTheme,
     type ImportReport,
     type LibraryBook,
     type LibraryViewMode,
@@ -75,15 +80,15 @@
   let selectedIds = new Set<string>();
   let failedCovers = new Set<string>();
   let startedBookIds: Set<string> | null = new Set();
-  let managementMenu: HTMLDetailsElement | undefined;
   let storageDialog: HTMLDialogElement | undefined;
   let storageUsage: StorageUsage | null = null;
-  let section: "library" | "memory" = "library";
+  let section: "library" | "memory" | "settings" = "library";
   let layout: "grid" | "list" = "grid";
   let dragActive = false;
   let visibleBooks: LibraryBook[] = [];
   let progressGroups = { reading: [] as LibraryBook[], unread: [] as LibraryBook[] };
   let allVisibleSelected = false;
+  let appTheme = readAppTheme();
 
   $: visibleBooks = filterLibraryBooks(books, query, view);
   $: progressGroups = startedBookIds
@@ -92,13 +97,48 @@
   $: allVisibleSelected =
     visibleBooks.length > 0 && visibleBooks.every((book) => selectedIds.has(book.id));
 
+  function syncAppTheme() {
+    document.documentElement.dataset.appTheme = appTheme;
+    Reflect.get(globalThis, "AthaSystemBars")?.setReadingMode?.(
+      false,
+      appTheme === "dark" ||
+        (appTheme === "system" && globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches),
+    );
+  }
+
+  function chooseAppTheme(theme: AppTheme) {
+    if (theme === appTheme) return;
+    try {
+      writeAppTheme(theme);
+      appTheme = theme;
+      syncAppTheme();
+      status = "";
+    } catch {
+      status = "无法保存应用主题。";
+    }
+  }
+
+  function resetReadingDefaults() {
+    if (!confirm("恢复后，新打开的书会使用默认阅读主题、字号、字体和行距。本书设置不变。继续？")) {
+      return;
+    }
+    status = resetReaderApplicationPreferences()
+      ? "阅读默认已恢复。"
+      : "无法恢复阅读默认，请先在阅读界面修复损坏的设置。";
+  }
+
   onMount(() => {
-    const systemBars = Reflect.get(globalThis, "AthaSystemBars");
+    const darkScheme = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
     let mounted = true;
     let stopDragDrop: (() => void) | undefined;
-    systemBars?.setReadingMode?.(false, true);
+    syncAppTheme();
+    const syncSystemTheme = () => {
+      if (appTheme === "system") syncAppTheme();
+    };
+    darkScheme?.addEventListener("change", syncSystemTheme);
     const syncSafeAreaInsets = () => {
       try {
+        const systemBars = Reflect.get(globalThis, "AthaSystemBars");
         const insets = JSON.parse(systemBars?.getSafeAreaInsets?.() ?? "null");
         for (const edge of ["top", "right", "bottom", "left"] as const) {
           if (Number.isFinite(insets?.[edge])) {
@@ -142,6 +182,7 @@
     return () => {
       mounted = false;
       stopDragDrop?.();
+      darkScheme?.removeEventListener("change", syncSystemTheme);
       globalThis.removeEventListener("atha-safe-area-change", syncSafeAreaInsets);
     };
   });
@@ -176,14 +217,9 @@
     if (startedBookIds === null && view === "progress") view = "default";
   }
 
-  function closeManagementMenu() {
-    managementMenu?.removeAttribute("open");
-  }
-
-  function setSection(next: "library" | "memory") {
+  function setSection(next: "library" | "memory" | "settings") {
     if (loading || busy || next === section) return;
     if (selecting) cancelSelection();
-    closeManagementMenu();
     status = "";
     section = next;
   }
@@ -200,7 +236,6 @@
   async function addDroppedBooks(paths: string[]) {
     if (loading || busy || paths.length === 0) return;
     if (selecting) cancelSelection();
-    closeManagementMenu();
     section = "library";
     await addBooks(() => importBookPaths(paths));
   }
@@ -233,7 +268,6 @@
 
   async function backup() {
     if (busy) return;
-    closeManagementMenu();
     if (!libraryAvailable) {
       status = "请在 Atha 应用中备份资料库。";
       return;
@@ -254,7 +288,6 @@
 
   async function restore() {
     if (busy) return;
-    closeManagementMenu();
     if (!libraryAvailable) {
       status = "请在 Atha 应用中恢复资料库。";
       return;
@@ -334,7 +367,6 @@
 
   async function showStorage() {
     if (busy) return;
-    closeManagementMenu();
     busy = true;
     status = "";
     try {
@@ -518,6 +550,7 @@
   class:library-selecting={selecting && section === "library"}
   class:library-list-view={layout === "list" && section === "library"}
   class="library-shell"
+  data-app-theme={appTheme}
   aria-label="Atha 资料库"
   aria-busy={loading || busy}
 >
@@ -543,6 +576,16 @@
         <MessageSquareText aria-hidden="true" />
         <span>阅读记忆</span>
       </button>
+      <button
+        type="button"
+        class:active={section === "settings"}
+        aria-current={section === "settings" ? "page" : undefined}
+        onclick={() => setSection("settings")}
+        disabled={loading || busy}
+      >
+        <Settings aria-hidden="true" />
+        <span>设置</span>
+      </button>
     </nav>
 
     {#if section === "library"}
@@ -558,26 +601,6 @@
           oninput={(event) => setQuery(event.currentTarget.value)}
         />
       </label>
-      <details class="library-management" bind:this={managementMenu}>
-        <summary aria-label="管理书架">
-          <Ellipsis aria-hidden="true" />
-          <span>管理</span>
-        </summary>
-        <div class="library-management-menu" aria-label="书架管理">
-          <button type="button" onclick={backup} disabled={busy}>
-            <Archive aria-hidden="true" />
-            <span>备份资料库</span>
-          </button>
-          <button type="button" onclick={restore} disabled={busy}>
-            <ArchiveRestore aria-hidden="true" />
-            <span>恢复资料库</span>
-          </button>
-          <button type="button" onclick={showStorage} disabled={busy}>
-            <HardDrive aria-hidden="true" />
-            <span>存储占用</span>
-          </button>
-        </div>
-      </details>
     </div>
 
     {#if selecting}
@@ -647,6 +670,67 @@
 
   {#if section === "memory"}
     <MemoryCenter {books} disabled={loading || busy} />
+  {:else if section === "settings"}
+    <section class="library-settings" aria-labelledby="library-settings-heading">
+      <header class="library-settings-heading">
+        <h1 id="library-settings-heading">设置</h1>
+      </header>
+
+      <section class="library-settings-group" aria-labelledby="appearance-settings-heading">
+        <h2 id="appearance-settings-heading">应用外观</h2>
+        <div class="library-setting-row">
+          <span>界面主题</span>
+          <div class="library-theme-control" role="radiogroup" aria-label="应用界面主题">
+            {#each [
+              ["system", "跟随系统"],
+              ["light", "浅色"],
+              ["dark", "深色"],
+            ] as [theme, label]}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={appTheme === theme}
+                onclick={() => chooseAppTheme(theme as AppTheme)}
+                disabled={busy}
+              >{label}</button>
+            {/each}
+          </div>
+        </div>
+      </section>
+
+      <section class="library-settings-group" aria-labelledby="reading-defaults-settings-heading">
+        <h2 id="reading-defaults-settings-heading">阅读默认</h2>
+        <p class="library-settings-description">
+          新打开的书沿用阅读界面保存的书页主题、字号、字体和行距；当前书的布局与样式仍在阅读时调整。
+        </p>
+        <div class="library-data-actions">
+          <button type="button" onclick={resetReadingDefaults} disabled={busy}>
+            <BookOpen aria-hidden="true" />
+            <span>恢复阅读默认</span>
+          </button>
+        </div>
+      </section>
+
+      <DictionarySettings disabled={busy} />
+
+      <section class="library-settings-group" aria-labelledby="local-data-settings-heading">
+        <h2 id="local-data-settings-heading">本地资料</h2>
+        <div class="library-data-actions">
+          <button type="button" onclick={backup} disabled={busy}>
+            <Archive aria-hidden="true" />
+            <span>备份资料库</span>
+          </button>
+          <button type="button" onclick={restore} disabled={busy}>
+            <ArchiveRestore aria-hidden="true" />
+            <span>恢复资料库</span>
+          </button>
+          <button type="button" onclick={showStorage} disabled={busy}>
+            <HardDrive aria-hidden="true" />
+            <span>存储占用</span>
+          </button>
+        </div>
+      </section>
+    </section>
   {:else}
   {#if startedBookIds === null}
     <p class="library-progress-notice" role="status">无法读取本机阅读进度，进度视图暂不可用。</p>
@@ -723,6 +807,7 @@
       </button>
     </div>
   {/if}
+  {/if}
 
   <dialog class="library-storage-dialog" bind:this={storageDialog} onclose={() => (storageUsage = null)}>
     <header>
@@ -765,6 +850,5 @@
         <progress aria-label={workLabel}></progress>
       </div>
     </div>
-  {/if}
   {/if}
 </main>

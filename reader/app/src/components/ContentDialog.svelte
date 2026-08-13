@@ -5,7 +5,6 @@
   const MAX_SCALE = 4;
   const SCALE_STEP = 0.25;
 
-  let dialog: HTMLDialogElement;
   let viewport: HTMLDivElement;
   let scale = $state(1);
 
@@ -32,7 +31,6 @@
 </script>
 
 <dialog
-  bind:this={dialog}
   id="content-dialog"
   aria-labelledby="content-dialog-title"
   style={`--content-viewer-scale: ${scale}`}
