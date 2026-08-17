@@ -730,6 +730,21 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     });
   }
 
+  function imageLayoutSignature(images) {
+    const values = [book.scrollWidth, book.scrollHeight];
+    const elements = new Set(images.flatMap((image) => [image, image.parentElement]).filter(Boolean));
+    for (const element of elements) {
+      const rect = element.getBoundingClientRect();
+      values.push(
+        rect.left.toFixed(2),
+        rect.top.toFixed(2),
+        rect.right.toFixed(2),
+        rect.bottom.toFixed(2),
+      );
+    }
+    return values.join(":");
+  }
+
   async function materializePreviewImage(source, preview, signal) {
     const url = pendingImages.get(source);
     if (!url || signal?.aborted) return false;
@@ -772,9 +787,10 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
   }
 
   async function loadImages(images, generation, beforeLayoutChange, batch) {
+    const beforeLayout = imageLayoutSignature(images);
     let layoutChanged = false;
+    if (images.length > 0) beforeLayoutChange?.();
     const replaceFailed = (image, count = true) => {
-      if (!layoutChanged) beforeLayoutChange?.();
       layoutChanged = true;
       replaceFailedImage(image);
       forgetPendingImage(image);
@@ -807,7 +823,12 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
             reveal();
           }
           else replaceFailed(image, false);
-          if (lateOutcome === "failed") scheduleLateLayout(late?.anchor);
+          if (
+            lateOutcome === "failed" ||
+            (lateOutcome === "loaded" && late?.layout !== imageLayoutSignature([image]))
+          ) {
+            scheduleLateLayout(late?.anchor);
+          }
         });
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
         if (outcome === "failed") {
@@ -823,6 +844,7 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
               scrollTop: 0,
             },
             generation,
+            layout: imageLayoutSignature([image]),
           });
         }
         if (outcome === "loaded") reveal();
@@ -830,7 +852,7 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
         if (outcome === "loaded" && batch) batch.success += 1;
       }),
     );
-    return layoutChanged;
+    return layoutChanged || beforeLayout !== imageLayoutSignature(images);
   }
 
   async function loadVisible(includeNextPage = false, beforeLayoutChange) {
@@ -1335,8 +1357,10 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     }
     book.replaceChildren();
     const firstVisible = document.createElement("img");
+    const resizedVisible = document.createElement("img");
     const lateVisible = document.createElement("img");
     const firstVisibleUrl = `${validProbeUrl}#first-visible`;
+    const resizedVisibleUrl = `${validProbeUrl}#resized-visible`;
     const lateVisibleUrl = `${validProbeUrl}#late-visible`;
     const bounds = loadBounds(false);
     const inside = () => ({
@@ -1349,6 +1373,14 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     });
     let lateInside = false;
     Object.defineProperty(firstVisible, "getBoundingClientRect", { value: inside });
+    Object.defineProperty(resizedVisible, "getBoundingClientRect", {
+      value: () => {
+        const rect = inside();
+        return resizedVisible.hasAttribute("src")
+          ? { ...rect, right: rect.right + 1, bottom: rect.bottom + 1 }
+          : rect;
+      },
+    });
     Object.defineProperty(lateVisible, "getBoundingClientRect", {
       value: () =>
         lateInside
@@ -1371,6 +1403,10 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
         },
       },
     });
+    Object.defineProperties(resizedVisible, {
+      complete: { get: () => true },
+      naturalWidth: { get: () => 1 },
+    });
     let lateLoad;
     let lateDecodeCalls = 0;
     Object.defineProperties(lateVisible, {
@@ -1391,19 +1427,24 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     lateVisible.classList.add("atha-resource-pending");
     lateVisible.setAttribute("aria-busy", "true");
     lateVisible.dataset.athaResource = lateVisibleUrl;
-    book.append(firstVisible, lateVisible);
+    book.append(firstVisible, resizedVisible, lateVisible);
     pendingImages.set(firstVisible, firstVisibleUrl);
+    pendingImages.set(resizedVisible, resizedVisibleUrl);
     pendingImages.set(lateVisible, lateVisibleUrl);
     validatedSvg.set(firstVisibleUrl, Promise.resolve());
+    validatedSvg.set(resizedVisibleUrl, Promise.resolve());
     validatedSvg.set(lateVisibleUrl, Promise.resolve());
     try {
       const loaded = await loadVisible(false, () => 37);
       ensure(
-        loaded.loaded === 2 &&
-          !loaded.layoutChanged &&
+        loaded.loaded === 3 &&
+          loaded.layoutChanged &&
           !pendingImages.has(firstVisible) &&
+          !pendingImages.has(resizedVisible) &&
           !pendingImages.has(lateVisible) &&
           lastVisibleLoad.passes === 2 &&
+          lastVisibleLoad.batches[0].layoutChanged &&
+          !lastVisibleLoad.batches[1].layoutChanged &&
           lastVisibleLoad.batches[1].success === 0 &&
           lateImages.get(lateVisible)?.anchor.offset === 37 &&
           lateVisible.classList.contains("atha-resource-pending") &&
@@ -1424,10 +1465,13 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
       );
     } finally {
       pendingImages.delete(firstVisible);
+      pendingImages.delete(resizedVisible);
       pendingImages.delete(lateVisible);
       validatedSvg.delete(firstVisibleUrl);
+      validatedSvg.delete(resizedVisibleUrl);
       validatedSvg.delete(lateVisibleUrl);
       readySvg.delete(firstVisibleUrl);
+      readySvg.delete(resizedVisibleUrl);
       readySvg.delete(lateVisibleUrl);
       resetLateImages();
     }
