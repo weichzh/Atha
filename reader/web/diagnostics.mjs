@@ -190,6 +190,34 @@ export function createDiagnostics({
     }
   }
 
+  function verifyStableRevealAndListInset() {
+    const root = document.documentElement;
+    const previousState = root.dataset.sessionState;
+    root.dataset.sessionState = "content-loaded";
+    try {
+      assert(
+        getComputedStyle(reader.querySelector(".page")).visibility === "hidden",
+        "unstable-layout",
+      );
+      const startup = document.querySelector(".reader-startup");
+      if (startup) {
+        assert(getComputedStyle(startup).visibility === "visible", "unstable-layout");
+      }
+    } finally {
+      root.dataset.sessionState = previousState;
+    }
+
+    const list = document.createElement("ol");
+    list.style.fontSize = "40px";
+    list.append(document.createElement("li"));
+    content.book.append(list);
+    try {
+      assert(parseFloat(getComputedStyle(list).paddingInlineStart) >= 62, "layout-cut");
+    } finally {
+      list.remove();
+    }
+  }
+
   async function verifyNavigation() {
     const description = session.describe();
     const first = navigation.current();
@@ -1143,6 +1171,7 @@ export function createDiagnostics({
 
   async function verify() {
     verifyPendingFormulaPlaceholder();
+    verifyStableRevealAndListInset();
     await verifySections();
     await verifyNavigation();
     await verifyPreferences();

@@ -286,6 +286,11 @@ const session = createReadingSession({
   render: renderCachedSource,
   onState(state) {
     document.documentElement.dataset.sessionState = state;
+    if (root.hasAttribute("data-reader-ready")) {
+      const loading = state === "content-loaded";
+      readerShell.setAttribute("aria-busy", String(loading));
+      readerStartup.setAttribute("aria-hidden", String(!loading));
+    }
     readingStatistics?.setStable(state === "layout-stable");
   },
   assert,

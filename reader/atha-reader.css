@@ -939,7 +939,18 @@ body {
 }
 
 :root[data-reader-ready] .reader-startup-dot {
-  animation: none;
+  animation-play-state: paused;
+}
+
+:root[data-reader-ready][data-session-state="content-loaded"] .reader-startup {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition: none;
+}
+
+:root[data-reader-ready][data-session-state="content-loaded"] .reader-startup-dot {
+  animation-play-state: running;
 }
 
 @keyframes reader-startup-dot {
@@ -1027,6 +1038,10 @@ textarea:focus-visible,
   width: var(--content-width);
   height: var(--content-height);
   overflow: hidden;
+}
+
+:root[data-session-state="content-loaded"] .page {
+  visibility: hidden;
 }
 
 #book-host {
@@ -1159,6 +1174,10 @@ textarea:focus-visible,
 .book > :first-child,
 .book > :first-child > :first-child {
   margin-top: 0;
+}
+
+.book :where(ol, ul) {
+  padding-inline-start: max(1.55em, 40px);
 }
 
 .book img.math-inline,
