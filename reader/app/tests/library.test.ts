@@ -46,6 +46,9 @@ test("feature styles consume the shared theme palette", () => {
   const palette = readFileSync(new URL("../../theme.css", import.meta.url), "utf8");
   assert.match(palette, /--library-bg:/);
   assert.match(palette, /--ui-canvas:/);
+  assert.match(palette, /:root\[data-app-tone="light"\]\s*{/);
+  assert.match(palette, /:root\[data-theme-tone="dark"\]\s*{/);
+  assert.doesNotMatch(palette, /@media\s*\(prefers-color-scheme:/);
 });
 
 function progress(id: string) {

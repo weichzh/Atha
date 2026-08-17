@@ -607,6 +607,28 @@ fn removed_book_source_survives_backup_restore_and_recovers_identity() {
 }
 
 #[test]
+fn shelf_removal_recovers_an_orphaned_custom_cover() {
+    let root = TestRoot::new("orphaned-custom-cover");
+    let book_path = root.path().join("orphaned.txt");
+    let cover_path = root.path().join("custom-cover.png");
+    fs::write(&book_path, "封面恢复边界\n").expect("write source book");
+    fs::write(&cover_path, PNG_1X1).expect("write custom cover");
+    let library = LocalLibrary::open(root.path()).expect("open library");
+    let book = library
+        .stage_with_title_hint(&book_path, None)
+        .expect("stage source book");
+    library
+        .set_custom_cover(&book.id, &cover_path)
+        .expect("set custom cover");
+    let stored_cover = root.path().join(format!("Library/{}.cover", book.id));
+    fs::remove_file(root.path().join(format!("Library/{}.json", book.id)))
+        .expect("simulate interrupted shelf removal");
+
+    LocalLibrary::open(root.path()).expect("recover library");
+    assert!(!stored_cover.exists());
+}
+
+#[test]
 fn browser_state_is_bounded_sorted_and_production_only() {
     let id = "a".repeat(64);
     assert!(browser_state(&id).validate().is_ok());

@@ -649,13 +649,14 @@ const style = getComputedStyle(shell);
 return {
   shell: shell?.dataset.appTheme || "",
   root: document.documentElement.dataset.appTheme || "",
+  tone: document.documentElement.dataset.appTone || "",
   stored: JSON.parse(localStorage.getItem("atha.app.appearance.v1") || "null")?.theme || "",
   readerUnchanged: localStorage.getItem("atha.reader.application.v1") === globalThis.__athaReaderPreferencesBeforeAppTheme,
   background: style.backgroundColor,
   color: style.color,
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
 };' \
-    '.shell == "light" and .root == "light" and .stored == "light" and .readerUnchanged == true and .background == "rgb(246, 246, 248)" and .color == "rgb(29, 29, 31)" and .overflow == false' \
+    '.shell == "light" and .root == "light" and .tone == "light" and .stored == "light" and .readerUnchanged == true and .background == "rgb(246, 246, 248)" and .color == "rgb(29, 29, 31)" and .overflow == false' \
     'independent application theme did not become ready') || die 'could not inspect the application theme'
   [[ $(execute_sync '
 const button = [...document.querySelectorAll(".library-theme-control button")]
@@ -1076,27 +1077,41 @@ return {
 
   keyboard=$(execute_async '
 const done = arguments[arguments.length - 1];
+const root = document.documentElement;
 const overlay = document.querySelector("#message-conversation");
 const composer = document.querySelector("#message-composer");
-if (!overlay || !composer || !window.visualViewport) return done({bound: false});
+const noteDialog = document.querySelector("#annotation-note-dialog");
+const noteInput = document.querySelector("#annotation-note");
+const noteActions = document.querySelector(".annotation-dialog-actions");
+if (!overlay || !composer || !noteDialog || !noteInput || !noteActions || !window.visualViewport) return done({bound: false});
 const hidden = overlay.hidden;
-const height = overlay.style.getPropertyValue("--message-visual-height");
-const top = overlay.style.getPropertyValue("--message-visual-top");
-const bound = Math.abs(parseFloat(height) - window.visualViewport.height) < 1 && Math.abs(parseFloat(top) - window.visualViewport.offsetTop) < 1;
+const height = root.style.getPropertyValue("--visual-viewport-height");
+const top = root.style.getPropertyValue("--visual-viewport-top");
+const center = root.style.getPropertyValue("--visual-viewport-center");
+const bound = root.hasAttribute("data-visual-viewport") && Math.abs(parseFloat(height) - window.visualViewport.height) < 1 && Math.abs(parseFloat(top) - window.visualViewport.offsetTop) < 1;
 overlay.hidden = false;
-overlay.style.setProperty("--message-visual-height", "320px");
-overlay.style.setProperty("--message-visual-top", "24px");
+root.style.setProperty("--visual-viewport-height", "320px");
+root.style.setProperty("--visual-viewport-top", "24px");
+root.style.setProperty("--visual-viewport-center", "184px");
+noteDialog.showModal();
+noteInput.focus();
 requestAnimationFrame(() => {
   const overlayRect = overlay.getBoundingClientRect();
   const composerRect = composer.getBoundingClientRect();
-  const visible = overlayRect.top >= 23 && overlayRect.bottom <= 345 && composerRect.bottom <= 345;
+  const noteRect = noteDialog.getBoundingClientRect();
+  const inputRect = noteInput.getBoundingClientRect();
+  const actionsRect = noteActions.getBoundingClientRect();
+  const messageVisible = overlayRect.top >= 23 && overlayRect.bottom <= 345 && composerRect.bottom <= 345;
+  const noteVisible = noteRect.top >= 23 && noteRect.bottom <= 345 && inputRect.bottom <= 345 && actionsRect.bottom <= 345;
+  noteDialog.close();
   overlay.hidden = hidden;
-  overlay.style.setProperty("--message-visual-height", height);
-  overlay.style.setProperty("--message-visual-top", top);
-  done({bound, visible, overlayBottom: overlayRect.bottom, composerBottom: composerRect.bottom});
-});') || die 'could not inspect the visual viewport message layout'
-  jq -e '.bound == true and .visible == true' <<<"$keyboard" >/dev/null ||
-    die "message composer did not stay in the visual viewport (state: $(jq -c . <<<"$keyboard"))"
+  root.style.setProperty("--visual-viewport-height", height);
+  root.style.setProperty("--visual-viewport-top", top);
+  root.style.setProperty("--visual-viewport-center", center);
+  done({bound, messageVisible, noteVisible, overlayBottom: overlayRect.bottom, composerBottom: composerRect.bottom, noteBottom: noteRect.bottom, noteActionsBottom: actionsRect.bottom});
+});') || die 'could not inspect the visual viewport editor layouts'
+  jq -e '.bound == true and .messageVisible == true and .noteVisible == true' <<<"$keyboard" >/dev/null ||
+    die "note editors did not stay in the visual viewport (state: $(jq -c . <<<"$keyboard"))"
 
   [[ $(execute_sync 'document.querySelector(".notes-actions > summary")?.click(); return true;') == true ]] ||
     die 'could not open the notes actions'

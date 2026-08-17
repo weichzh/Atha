@@ -90,7 +90,13 @@ export async function renderSnapshotElement(capture, store) {
     image.setAttribute(attribute, resources.get(image.getAttribute(attribute)));
   }
   const host = document.createElement("div");
+  const themeTone =
+    presentation.theme === "dark" ||
+    (presentation.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+      ? "dark"
+      : "light";
   host.dataset.theme = presentation.theme;
+  host.dataset.themeTone = themeTone;
   host.style.filter = `brightness(${presentation.brightness / 100})`;
   const shadow = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
@@ -100,6 +106,7 @@ export async function renderSnapshotElement(capture, store) {
   const book = document.createElement("article");
   book.className = "book";
   book.dataset.theme = presentation.theme;
+  book.dataset.themeTone = themeTone;
   if (presentation.fontFamily !== "book") book.dataset.fontFamily = presentation.fontFamily;
   book.style.fontSize = `${presentation.fontSize}px`;
   book.style.setProperty("--reader-line-height", `${presentation.lineHeightPx}px`);

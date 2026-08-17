@@ -118,12 +118,12 @@
     : null;
 
   function syncAppTheme() {
-    document.documentElement.dataset.appTheme = appTheme;
-    Reflect.get(globalThis, "AthaSystemBars")?.setReadingMode?.(
-      false,
+    const dark =
       appTheme === "dark" ||
-        (appTheme === "system" && globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches),
-    );
+      (appTheme === "system" && globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches);
+    document.documentElement.dataset.appTheme = appTheme;
+    document.documentElement.dataset.appTone = dark ? "dark" : "light";
+    Reflect.get(globalThis, "AthaSystemBars")?.setReadingMode?.(false, dark);
   }
 
   function chooseAppTheme(theme: AppTheme) {

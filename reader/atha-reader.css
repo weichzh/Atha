@@ -12,6 +12,9 @@
   --workspace-width: 320px;
   --page-scale: 1;
   --reader-brightness: 1;
+  --visual-viewport-height: 100dvh;
+  --visual-viewport-top: 0px;
+  --visual-viewport-center: 50dvh;
   color-scheme: light;
   font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   background: var(--ui-canvas);
@@ -34,8 +37,8 @@
 }
 
 .message-conversation {
-  --message-visual-height: 100dvh;
-  --message-visual-top: 0px;
+  --message-visual-height: var(--visual-viewport-height);
+  --message-visual-top: var(--visual-viewport-top);
   position: fixed;
   z-index: 15;
   right: auto;
@@ -2125,12 +2128,24 @@ textarea:focus-visible,
 }
 
 #annotation-note-dialog {
+  box-sizing: border-box;
   width: min(420px, calc(100vw - 32px));
   padding: 20px;
   border: 1px solid var(--ui-border);
   border-radius: 14px;
   background: var(--ui-surface);
   color: var(--ui-text);
+}
+
+:root[data-visual-viewport] #annotation-note-dialog[open] {
+  top: var(--visual-viewport-center);
+  right: 0;
+  bottom: auto;
+  left: 0;
+  max-height: calc(var(--visual-viewport-height) - 24px);
+  margin: 0 auto;
+  overflow: auto;
+  transform: translateY(-50%);
 }
 
 #annotation-note-dialog::backdrop {
@@ -2153,9 +2168,13 @@ textarea:focus-visible,
 }
 
 .annotation-dialog-actions {
+  position: sticky;
+  bottom: 0;
   display: flex;
+  padding-top: 8px;
   justify-content: flex-end;
   gap: 8px;
+  background: var(--ui-surface);
 }
 
 ::highlight(atha-annotations) {
@@ -3511,19 +3530,6 @@ textarea:focus-visible,
   display: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]),
-  .book:not([data-theme]) {
-    color-scheme: dark;
-  }
-
-  .book:not([data-theme]) img.math-inline,
-  .book:not([data-theme]) img.math-display,
-  :root:not([data-theme]) #content-dialog-image.formula-preview {
-    filter: invert(0.88) hue-rotate(180deg);
-  }
-}
-
 :root[data-theme="light"],
 .book[data-theme="light"] {
   color-scheme: light;
@@ -3535,13 +3541,18 @@ textarea:focus-visible,
 }
 
 :root[data-theme="dark"],
-.book[data-theme="dark"] {
+.book[data-theme="dark"],
+:root[data-theme-tone="dark"],
+.book[data-theme-tone="dark"] {
   color-scheme: dark;
 }
 
 .book[data-theme="dark"] img.math-inline,
 .book[data-theme="dark"] img.math-display,
-:root[data-theme="dark"] #content-dialog-image.formula-preview {
+.book[data-theme-tone="dark"] img.math-inline,
+.book[data-theme-tone="dark"] img.math-display,
+:root[data-theme="dark"] #content-dialog-image.formula-preview,
+:root[data-theme-tone="dark"] #content-dialog-image.formula-preview {
   filter: invert(0.88) hue-rotate(180deg);
 }
 

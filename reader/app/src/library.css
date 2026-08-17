@@ -16,16 +16,9 @@ body,
   background: inherit;
 }
 
-:root[data-app-theme="light"] {
+:root[data-app-tone="light"] {
   color-scheme: light;
   background: var(--library-bg);
-}
-
-@media (prefers-color-scheme: light) {
-  :root[data-app-theme="system"] {
-    color-scheme: light;
-    background: var(--library-bg);
-  }
 }
 
 button,
@@ -46,7 +39,6 @@ summary {
 }
 
 .library-shell {
-  color-scheme: dark;
   box-sizing: border-box;
   min-height: 100vh;
   padding: 0 max(16px, var(--safe-area-right)) max(36px, var(--safe-area-bottom))
@@ -56,16 +48,6 @@ summary {
   color: var(--library-text);
   font-family:
     Inter, "Segoe UI Variable", "Microsoft YaHei UI", system-ui, sans-serif;
-}
-
-.library-shell[data-app-theme="light"] {
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: light) {
-  .library-shell[data-app-theme="system"] {
-    color-scheme: light;
-  }
 }
 
 .library-shell.library-selecting {

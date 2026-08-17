@@ -413,8 +413,11 @@ impl LocalLibrary {
         if !path.is_file() {
             return Err(LibraryError::UnknownBook);
         }
+        fs::remove_file(path).map_err(|_| LibraryError::WriteFailed)?;
+        sync_directory(&self.records)?;
         remove_path_if_exists(&self.custom_cover_path(id)?)?;
-        fs::remove_file(path).map_err(|_| LibraryError::WriteFailed)
+        remove_path_if_exists(&self.custom_cover_previous_path(id)?)?;
+        sync_directory(&self.records)
     }
 
     pub fn prepare_local_data_deletion(
@@ -680,6 +683,20 @@ impl LocalLibrary {
                 remove_path_if_exists(&entry.path())?;
             } else {
                 fs::rename(entry.path(), target).map_err(|_| LibraryError::WriteFailed)?;
+            }
+        }
+        for entry in fs::read_dir(&self.records).map_err(|_| LibraryError::InvalidRoot)? {
+            let entry = entry.map_err(|_| LibraryError::InvalidRoot)?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or(LibraryError::InvalidRoot)?
+                .to_owned();
+            let Some(id) = name.strip_suffix(CUSTOM_COVER_SUFFIX) else {
+                continue;
+            };
+            if valid_id(id) && !self.record_path(id)?.is_file() {
+                remove_path_if_exists(&entry.path())?;
             }
         }
         sync_directory(&self.records)

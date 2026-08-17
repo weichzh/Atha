@@ -64,14 +64,26 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   document.addEventListener?.("visibilitychange", syncSafeAreaInsets);
 
   function syncSystemBars() {
-    systemBars?.setReadingMode?.(
-      true,
-      application.theme === "dark" || (application.theme === "system" && darkScheme?.matches),
+    systemBars?.setReadingMode?.(true, isDarkTheme());
+  }
+
+  function isDarkTheme() {
+    return (
+      application.theme === "dark" || (application.theme === "system" && darkScheme?.matches)
     );
   }
 
+  function syncThemeTone() {
+    const tone = isDarkTheme() ? "dark" : "light";
+    root.dataset.themeTone = tone;
+    content.book.dataset.themeTone = tone;
+  }
+
   darkScheme?.addEventListener?.("change", () => {
-    if (application.theme === "system") syncSystemBars();
+    if (application.theme === "system") {
+      syncThemeTone();
+      syncSystemBars();
+    }
   });
 
   function ensure(condition, code = "invalid-preference") {
@@ -331,6 +343,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       root.dataset.theme = application.theme;
       content.book.dataset.theme = application.theme;
     }
+    syncThemeTone();
     syncSystemBars();
     root.style.setProperty("--reader-brightness", String(application.brightness / 100));
     reader.dataset.readingMode = nextBook.readingMode;

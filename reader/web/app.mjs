@@ -45,17 +45,24 @@ if (params.has("verify") || params.has("gesture-probe")) {
 }
 
 function bindVisualViewport() {
-  const overlay = document.querySelector("#message-conversation");
   const viewport = window.visualViewport;
-  if (!overlay || !viewport) return;
+  if (!viewport) return;
+  root.setAttribute("data-visual-viewport", "");
   let frame = 0;
   const sync = () => {
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
-      overlay.style.setProperty("--message-visual-height", `${viewport.height}px`);
-      overlay.style.setProperty("--message-visual-top", `${viewport.offsetTop}px`);
+      root.style.setProperty("--visual-viewport-height", `${viewport.height}px`);
+      root.style.setProperty("--visual-viewport-top", `${viewport.offsetTop}px`);
+      root.style.setProperty(
+        "--visual-viewport-center",
+        `${viewport.offsetTop + viewport.height / 2}px`,
+      );
       const active = document.activeElement;
-      if (active instanceof HTMLElement && active.closest(".message-composer")) {
+      if (
+        active instanceof HTMLElement &&
+        active.closest(".message-composer, #annotation-note-form")
+      ) {
         active.scrollIntoView({ block: "nearest" });
       }
     });
