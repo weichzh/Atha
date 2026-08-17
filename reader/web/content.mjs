@@ -212,6 +212,7 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
       if (sourceStyles) element.setAttribute("style", style);
       else element.removeAttribute("style");
     }
+    applyPendingFormulaAspectRatios();
   }
 
   function setImageInteraction(image) {
@@ -431,11 +432,27 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     return true;
   }
 
-  function hasStableImageBox(image) {
-    if (intrinsicImageSize(image)) return true;
+  function stableImageSize(image) {
+    const intrinsic = intrinsicImageSize(image);
+    if (intrinsic) return intrinsic;
     const width = Number(image.getAttribute("width"));
     const height = Number(image.getAttribute("height"));
-    return Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
+    return Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0
+      ? Object.freeze({ width, height })
+      : null;
+  }
+
+  function hasStableImageBox(image) {
+    return Boolean(stableImageSize(image));
+  }
+
+  function applyPendingFormulaAspectRatios() {
+    for (const image of book.querySelectorAll(
+      "img.atha-resource-pending[data-atha-resource].math-inline, img.atha-resource-pending[data-atha-resource].math-display",
+    )) {
+      const size = stableImageSize(image);
+      if (size) image.style.setProperty("aspect-ratio", `${size.width} / ${size.height}`);
+    }
   }
 
   function deferredFormula(image) {
@@ -1011,6 +1028,34 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     hintedImage.setAttribute("data-atha-intrinsic-width", "598");
     hintedImage.setAttribute("data-atha-intrinsic-height", "130");
     ensure(applyIntrinsicImageHint(hintedImage) && hasStableImageBox(hintedImage), "image-load");
+    const formulaRatio = document.createElement("img");
+    formulaRatio.className = "math-inline";
+    formulaRatio.setAttribute("width", "47.5");
+    formulaRatio.setAttribute("height", "17");
+    ensure(hasStableImageBox(formulaRatio), "image-load");
+    formulaRatio.style.cssText = "height:1.02em;width:auto";
+    formulaRatio.classList.add("atha-resource-pending");
+    formulaRatio.dataset.athaResource = "formula.svg";
+    book.append(formulaRatio);
+    const previousInlineStyles = inlineStyles;
+    const previousSourceStyles = sourceStyles;
+    inlineStyles = [[formulaRatio, formulaRatio.getAttribute("style")]];
+    try {
+      setStyles({ sourceStyles: false, userStylesEnabled, userStylesheet });
+      ensure(
+        formulaRatio.style.aspectRatio === "47.5 / 17" && !formulaRatio.style.height,
+        "image-load",
+      );
+      setStyles({ sourceStyles: true, userStylesEnabled, userStylesheet });
+      ensure(
+        formulaRatio.style.aspectRatio === "47.5 / 17" && formulaRatio.style.height === "1.02em",
+        "image-load",
+      );
+    } finally {
+      formulaRatio.remove();
+      inlineStyles = previousInlineStyles;
+      setStyles({ sourceStyles: previousSourceStyles, userStylesEnabled, userStylesheet });
+    }
     const previousUserStyle = userStyle.textContent;
     userStyle.textContent =
       "img{display:block;width:50px;height:300px!important}";
