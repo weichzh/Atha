@@ -662,6 +662,16 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     };
   }
 
+  function flushLateLayout(notify = onLateLayout) {
+    clearTimeout(lateLayoutTimer);
+    lateLayoutTimer = 0;
+    if (!lateLayoutDirty || !lateLayoutAnchor) return;
+    const anchorValue = lateLayoutAnchor;
+    lateLayoutAnchor = null;
+    lateLayoutDirty = false;
+    notify(anchorValue);
+  }
+
   function scheduleLateLayout(anchor) {
     if (!onLateLayout) return;
     pendingImageGeometry.clear();
@@ -669,14 +679,7 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     lateLayoutAnchor = normalizeLayoutAnchor(anchor) ?? lateLayoutAnchor;
     lateLayoutDirty = true;
     clearTimeout(lateLayoutTimer);
-    lateLayoutTimer = setTimeout(() => {
-      lateLayoutTimer = 0;
-      if (!lateLayoutDirty || !lateLayoutAnchor) return;
-      const anchorValue = lateLayoutAnchor;
-      lateLayoutAnchor = null;
-      lateLayoutDirty = false;
-      onLateLayout(anchorValue);
-    }, IMAGE_SETTLE_TIMEOUT_MS);
+    lateLayoutTimer = setTimeout(flushLateLayout, IMAGE_SETTLE_TIMEOUT_MS);
   }
 
   function resetLateImages() {
@@ -1372,6 +1375,7 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
       left: bounds.left + 1,
     });
     let lateInside = false;
+    let lateResized = false;
     Object.defineProperty(firstVisible, "getBoundingClientRect", { value: inside });
     Object.defineProperty(resizedVisible, "getBoundingClientRect", {
       value: () => {
@@ -1382,17 +1386,20 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
       },
     });
     Object.defineProperty(lateVisible, "getBoundingClientRect", {
-      value: () =>
-        lateInside
-          ? inside()
-          : {
-              width: 1,
-              height: 1,
-              top: bounds.top + 1,
-              right: bounds.right + 2,
-              bottom: bounds.top + 2,
-              left: bounds.right + 1,
-            },
+      value: () => {
+        if (lateInside) {
+          const rect = inside();
+          return lateResized ? { ...rect, right: rect.right + 1, bottom: rect.bottom + 1 } : rect;
+        }
+        return {
+          width: 1,
+          height: 1,
+          top: bounds.top + 1,
+          right: bounds.right + 2,
+          bottom: bounds.top + 2,
+          left: bounds.right + 1,
+        };
+      },
     });
     Object.defineProperties(firstVisible, {
       complete: { get: () => true },
@@ -1412,7 +1419,12 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
     Object.defineProperties(lateVisible, {
       addEventListener: {
         value: (type, listener) => {
-          if (type === "load") lateLoad = listener;
+          if (type === "load") {
+            lateLoad = () => {
+              lateResized = true;
+              listener();
+            };
+          }
         },
       },
       complete: { get: () => false },
@@ -1454,13 +1466,18 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
           typeof lateLoad === "function",
         "image-load",
       );
+      let lateLayoutAnchorValue;
       lateLoad();
+      flushLateLayout((anchor) => {
+        lateLayoutAnchorValue = anchor;
+      });
       ensure(
         book.contains(lateVisible) &&
           !lateVisible.classList.contains("atha-resource-pending") &&
           !lateVisible.hasAttribute("aria-busy") &&
           !lateVisible.dataset.athaResource &&
-          !lateImages.has(lateVisible),
+          !lateImages.has(lateVisible) &&
+          lateLayoutAnchorValue?.offset === 37,
         "image-load",
       );
     } finally {
