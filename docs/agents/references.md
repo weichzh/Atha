@@ -181,11 +181,18 @@ adb -s "$serial" logcat --pid="$pid" -d
 
 ## Readest 界面与交互证据
 
-- 固定界面源码：[`readest/readest` 提交 `cf413b2b`](https://github.com/readest/readest/tree/cf413b2b9f1a205732062bf656e73c702f12ac02)；固定交互源码：Readest v0.11.20 [`useCapturedTurn.ts`](https://github.com/readest/readest/blob/1df1505fc5033fc949463c9908f2d53bd0fbdfa6/apps/readest-app/src/app/reader/hooks/useCapturedTurn.ts) 与对应 foliate-js [`paginator.js`](https://github.com/readest/foliate-js/blob/dd71f2be356563c16a23272686189fcfb45d0b82/paginator.js)。当前公开 Web 入口为 [web.readest.com](https://web.readest.com/)，阅读与自定义能力以 [Reading](https://readest.com/docs/reading) 和 [Customization](https://readest.com/docs/customization) 为准。
+- 固定界面源码：[`readest/readest` 提交 `cf413b2b`](https://github.com/readest/readest/tree/cf413b2b9f1a205732062bf656e73c702f12ac02)；固定交互源码：Readest v0.11.20 [`useCapturedTurn.ts`](https://github.com/readest/readest/blob/1df1505fc5033fc949463c9908f2d53bd0fbdfa6/apps/readest-app/src/app/reader/hooks/useCapturedTurn.ts)、[`useLongPress.ts`](https://github.com/readest/readest/blob/1df1505fc5033fc949463c9908f2d53bd0fbdfa6/apps/readest-app/src/hooks/useLongPress.ts)、[`BookshelfItem.tsx`](https://github.com/readest/readest/blob/1df1505fc5033fc949463c9908f2d53bd0fbdfa6/apps/readest-app/src/app/library/components/BookshelfItem.tsx)、[`ImageViewer.tsx`](https://github.com/readest/readest/blob/1df1505fc5033fc949463c9908f2d53bd0fbdfa6/apps/readest-app/src/app/reader/components/ImageViewer.tsx) 与对应 foliate-js [`paginator.js`](https://github.com/readest/foliate-js/blob/dd71f2be356563c16a23272686189fcfb45d0b82/paginator.js)。当前公开 Web 入口为 [web.readest.com](https://web.readest.com/)，阅读与自定义能力以 [Reading](https://readest.com/docs/reading) 和 [Customization](https://readest.com/docs/customization) 为准。
 - 本地事实：固定提交内的 Android、macOS、桌面原图，2026-08-08 的公开 Web 实际截图、逐图观察和 SHA-256 清单位于忽略目录 `fixtures/local/readest/`。
 - 项目快速用法：设计结论必须引用本地 `README.md` 的 `RD-*` 编号并打开原图；Atha 采用 Readest 的安静图标工具、正文与侧栏并存、主题预览和设置渐进披露。交互只借鉴其小阈值后拖动优先于点击和分页收束，不复制 React / Tailwind、截图覆盖动画或 foliate 完整分页架构；表格边界必须按 Atha 的 owner 规则移交。
 - 最短检查：在证据目录运行 `sha256sum -c SHA256SUMS`；需要刷新 Web 界面时通过 `agent-browser` 重新采集带日期的截图，默认分支变化后使用新提交建立新快照，不覆盖既有证据。
 - 必须重查：默认分支提交、公开 Web 版本、商店截图与实际运行版本差异、屏幕尺寸、深浅主题、输入方式和与 Atha 当前设计结论的对应关系。
+
+## Web 可视视口与触控输入
+
+- 官方入口：[MDN Visual Viewport API](https://developer.mozilla.org/en-US/docs/Web/API/Visual_Viewport_API)、[MDN Touch events](https://developer.mozilla.org/en-US/docs/Web/API/Touch_events/Using_Touch_Events)、[MDN wheel event](https://developer.mozilla.org/en-US/docs/Web/API/Element/wheel_event)。
+- 项目快速用法：软键盘适配只在 `window.visualViewport` 可用时监听 `resize` / `scroll` 并把可视高度与顶部偏移投影为消息层变量；不可用时保留既有 `dvh` 布局。预览缩放只在图片、公式或表格 dialog 内拦截双指 `touchmove` 和桌面 `wheel`，监听器必须显式 `passive: false`，单指滚动与阅读正文输入不受影响。
+- 最短检查：Svelte check / build 后在 Linux WebKitGTK 运行 `scripts/check-reader-linux.sh`；Android 软键盘遮挡仍需 PCT-AL10 或等价系统 WebView 真机验证。
+- 必须重查：VisualViewport 在目标 WebView 的 offset、缩放、键盘 resize / overlay 行为，touch cancellation、桌面触控板 wheel 粒度，以及输入法候选栏和横屏安全区。
 
 ## Tiptap 3
 

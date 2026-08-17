@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Maximize2, Minus, Plus, X } from "@lucide/svelte";
+  import { onMount } from "svelte";
 
   const MIN_SCALE = 0.5;
   const MAX_SCALE = 4;
@@ -7,6 +8,8 @@
 
   let viewport: HTMLDivElement;
   let scale = $state(1);
+  let pinchDistance = 0;
+  let pinchScale = 1;
 
   function setScale(next: number) {
     scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, next));
@@ -19,6 +22,75 @@
       viewport.scrollTop = 0;
     }
   }
+
+  function isScalablePreview() {
+    return viewport?.closest("dialog")?.matches(".media-preview, .table-preview") ?? false;
+  }
+
+  function zoomAt(next: number, clientX: number, clientY: number) {
+    const previous = scale;
+    const clamped = Math.min(MAX_SCALE, Math.max(MIN_SCALE, next));
+    if (clamped === previous) return;
+    const bounds = viewport.getBoundingClientRect();
+    const x = clientX - bounds.left;
+    const y = clientY - bounds.top;
+    scale = clamped;
+    requestAnimationFrame(() => {
+      const ratio = clamped / previous;
+      viewport.scrollLeft = (viewport.scrollLeft + x) * ratio - x;
+      viewport.scrollTop = (viewport.scrollTop + y) * ratio - y;
+    });
+  }
+
+  function touchDistance(touches: TouchList) {
+    return Math.hypot(
+      touches[1].clientX - touches[0].clientX,
+      touches[1].clientY - touches[0].clientY,
+    );
+  }
+
+  onMount(() => {
+    const handleWheel = (event: WheelEvent) => {
+      if (!isScalablePreview()) return;
+      event.preventDefault();
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? viewport.clientHeight
+          : 1;
+      const delta = Math.max(-240, Math.min(240, event.deltaY * unit));
+      zoomAt(scale * Math.exp(-delta * 0.002), event.clientX, event.clientY);
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      if (!isScalablePreview() || event.touches.length !== 2) return;
+      event.preventDefault();
+      pinchDistance = touchDistance(event.touches);
+      pinchScale = scale;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!isScalablePreview() || event.touches.length !== 2 || pinchDistance <= 0) return;
+      event.preventDefault();
+      const x = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+      const y = (event.touches[0].clientY + event.touches[1].clientY) / 2;
+      zoomAt(pinchScale * touchDistance(event.touches) / pinchDistance, x, y);
+    };
+    const finishPinch = () => {
+      pinchDistance = 0;
+    };
+
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    viewport.addEventListener("touchstart", handleTouchStart, { passive: false });
+    viewport.addEventListener("touchmove", handleTouchMove, { passive: false });
+    viewport.addEventListener("touchend", finishPinch);
+    viewport.addEventListener("touchcancel", finishPinch);
+    return () => {
+      viewport.removeEventListener("wheel", handleWheel);
+      viewport.removeEventListener("touchstart", handleTouchStart);
+      viewport.removeEventListener("touchmove", handleTouchMove);
+      viewport.removeEventListener("touchend", finishPinch);
+      viewport.removeEventListener("touchcancel", finishPinch);
+    };
+  });
 
   function handleKeydown(event: KeyboardEvent) {
     if (!event.ctrlKey && !event.metaKey) return;

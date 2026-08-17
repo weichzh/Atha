@@ -5,6 +5,11 @@ const readerShell = document.querySelector(".reader-shell");
 const readerStartup = document.querySelector(".reader-startup");
 const contentDialog = document.querySelector("#content-dialog");
 const contentDialogViewport = document.querySelector("#content-dialog-viewport");
+const bottomToolbar = document.querySelector(".toolbar");
+const preferencesTool = document.querySelector(".reader-tool.preferences");
+if (bottomToolbar && preferencesTool?.parentElement !== bottomToolbar) {
+  bottomToolbar.append(preferencesTool);
+}
 const desktopWorkspaceMedia = matchMedia("(min-width: 1100px)");
 const workspaceTools = ["directory", "search", "notes"].map((name) => ({
   name,
@@ -38,6 +43,30 @@ if (params.has("verify") || params.has("gesture-probe")) {
   };
   Object.defineProperty(globalThis, "__athaReaderRuntimeErrors", { value: runtimeErrors });
 }
+
+function bindVisualViewport() {
+  const overlay = document.querySelector("#message-conversation");
+  const viewport = window.visualViewport;
+  if (!overlay || !viewport) return;
+  let frame = 0;
+  const sync = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      overlay.style.setProperty("--message-visual-height", `${viewport.height}px`);
+      overlay.style.setProperty("--message-visual-top", `${viewport.offsetTop}px`);
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.closest(".message-composer")) {
+        active.scrollIntoView({ block: "nearest" });
+      }
+    });
+  };
+  viewport.addEventListener("resize", sync);
+  viewport.addEventListener("scroll", sync);
+  window.addEventListener("resize", sync);
+  sync();
+}
+
+bindVisualViewport();
 
 function closeReaderTools() {
   const desktop = root.hasAttribute("data-desktop-workspace");
@@ -199,6 +228,7 @@ let navigation;
 const content = createContent({
   host: document.querySelector("#book-host"),
   reader,
+  themeStyleSource: document.querySelector("#reader-theme-source"),
   readerStyleSource: document.querySelector("#reader-style-source"),
   onLateLayout: ({ offset, pageIndex, scrollTop }) => {
     if (!navigation) return;

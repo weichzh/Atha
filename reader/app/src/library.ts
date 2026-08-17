@@ -6,6 +6,7 @@ export interface LibraryBook {
   title: string;
   authors: string[];
   hasCover: boolean;
+  hasCustomCover: boolean;
   importedAt: number;
   prepared: boolean;
 }
@@ -500,6 +501,14 @@ export async function importBookPaths(paths: string[]): Promise<ImportReport> {
   return invoke<ImportReport>("import_library_paths", { paths });
 }
 
+export function setBookCover(id: string): Promise<LibraryBook[] | null> {
+  return invoke<LibraryBook[] | null>("set_library_book_cover", { id });
+}
+
+export function resetBookCover(id: string): Promise<LibraryBook[]> {
+  return invoke<LibraryBook[]>("reset_library_book_cover", { id });
+}
+
 export async function takeStartupImport(): Promise<StartupImport | null> {
   if (!libraryAvailable) return null;
   return invoke<StartupImport | null>("take_startup_import");
@@ -950,11 +959,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-export function coverUrl(id: string): string {
+export function coverUrl(id: string, revision = 0): string {
   const root = globalThis.location?.protocol === "tauri:"
     ? "atha-cover://localhost/"
     : "https://atha-cover.localhost/";
-  return `${root}${id}`;
+  return `${root}${id}${revision > 0 ? `?v=${revision}` : ""}`;
 }
 
 export function importFailureMessage(code: string): string {

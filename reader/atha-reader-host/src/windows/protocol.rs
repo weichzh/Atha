@@ -30,6 +30,10 @@ pub(super) fn app_response(request: Request<Vec<u8>>) -> Response<Cow<'static, [
             Cow::Borrowed(include_bytes!("../../../atha-reader.css")),
             "text/css; charset=utf-8",
         ),
+        "/theme.css" => (
+            Cow::Borrowed(include_bytes!("../../../theme.css")),
+            "text/css; charset=utf-8",
+        ),
         "/assets/bookmark-24-regular.svg" => (
             Cow::Borrowed(include_bytes!("../../../assets/bookmark-24-regular.svg")),
             "image/svg+xml",

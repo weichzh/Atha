@@ -18,7 +18,9 @@ use atha_backend::{
         MAX_SOURCE_BYTES, READER_PAGE,
         dictionary::LocalDictionaries,
         epub::READER_MANIFEST,
-        library::{LibraryBook, LibraryError, LocalLibrary, PendingBookDeletion},
+        library::{
+            LibraryBook, LibraryError, LocalLibrary, MAX_CUSTOM_COVER_BYTES, PendingBookDeletion,
+        },
         resources::{BookRoot, Resource, ResourceError},
         telemetry::{MetricStage, ReaderEvent, parse_reader_event, safe_event},
     },
@@ -424,9 +426,19 @@ fn stage_library_files(
             }
         };
         match library.stage_with_title_hint(input.path(), input.title_hint()) {
-            Ok(book) => {
-                first_book_id.get_or_insert(book.id);
-            }
+            Ok(book) => match library.open_book(&book.id) {
+                Ok(_) => {
+                    first_book_id.get_or_insert(book.id);
+                }
+                Err(error) => {
+                    log::warn!(
+                        target: "atha::library",
+                        "operation=import stage=prepare outcome=failed code={}",
+                        error.code()
+                    );
+                    failures.push(ImportFailure { code: error.code() });
+                }
+            },
             Err(error) => {
                 log::warn!(
                     target: "atha::library",
@@ -459,6 +471,60 @@ fn stage_library_files(
         report: ImportReport { books, failures },
         first_book_id,
     })
+}
+
+#[tauri::command]
+async fn set_library_book_cover(
+    app: AppHandle,
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    id: String,
+) -> Result<Option<Vec<LibraryBook>>, String> {
+    message_maintenance::require_library_window(&window)?;
+    let Some(selected) = app
+        .dialog()
+        .file()
+        .add_filter("JPEG / PNG / WebP", &["jpg", "jpeg", "png", "webp"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let _operation = begin_local_data_operation(&runtime)?;
+    let started = Instant::now();
+    let library = runtime.library.clone();
+    let books = tauri::async_runtime::spawn_blocking(move || {
+        let input =
+            platform_file::PickerInput::open(&app, selected, "cover", MAX_CUSTOM_COVER_BYTES)
+                .map_err(|_| "invalid-library-cover".to_owned())?;
+        library
+            .set_custom_cover(&id, input.path())
+            .map_err(|error| library_command_error("cover", "write", &started, error))?;
+        library
+            .list()
+            .map_err(|error| library_command_error("cover", "list", &started, error))
+    })
+    .await
+    .map_err(|_| "library-cover-task".to_owned())??;
+    Ok(Some(books))
+}
+
+#[tauri::command]
+fn reset_library_book_cover(
+    window: WebviewWindow,
+    runtime: State<'_, ReaderRuntime>,
+    id: String,
+) -> Result<Vec<LibraryBook>, String> {
+    message_maintenance::require_library_window(&window)?;
+    let _operation = begin_local_data_operation(&runtime)?;
+    let started = Instant::now();
+    runtime
+        .library
+        .reset_custom_cover(&id)
+        .map_err(|error| library_command_error("cover", "reset", &started, error))?;
+    runtime
+        .library
+        .list()
+        .map_err(|error| library_command_error("cover", "list", &started, error))
 }
 
 #[tauri::command]
@@ -738,6 +804,8 @@ fn try_run() -> Result<(), Box<dyn Error>> {
             import_library_paths,
             take_startup_import,
             open_library_book,
+            set_library_book_cover,
+            reset_library_book_cover,
             remove_library_book,
             delete_library_book_data,
             pending_library_book_deletions,
@@ -1192,7 +1260,7 @@ fn cover_response(
         return empty_response(StatusCode::BAD_REQUEST);
     }
     match library.cover(id) {
-        Ok(resource) => resource_response(resource, "private, max-age=31536000, immutable", false),
+        Ok(resource) => resource_response(resource, "no-store", false),
         Err(LibraryError::InvalidBookId) => empty_response(StatusCode::BAD_REQUEST),
         Err(LibraryError::UnknownBook | LibraryError::MissingCover) => {
             empty_response(StatusCode::NOT_FOUND)
@@ -1332,6 +1400,7 @@ mod tests {
             LibraryError::UnknownBook,
             LibraryError::MissingSource,
             LibraryError::MissingCover,
+            LibraryError::InvalidCover,
             LibraryError::UnsupportedSource,
             LibraryError::Resource(ResourceError::InvalidPath),
             LibraryError::Resource(ResourceError::NotFound),

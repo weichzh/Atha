@@ -13,7 +13,7 @@ chardetng = "=1.0.0"
 dom_query = "0.27"
 encoding_rs = "=0.8.35"
 fs2 = "=0.4.3"
-imagesize = { version = "0.15", default-features = false, features = ["gif", "jpeg", "png"] }
+imagesize = { version = "0.15", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 kamadak-exif = "0.6.1"
 log = "0.4"
 mdict-rs = { version = "=0.1.4", features = ["lzo"] }

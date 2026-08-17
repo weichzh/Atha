@@ -44,7 +44,7 @@ export function cloneSelectedRange(book, selection) {
   return range.cloneRange();
 }
 
-export function createContent({ host, reader, readerStyleSource, onLateLayout }) {
+export function createContent({ host, reader, themeStyleSource, readerStyleSource, onLateLayout }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const nativeImageStyle = document.createElement("style");
   const bookStyle = document.createElement("style");
@@ -1496,9 +1496,13 @@ export function createContent({ host, reader, readerStyleSource, onLateLayout })
   }
 
   async function initialize() {
-    const response = await fetch(readerStyleSource.href);
-    ensure(response.ok, "reader-style-load");
-    readerStyle.textContent = await response.text();
+    const responses = await Promise.all(
+      [themeStyleSource, readerStyleSource].map((source) => fetch(source.href)),
+    );
+    ensure(responses.every((response) => response.ok), "reader-style-load");
+    readerStyle.textContent = (await Promise.all(responses.map((response) => response.text()))).join(
+      "\n",
+    );
   }
 
   function remember(cache, key, value, characters = sectionCacheOrder.get(key) || 0) {

@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { Clock3, List, Search, SquarePen } from "@lucide/svelte";
+  import { Clock3, List, Search, Settings, SquarePen } from "@lucide/svelte";
 
   import DirectoryPanel from "../panels/DirectoryPanel.svelte";
   import NotesPanel from "../panels/NotesPanel.svelte";
+  import PreferencesPanel from "../panels/PreferencesPanel.svelte";
   import ProgressPanel from "../panels/ProgressPanel.svelte";
   import SearchPanel from "../panels/SearchPanel.svelte";
 </script>
@@ -31,5 +32,11 @@
       <Clock3 aria-hidden="true" />
     </summary>
     <ProgressPanel />
+  </details>
+  <details class="reader-tool preferences" name="reader-panel">
+    <summary class="icon-button" aria-label="阅读设置" title="阅读设置">
+      <Settings aria-hidden="true" />
+    </summary>
+    <PreferencesPanel />
   </details>
 </nav>

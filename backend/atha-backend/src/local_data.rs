@@ -1098,7 +1098,10 @@ fn allowed_entry(path: &str) -> bool {
     }
     let parts = path.split('/').collect::<Vec<_>>();
     match parts.as_slice() {
-        ["Library", record] => record.strip_suffix(".json").is_some_and(valid_content_id),
+        ["Library", record] => record
+            .strip_suffix(".json")
+            .or_else(|| record.strip_suffix(".cover"))
+            .is_some_and(valid_content_id),
         ["SourceBooks", source] => source
             .rsplit_once('.')
             .is_some_and(|(id, extension)| valid_content_id(id) && valid_book_extension(extension)),

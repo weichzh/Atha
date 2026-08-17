@@ -24,6 +24,13 @@ use sha2::{Digest, Sha256};
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+const PNG_1X1: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xb5, 0x1c, 0x0c,
+    0x02, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x64, 0xf8, 0x0f, 0x00,
+    0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xe3, 0x66, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+    0xae, 0x42, 0x60, 0x82,
+];
 
 #[test]
 fn complete_local_data_round_trip_rebuilds_cache_and_confirms_browser_state() {
@@ -36,6 +43,34 @@ fn complete_local_data_round_trip_rebuilds_cache_and_confirms_browser_state() {
         .stage_with_title_hint(&source_book, Some("往返书籍"))
         .expect("stage source book");
     library.open_book(&book.id).expect("prepare source cache");
+    let custom_cover = source.path().join("custom-cover.png");
+    fs::write(&custom_cover, PNG_1X1).expect("write custom cover");
+    let customized = library
+        .set_custom_cover(&book.id, &custom_cover)
+        .expect("set custom cover");
+    assert!(customized.has_cover);
+    assert!(customized.has_custom_cover);
+    assert_eq!(
+        library.cover(&book.id).expect("read custom cover").bytes,
+        PNG_1X1
+    );
+    let invalid_cover = source.path().join("invalid-cover.png");
+    fs::write(&invalid_cover, b"not an image").expect("write invalid cover");
+    assert_eq!(
+        library.set_custom_cover(&book.id, &invalid_cover),
+        Err(LibraryError::InvalidCover)
+    );
+    let stored_cover = source.path().join(format!("Library/{}.cover", book.id));
+    let previous_cover = source
+        .path()
+        .join(format!("Library/{}.cover.previous", book.id));
+    let abandoned_cover = source.path().join("Library/.cover.staging-test");
+    fs::rename(&stored_cover, &previous_cover).expect("simulate interrupted cover replacement");
+    fs::write(&abandoned_cover, b"staging").expect("write abandoned cover");
+    let library = LocalLibrary::open(source.path()).expect("recover source library");
+    assert!(stored_cover.is_file());
+    assert!(!previous_cover.exists());
+    assert!(!abandoned_cover.exists());
     let dictionaries = LocalDictionaries::open(source.path()).expect("open source dictionaries");
     let messages = MessageStore::open(source.path()).expect("open source messages");
     messages
@@ -74,6 +109,12 @@ fn complete_local_data_round_trip_rebuilds_cache_and_confirms_browser_state() {
     assert_eq!(listed[0].id, book.id);
     assert_eq!(listed[0].title, "往返书籍");
     assert!(!listed[0].prepared);
+    assert!(listed[0].has_cover);
+    assert!(listed[0].has_custom_cover);
+    assert_eq!(
+        restored.cover(&book.id).expect("read restored cover").bytes,
+        PNG_1X1
+    );
     assert!(
         !destination
             .path()
@@ -88,6 +129,11 @@ fn complete_local_data_round_trip_rebuilds_cache_and_confirms_browser_state() {
         .expect("list restored messages");
     assert_eq!(restored_messages.len(), 1);
     assert_eq!(restored_messages[0].text, "完整资料库消息");
+    let reset = restored
+        .reset_custom_cover(&book.id)
+        .expect("reset restored cover");
+    assert!(!reset.has_custom_cover);
+    assert!(!reset.has_cover);
     restored
         .open_book(&book.id)
         .expect("rebuild restored cache");

@@ -10,6 +10,8 @@
     Download,
     Grid2X2,
     HardDrive,
+    ImageOff,
+    ImagePlus,
     Library,
     List as ListIcon,
     MessageSquareText,
@@ -19,7 +21,7 @@
     Trash2,
     X,
   } from "@lucide/svelte";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   import MemoryCenter from "./MemoryCenter.svelte";
   import DictionarySettings from "./panels/DictionarySettings.svelte";
@@ -49,7 +51,9 @@
     resetReaderApplicationPreferences,
     replaceLocalDataState,
     resumeBookDataDeletions,
+    resetBookCover,
     removeBooksSerially,
+    setBookCover,
     rollbackLocalDataRestore,
     takeStartupImport,
     validateLocalDataState,
@@ -89,6 +93,19 @@
   let progressGroups = { reading: [] as LibraryBook[], unread: [] as LibraryBook[] };
   let allVisibleSelected = false;
   let appTheme = readAppTheme();
+  let selectedBook: LibraryBook | null = null;
+  let bookMenu: { book: LibraryBook; x: number; y: number } | null = null;
+  let bookMenuElement: HTMLDivElement | undefined;
+  let pressedBookId = "";
+  let suppressedClickId = "";
+  let activePress: {
+    id: string;
+    pointerId: number;
+    x: number;
+    y: number;
+    timer: ReturnType<typeof globalThis.setTimeout>;
+  } | null = null;
+  let coverRevisions = new Map<string, number>();
 
   $: visibleBooks = filterLibraryBooks(books, query, view);
   $: progressGroups = startedBookIds
@@ -96,6 +113,9 @@
     : { reading: [], unread: [] };
   $: allVisibleSelected =
     visibleBooks.length > 0 && visibleBooks.every((book) => selectedIds.has(book.id));
+  $: selectedBook = selectedIds.size === 1
+    ? books.find((book) => selectedIds.has(book.id)) ?? null
+    : null;
 
   function syncAppTheme() {
     document.documentElement.dataset.appTheme = appTheme;
@@ -154,6 +174,17 @@
     };
     syncSafeAreaInsets();
     globalThis.addEventListener("atha-safe-area-change", syncSafeAreaInsets);
+    const closeMenuFromPointer = (event: PointerEvent) => {
+      if (bookMenu && !bookMenuElement?.contains(event.target as Node)) bookMenu = null;
+    };
+    const closeMenuFromKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") bookMenu = null;
+    };
+    const closeMenu = () => (bookMenu = null);
+    globalThis.addEventListener("pointerdown", closeMenuFromPointer);
+    globalThis.addEventListener("keydown", closeMenuFromKey);
+    globalThis.addEventListener("resize", closeMenu);
+    globalThis.addEventListener("scroll", closeMenu, true);
     void initializeLibrary();
     if (libraryAvailable) {
       void getCurrentWebview()
@@ -184,6 +215,11 @@
       stopDragDrop?.();
       darkScheme?.removeEventListener("change", syncSystemTheme);
       globalThis.removeEventListener("atha-safe-area-change", syncSafeAreaInsets);
+      globalThis.removeEventListener("pointerdown", closeMenuFromPointer);
+      globalThis.removeEventListener("keydown", closeMenuFromKey);
+      globalThis.removeEventListener("resize", closeMenu);
+      globalThis.removeEventListener("scroll", closeMenu, true);
+      cancelBookPress();
     };
   });
 
@@ -221,6 +257,7 @@
     if (loading || busy || next === section) return;
     if (selecting) cancelSelection();
     status = "";
+    bookMenu = null;
     section = next;
   }
 
@@ -433,6 +470,128 @@
     selectedIds = next;
   }
 
+  function cancelBookPress() {
+    if (activePress) globalThis.clearTimeout(activePress.timer);
+    activePress = null;
+    pressedBookId = "";
+  }
+
+  function beginBookPress(event: PointerEvent, book: LibraryBook) {
+    if (busy || selecting || event.pointerType === "mouse" || event.button !== 0) return;
+    cancelBookPress();
+    const timer = globalThis.setTimeout(() => {
+      if (!activePress || activePress.id !== book.id) return;
+      suppressedClickId = book.id;
+      selecting = true;
+      selectedIds = new Set([book.id]);
+      pressedBookId = "";
+    }, 500);
+    activePress = {
+      id: book.id,
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      timer,
+    };
+    pressedBookId = book.id;
+  }
+
+  function moveBookPress(event: PointerEvent) {
+    if (
+      activePress?.pointerId === event.pointerId &&
+      Math.hypot(event.clientX - activePress.x, event.clientY - activePress.y) > 10
+    ) cancelBookPress();
+  }
+
+  function activateBook(book: LibraryBook) {
+    cancelBookPress();
+    if (suppressedClickId === book.id) {
+      suppressedClickId = "";
+      return;
+    }
+    if (selecting) toggleSelection(book.id);
+    else void read(book);
+  }
+
+  async function showBookMenu(book: LibraryBook, x: number, y: number) {
+    cancelBookPress();
+    bookMenu = {
+      book,
+      x: Math.max(8, Math.min(x, innerWidth - 228)),
+      y: Math.max(8, Math.min(y, innerHeight - 356)),
+    };
+    await tick();
+    bookMenuElement?.querySelector<HTMLButtonElement>("button")?.focus();
+  }
+
+  function handleBookContextMenu(event: MouseEvent, book: LibraryBook) {
+    event.preventDefault();
+    if (busy || event.button !== 2) return;
+    void showBookMenu(book, event.clientX, event.clientY);
+  }
+
+  function handleBookKeydown(event: KeyboardEvent, book: LibraryBook) {
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+    event.preventDefault();
+    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    void showBookMenu(book, bounds.left + 12, bounds.top + 40);
+  }
+
+  function selectFromMenu(book: LibraryBook) {
+    bookMenu = null;
+    if (!selecting) {
+      selecting = true;
+      selectedIds = new Set([book.id]);
+    } else {
+      toggleSelection(book.id);
+    }
+  }
+
+  function bumpCover(id: string) {
+    const next = new Map(coverRevisions);
+    next.set(id, (next.get(id) ?? 0) + 1);
+    coverRevisions = next;
+    const failed = new Set(failedCovers);
+    failed.delete(id);
+    failedCovers = failed;
+  }
+
+  async function changeCover(book: LibraryBook) {
+    if (busy) return;
+    bookMenu = null;
+    busy = true;
+    workLabel = "正在更新封面…";
+    try {
+      const updated = await setBookCover(book.id);
+      if (!updated) return;
+      books = updated;
+      bumpCover(book.id);
+      status = "封面已更新。";
+    } catch (error) {
+      status = String(error).includes("invalid-library-cover")
+        ? "请选择有效的 JPEG、PNG 或 WebP 图片。"
+        : "无法更新封面。";
+    } finally {
+      workLabel = "";
+      busy = false;
+    }
+  }
+
+  async function restoreCover(book: LibraryBook) {
+    if (busy || !book.hasCustomCover) return;
+    bookMenu = null;
+    busy = true;
+    try {
+      books = await resetBookCover(book.id);
+      bumpCover(book.id);
+      status = "已恢复书籍内置封面。";
+    } catch {
+      status = "无法恢复书籍内置封面。";
+    } finally {
+      busy = false;
+    }
+  }
+
   function toggleVisibleSelection() {
     if (visibleBooks.length === 0) return;
     const next = new Set(selectedIds);
@@ -443,11 +602,15 @@
     selectedIds = next;
   }
 
-  async function removeSelected() {
-    const ids = books.filter((book) => selectedIds.has(book.id)).map((book) => book.id);
+  function removeSelected() {
+    return removeBooks(books.filter((book) => selectedIds.has(book.id)).map((book) => book.id));
+  }
+
+  async function removeBooks(ids: string[]) {
     if (busy || ids.length === 0) return;
     if (!confirm(`从书架移出已选的 ${ids.length} 本书？阅读进度和导入内容会保留。`)) return;
 
+    bookMenu = null;
     busy = true;
     status = "正在移出书架…";
     try {
@@ -469,12 +632,16 @@
     }
   }
 
-  async function deleteSelected() {
-    const ids = books.filter((book) => selectedIds.has(book.id)).map((book) => book.id);
+  function deleteSelected() {
+    return deleteBooks(books.filter((book) => selectedIds.has(book.id)).map((book) => book.id));
+  }
+
+  async function deleteBooks(ids: string[]) {
     if (busy || ids.length === 0) return;
     if (!confirm(`删除已选 ${ids.length} 本书的本地文件和阅读状态？笔记、标注消息和原文快照会保留。`)) {
       return;
     }
+    bookMenu = null;
     busy = true;
     status = "正在删除本地数据…";
     try {
@@ -509,18 +676,26 @@
   <article class="library-book">
     <button
       class="library-book-open"
+      class:pressed={pressedBookId === book.id}
       type="button"
       aria-label={selecting
         ? `${selectedIds.has(book.id) ? "取消选择" : "选择"}《${book.title}》`
         : undefined}
       aria-pressed={selecting ? selectedIds.has(book.id) : undefined}
-      onclick={() => (selecting ? toggleSelection(book.id) : read(book))}
+      aria-haspopup="menu"
+      onclick={() => activateBook(book)}
+      onpointerdown={(event) => beginBookPress(event, book)}
+      onpointermove={moveBookPress}
+      onpointerup={cancelBookPress}
+      onpointercancel={cancelBookPress}
+      oncontextmenu={(event) => handleBookContextMenu(event, book)}
+      onkeydown={(event) => handleBookKeydown(event, book)}
       disabled={busy}
     >
       <span class="library-cover">
-        {#if book.prepared && book.hasCover && !failedCovers.has(book.id)}
+        {#if book.hasCover && !failedCovers.has(book.id)}
           <img
-            src={coverUrl(book.id)}
+            src={coverUrl(book.id, coverRevisions.get(book.id) ?? 0)}
             alt="书籍封面"
             draggable="false"
             loading="lazy"
@@ -797,16 +972,57 @@
 
   {#if selecting}
     <div class="library-selection-bar" role="toolbar" aria-label="批量操作">
+      <button type="button" onclick={() => selectedBook && changeCover(selectedBook)} disabled={busy || !selectedBook}>
+        <ImagePlus aria-hidden="true" />
+        <span>封面</span>
+      </button>
+      {#if selectedBook?.hasCustomCover}
+        <button type="button" onclick={() => selectedBook && restoreCover(selectedBook)} disabled={busy}>
+          <ImageOff aria-hidden="true" />
+          <span>恢复</span>
+        </button>
+      {/if}
       <button class="library-remove-action" type="button" onclick={removeSelected} disabled={busy || selectedIds.size === 0}>
         <BookMinus aria-hidden="true" />
-        <span>移出书架</span>
+        <span>移出</span>
       </button>
       <button class="library-delete-action" type="button" onclick={deleteSelected} disabled={busy || selectedIds.size === 0}>
         <Trash2 aria-hidden="true" />
-        <span>删除本地数据</span>
+        <span>删除</span>
       </button>
     </div>
   {/if}
+  {/if}
+
+  {#if bookMenu}
+    <div
+      bind:this={bookMenuElement}
+      class="library-book-menu"
+      role="menu"
+      aria-label={`《${bookMenu.book.title}》操作`}
+      style={`left: ${bookMenu.x}px; top: ${bookMenu.y}px`}
+    >
+      <button type="button" role="menuitem" onclick={() => { const book = bookMenu?.book; bookMenu = null; if (book) void read(book); }}>
+        <BookOpen aria-hidden="true" /><span>打开</span>
+      </button>
+      <button type="button" role="menuitem" onclick={() => bookMenu && selectFromMenu(bookMenu.book)}>
+        <CircleCheck aria-hidden="true" /><span>{selecting && selectedIds.has(bookMenu.book.id) ? "取消选择" : "选择"}</span>
+      </button>
+      <button type="button" role="menuitem" onclick={() => bookMenu && changeCover(bookMenu.book)}>
+        <ImagePlus aria-hidden="true" /><span>更换封面</span>
+      </button>
+      {#if bookMenu.book.hasCustomCover}
+        <button type="button" role="menuitem" onclick={() => bookMenu && restoreCover(bookMenu.book)}>
+          <ImageOff aria-hidden="true" /><span>恢复内置封面</span>
+        </button>
+      {/if}
+      <button type="button" role="menuitem" onclick={() => bookMenu && removeBooks([bookMenu.book.id])}>
+        <BookMinus aria-hidden="true" /><span>移出书架</span>
+      </button>
+      <button class="danger" type="button" role="menuitem" onclick={() => bookMenu && deleteBooks([bookMenu.book.id])}>
+        <Trash2 aria-hidden="true" /><span>删除本地数据</span>
+      </button>
+    </div>
   {/if}
 
   <dialog class="library-storage-dialog" bind:this={storageDialog} onclose={() => (storageUsage = null)}>

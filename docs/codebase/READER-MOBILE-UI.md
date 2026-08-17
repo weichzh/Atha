@@ -13,17 +13,17 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
 | `reader/app/src/components/ReaderCanvas.svelte` | 自适应书页、章节和进度 DOM |
 | `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条、兼容笔记 dialog 与对话浮层的组合 |
-| `reader/app/src/components/ContentDialog.svelte` | 图片、公式和表格的全屏查看层，以及关闭、放大、缩小和复位控制 |
+| `reader/app/src/components/ContentDialog.svelte` | 图片、公式和表格的全屏查看层，以及双指 / 滚轮、按钮、键盘缩放和复位控制 |
 | `reader/app/src/components/ConversationOverlay.svelte` | Atha 默认对话界面、修订/关系 dialog 与历史快照 dialog 的 DOM |
 | `reader/app/src/components/MessageComposer.svelte` | 自增高/全屏消息输入、两层工具栏和可视/Markdown 输入模式 |
 | `reader/app/src/message-editor.ts`、`message-markdown.ts` | 受限 Tiptap 扩展、链接规则及按需加载的 Markdown 双向转换 |
-| `reader/app/src/components/chrome/` | 顶部返回/书签/更多和底部四图标 |
+| `reader/app/src/components/chrome/` | 顶部返回 / 书签和底部目录 / 搜索 / 笔记 / 进度 / 设置五图标 |
 | `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
 | `reader/app/src/components/panels/PreferencesPanel.svelte` | Readest 风格分层设置、字号滑块、排版卡片、两种阅读方式与 CSS 模块入口 |
 | `reader/app/src/components/CssEditor.svelte` | CSS 模块页可见时按需加载的 CodeMirror 6 渐进增强；隐藏 textarea 保持唯一状态入口 |
 | `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 桌面词典浮层、移动端 75% 高底部抽屉、来源 / 字号设置、选区精确查词与安全富文本词条 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的无网络 codec；未来数据源只能经此复用字段、大小、重复 ID 与 CSS 安全校验 |
-| `reader/app/src/shell.css` | 顶部和底部覆盖层、面板、图标及壳层明暗视觉 |
+| `reader/theme.css`、`reader/app/src/shell.css` | 应用 / 阅读共享颜色 token，以及顶部和底部覆盖层、面板与图标布局 |
 | `reader/atha-reader.css` | 自适应书页、固定内部边距、系统缩放和书籍内容样式 |
 | `reader/web/app.mjs` | 组合模块；开关工具层；目录投影；设置下钻；返回按钮 |
 | `reader/web/interaction.mjs` | 左右模式的键盘、滚轮、页区和横向触摸；上下模式的原生滚动、边界跨章和中间点击工具层 |
@@ -104,15 +104,15 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
 | 进度与统计 | `.progress-panel`、`.reading-statistics`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
 | 阅读设置 | `.preferences-backdrop`、`.preferences-panel`、`.settings-list`、`.settings-view`、`.reading-mode-cards`、`.module-settings`、`.css-editor-*` |
-| 主题 | `reader/atha-reader.css` 顶部语义令牌及 `data-theme="light|paper|dark"` 覆盖 |
+| 主题 | `reader/theme.css` 中唯一颜色 token 及 `data-theme="light|paper|dark"` 覆盖；功能 CSS 只消费语义变量 |
 
-图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `BottomToolbar.svelte` 决定；`.toolbar` 固定为四等分。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
+图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `BottomToolbar.svelte` 决定；`.toolbar` 固定为五等分，阅读设置只在底栏出现。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
 
 ## 交互连接
 
 - `app.mjs` 的 `toggleReaderTools()` 先撤销待处理的选区动作，再切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录和笔记页的返回按钮使用同一关闭入口；根级 `contextmenu` 监听统一禁止 WebView 默认右键菜单。
 - `#reading-mode` 只接受 `paged` 和 `scroll`。左右模式按左 35%、中间 30% 和右 35% 处理页区点击，单指横向拖动实时移动正文并在 300ms 内收束；上下模式把纵向手势交给 `.reader` 原生滚动，到顶部 / 底部后再以前后意图跨 section。
-- 表格中心单击打开安全投影后的全屏查看层；左右区域点按和表格上的横向拖动继续翻页，不再由内嵌表格截获。图片与表格查看层参考 Readest 的暗色全屏结构，右侧固定关闭、放大、缩小和复位按钮，顶部显示 50%–400% 缩放值，放大后由原生滚动查看完整内容。普通图片还可点击图片外黑色区域直接关闭并把焦点还给阅读页；图片、缩放控件、表格和其他预览不会触发该捷径。代码块仍以双击或键盘打开普通预览。
+- 表格中心单击打开安全投影后的全屏查看层；左右区域点按和表格上的横向拖动继续翻页，不再由内嵌表格截获。图片、公式与表格查看层参考 Readest 的暗色全屏结构，右侧固定关闭、放大、缩小和复位按钮，顶部显示 50%–400% 缩放值；双指按中心点连续缩放，桌面滚轮按指针位置连续缩放，单指和放大后继续原生滚动。普通图片还可点击图片外黑色区域直接关闭并把焦点还给阅读页；图片、缩放控件、表格和其他预览不会触发该捷径。代码块仍以双击或键盘打开普通预览。
 - 华为 WebView 114 对 adb 和部分真实触摸会给出空 `pointerType`，`interaction.mjs` 将其归一为 touch；原生 `pan-y` 取消 pointer 时使用仍会到达的 `touchend` 处理章节边界。正文与 reader 的 touch 监听复用 inside / outside 去重，闭合 Shadow DOM 内的链接、表格、代码、dialog 和选择不会被外层事件误判。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；投影目录中的章节或书签完成跳转后自动关闭目录。
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
@@ -122,9 +122,9 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - 进度面板在进度摘要和拖动条之间投影今日、近 7 天、本书与连续阅读。桌面为四列，600 px 及以下为 2 × 2；指标使用分隔线而非嵌套卡片。统计在工具层打开时暂停，关闭后由同一阅读状态接口恢复。
 - 原生正文选区在 `pointerup`、键盘选择或稳定后的 `selectionchange` 投影紧凑四图标 `#selection-actions`；`content.selectionRange()` 以真实 `Range.collapsed` 与正文归属为准，避开华为 WebView 114 对闭合 Shadow DOM 的 `Selection.isCollapsed` 误报。复制只触发浏览器 copy，标注和笔记在 Tauri 产品中写入同一根 Message。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存会追加 SourceAnchor/SourceSnapshot，笔记动作追加修订，删除写入墓碑。全屏 `#annotations` 支持章节和全文筛选；点击项目打开对话浮层，独立编辑和删除按钮不触发跳转。
 - 选区“查词”复用同一待处理 Range，只向上下文词典面板发送受限查询；阅读顶栏不再常驻词典按钮。桌面保持锚定浮层，640 px 及以下按 RD-24 / RD-25 使用 75% 高底部抽屉、遮罩、固定词头与独立滚动区，点击遮罩或关闭按钮回到原阅读位置，并尊重 reduced-motion。当前词典、导入、移除和独立于正文的 85%–175% 六档释义字号在应用设置中管理；schema 1 本地设置只保存当前词典 ID 与允许字号，损坏、已移除来源或存储不可用时回退。可见词头下以应用内建样式呈现后端白名单允许的音标、词性、段落、义项、例句、列表、引用、表格、ruby 与上下标；来源 class、ID、内联样式、地址、脚本、资源和 CSS 均不进入 DOM，不加载网络或富 MDD 内容。
-- `#message-conversation` 默认从底部占约半屏，拖动顶部把手可连续调高，轻点把手或标题栏全屏按钮可进入全屏；标题栏不提供收起、导出或共享。顶部可切换本条、本章和本书：本条显示当前 Conversation 的原文短预览、回复与更多；本章和本书是只读聚合记录，可按创建时间或根 Message Locator 的书内位置排列，点击“打开”后进入对应本条对话再写入。被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记全屏页以可见返回按钮回到正文，导出本书消息只放在右上角更多菜单。
+- `#message-conversation` 默认从底部占约半屏，拖动顶部把手可连续调高，轻点把手或标题栏全屏按钮可进入全屏；`app.mjs` 用 `VisualViewport` 的高度和顶部偏移约束普通、全屏与展开输入器，软键盘出现时保持编辑器和发送操作位于可视区，并把当前输入滚到最近位置。标题栏不提供收起、导出或共享。顶部可切换本条、本章和本书：本条显示当前 Conversation 的原文短预览、回复与更多；本章和本书是只读聚合记录，可按创建时间或根 Message Locator 的书内位置排列，点击“打开”后进入对应本条对话再写入。被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记全屏页以可见返回按钮回到正文，导出本书消息只放在右上角更多菜单。
 - `.message-editor` 随内容增高，到达紧凑上限后出现全屏按钮。全屏编辑顶部使用两层工具栏：第一层切换可视/Markdown 输入并保留撤销、重做与返回紧凑输入，第二层显示标题、粗体、斜体、列表、引用和安全链接。Markdown 转换按需加载，切回可视模式或发送前必须通过同一正文 schema；不支持的格式保留原文并显示错误，不静默丢失。
-- 设置入口使用原生 `<details>`、backdrop、Escape、焦点返回和 CSS transition；600 px 以下为自适应高度底部抽屉，子页按内容收缩并以 72dvh 为上限，`prefers-reduced-motion` 下关闭进入、返回和翻页收束动画。
+- 设置入口位于阅读底栏，使用原生 `<details>`、backdrop、Escape、焦点返回和 CSS transition；600 px 以下为自适应高度底部抽屉，子页按内容收缩并以 72dvh 为上限，`prefers-reduced-motion` 下关闭进入、返回和翻页收束动画。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
 
 ## 当前有意暂缓

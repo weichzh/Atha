@@ -11,6 +11,8 @@ commands.allow = [
   "import_library_books",
   "take_startup_import",
   "open_library_book",
+  "set_library_book_cover",
+  "reset_library_book_cover",
   "remove_library_book",
   "delete_library_book_data",
   "pending_library_book_deletions",

@@ -1,5 +1,6 @@
 <script lang="ts">
   import readerStyleHref from "../../atha-reader.css?url";
+  import themeStyleHref from "../../theme.css?url";
 
   import ContentDialog from "./components/ContentDialog.svelte";
   import LibraryView from "./components/LibraryView.svelte";
@@ -11,6 +12,7 @@
 </script>
 
 <svelte:head>
+  <link id="reader-theme-source" rel="stylesheet" href={themeStyleHref} />
   {#if readerRoute}
     <link id="reader-style-source" rel="stylesheet" href={readerStyleHref} />
   {/if}

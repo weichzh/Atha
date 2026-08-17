@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, Bookmark, Settings } from "@lucide/svelte";
-
-  import PreferencesPanel from "../panels/PreferencesPanel.svelte";
+  import { ArrowLeft, Bookmark } from "@lucide/svelte";
 </script>
 
 <div class="top-toolbar">
@@ -19,11 +17,5 @@
     >
       <Bookmark aria-hidden="true" />
     </button>
-    <details class="reader-tool preferences" name="reader-panel">
-      <summary class="icon-button" aria-label="阅读设置" title="阅读设置">
-        <Settings aria-hidden="true" />
-      </summary>
-      <PreferencesPanel />
-    </details>
   </div>
 </div>

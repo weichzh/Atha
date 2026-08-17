@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -24,10 +25,28 @@ import {
 
 const ids = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
 const books: LibraryBook[] = [
-  { id: ids[1], title: "Zeta", authors: ["Beta"], hasCover: true, importedAt: 30, prepared: true },
-  { id: ids[0], title: "Alpha", authors: ["Gamma"], hasCover: false, importedAt: 20, prepared: true },
-  { id: ids[2], title: "Middle", authors: [], hasCover: false, importedAt: 10, prepared: false },
+  { id: ids[1], title: "Zeta", authors: ["Beta"], hasCover: true, hasCustomCover: false, importedAt: 30, prepared: true },
+  { id: ids[0], title: "Alpha", authors: ["Gamma"], hasCover: false, hasCustomCover: false, importedAt: 20, prepared: true },
+  { id: ids[2], title: "Middle", authors: [], hasCover: false, hasCustomCover: false, importedAt: 10, prepared: false },
 ];
+
+test("feature styles consume the shared theme palette", () => {
+  const featureStyles = [
+    new URL("../src/library.css", import.meta.url),
+    new URL("../src/shell.css", import.meta.url),
+    new URL("../../atha-reader.css", import.meta.url),
+  ];
+  const colorDeclaration = /:\s*[^;{]*(?:#[0-9a-f]{3,8}\b|rgba?\()/i;
+  const hardcoded = featureStyles.flatMap((path) =>
+    readFileSync(path, "utf8")
+      .split("\n")
+      .flatMap((line, index) => colorDeclaration.test(line) ? [`${path.pathname}:${index + 1}`] : []),
+  );
+  assert.deepEqual(hardcoded, []);
+  const palette = readFileSync(new URL("../../theme.css", import.meta.url), "utf8");
+  assert.match(palette, /--library-bg:/);
+  assert.match(palette, /--ui-canvas:/);
+});
 
 function progress(id: string) {
   return JSON.stringify({

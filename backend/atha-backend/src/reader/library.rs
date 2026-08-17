@@ -7,9 +7,11 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use imagesize::ImageType;
 use serde::{Deserialize, Serialize};
 
 use crate::{create_real_directory, is_reparse_point};
@@ -18,7 +20,7 @@ use super::{
     cbz,
     epub::{self, ImportError, READER_MANIFEST, import_epub},
     fb2, kindle,
-    resources::{BookRoot, Resource, ResourceError},
+    resources::{BookRoot, MAX_RESOURCE_BYTES, Resource, ResourceError},
     text,
 };
 
@@ -31,6 +33,14 @@ pub(crate) const BOOK_EXTENSIONS: [&str; 10] = [
     "epub", "cbz", "fb2", "fbz", "mobi", "azw", "azw3", "md", "markdown", "txt",
 ];
 const DELETE_PREFIX: &str = ".atha-delete-";
+const CUSTOM_COVER_SUFFIX: &str = ".cover";
+const CUSTOM_COVER_PREVIOUS_SUFFIX: &str = ".cover.previous";
+const CUSTOM_COVER_STAGING_PREFIX: &str = ".cover.staging-";
+const MAX_COVER_SIDE: usize = 8_192;
+const MAX_COVER_PIXELS: usize = 20_000_000;
+static NEXT_COVER_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+
+pub const MAX_CUSTOM_COVER_BYTES: u64 = MAX_RESOURCE_BYTES;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +49,7 @@ pub struct LibraryBook {
     pub title: String,
     pub authors: Vec<String>,
     pub has_cover: bool,
+    pub has_custom_cover: bool,
     pub imported_at: u64,
     pub prepared: bool,
 }
@@ -92,7 +103,11 @@ struct ImportedSource {
     cover_path: Option<String>,
 }
 
-type DurableLibraryState = (Vec<StoredBook>, Vec<(PathBuf, String)>);
+type DurableLibraryState = (
+    Vec<StoredBook>,
+    Vec<(PathBuf, String)>,
+    Vec<(PathBuf, String)>,
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibraryError {
@@ -102,6 +117,7 @@ pub enum LibraryError {
     CorruptRecord,
     MissingSource,
     MissingCover,
+    InvalidCover,
     ReadFailed,
     WriteFailed,
     UnsupportedSource,
@@ -128,6 +144,7 @@ impl LocalLibrary {
             imports,
             sources,
         };
+        library.recover_custom_covers()?;
         library.recover_deletions()?;
         Ok(library)
     }
@@ -323,6 +340,10 @@ impl LocalLibrary {
 
     pub fn cover(&self, id: &str) -> Result<Resource, LibraryError> {
         let record = read_record(&self.record_path(id)?)?;
+        let custom = self.custom_cover_path(id)?;
+        if custom.is_file() {
+            return read_custom_cover(&custom);
+        }
         let path = read_imported_metadata(&self.imports.join(id), id)
             .and_then(|metadata| metadata.cover_path)
             .or(record.cover_path)
@@ -337,11 +358,62 @@ impl LocalLibrary {
         Ok(resource)
     }
 
+    pub fn set_custom_cover(
+        &self,
+        id: &str,
+        source: impl AsRef<Path>,
+    ) -> Result<LibraryBook, LibraryError> {
+        let record = read_record(&self.record_path(id)?)?;
+        let bytes = read_custom_cover_bytes(source.as_ref())?;
+        validate_custom_cover(&bytes)?;
+        let target = self.custom_cover_path(id)?;
+        let previous = self.custom_cover_previous_path(id)?;
+        if (target.exists() && !custom_cover_present(&target)) || previous.exists() {
+            return Err(LibraryError::WriteFailed);
+        }
+        let temporary = self.reserve_cover_temporary()?;
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temporary)
+                .map_err(|_| LibraryError::WriteFailed)?;
+            file.write_all(&bytes)
+                .and_then(|()| file.sync_all())
+                .map_err(|_| LibraryError::WriteFailed)?;
+            if target.is_file() {
+                fs::rename(&target, &previous).map_err(|_| LibraryError::WriteFailed)?;
+            }
+            if fs::rename(&temporary, &target).is_err() {
+                if previous.is_file() {
+                    let _ = fs::rename(&previous, &target);
+                }
+                return Err(LibraryError::WriteFailed);
+            }
+            sync_directory(&self.records)?;
+            remove_path_if_exists(&previous)?;
+            sync_directory(&self.records)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result?;
+        Ok(self.public_book(&record))
+    }
+
+    pub fn reset_custom_cover(&self, id: &str) -> Result<LibraryBook, LibraryError> {
+        let record = read_record(&self.record_path(id)?)?;
+        remove_path_if_exists(&self.custom_cover_path(id)?)?;
+        sync_directory(&self.records)?;
+        Ok(self.public_book(&record))
+    }
+
     pub fn remove(&self, id: &str) -> Result<(), LibraryError> {
         let path = self.record_path(id)?;
         if !path.is_file() {
             return Err(LibraryError::UnknownBook);
         }
+        remove_path_if_exists(&self.custom_cover_path(id)?)?;
         fs::remove_file(path).map_err(|_| LibraryError::WriteFailed)
     }
 
@@ -413,7 +485,7 @@ impl LocalLibrary {
         let target_sources = target_root.as_ref().join("SourceBooks");
         fs::create_dir(&target_records).map_err(|_| LibraryError::WriteFailed)?;
         fs::create_dir(&target_sources).map_err(|_| LibraryError::WriteFailed)?;
-        let (mut records, sources) = self.durable_state()?;
+        let (mut records, sources, covers) = self.durable_state()?;
         let source_ids = sources
             .iter()
             .filter_map(|(_, name)| name.split_once('.').map(|(id, _)| id))
@@ -453,11 +525,14 @@ impl LocalLibrary {
         for (source, name) in sources {
             fs::copy(source, target_sources.join(name)).map_err(|_| LibraryError::WriteFailed)?;
         }
+        for (cover, name) in covers {
+            fs::copy(cover, target_records.join(name)).map_err(|_| LibraryError::WriteFailed)?;
+        }
         Ok(())
     }
 
     pub(crate) fn validate_durable_state(&self) -> Result<(), LibraryError> {
-        let (records, sources) = self.durable_state()?;
+        let (records, sources, _) = self.durable_state()?;
         let source_ids = sources
             .iter()
             .filter_map(|(_, name)| name.split_once('.').map(|(id, _)| id))
@@ -479,13 +554,51 @@ impl LocalLibrary {
         Ok(self.records.join(format!("{id}.json")))
     }
 
+    fn custom_cover_path(&self, id: &str) -> Result<PathBuf, LibraryError> {
+        if !valid_id(id) {
+            return Err(LibraryError::InvalidBookId);
+        }
+        Ok(self.records.join(format!("{id}{CUSTOM_COVER_SUFFIX}")))
+    }
+
+    fn custom_cover_previous_path(&self, id: &str) -> Result<PathBuf, LibraryError> {
+        if !valid_id(id) {
+            return Err(LibraryError::InvalidBookId);
+        }
+        Ok(self
+            .records
+            .join(format!("{id}{CUSTOM_COVER_PREVIOUS_SUFFIX}")))
+    }
+
+    fn reserve_cover_temporary(&self) -> Result<PathBuf, LibraryError> {
+        for _ in 0..64 {
+            let sequence = NEXT_COVER_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+            let path = self.records.join(format!(
+                "{CUSTOM_COVER_STAGING_PREFIX}{}-{sequence}",
+                std::process::id()
+            ));
+            if !path.exists() {
+                return Ok(path);
+            }
+        }
+        Err(LibraryError::WriteFailed)
+    }
+
     fn public_book(&self, record: &StoredBook) -> LibraryBook {
         let root = self.imports.join(&record.id);
         let imported = read_imported_metadata(&root, &record.id);
         let prepared = imported.is_some()
             && root.join(READER_MANIFEST).is_file()
             && has_import_marker(&root, &record.id);
-        record.public(imported.as_ref(), prepared)
+        record.public(
+            imported.as_ref(),
+            prepared,
+            custom_cover_present(
+                &self
+                    .records
+                    .join(format!("{}{}", record.id, CUSTOM_COVER_SUFFIX)),
+            ),
+        )
     }
 
     fn source_paths(&self, record: &StoredBook) -> Vec<String> {
@@ -544,12 +657,42 @@ impl LocalLibrary {
         Ok(())
     }
 
+    fn recover_custom_covers(&self) -> Result<(), LibraryError> {
+        for entry in fs::read_dir(&self.records).map_err(|_| LibraryError::InvalidRoot)? {
+            let entry = entry.map_err(|_| LibraryError::InvalidRoot)?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or(LibraryError::InvalidRoot)?
+                .to_owned();
+            if name.starts_with(CUSTOM_COVER_STAGING_PREFIX) {
+                remove_path_if_exists(&entry.path())?;
+                continue;
+            }
+            let Some(id) = name.strip_suffix(CUSTOM_COVER_PREVIOUS_SUFFIX) else {
+                continue;
+            };
+            if !valid_id(id) {
+                return Err(LibraryError::InvalidRoot);
+            }
+            let target = self.custom_cover_path(id)?;
+            if target.is_file() {
+                remove_path_if_exists(&entry.path())?;
+            } else {
+                fs::rename(entry.path(), target).map_err(|_| LibraryError::WriteFailed)?;
+            }
+        }
+        sync_directory(&self.records)
+    }
+
     fn remove_book_files(&self, id: &str) -> Result<(), LibraryError> {
         self.ensure_roots()?;
         remove_path_if_exists(&self.imports.join(id))?;
         for path in self.source_paths_for_id(id) {
             remove_path_if_exists(&path)?;
         }
+        remove_path_if_exists(&self.custom_cover_path(id)?)?;
+        remove_path_if_exists(&self.custom_cover_previous_path(id)?)?;
         remove_path_if_exists(&self.record_path(id)?)?;
         sync_directory(&self.imports)?;
         sync_directory(&self.sources)?;
@@ -559,6 +702,7 @@ impl LocalLibrary {
     fn durable_state(&self) -> Result<DurableLibraryState, LibraryError> {
         self.ensure_roots()?;
         let mut records = Vec::new();
+        let mut covers = Vec::new();
         for entry in fs::read_dir(&self.records).map_err(|_| LibraryError::ReadFailed)? {
             let entry = entry.map_err(|_| LibraryError::ReadFailed)?;
             let metadata =
@@ -569,6 +713,17 @@ impl LocalLibrary {
                 .ok_or(LibraryError::CorruptRecord)?
                 .to_owned();
             if record_temporary(&name) {
+                continue;
+            }
+            if let Some(id) = name.strip_suffix(CUSTOM_COVER_SUFFIX) {
+                if !valid_id(id)
+                    || !metadata.file_type().is_file()
+                    || is_reparse_point(&metadata)
+                    || read_custom_cover(&entry.path()).is_err()
+                {
+                    return Err(LibraryError::CorruptRecord);
+                }
+                covers.push((entry.path(), name));
                 continue;
             }
             if !metadata.file_type().is_file()
@@ -583,6 +738,17 @@ impl LocalLibrary {
             records.push(read_record(&entry.path())?);
         }
         records.sort_by(|left, right| left.id.cmp(&right.id));
+        let record_ids = records
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<HashSet<_>>();
+        if covers.iter().any(|(_, name)| {
+            name.strip_suffix(CUSTOM_COVER_SUFFIX)
+                .is_none_or(|id| !record_ids.contains(id))
+        }) {
+            return Err(LibraryError::CorruptRecord);
+        }
+        covers.sort_by(|left, right| left.1.cmp(&right.1));
 
         let mut sources = Vec::new();
         for entry in fs::read_dir(&self.sources).map_err(|_| LibraryError::ReadFailed)? {
@@ -608,7 +774,7 @@ impl LocalLibrary {
             sources.push((entry.path(), name));
         }
         sources.sort_by(|left, right| left.1.cmp(&right.1));
-        Ok((records, sources))
+        Ok((records, sources, covers))
     }
 
     fn ensure_roots(&self) -> Result<(), LibraryError> {
@@ -625,7 +791,12 @@ impl LocalLibrary {
 }
 
 impl StoredBook {
-    fn public(&self, imported: Option<&ImportedMetadata>, prepared: bool) -> LibraryBook {
+    fn public(
+        &self,
+        imported: Option<&ImportedMetadata>,
+        prepared: bool,
+        has_custom_cover: bool,
+    ) -> LibraryBook {
         let imported_title = imported
             .and_then(|metadata| metadata.title.as_deref())
             .map(normalize_text)
@@ -645,11 +816,13 @@ impl StoredBook {
             authors: imported_authors
                 .filter(|authors| !authors.is_empty())
                 .unwrap_or_else(|| self.authors.clone()),
-            has_cover: prepared
-                && imported
-                    .and_then(|metadata| metadata.cover_path.as_ref())
-                    .or(self.cover_path.as_ref())
-                    .is_some(),
+            has_cover: has_custom_cover
+                || (prepared
+                    && imported
+                        .and_then(|metadata| metadata.cover_path.as_ref())
+                        .or(self.cover_path.as_ref())
+                        .is_some()),
+            has_custom_cover,
             imported_at: self.imported_at,
             prepared,
         }
@@ -665,6 +838,7 @@ impl LibraryError {
             Self::CorruptRecord => "corrupt-library-record",
             Self::MissingSource => "missing-library-source",
             Self::MissingCover => "missing-library-cover",
+            Self::InvalidCover => "invalid-library-cover",
             Self::ReadFailed => "library-read-failed",
             Self::WriteFailed => "library-write-failed",
             Self::UnsupportedSource => "invalid-library-source",
@@ -834,6 +1008,63 @@ fn remove_path_if_exists(path: &Path) -> Result<(), LibraryError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err(LibraryError::WriteFailed),
     }
+}
+
+fn custom_cover_present(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_file()
+            && !is_reparse_point(&metadata)
+            && metadata.len() > 0
+            && metadata.len() <= MAX_CUSTOM_COVER_BYTES
+    })
+}
+
+fn read_custom_cover_bytes(path: &Path) -> Result<Vec<u8>, LibraryError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| LibraryError::InvalidCover)?;
+    if !metadata.file_type().is_file()
+        || is_reparse_point(&metadata)
+        || metadata.len() == 0
+        || metadata.len() > MAX_CUSTOM_COVER_BYTES
+    {
+        return Err(LibraryError::InvalidCover);
+    }
+    let bytes = fs::read(path).map_err(|_| LibraryError::ReadFailed)?;
+    if bytes.len() as u64 != metadata.len() {
+        return Err(LibraryError::InvalidCover);
+    }
+    Ok(bytes)
+}
+
+fn validate_custom_cover(bytes: &[u8]) -> Result<&'static str, LibraryError> {
+    let content_type = match imagesize::image_type(bytes) {
+        Ok(ImageType::Jpeg) => "image/jpeg",
+        Ok(ImageType::Png) => "image/png",
+        Ok(ImageType::Webp) => "image/webp",
+        _ => return Err(LibraryError::InvalidCover),
+    };
+    let size = imagesize::blob_size(bytes).map_err(|_| LibraryError::InvalidCover)?;
+    let pixels = size
+        .width
+        .checked_mul(size.height)
+        .ok_or(LibraryError::InvalidCover)?;
+    if size.width == 0
+        || size.height == 0
+        || size.width > MAX_COVER_SIDE
+        || size.height > MAX_COVER_SIDE
+        || pixels > MAX_COVER_PIXELS
+    {
+        return Err(LibraryError::InvalidCover);
+    }
+    Ok(content_type)
+}
+
+fn read_custom_cover(path: &Path) -> Result<Resource, LibraryError> {
+    let bytes = read_custom_cover_bytes(path)?;
+    let content_type = validate_custom_cover(&bytes)?;
+    Ok(Resource {
+        bytes,
+        content_type,
+    })
 }
 
 fn real_directory(path: &Path) -> bool {

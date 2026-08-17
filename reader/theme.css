@@ -1,0 +1,204 @@
+:root {
+  --reader-accent: #1497e8;
+  --ui-canvas: #dddeda;
+  --ui-surface: #ffffff;
+  --ui-surface-muted: #f3f4f1;
+  --ui-bar-bg: rgb(255 255 255 / 94%);
+  --ui-input-bg: #f7f8f5;
+  --ui-text: #222725;
+  --ui-muted: #747b77;
+  --ui-border: #d4d8d3;
+  --ui-shadow: rgb(32 40 36 / 16%);
+  --ui-backdrop: rgb(18 23 21 / 42%);
+  --ui-error: #a32921;
+  --ui-error-bg: #fff0ed;
+  --page-bg: #f8f4e9;
+  --page-text: #2b2a26;
+  --page-muted: rgb(43 42 38 / 52%);
+  --formula-bg: #ffffff;
+  --annotation-bg: rgb(216 173 42 / 42%);
+  --ui-on-accent: #ffffff;
+  --ui-selection-highlight: rgb(242 201 76 / 48%);
+  --ui-preview-overlay: rgb(13 15 14 / 96%);
+  --ui-preview-control: rgb(0 0 0 / 68%);
+  --ui-preview-control-hover: rgb(0 0 0 / 84%);
+  --ui-preview-border: rgb(255 255 255 / 10%);
+  --ui-dialog-shadow: rgb(0 0 0 / 24%);
+  --ui-preview-shadow: rgb(0 0 0 / 28%);
+  --theme-preview-light-text: #242725;
+  --theme-preview-light-bg: #f8f8f6;
+  --theme-preview-light-border: rgb(31 35 33 / 14%);
+  --theme-preview-system-text: #e8e9e7;
+  --theme-preview-system-bg: #363a38;
+  --theme-preview-paper-text: #3a3427;
+  --theme-preview-paper-bg: #eee3c7;
+  --theme-preview-dark-text: #eceeec;
+  --theme-preview-dark-bg: #242725;
+
+  --library-bg: #050505;
+  --library-surface: #19191b;
+  --library-surface-raised: #232326;
+  --library-text: #f2f2f3;
+  --library-muted: #8b8b91;
+  --library-border: rgb(255 255 255 / 11%);
+  --library-accent: #1888d8;
+  --library-header-bg: rgb(5 5 5 / 95%);
+  --library-divider: rgb(255 255 255 / 7%);
+  --library-hover: rgb(255 255 255 / 5%);
+  --library-active: rgb(255 255 255 / 8%);
+  --library-secondary: #c5c5c9;
+  --library-faint: #57575d;
+  --library-cover-bg: #1b1b1e;
+  --library-cover-icon: #67676e;
+  --library-selection-bg: #1b1b1d;
+  --library-danger: #ef5b61;
+  --library-quote: #d8d8db;
+  --library-copy: #b7b7bc;
+  --library-gold: #d3b867;
+  --library-gold-muted: #b8a86f;
+  --library-link: #65b7ec;
+  --library-error-border: #d15b60;
+  --library-error-bg: rgb(209 91 96 / 8%);
+  --library-error-text: #e7b7b9;
+  --library-drop-bg: rgb(5 5 5 / 88%);
+  --library-drop-text: #f2f2f3;
+  --library-on-accent: #ffffff;
+  --library-cover-shadow: rgb(0 0 0 / 34%);
+  --library-selection-mask: rgb(0 0 0 / 50%);
+  --library-selection-icon: rgb(255 255 255 / 78%);
+  --library-menu-shadow: rgb(0 0 0 / 42%);
+  --library-dialog-shadow: rgb(0 0 0 / 58%);
+  --library-dialog-backdrop: rgb(0 0 0 / 68%);
+  --library-work-backdrop: rgb(0 0 0 / 58%);
+  --library-memory-icon: #aaaab0;
+  --library-quote-border: #9f8e59;
+  --library-jump-border: rgb(24 136 216 / 45%);
+  --library-snapshot-backdrop: rgb(0 0 0 / 72%);
+  --library-snapshot-bg: #ffffff;
+  --library-snapshot-text: #111111;
+}
+
+:root[data-app-theme="light"],
+.library-shell[data-app-theme="light"] {
+  --library-bg: #f6f6f8;
+  --library-surface: #ffffff;
+  --library-surface-raised: #ffffff;
+  --library-text: #1d1d1f;
+  --library-muted: #66666d;
+  --library-border: rgb(0 0 0 / 13%);
+  --library-accent: #006fb9;
+  --library-header-bg: rgb(246 246 248 / 95%);
+  --library-divider: rgb(0 0 0 / 8%);
+  --library-hover: rgb(0 0 0 / 4%);
+  --library-active: rgb(0 0 0 / 6%);
+  --library-secondary: #49494f;
+  --library-faint: #9a9aa0;
+  --library-cover-bg: #ededf0;
+  --library-cover-icon: #8a8a90;
+  --library-selection-bg: #ffffff;
+  --library-danger: #c8383f;
+  --library-quote: #36363a;
+  --library-copy: #4f4f55;
+  --library-gold: #79651c;
+  --library-gold-muted: #79651c;
+  --library-link: #006fb9;
+  --library-error-border: #b52f37;
+  --library-error-bg: rgb(181 47 55 / 8%);
+  --library-error-text: #8c2027;
+  --library-drop-bg: rgb(246 246 248 / 92%);
+  --library-drop-text: #1d1d1f;
+  --library-memory-icon: #66666d;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-app-theme="system"],
+  .library-shell[data-app-theme="system"] {
+    --library-bg: #f6f6f8;
+    --library-surface: #ffffff;
+    --library-surface-raised: #ffffff;
+    --library-text: #1d1d1f;
+    --library-muted: #66666d;
+    --library-border: rgb(0 0 0 / 13%);
+    --library-accent: #006fb9;
+    --library-header-bg: rgb(246 246 248 / 95%);
+    --library-divider: rgb(0 0 0 / 8%);
+    --library-hover: rgb(0 0 0 / 4%);
+    --library-active: rgb(0 0 0 / 6%);
+    --library-secondary: #49494f;
+    --library-faint: #9a9aa0;
+    --library-cover-bg: #ededf0;
+    --library-cover-icon: #8a8a90;
+    --library-selection-bg: #ffffff;
+    --library-danger: #c8383f;
+    --library-quote: #36363a;
+    --library-copy: #4f4f55;
+    --library-gold: #79651c;
+    --library-gold-muted: #79651c;
+    --library-link: #006fb9;
+    --library-error-border: #b52f37;
+    --library-error-bg: rgb(181 47 55 / 8%);
+    --library-error-text: #8c2027;
+    --library-drop-bg: rgb(246 246 248 / 92%);
+    --library-drop-text: #1d1d1f;
+    --library-memory-icon: #66666d;
+  }
+}
+
+:root[data-theme="light"] {
+  --ui-canvas: #e7e9e6;
+  --ui-surface: #ffffff;
+  --ui-surface-muted: #f3f5f2;
+  --ui-bar-bg: rgb(255 255 255 / 94%);
+  --ui-input-bg: #f6f8f5;
+  --ui-text: #202522;
+  --ui-muted: #747b77;
+  --ui-border: #d6dad5;
+  --page-bg: #ffffff;
+  --page-text: #282b29;
+  --page-muted: rgb(40 43 41 / 50%);
+  --formula-bg: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  --reader-accent: #1497e8;
+  --ui-canvas: #101513;
+  --ui-surface: #202724;
+  --ui-surface-muted: #29312e;
+  --ui-bar-bg: rgb(26 32 29 / 94%);
+  --ui-input-bg: #29312e;
+  --ui-text: #edf0ed;
+  --ui-muted: #a0aaa4;
+  --ui-border: #46504a;
+  --ui-shadow: rgb(0 0 0 / 38%);
+  --ui-backdrop: rgb(0 0 0 / 58%);
+  --ui-error: #ffb3ad;
+  --ui-error-bg: #3d2220;
+  --page-bg: #1a211e;
+  --page-text: #e8ece8;
+  --page-muted: rgb(232 236 232 / 54%);
+  --formula-bg: transparent;
+  --annotation-bg: rgb(211 167 41 / 42%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --reader-accent: #1497e8;
+    --ui-canvas: #101513;
+    --ui-surface: #202724;
+    --ui-surface-muted: #29312e;
+    --ui-bar-bg: rgb(26 32 29 / 94%);
+    --ui-input-bg: #29312e;
+    --ui-text: #edf0ed;
+    --ui-muted: #a0aaa4;
+    --ui-border: #46504a;
+    --ui-shadow: rgb(0 0 0 / 38%);
+    --ui-backdrop: rgb(0 0 0 / 58%);
+    --ui-error: #ffb3ad;
+    --ui-error-bg: #3d2220;
+    --page-bg: #1a211e;
+    --page-text: #e8ece8;
+    --page-muted: rgb(232 236 232 / 54%);
+    --formula-bg: transparent;
+    --annotation-bg: rgb(211 167 41 / 42%);
+  }
+}

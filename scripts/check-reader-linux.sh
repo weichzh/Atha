@@ -496,10 +496,11 @@ window.__TAURI_INTERNALS__.invoke("import_library_paths", { paths })
   if ((expected_books == 1)); then
     removal=$(execute_async "
 const done = arguments[arguments.length - 1];
-window.__TAURI_INTERNALS__.invoke('remove_library_book', { id: '$public_id' })
+window.__TAURI_INTERNALS__.invoke('delete_library_book_data', { id: '$public_id' })
+  .then(() => window.__TAURI_INTERNALS__.invoke('finish_library_book_deletion', { id: '$public_id' }))
   .then((books) => done({ ok: true, count: books.length }))
   .catch(() => done({ ok: false }));
-") || die 'could not empty the isolated library'
+") || die 'could not clear the isolated library'
     jq -e '.ok == true and .count == 0' <<<"$removal" >/dev/null ||
       die 'isolated library did not become empty'
     execute_sync 'location.reload(); return true;' >/dev/null || die 'could not reload the empty library'
@@ -525,9 +526,9 @@ window.__TAURI_INTERNALS__.invoke('remove_library_book', { id: '$public_id' })
     fire_tauri_drag_event 'tauri://drag-drop' "$repo_root/.tmp/fb2-gate.fb2" >/dev/null ||
       die 'could not drop into the empty library'
     wait_for_script \
-      'return { cards: document.querySelectorAll(".library-book-open").length, overlay: Boolean(document.querySelector(".library-drop-overlay")), working: Boolean(document.querySelector(".library-work-overlay")), status: document.querySelector(".library-status")?.textContent || "" };' \
-      '.cards == 1 and .overlay == false and .working == false and .status == "已加入书架。"' \
-      'drop did not add a book to the empty library' >/dev/null
+      'const image = document.querySelector(".library-cover img"); return { cards: document.querySelectorAll(".library-book-open").length, cover: Boolean(image?.complete && image.naturalWidth > 0), overlay: Boolean(document.querySelector(".library-drop-overlay")), working: Boolean(document.querySelector(".library-work-overlay")), status: document.querySelector(".library-status")?.textContent || "" };' \
+      '.cards == 1 and .cover == true and .overlay == false and .working == false and .status == "已加入书架。"' \
+      'drop did not add a prepared book with its cover to the empty library' >/dev/null
   fi
 
   fire_tauri_drag_event 'tauri://drag-drop' "$unsupported_file" >/dev/null ||
@@ -545,7 +546,7 @@ window.__TAURI_INTERNALS__.invoke('remove_library_book', { id: '$public_id' })
 
   library_entry_evidence=$(jq -n \
     --argjson emptyShelf "$([[ $expected_books == 1 ]] && printf true || printf false)" \
-    '{events: ["enter", "leave", "drop"], duplicateStable: true, unsupportedRejected: true, pathBoundary: 32, emptyShelf: $emptyShelf, syntheticTauriEvents: true}')
+    '{events: ["enter", "leave", "drop"], duplicateStable: true, unsupportedRejected: true, pathBoundary: 32, emptyShelf: $emptyShelf, firstImportCover: $emptyShelf, syntheticTauriEvents: true}')
 }
 
 verify_library_layout() {
@@ -607,7 +608,7 @@ return true;
 }
 
 verify_library_settings() {
-  local settings theme storage selection
+  local settings theme storage context selection
   [[ $(execute_sync '
 const button = [...document.querySelectorAll(".library-sections button")]
   .find((item) => item.textContent.trim() === "设置");
@@ -696,16 +697,36 @@ document.querySelector(".library-storage-dialog")?.close();
 const library = [...document.querySelectorAll(".library-sections button")]
   .find((item) => item.textContent.trim() === "书架");
 library?.click();
-const button = [...document.querySelectorAll(".library-primary-actions button")]
-  .find((item) => item.textContent.includes("选择"));
-button?.click();
-return Boolean(button);') == true ]] || die 'could not enter library selection'
+return Boolean(library);') == true ]] || die 'could not return to the library shelf'
+  [[ $(execute_sync '
+const button = document.querySelector(".library-book-open");
+const rect = button?.getBoundingClientRect();
+if (!button || !rect) return false;
+const event = new MouseEvent("contextmenu", {bubbles: true, cancelable: true, button: 2, clientX: rect.left + 20, clientY: rect.top + 20});
+return !button.dispatchEvent(event);') == true ]] || die 'could not dispatch a library context menu event'
+  context=$(wait_for_script \
+    'const menu = document.querySelector(".library-book-menu"); const rect = menu?.getBoundingClientRect(); return { open: Boolean(menu), labels: [...(menu?.querySelectorAll("button") || [])].map((button) => button.textContent.trim()), inViewport: Boolean(rect && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight) };' \
+    '.open == true and .labels == ["打开","选择","更换封面","移出书架","删除本地数据"] and .inViewport == true' \
+    'library context menu did not become ready')
+  [[ $(execute_sync 'document.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true})); return !document.querySelector(".library-book-menu");') == true ]] ||
+    die 'could not close the library context menu'
+  [[ $(execute_async '
+const done = arguments[arguments.length - 1];
+const button = document.querySelector(".library-book-open");
+if (!button) return done(false);
+const rect = button.getBoundingClientRect();
+const event = (type) => new PointerEvent(type, {bubbles: true, cancelable: true, pointerId: 91, pointerType: "touch", button: 0, clientX: rect.left + 20, clientY: rect.top + 20});
+button.dispatchEvent(event("pointerdown"));
+setTimeout(() => {
+  button.dispatchEvent(event("pointerup"));
+  done(true);
+}, 560);') == true ]] || die 'could not long-press a library book'
   selection=$(wait_for_script \
-    'const buttons = [...document.querySelectorAll(".library-selection-bar button")]; const rects = buttons.map((button) => button.getBoundingClientRect()); return { count: buttons.length, labels: buttons.map((button) => button.textContent.trim()), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, clipped: buttons.some((button) => button.scrollWidth > button.clientWidth || button.scrollHeight > button.clientHeight), inViewport: rects.every((rect) => rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight), separated: rects.length == 2 && rects[0].right <= rects[1].left };' \
-    '.count == 2 and .overflow == false and .clipped == false and .inViewport == true and .separated == true' \
-    'library deletion actions do not fit the viewport')
-  jq -e '.labels == ["移出书架", "删除本地数据"]' <<<"$selection" >/dev/null ||
-    die "library deletion actions are incomplete (state: $(jq -c . <<<"$selection"))"
+    'const buttons = [...document.querySelectorAll(".library-selection-bar button")]; const rects = buttons.map((button) => button.getBoundingClientRect()); return { count: buttons.length, selected: document.querySelectorAll(".library-book-open[aria-pressed=true]").length, labels: buttons.map((button) => button.textContent.trim()), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, clipped: buttons.some((button) => button.scrollWidth > button.clientWidth || button.scrollHeight > button.clientHeight), inViewport: rects.every((rect) => rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight), separated: rects.every((rect, index) => index == 0 || rects[index - 1].right <= rect.left + 1) };' \
+    '.count == 3 and .selected == 1 and .labels == ["封面","移出","删除"] and .overflow == false and .clipped == false and .inViewport == true and .separated == true' \
+    'library long-press actions do not fit the viewport')
+  jq -e '.labels == ["封面", "移出", "删除"] and .selected == 1' <<<"$selection" >/dev/null ||
+    die "library long-press actions are incomplete (state: $(jq -c . <<<"$selection"))"
   [[ $(execute_sync '
 const button = [...document.querySelectorAll(".library-selection-header button")]
   .find((item) => item.textContent.trim() === "取消");
@@ -964,7 +985,7 @@ return {before, after};') || die 'could not probe reader console error collectio
 }
 
 verify_reader_interface_navigation() {
-  local media image_point backdrop_point preview notes menu closed
+  local media image_point backdrop_point zoom pinch preview notes keyboard menu closed settings
   media=$(execute_async '
 const done = arguments[arguments.length - 1];
 Promise.resolve(globalThis.__athaReaderDiagnostics?.mediaPoint("ordinary"))
@@ -978,6 +999,39 @@ Promise.resolve(globalThis.__athaReaderDiagnostics?.mediaPoint("ordinary"))
     'return {open: document.querySelector("#content-dialog")?.open, media: document.querySelector("#content-dialog")?.classList.contains("media-preview")};' \
     '.open == true and .media == true' \
     'image preview did not open' >/dev/null
+
+  [[ $(execute_sync '
+const viewport = document.querySelector("#content-dialog-viewport");
+const rect = viewport?.getBoundingClientRect();
+if (!viewport || !rect) return false;
+return !viewport.dispatchEvent(new WheelEvent("wheel", {bubbles: true, cancelable: true, deltaY: -120, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2}));') == true ]] ||
+    die 'preview wheel zoom did not prevent native scrolling'
+  zoom=$(wait_for_script \
+    'return {label: document.querySelector(".content-dialog-zoom-label")?.textContent || "", scale: document.querySelector("#content-dialog")?.style.getPropertyValue("--content-viewer-scale").trim() || ""};' \
+    '.label != "100%" and (.scale | tonumber) > 1' \
+    'preview wheel zoom did not update its scale')
+  [[ $(execute_sync 'document.querySelector("button[aria-label=\"恢复原始大小\"]")?.click(); return true;') == true ]] ||
+    die 'could not reset preview wheel zoom'
+  [[ $(execute_sync '
+const viewport = document.querySelector("#content-dialog-viewport");
+const rect = viewport?.getBoundingClientRect();
+if (!viewport || !rect) return false;
+const event = (type, touches) => {
+  const value = new Event(type, {bubbles: true, cancelable: true});
+  Object.defineProperty(value, "touches", {value: touches});
+  return viewport.dispatchEvent(value);
+};
+const y = rect.top + rect.height / 2;
+event("touchstart", [{clientX: rect.left + 120, clientY: y}, {clientX: rect.left + 220, clientY: y}]);
+const accepted = event("touchmove", [{clientX: rect.left + 90, clientY: y}, {clientX: rect.left + 250, clientY: y}]);
+event("touchend", []);
+return !accepted;') == true ]] || die 'preview pinch zoom did not prevent native scaling'
+  pinch=$(wait_for_script \
+    'return {label: document.querySelector(".content-dialog-zoom-label")?.textContent || "", scale: document.querySelector("#content-dialog")?.style.getPropertyValue("--content-viewer-scale").trim() || ""};' \
+    '(.scale | tonumber) > 1.5' \
+    'preview pinch zoom did not update its scale')
+  execute_sync 'document.querySelector("button[aria-label=\"恢复原始大小\"]")?.click(); return true;' >/dev/null ||
+    die 'could not reset preview pinch zoom'
 
   image_point=$(execute_sync '
 const rect = document.querySelector("#content-dialog-image")?.getBoundingClientRect();
@@ -1013,10 +1067,36 @@ return {
   exportHidden: document.querySelector("#message-export-all")?.getClientRects().length == 0,
   topbarDictionary: Boolean(document.querySelector(".top-toolbar .reader-tool.dictionary")),
   settingsIcon: Boolean(document.querySelector(".top-toolbar .reader-tool.preferences > summary svg")),
+  bottomSettingsIcon: Boolean(document.querySelector(".toolbar .reader-tool.preferences > summary svg")),
+  settingsInBottomBar: document.querySelector(".reader-tool.preferences")?.parentElement?.matches(".toolbar") || false,
   overflow: panel ? panel.scrollWidth > panel.clientWidth : true
 };' \
-    '.open == true and .backIcon == true and .backVisible == true and .exportHidden == true and .topbarDictionary == false and .settingsIcon == true and .overflow == false' \
+    '.open == true and .backIcon == true and .backVisible == true and .exportHidden == true and .topbarDictionary == false and .settingsIcon == false and .bottomSettingsIcon == true and .settingsInBottomBar == true and .overflow == false' \
     'notes navigation did not become ready')
+
+  keyboard=$(execute_async '
+const done = arguments[arguments.length - 1];
+const overlay = document.querySelector("#message-conversation");
+const composer = document.querySelector("#message-composer");
+if (!overlay || !composer || !window.visualViewport) return done({bound: false});
+const hidden = overlay.hidden;
+const height = overlay.style.getPropertyValue("--message-visual-height");
+const top = overlay.style.getPropertyValue("--message-visual-top");
+const bound = Math.abs(parseFloat(height) - window.visualViewport.height) < 1 && Math.abs(parseFloat(top) - window.visualViewport.offsetTop) < 1;
+overlay.hidden = false;
+overlay.style.setProperty("--message-visual-height", "320px");
+overlay.style.setProperty("--message-visual-top", "24px");
+requestAnimationFrame(() => {
+  const overlayRect = overlay.getBoundingClientRect();
+  const composerRect = composer.getBoundingClientRect();
+  const visible = overlayRect.top >= 23 && overlayRect.bottom <= 345 && composerRect.bottom <= 345;
+  overlay.hidden = hidden;
+  overlay.style.setProperty("--message-visual-height", height);
+  overlay.style.setProperty("--message-visual-top", top);
+  done({bound, visible, overlayBottom: overlayRect.bottom, composerBottom: composerRect.bottom});
+});') || die 'could not inspect the visual viewport message layout'
+  jq -e '.bound == true and .visible == true' <<<"$keyboard" >/dev/null ||
+    die "message composer did not stay in the visual viewport (state: $(jq -c . <<<"$keyboard"))"
 
   [[ $(execute_sync 'document.querySelector(".notes-actions > summary")?.click(); return true;') == true ]] ||
     die 'could not open the notes actions'
@@ -1037,8 +1117,23 @@ return {
   jq -e '.open == false and .focused == true' <<<"$closed" >/dev/null ||
     die 'notes back button did not return to reading'
 
-  jq -cn --argjson preview "$preview" --argjson notes "$notes" --argjson menu "$menu" \
-    '{imageBackdrop: $preview, notes: $notes, exportMenu: $menu, contextualDictionary: true}'
+  settings=$(execute_sync '
+document.documentElement.setAttribute("data-reader-tools", "");
+const tool = document.querySelector(".toolbar .reader-tool.preferences");
+tool?.querySelector("summary")?.click();
+const panel = tool?.querySelector(".preferences-panel");
+const rect = panel?.getBoundingClientRect();
+const result = {open: tool?.open || false, bottom: tool?.parentElement?.matches(".toolbar") || false, visible: Boolean(rect && rect.width > 0 && rect.height > 0)};
+tool?.querySelector("summary")?.click();
+document.documentElement.removeAttribute("data-reader-tools");
+return result;') || die 'could not open reading settings from the bottom bar'
+  jq -e '.open == true and .bottom == true and .visible == true' <<<"$settings" >/dev/null ||
+    die "reading settings did not open from the bottom bar (state: $(jq -c . <<<"$settings"))"
+
+  jq -cn --argjson preview "$preview" --argjson zoom "$zoom" --argjson pinch "$pinch" \
+    --argjson notes "$notes" --argjson keyboard "$keyboard" --argjson menu "$menu" \
+    --argjson settings "$settings" \
+    '{imageBackdrop: $preview, zoom: {wheel: $zoom, pinch: $pinch}, notes: $notes, keyboard: $keyboard, exportMenu: $menu, settings: $settings, contextualDictionary: true}'
 }
 
 open_book() {
