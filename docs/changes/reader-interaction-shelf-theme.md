@@ -27,7 +27,7 @@ implemented
 - 不新增封面裁剪、在线搜索、自动封面识别、书籍分组或同步；
 - 不改变书内正文缩放、分页缩放、阅读偏好 schema、消息正文 schema 或输入法实现；
 - 不复制 Readest 的 React 状态结构、完整菜单项、元数据编辑器或图片查看器架构；
-- 不在本次范围安装真机候选、推送或发布。
+- 功能实现范围不包含真机安装、源码推送或正式发布；后续交付单独记录。
 
 ## Architecture Impact
 
@@ -87,4 +87,5 @@ present
 - 静态 / 本地：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings` 和 `cargo test --workspace --all-targets --locked` 通过；完整 Rust 测试无失败，私有 fixture 专项按声明忽略。
 - 静态 / 本地：`pnpm --dir reader/app check` 为 0 error / 0 warning，production build 通过，资料库与阅读 Web Node 检查均为 13 / 13 通过；功能 CSS 没有颜色字面量或重复系统主题媒体分支。
 - Linux 真实壳：`bash scripts/check-reader-linux.sh` 在 WebKitGTK 0.55.1 通过。隔离冷导入立即显示封面；360–1600 px 视口无横向溢出；右键菜单和 500 ms 长按底栏状态正确；图片预览滚轮到 127%、合成双指到 160%；阅读设置只在底栏；模拟 320 px 高可视视口时标注笔记、保存操作、对话层与消息输入器均位于可视区；220 次既有可信鼠标手势和 AppLog 隐私检查继续通过。
-- 边界：Linux 门的长按、双指和右键 DOM 事件是合成输入，`VisualViewport` 用可控几何验证；尚未在 PCT-AL10 用自然手指和真实输入法复核，也未在 Windows WebView2 实际运行新增 `theme.css` 路由。未安装真机候选、推送或发布。
+- PCT-AL10 真实目标：arm64 release 本地测试候选 `f2f2edf210fdec7c80254ea2a98545506133dc1265882351d36696208e60df29` 通过 package、SDK、权限、签名和 16 KiB ZIP / ELF 检查；`artifacts/local/audits/pct-reader-install-20260818T045537Z-2835081/` 记录了同签名、非降级、未清数据的覆盖安装，候选哈希、版本和证书一致，首次安装时间保持，主进程运行且 `MainActivity` 获得焦点。
+- 边界：Linux 门的长按、双指和右键 DOM 事件是合成输入，`VisualViewport` 用可控几何验证；PCT-AL10 已完成安装和启动烟测，但尚未用自然手指和真实输入法复核本轮功能，也未在 Windows WebView2 实际运行新增 `theme.css` 路由。该本地测试候选不是生产签名发布包。

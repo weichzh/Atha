@@ -25,7 +25,7 @@
 | `reader/app/src/components/LibraryView.svelte`、`reader/app/src/library.ts` | 系统选择器 / 桌面拖放共用导入结果、网格 / 列表书架、长按选择 / 右键菜单、自定义封面、冷启动一次性打开，以及独立应用主题、全书阅读默认恢复、词典和本地资料设置投影 | Linux GUI 已验证 |
 | `reader/app/src/components/MemoryCenter.svelte` | 最近阅读、跨书消息搜索、有书跳回和缺书 / 历史 Snapshot 资料库投影 | Linux GUI 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
-| `reader/theme.css`、`reader/atha-reader.html`、`reader/atha-reader.css` | 应用 / 阅读共享颜色 token、唯一阅读页结构、分页 / 原生滚动、宽屏工作区、底栏设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 已验证；软键盘与自然双指仍待 PCT-AL10 复核 |
+| `reader/theme.css`、`reader/atha-reader.html`、`reader/atha-reader.css` | 应用 / 阅读共享颜色 token、唯一阅读页结构、分页 / 原生滚动、宽屏工作区、底栏设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 已验证；当前候选已安装 PCT-AL10，软键盘与自然双指仍待交互复核 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、真实 frame 分页、桌面工作区绑定、诊断、benchmark 和页面组合入口 | Linux GUI 已验证 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的解析、序列化、大小 / 字段 / 重复 ID 与注入式 CSS 校验边界 | 已实现 |
 | `reader/app/src/components/panels/DictionaryPanel.svelte`、`DictionarySettings.svelte`、`reader/app/src/dictionary.ts` | 阅读界面的选区查词与安全富文本词条，以及应用设置中的本地词典管理、持久化来源 / 六档释义字号；移动查词使用 75% 高底部抽屉 | PCT-AL10 release 本地测试候选已自动化验证 |
@@ -114,6 +114,7 @@
 - Android app storage 实测 hard link 返回 `PermissionDenied`。非 Android 备份继续用 hard link 提供 no-replace 发布；Android 只在 Tauri adapter 新建的独占 Picker cache 目录内使用相邻 rename。`rename` 本身不保证 no-replace，当前正确性依赖该独占目录前置条件；只有后续出现其他 Android backend 调用方或实测竞态，才研究 `renameat2` 等替代；
 - Android `ACTION_CREATE_DOCUMENT` 会先创建 provider 文档；完整 cache 制品向 content URI 复制时若失败，provider 可能留下不完整目标。Atha 会报告失败并清空自身 cache，但不能对所有 provider 承诺删除外部残留；
 - 当前通用 Android 应用最高证据仍是 x86_64 模拟器完整 picker 链路；PCT-AL10 另有 arm64 debug APK 的阅读设置、字号 / DPR、水平翻页、原生纵向滚动和跨章专项证据，以及离线词典 release 原生查词 / RSS 与 Tauri 应用 PSS。当前同签名 arm64 release 本地测试候选已覆盖安装并保留应用数据，ADB 自动化验证了四按钮工具栏、选区查词、安全富文本、设置页、六档字号和重启恢复；日常入口候选另通过 package、SDK、权限、签名、16 KiB ZIP / ELF、非降级与首次安装时间检查，并在不请求清数据、首次安装时间保持的覆盖安装后确认主进程和 `MainActivity` 启动，但未重新实测书架或设置连续性。自然手指触摸仍只由富文本改造前的同机长按与直接点击证据覆盖；这些都不等同于生产签名发布验收。
+- 2026-08-18 阅读交互候选 `f2f2edf210fdec7c80254ea2a98545506133dc1265882351d36696208e60df29` 的 PCT-AL10 证据位于忽略目录 `artifacts/local/audits/pct-reader-install-20260818T045537Z-2835081/`：同签名、非降级覆盖安装进入终态成功，未请求清数据，候选哈希、版本与证书一致，首次安装时间保持，主进程运行且 `MainActivity` 获得焦点。该烟测不证明本轮书架菜单、查看器自然双指或真实输入法避让体验。
 - CBZ 共用同一 Android picker、私有数据根、reader runtime 和 Locator 恢复链路；`-VerifyCbzFixture` 已验证逐页、坏页继续、日志隐私与 app PSS，并在 renderer 不能唯一归因时明确不生成数值。
 - Markdown / TXT 共用同一 picker、书根、ReaderManifest、Locator、搜索与恢复链路。Markdown 固定把 raw HTML / 活动链接 / 图片能力投影为惰性文本，代码块使用 Readest 同型 `pre-wrap` 且允许跨页；TXT 以高置信整行标题生成 TOC、按约 1 MiB 合并物理 sections。API 36 x86_64 16 KiB AVD 已用仓库 README 与私有真实 TXT 覆盖目录首 / 中 / 末、全文搜索、翻页、强停恢复、Picker cache、PSS、健康和双日志隐私；十样本只作为同环境基线，ARM64 真机仍未覆盖。
 - Android edge-to-edge 由 native `WindowInsetsCompat` 提供 `systemBars | displayCutout` 四边事实，Web 端只消费一套自有 CSS 变量；阅读态隐藏状态栏但保留导航栏，章节标题仍在 cutout 下方，工具打开时章节标题隐藏且顶部工具栏完整避让状态栏。
