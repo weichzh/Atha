@@ -58,6 +58,7 @@ none
 - Mode: `iterative`
 - Maximum repair iterations: `2`
 - Unchanged-delta limit: `1`
+- Trigger: 首轮独立复审发现文档守卫可放行纯文档 change 与重复 Mode，继续最小修复。
 - Human stop: contract digest 无法批准、规则所有权不清或机械检查需要扩大到产品 / 架构范围。
 - Per-iteration receipt: change 的 `Result` 与 `Evidence And Residual Risks`，详细命令结果仍由 `project-workflow` 工站保存。
 

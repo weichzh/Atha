@@ -40,9 +40,9 @@
 
 workflow 只负责要求这些输入存在并保存验收证据；具体架构内容由 `docs/architecture/DESIGN-GUIDE.md` 和对应事实所有者负责。不得把流程优化与产品架构重设计合并为同一 change。
 
-每份新 change 还必须包含 `Iteration Control`，`Mode` 只使用 `single-pass` 或 `iterative`。局部且预期一次验证即可关闭的工作使用 `single-pass`；验证失败后若要继续编辑，必须先切换为 `iterative`。迭代模式在下一轮 Repair 前写明最大修复轮数、连续不变 `remaining_delta` 上限和人工 / 真实目标停止条件，不因本轮尚未通过而自动扩大范围。
+每份处于 `ACTIVE` 的 change 必须包含 `Iteration Control`，且只能有一个 `Mode`，值为 `single-pass` 或 `iterative`。局部且预期一次验证即可关闭的工作使用 `single-pass`；验证失败后若要继续编辑，必须先切换为 `iterative`。迭代模式在下一轮 Repair 前写明最大修复轮数、连续不变 `remaining_delta` 上限和人工 / 真实目标停止条件，不因本轮尚未通过而自动扩大范围。历史 change 不批量迁移，只在重新成为 `ACTIVE` 时补齐。
 
-迭代修复使用同一个 change 和 task：Review 只读并形成有证据的发现，Repair 只处理本轮阻塞与上一轮剩余差异，Validate 实际执行最小检查并按成本扩展。每轮的简短收据保存在 `Result`、`Evidence And Residual Risks` 和工站记录；计划命令、模型判断或截图均不能冒充未执行的通过证据。验证通过、达到轮数上限、差异停滞或需要人工 / 真实目标决定时停止，并如实保留未关闭差异。
+迭代修复使用同一个 change 和 task：Review 只读并形成有证据的发现，Repair 只处理本轮阻塞与上一轮剩余差异，Validate 实际执行最小检查并按成本扩展。每轮在 `Result` 记录 `iteration`、`review findings`、`repair`、`validation cases`、`remaining_delta`、`evidence level` 和 `stop reason`；工站保存命令与完整结果，`Evidence And Residual Risks` 只汇总证据等级和未覆盖项。计划命令、模型判断或截图均不能冒充未执行的通过证据。验证通过、达到轮数上限、差异停滞或需要人工 / 真实目标决定时停止，并如实保留未关闭差异。
 
 同一事实不复制到 `ACTIVE`、计划和评审。实现完成后进行一次独立 review pass：
 

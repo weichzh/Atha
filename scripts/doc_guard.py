@@ -121,14 +121,14 @@ def iteration_mode(text: str) -> str | None:
     )
     if section is None:
         return None
-    match = re.search(
-        r"^- Mode:\s*`(?P<mode>[^`]+)`\s*$",
+    modes = re.findall(
+        r"^- Mode:\s*`([^`]+)`\s*$",
         section.group("body"),
         re.MULTILINE,
     )
-    if match is None or match.group("mode") not in ITERATION_MODES:
+    if len(modes) != 1 or modes[0] not in ITERATION_MODES:
         return None
-    return match.group("mode")
+    return modes[0]
 
 
 def valid_change_text(text: str) -> bool:
@@ -190,12 +190,20 @@ def self_check() -> int:
         "## Iteration Control\n\nplaceholder",
         "## Iteration Control\n\n- Mode: `unknown`",
     )
+    duplicate_iteration = single_pass.replace(
+        "- Mode: `single-pass`",
+        "- Mode: `single-pass`\n- Mode: `iterative`",
+    )
 
     if not valid_change_text(single_pass) or not valid_change_text(iterative):
         raise AssertionError("valid change metadata was rejected")
     if valid_change_text(missing_architecture) or valid_change_text(unknown_architecture):
         raise AssertionError("invalid architecture impact was accepted")
-    if valid_change_text(missing_iteration) or valid_change_text(unknown_iteration):
+    if (
+        valid_change_text(missing_iteration)
+        or valid_change_text(unknown_iteration)
+        or valid_change_text(duplicate_iteration)
+    ):
         raise AssertionError("invalid iteration mode was accepted")
     print("doc_guard_self_check: ok")
     return 0
@@ -214,9 +222,14 @@ def main() -> int:
     code_changed = any(is_code(path) for path in changed)
     changes = active_changes(root)
 
-    if code_changed and not any(
-        path in changed and accepted_change(root, path) for path in changes
-    ):
+    invalid_changes = [path for path in changes if not accepted_change(root, path)]
+    if invalid_changes:
+        print("BLOCKED: active change has invalid metadata.")
+        for path in invalid_changes:
+            print(f" - {path}")
+        return 1
+
+    if code_changed and not any(path in changed for path in changes):
         print("BLOCKED: code changed without an updated accepted change.")
         print()
         print(f"Repository: {root}")
