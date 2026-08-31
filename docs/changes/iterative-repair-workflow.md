@@ -72,14 +72,34 @@ none
 
 ## Result
 
-待实施。
+### Iteration 1
+
+- Iteration: `1`
+- Review findings: 独立 Standards / Spec 复审发现纯文档 active change 可绕过校验、同一区段重复 `Mode` 会被接受，以及生命周期语义在两份文档重复。
+- Repair: 主入口先校验所有 active change；`Mode` 改为恰好一个；迭代生命周期归 `PROTOCOL.md`，工站文档只保留映射。
+- Validation cases: 红探针确认未知 mode 曾以零退出，重复 mode self-check 曾失败；修复后未知 mode 被拒绝，self-check、工作流检查和文档 lint 通过。
+- Remaining delta: 重复 `Iteration Control` 区段仍可能隐藏第二个 mode；最终复审和 required gate 尚未完成。
+- Evidence level: 静态与本地机械检查。
+- Stop reason: 继续处理独立复审的 blocking 发现。
+
+### Iteration 2
+
+- Iteration: `2`
+- Review findings: 两路复审均确认重复 `Iteration Control` 区段仍会被放行。
+- Repair: 解析器要求全文恰好一个 `Iteration Control` 区段，并增加对应 self-check 断言。
+- Validation cases: 新断言先红，修复后 `doc_guard.py --self-check` 通过；最终 required gate 待候选提交后执行。
+- Remaining delta: 最终独立复审、required gate 与关闭收据。
+- Evidence level: 静态与本地机械检查。
+- Stop reason: 达到最大修复轮数；只执行复审、验证和收尾，不再扩大实现。
 
 ## Review
 
-- Blocking: 待复审。
-- Non-blocking: 待复审。
-- Out-of-scope: 待复审。
+- Blocking: 前两轮复审发现均已进入对应 Repair；最终复审待执行。
+- Non-blocking: 无。
+- Out-of-scope: 无。
 
 ## Evidence And Residual Risks
 
-待实施。
+- 已覆盖：模式缺失、未知值、同一区段重复值、重复区段，以及纯文档 active change 的主入口拒绝。
+- 证据等级：静态代码复审与本地机械检查；本次不改变产品行为，无需 GUI、真机或生产等价验收。
+- 待完成：最终独立复审、required gate 和 task 关闭。

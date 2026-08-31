@@ -114,16 +114,16 @@ def architecture_impact(text: str) -> str | None:
 
 
 def iteration_mode(text: str) -> str | None:
-    section = re.search(
+    sections = re.findall(
         r"^## Iteration Control\s*$\n(?P<body>.*?)(?=^## |\Z)",
         text,
         re.MULTILINE | re.DOTALL,
     )
-    if section is None:
+    if len(sections) != 1:
         return None
     modes = re.findall(
         r"^- Mode:\s*`([^`]+)`\s*$",
-        section.group("body"),
+        sections[0],
         re.MULTILINE,
     )
     if len(modes) != 1 or modes[0] not in ITERATION_MODES:
@@ -194,6 +194,9 @@ def self_check() -> int:
         "- Mode: `single-pass`",
         "- Mode: `single-pass`\n- Mode: `iterative`",
     )
+    duplicate_iteration_section = single_pass + (
+        "\n\n## Iteration Control\n\n- Mode: `iterative`"
+    )
 
     if not valid_change_text(single_pass) or not valid_change_text(iterative):
         raise AssertionError("valid change metadata was rejected")
@@ -203,6 +206,7 @@ def self_check() -> int:
         valid_change_text(missing_iteration)
         or valid_change_text(unknown_iteration)
         or valid_change_text(duplicate_iteration)
+        or valid_change_text(duplicate_iteration_section)
     ):
         raise AssertionError("invalid iteration mode was accepted")
     print("doc_guard_self_check: ok")
