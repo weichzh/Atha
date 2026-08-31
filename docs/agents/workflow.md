@@ -23,6 +23,20 @@
 
 上述规则的证据和计数保存在对应 workflow change；当前只有 Atha 一个仓库样本，因此本地契约与检查脚本优先，全局 CLI 保持不变。
 
+## 迭代修复
+
+只有验证失败后仍需继续修复，或 change 预先包含高成本、真实 GUI、真机或人工验收时，才使用迭代模式。所有轮次留在同一个 task 和 change；不得为每轮创建新 task、复制 change 或扩张 claim。
+
+- `Review`：只读检查当前事实、实际制品与最新验证证据，按 `blocking`、`non-blocking`、`out-of-scope` 输出发现、证据、所有者和下一条最小检查，不修改文件；
+- `Repair`：只处理已批准范围内的 `blocking` 与上一轮 `remaining_delta`，使用最小改动，不顺手处理其他候选，也不声称验证已经通过；
+- `Validate`：先重跑上一轮失败的最小检查，再按成本顺序扩展；确定性测试、真实 GUI、真机和人工结果是通过依据，模型判断只能整理证据，不能替代执行。
+
+每轮在 change 的 `Result` / `Evidence And Residual Risks` 与对应工站中留下同一份简短收据：`iteration`、`review findings`、`repair`、`validation cases`、`remaining_delta`、`evidence level` 和 `stop reason`。完整输出与含设备或私密样本的材料只链接既有工站或忽略证据目录，不复制进 Git 文档。
+
+每份 change 在 `Iteration Control` 声明 `single-pass` 或 `iterative`。`single-pass` 在一次实施和验证后停止；若失败后还要继续编辑，先改为 `iterative` 并写明最大修复轮数、连续不变差异上限和人工 / 真实目标停止条件。迭代在验证通过、达到轮数上限、`remaining_delta` 达到不变上限或下一步需要人工决定 / 真实目标操作时停止；不得通过扩大范围、降低门槛或重复同一高成本命令强行继续。
+
+只有彼此不共享工作树、候选制品、设备或外部状态的独立样本才能并行。迭代 change 关闭前以 `benchmark --summary --task TASK` 复核本任务；只有影响范围、正确性、安全、证据可信度、重复劳动或后续决策的事件才进入流程改进，并且每项只归属仓库规则、change、既有 skill、检查脚本 / validator、回归测试或 `no process change` 中的一个所有者。
+
 ## 检查
 
 `docs` 是可交付任务的默认 gate。修改本仓库流程脚本时，在任务开始时追加 `workflow-self-check`；阅读器继续使用已有正式检查脚本，不为已停止的引擎实验保留 gate。

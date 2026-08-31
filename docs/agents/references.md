@@ -2,6 +2,13 @@
 
 本文件只保存 Atha 直接依赖的外部边界、版本事实来源和最短用法，不复制官方文档。进入任务时完整读取；当任务涉及下列边界的行为、API 语义、兼容性、错误、安全或性能时，先打开对应官方入口再诊断或修改。
 
+## Codex 迭代开发工作流
+
+- 官方入口：[Iterating Development Workflows with Codex](https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex)、[Build iterative repair loops with Codex](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)。
+- 项目快速用法：Atha 复用现有 `AGENTS.md`、事实所有者、单份 change、`project-workflow` 工站和正式检查，不复制示例的 `GOALS.md`、`PLANS.md`、`PROMPTS.md` 或 `harness/`。困难修复在同一 task 内按 Review、Repair、Validate 迭代，并把结构化剩余差异反馈到下一轮。
+- 最短检查：`project_workflow.py benchmark --summary --task <task>`、`mise exec -- python3 scripts/doc_guard.py --self-check` 与 `bash scripts/check-workflow.sh`。
+- 必须重查：Codex 官方约定变化、结构化输出能力、自动化审批边界，以及任何把模型 judge、并行执行或无人值守修复扩展到真实设备、用户数据、外部系统或发布链路的提议。
+
 ## Tauri 2
 
 - 版本事实：`reader/app/package.json`、`reader/app/src-tauri/Cargo.toml` 与 `Cargo.lock`。

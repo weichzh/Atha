@@ -44,12 +44,14 @@ CHANGE_HEADINGS = (
     "## Acceptance Criteria",
     "## Files And Steps",
     "## Checks",
+    "## Iteration Control",
     "## Result",
     "## Review",
     "## Evidence And Residual Risks",
 )
 
 ARCHITECTURE_IMPACT_VALUES = {"none", "present"}
+ITERATION_MODES = {"single-pass", "iterative"}
 
 
 def run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -111,6 +113,24 @@ def architecture_impact(text: str) -> str | None:
     return match.group(1)
 
 
+def iteration_mode(text: str) -> str | None:
+    section = re.search(
+        r"^## Iteration Control\s*$\n(?P<body>.*?)(?=^## |\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if section is None:
+        return None
+    match = re.search(
+        r"^- Mode:\s*`(?P<mode>[^`]+)`\s*$",
+        section.group("body"),
+        re.MULTILINE,
+    )
+    if match is None or match.group("mode") not in ITERATION_MODES:
+        return None
+    return match.group("mode")
+
+
 def valid_change_text(text: str) -> bool:
     status = re.search(
         r"^## Status\s*$\n+\s*(accepted|implemented)\s*$",
@@ -121,6 +141,7 @@ def valid_change_text(text: str) -> bool:
         status is not None
         and all(heading in text for heading in CHANGE_HEADINGS)
         and architecture_impact(text) is not None
+        and iteration_mode(text) is not None
     )
 
 
@@ -151,16 +172,31 @@ def self_check() -> int:
         "## Architecture Impact\n\nnone",
         "## Architecture Impact\n\npresent",
     )
-    missing = none.replace("## Architecture Impact\n\nnone\n\n", "")
-    unknown = none.replace(
+    single_pass = none.replace(
+        "## Iteration Control\n\nplaceholder",
+        "## Iteration Control\n\n- Mode: `single-pass`",
+    )
+    iterative = present.replace(
+        "## Iteration Control\n\nplaceholder",
+        "## Iteration Control\n\n- Mode: `iterative`",
+    )
+    missing_architecture = single_pass.replace("## Architecture Impact\n\nnone\n\n", "")
+    unknown_architecture = single_pass.replace(
         "## Architecture Impact\n\nnone",
         "## Architecture Impact\n\nunknown",
     )
+    missing_iteration = none.replace("## Iteration Control\n\nplaceholder\n\n", "")
+    unknown_iteration = none.replace(
+        "## Iteration Control\n\nplaceholder",
+        "## Iteration Control\n\n- Mode: `unknown`",
+    )
 
-    if not valid_change_text(none) or not valid_change_text(present):
-        raise AssertionError("valid architecture impact was rejected")
-    if valid_change_text(missing) or valid_change_text(unknown):
+    if not valid_change_text(single_pass) or not valid_change_text(iterative):
+        raise AssertionError("valid change metadata was rejected")
+    if valid_change_text(missing_architecture) or valid_change_text(unknown_architecture):
         raise AssertionError("invalid architecture impact was accepted")
+    if valid_change_text(missing_iteration) or valid_change_text(unknown_iteration):
+        raise AssertionError("invalid iteration mode was accepted")
     print("doc_guard_self_check: ok")
     return 0
 
