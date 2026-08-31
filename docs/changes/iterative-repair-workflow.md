@@ -6,7 +6,7 @@ description: 用现有 change、工站和检查入口建立可停止、可追溯
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -87,14 +87,14 @@ none
 - Iteration: `2`
 - Review findings: 两路复审均确认重复 `Iteration Control` 区段仍会被放行。
 - Repair: 解析器要求全文恰好一个 `Iteration Control` 区段，并增加对应 self-check 断言。
-- Validation cases: 新断言先红，修复后 `doc_guard.py --self-check` 通过；最终 required gate 待候选提交后执行。
-- Remaining delta: 最终独立复审、required gate 与关闭收据。
+- Validation cases: 新断言先红，修复后 self-check、工作流检查、文档 lint 与 diff check 通过；最终 Standards / Spec 复审均无 blocking。
+- Remaining delta: 无；required gate 与 task 关闭属于工站收尾，不是实现差异。
 - Evidence level: 静态与本地机械检查。
-- Stop reason: 达到最大修复轮数；只执行复审、验证和收尾，不再扩大实现。
+- Stop reason: 在最大修复轮数内清空差异并通过独立复审，停止 Repair。
 
 ## Review
 
-- Blocking: 前两轮复审发现均已进入对应 Repair；最终复审待执行。
+- Blocking: 前两轮发现均已修复；最终 Standards / Spec 复审无 blocking。
 - Non-blocking: 无。
 - Out-of-scope: 无。
 
@@ -102,4 +102,4 @@ none
 
 - 已覆盖：模式缺失、未知值、同一区段重复值、重复区段，以及纯文档 active change 的主入口拒绝。
 - 证据等级：静态代码复审与本地机械检查；本次不改变产品行为，无需 GUI、真机或生产等价验收。
-- 待完成：最终独立复审、required gate 和 task 关闭。
+- 剩余风险：历史 change 不批量迁移，只在重新成为 `ACTIVE` 时补齐；required gate 的完整结果由 `project-workflow` 工站保存，不在本文复制。
