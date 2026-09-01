@@ -13,7 +13,7 @@
 | `backend/atha-backend/` | 正式后端库、书根资源边界、全部已支持书籍格式、本地离线词典、书架、消息数据库与阅读遥测校验 | Linux 本地已验证 |
 | `backend/atha-backend/src/local_data.rs` | schema 1 `.atha-data`、严格制品校验、跨书架 / 书源 / 词典 / MessageStore 的 staging、恢复日志、占用统计与启动恢复 | Linux 本地已验证 |
 | `backend/atha-backend/src/reader/dictionary.rs` | MDict v2 与经典 Kindle MOBI6 词典的事务导入、HUFF 累计偏移 sidecar、固定格式分派、精确查词、MDD 范围读取和安全富文本 / 纯文本双投影 | 私有英文输出与公共安全矩阵已验证 |
-| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、最近阅读、跨书消息搜索、应用壳、能力清单、受控协议和平台打包配置 | Linux AppImage 与 PCT 内部候选已验证；Windows 配置静态检查 |
+| `reader/app/` | Tauri 2、Vite、Svelte 5 产品入口；书架、最近阅读、跨书笔记与回复搜索、应用壳、能力清单、受控协议和平台打包配置 | Linux AppImage 与 PCT 内部候选已验证；Windows 配置静态检查 |
 | `reader/app/src-tauri/src/lib.rs` | Tauri composition root，以及当前仍同文件的 library、桌面拖放 / 冷启动 staging、telemetry、固定字段平台日志与 protocol adapter | Linux GUI 与 AppImage 启动已验证 |
 | `reader/app/src-tauri/src/dictionary_commands.rs` | 离线词典 picker、Tauri command、blocking adapter 与 internal-only 固定字段日志策略 | Linux GUI 已验证 |
 | `reader/app/src-tauri/src/platform_file.rs` | 普通路径与 Android SAF content URI 共用的流式 Picker cache bridge；RAII / 启动清理和输入大小边界 | Android 模拟器已验证 |
@@ -23,7 +23,7 @@
 | `reader/app/src-tauri/src/message_maintenance.rs` | 资料库根路由校验与兼容 MessageStore-only 维护 IPC adapter | 已验证 |
 | `reader/app/src-tauri/src/local_data_maintenance.rs` | 完整本地数据 picker、恢复确认、存储统计、blocking worker 与固定字段日志 adapter | Linux GUI 已验证 |
 | `reader/app/src/components/LibraryView.svelte`、`reader/app/src/library.ts` | 系统选择器 / 桌面拖放共用导入结果、网格 / 列表书架、长按选择 / 右键菜单、自定义封面、冷启动一次性打开，以及独立应用主题、全书阅读默认恢复、词典和本地资料设置投影 | Linux GUI 已验证 |
-| `reader/app/src/components/MemoryCenter.svelte` | 最近阅读、跨书消息搜索、有书跳回和缺书 / 历史 Snapshot 资料库投影 | Linux GUI 已验证 |
+| `reader/app/src/components/MemoryCenter.svelte` | 最近阅读、跨书笔记与回复搜索、有书跳回和缺书 / 历史 Snapshot 资料库投影 | Linux GUI 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
 | `reader/theme.css`、`reader/atha-reader.html`、`reader/atha-reader.css` | 应用 / 阅读共享颜色 token、唯一阅读页结构、分页 / 原生滚动、760 CSS px 居中单栏、横屏工作区、竖屏笔记两页、横屏 `A+B` / `B+C` / `A+B+C`、底栏设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板与内容 dialog | Linux GUI 已验证；当前候选已安装 PCT-AL10，软键盘与自然双指仍待交互复核 |
 | `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/线程、标注列表与当前选择投影、内容安全、视觉 CSS px 到设备像素换算、真实 frame 分页、响应式工作区绑定、诊断、benchmark 和页面组合入口 | Linux GUI 已验证 |
@@ -143,8 +143,8 @@
 - schema v2 `MessageStore`、不可变修订、墓碑、回复、正反向引用、SourceAnchor/SourceSnapshot 版本、当前修订 FTS5 与事务 Outbox；
 - HTML/CSS/呈现参数与图片资源双层信任边界校验，资源按 SHA-256 内容寻址；
 - localStorage 标注原子幂等迁移、Edition/单对话自包含 ZIP 导出与公开完整性检查；
-- Tauri TypeScript client、根 Message 标注 / 笔记投影、竖屏列表 / 线程两页、横屏 `A+B` / `B+C` / `A+B+C`、本条 / 本章 / 本书记录及时间 / 书序投影、受限富文本与 Markdown 输入、历史 / 关系 / 快照 / 跳回和本书导出入口。
-- 资料库阅读记忆投影：严格最近阅读、跨 Edition 当前消息搜索、根墓碑排除、完整内容身份可用性、有书深链复核与缺书 Snapshot。
+- Tauri TypeScript client、根 Message 的标注 / 笔记投影、竖屏列表 / 线程两页、横屏 `A+B` / `B+C` / `A+B+C`、当前 / 本章 / 本书对话及时间 / 书序投影、受限富文本与 Markdown 输入、历史 / 关系 / 快照 / 跳回和本书导出入口；用户术语不改内部 `Message` / `Conversation` 接口。
+- 资料库阅读记忆投影：严格最近阅读、跨 Edition 笔记与回复搜索、根墓碑排除、完整内容身份可用性、有书深链复核与缺书 Snapshot。
 
 ## 验证证据
 

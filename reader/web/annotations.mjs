@@ -180,7 +180,7 @@ export function createAnnotations({
         edit.className = "annotation-item-action annotation-item-edit";
         edit.dataset.annotationId = item.id;
         edit.dataset.annotationAction = "edit";
-        edit.setAttribute("aria-label", item.note ? "编辑笔记" : "为标注添加笔记");
+        edit.setAttribute("aria-label", item.note ? "编辑笔记" : "为这段原文添加笔记");
         edit.title = edit.getAttribute("aria-label");
         const editIcon = document.createElement("span");
         editIcon.className = "fluent-icon";
@@ -191,7 +191,7 @@ export function createAnnotations({
         removeButton.className = "annotation-item-action annotation-item-delete";
         removeButton.dataset.annotationId = item.id;
         removeButton.dataset.annotationAction = "delete";
-        removeButton.setAttribute("aria-label", "删除标注");
+        removeButton.setAttribute("aria-label", item.note ? "删除笔记" : "删除标注");
         removeButton.title = removeButton.getAttribute("aria-label");
         const deleteIcon = document.createElement("span");
         deleteIcon.className = "fluent-icon";
@@ -211,7 +211,7 @@ export function createAnnotations({
       statusText(code) ||
       (query || section
         ? `${active.length} 条符合条件，共 ${all.length} 条`
-        : `${active.length} 条笔记与标注`);
+        : `共 ${active.length} 条`);
   }
 
   async function applyFilters() {

@@ -156,7 +156,7 @@
   <header class="memory-heading">
     <div>
       <h1 id="memory-center-heading">阅读记忆</h1>
-      <p>最近阅读与跨书消息</p>
+      <p>最近阅读与跨书笔记</p>
     </div>
     <MessageSquareText aria-hidden="true" />
   </header>
@@ -204,7 +204,7 @@
     <header class="memory-section-heading">
       <div>
         <Search aria-hidden="true" />
-        <h2 id="memory-search-heading">搜索消息</h2>
+        <h2 id="memory-search-heading">搜索笔记与回复</h2>
       </div>
     </header>
     <form class="memory-search-form" onsubmit={search}>
@@ -225,7 +225,7 @@
     </form>
 
     {#if searching}
-      <p class="memory-inline-status" role="status">正在搜索本地消息…</p>
+      <p class="memory-inline-status" role="status">正在搜索笔记…</p>
     {:else if searched && hits.length === 0 && !status}
       <div class="memory-search-empty">
         <Search aria-hidden="true" />

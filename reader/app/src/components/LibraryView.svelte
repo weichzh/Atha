@@ -329,7 +329,7 @@
       status = "请在 Atha 应用中恢复资料库。";
       return;
     }
-    if (!confirm("恢复会替换当前书架、书籍文件、词典、消息和阅读状态。继续？")) {
+    if (!confirm("恢复会替换当前书架、书籍文件、词典、笔记、对话和阅读状态。继续？")) {
       status = "已取消恢复。";
       return;
     }
@@ -638,7 +638,7 @@
 
   async function deleteBooks(ids: string[]) {
     if (busy || ids.length === 0) return;
-    if (!confirm(`删除已选 ${ids.length} 本书的本地文件和阅读状态？笔记、标注消息和原文快照会保留。`)) {
+    if (!confirm(`删除已选 ${ids.length} 本书的本地文件和阅读状态？笔记、标注和原文快照会保留。`)) {
       return;
     }
     bookMenu = null;
@@ -1039,7 +1039,7 @@
       <dl>
         <div><dt>书籍文件</dt><dd>{formatBytes(storageUsage.booksBytes)}</dd></div>
         <div><dt>阅读缓存</dt><dd>{formatBytes(storageUsage.cacheBytes)}</dd></div>
-        <div><dt>消息与快照</dt><dd>{formatBytes(storageUsage.messagesBytes)}</dd></div>
+        <div><dt>笔记与引用快照</dt><dd>{formatBytes(storageUsage.messagesBytes)}</dd></div>
         <div><dt>离线词典</dt><dd>{formatBytes(storageUsage.dictionariesBytes)}</dd></div>
         <div><dt>阅读设置</dt><dd>{formatBytes(storageUsage.preferencesBytes)}</dd></div>
         <div class="library-storage-total"><dt>合计</dt><dd>{formatBytes(storageUsage.totalBytes)}</dd></div>

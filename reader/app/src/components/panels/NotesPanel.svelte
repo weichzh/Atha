@@ -26,13 +26,13 @@
       type="search"
       maxlength="128"
       autocomplete="off"
-      placeholder="搜索笔记与标注"
-      aria-label="搜索笔记与标注"
+      placeholder="搜索笔记或标注"
+      aria-label="搜索笔记或标注"
     />
     <select id="annotation-filter-section" aria-label="按章节筛选">
       <option value="">全部章节</option>
     </select>
   </div>
-  <nav id="annotations" class="annotation-list" aria-label="笔记与标注"></nav>
+  <nav id="annotations" class="annotation-list" aria-label="笔记和标注列表"></nav>
   <output id="annotations-status" aria-live="polite"></output>
 </section>

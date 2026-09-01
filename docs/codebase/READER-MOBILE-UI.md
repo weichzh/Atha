@@ -30,7 +30,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/web/content-actions.mjs`、`reader/web/structured-actions.mjs` | 图片 / 公式与安全表格投影的激活、查看、焦点返回和诊断检查 |
 | `reader/web/bookmarks.mjs` | 右上角书签切换、目录中的书签列表和书签跳转 |
 | `reader/web/message-store.mjs` | 正式根 Message 到标注/笔记投影的适配，以及旧 localStorage 记录迁移 |
-| `reader/web/conversations.mjs` | 对话浮层、本条/本章/本书记录、时间/书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
+| `reader/web/conversations.mjs` | 对话浮层、当前 / 本章 / 本书范围、时间 / 书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
 | `reader/web/navigation.mjs` | 章节标题、目录选择、全书近似进度和进度拖动 |
 | `reader/web/reader-state.mjs` | 应用 / 本书偏好、书签、进度与有界本地阅读统计；统计只消费页面生命周期和既有导航稳定状态 |
 | `reader/web/pagination.mjs` | 视口设备像素换算、分页、尺寸变化、进度和公式尺寸；几何 cut 只供诊断与 verify-sample / benchmark 门使用，不作为普通阅读的全局失败条件 |
@@ -71,7 +71,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 └─ #message-snapshot-dialog
 ```
 
-顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不把 XHTML 或分页热状态移进组件树。四个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。笔记是例外的响应式投影：竖屏的列表与当前线程使用同一悬浮窗口边界；横屏至少 800 px 时从左到右组合正文 `A`、列表 `B` 与线程 `C`，工作区变化后由同一 Locator 重排正文。
+顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不把 XHTML 或分页热状态移进组件树。四个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。笔记是例外的响应式投影：竖屏的列表与当前线程使用同一悬浮窗口边界；横屏至少 800 px 时从左到右组合正文 `A`、列表 `B` 与线程 `C`，工作区变化后由同一 Locator 重排正文。可见名称固定为笔记入口、纯原文“标注”、当前“对话”和对话内“消息”，不把内部 MessageStore 名称投影给用户。
 
 `.reader-startup` 从阅读路由首次挂载起用不透明书页底色覆盖书内内容；`app.mjs` 恢复上次 Locator 并绑定交互后设置根级 `data-reader-ready`，加载层才淡出。失败路径同样撤下加载层并显示错误，三点动画与淡出在 `prefers-reduced-motion` 下停用。
 
@@ -99,7 +99,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 搜索 | `.search-panel`、`.search-actions` |
 | 选区动作与笔记 | `.selection-actions` 四图标动作栏、`#annotation-note-dialog`、`.notes-panel`、`.annotation-filters`、`.annotation-list`、`.annotation-item` |
 | 词典 | `.dictionary-backdrop`、`.dictionary-panel`、`.dictionary-content`、`.dictionary-source`、`.dictionary-result` |
-| 阅读对话 | `.message-conversation`、`.message-view-controls`、`.message-segmented`、`.message-source-context`、`.message-feed-source`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
+| 对话 | `.message-conversation`、`.message-view-controls`、`.message-segmented`、`.message-source-context`、`.message-feed-source`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
 | 消息输入 | `.message-editor`、`.message-editor-toolbar-primary`、`.message-editor-toolbar-secondary`、`.message-editor-mode-switch`、`.message-editor-markdown` |
 | 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
 | 进度与统计 | `.progress-panel`、`.reading-statistics`、`.progress-scrubber`、`.progress-book`、`.progress-position` |

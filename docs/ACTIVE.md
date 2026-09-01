@@ -2,7 +2,7 @@
 
 本文件只登记当前可执行工作的路由，不保存完成摘要、验收流水或候选需求。
 
-- `now`：UI / UX 整理；默认阅读版面和笔记响应式结构已形成当前事实，没有未完成的 `accepted` 实现 change。
-- `change`：已实现的笔记响应式分栏 → `docs/changes/notes-responsive-panes.md`
-- `next`：统一“笔记”、“标注”、“阅读对话”等用户术语；实施前另建 change 并确认范围，不在版面切片中顺带修改。
+- `now`：UI / UX 整理；正在统一笔记、标注、对话与消息的用户术语，不改变已经成立的响应式结构和数据模型。
+- `change`：笔记对话用户术语 → `docs/changes/note-conversation-terminology.md`
+- `next`：术语切片关闭后，对默认阅读、笔记列表与当前线程执行一次跨视口整体复核，再决定是否存在新的实现切片。
 - `Context Bundle`：`docs/product/OVERVIEW.md`、`docs/roadmap/ROADMAP.md`、`docs/architecture/MESSAGE-READING.md`、`docs/architecture/READER-CORE.md`、`docs/codebase/DATABASE.md`、`docs/codebase/MAP.md`、`docs/agents/references.md`。

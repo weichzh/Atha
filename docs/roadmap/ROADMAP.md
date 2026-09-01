@@ -28,7 +28,7 @@ schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词�
 
 ## Done：跨书阅读记忆中心
 
-资料库已从现有 schema 1 阅读统计投影最近阅读，并在 MessageStore 既有 FTS5 上提供跨书消息搜索。搜索结果复用 Edition、当前根 Anchor 和 SourceSnapshot；只有完整内容身份仍在书架时才出现“跳回原书”，阅读器再次验证 Edition、根 Message、Locator 和正文位置后才定位对话，缺书结果只提供当前与历史 Snapshot。
+资料库已从现有 schema 1 阅读统计投影最近阅读，并在 MessageStore 既有 FTS5 上提供跨书笔记与回复搜索。搜索结果复用 Edition、当前根 Anchor 和 SourceSnapshot；只有完整内容身份仍在书架时才出现“跳回原书”，阅读器再次验证 Edition、根 Message、Locator 和正文位置后才定位对话，缺书结果只提供当前与历史 Snapshot。
 
 实现未增加数据库、索引、统计 schema、同步模型或独立知识库事实。公开测试覆盖跨 Edition 排序、短查询、命中与根消息墓碑；Linux Tauri 真壳覆盖 360 / 1000 宽度、最近阅读、有书 / 缺书搜索结果、当前 / 历史 Snapshot、安全跳回和 AppLog 隐私。
 
@@ -44,7 +44,9 @@ Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联
 
 ## Now：UI / UX 整理
 
-当前阶段不扩展功能清单，而是让已经存在的阅读、消息和词典形成清楚的产品构图。阅读版面切片已经让 24 / 32 / 48 左右边距按视觉 CSS px 跨 DPR 生效，并把分页与滚动正文限制为约 760 CSS px 的居中单栏。笔记切片已经按 Telegram 的成熟层级整理为竖屏同一悬浮窗口中的 `B → C → B` 两页；横屏从左到右显示 `A+B`、`B+C` 或 `A+B+C`，其中 `A` 是正文、`B` 是笔记 / 对话列表、`C` 是当前消息线程。下一切片统一用户术语。
+当前阶段不扩展功能清单，而是让已经存在的阅读、消息和词典形成清楚的产品构图。阅读版面切片已经让 24 / 32 / 48 左右边距按视觉 CSS px 跨 DPR 生效，并把分页与滚动正文限制为约 760 CSS px 的居中单栏。笔记切片已经按 Telegram 的成熟层级整理为竖屏同一悬浮窗口中的 `B → C → B` 两页；横屏从左到右显示 `A+B`、`B+C` 或 `A+B+C`，其中 `A` 是正文、`B` 是笔记 / 对话列表、`C` 是当前消息线程。用户术语切片进一步固定“笔记 / 标注 / 对话 / 消息 / 原文引用”的层级，并把技术存储名称从资料库界面移除。
+
+术语判断优先降低用户在阅读语言与实现语言之间的翻译成本：入口叫“笔记”，无正文的原文记录才叫“标注”，线程叫“对话”，单项才叫“消息”。短标签“当前 / 本章 / 本书”依赖同屏的“对话范围”可访问名称，不脱离该控件单独复用。下一步先对默认阅读、列表和线程做一次跨视口整体复核，再决定是否存在新的实现切片。
 
 本阶段以微信读书式安静阅读和 Telegram 式稳定消息流为参照，但只复用适合 Atha 主循环的设计判断，不照搬品牌外观。数据丢失、内容安全、引用错位和 Android 性能回归仍高于视觉扩展；每次只关闭一个可验证切片，不预建新框架、设置项、社区服务或同步 schema。内部候选的平台补证保留为后续交付条件，不与当前视觉判断混为一项。
 
@@ -79,7 +81,7 @@ Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联
 | CSS 社区模块边界 | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md` |
 | 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/architecture/READER-CORE.md` |
 | 完整本地数据生命周期 | `.atha-data` 完整备份 / 恢复、恢复日志、分类占用、两级删除和 Linux 真壳管理界面 | `docs/decisions/ADR-0010-local-data-lifecycle.md`、`docs/architecture/READER-CORE.md` |
-| 跨书阅读记忆中心 | 最近阅读、跨书 Message 搜索、有书安全跳回、缺书及历史 Snapshot | `docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md` |
+| 跨书阅读记忆中心 | 最近阅读、跨书笔记与回复搜索、有书安全跳回、缺书及历史 Snapshot | `docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md` |
 | 桌面阅读工作区 | 横屏目录 / 搜索侧栏，笔记 `A+B` / `B+C` / `A+B+C` 投影，键鼠焦点、真实 frame 分页与窄屏回归 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
 | 日常入口与内部候选 | 桌面拖放、网格 / 列表、冷启动文件关联、Linux AppImage 与 PCT-AL10 内部候选门 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
 | 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md` |

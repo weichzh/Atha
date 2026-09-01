@@ -318,7 +318,7 @@ export function createConversations({
     if (mode === "edit") {
       controls.composerContext.hidden = false;
       controls.composerContext.dataset.mode = "edit";
-      controls.composerContextText.textContent = message.text ? "编辑消息" : "为标注添加笔记";
+      controls.composerContextText.textContent = message.text ? "编辑消息" : "为这段原文添加笔记";
       syncSelectedMessage();
       return;
     }
@@ -365,7 +365,7 @@ export function createConversations({
         message.id,
         "message-feed-source",
       );
-      source.setAttribute("aria-label", `打开标记：${root.source.selectedText || "原文已删除"}`);
+      source.setAttribute("aria-label", `打开对话：${root.source.selectedText || "原文已删除"}`);
       card.append(source);
     }
     for (const preview of linkedMessagePreviews(message, messages)) {
@@ -443,13 +443,13 @@ export function createConversations({
             showSource: false,
           }))
         : conversationFeed(feedConversations, order, store.compareSources);
-    const markCount = scope === "mark" ? 1 : feedConversations.length;
+    const conversationCount = scope === "mark" ? 1 : feedConversations.length;
     controls.sourceLabel.textContent =
-      scope === "mark" ? "原文引用" : scope === "chapter" ? "本章记录" : "本书记录";
+      scope === "mark" ? "原文引用" : scope === "chapter" ? "本章对话" : "本书对话";
     controls.source.textContent =
       scope === "mark"
         ? entries[0]?.root?.source?.selectedText || "原文已删除"
-        : `${markCount} 条标记 · ${entries.length} 条消息`;
+        : `${conversationCount} 个对话 · ${entries.length} 条消息`;
     controls.sourceJump.hidden = scope !== "mark";
     controls.form.hidden = scope !== "mark";
     controls.orderControls.hidden = scope === "mark";
@@ -462,7 +462,7 @@ export function createConversations({
     if (!entries.length) {
       const empty = document.createElement("p");
       empty.className = "message-feed-empty";
-      empty.textContent = scope === "chapter" ? "本章还没有标记" : "本书还没有标记";
+      empty.textContent = scope === "chapter" ? "本章还没有对话" : "本书还没有对话";
       controls.list.replaceChildren(empty);
       return;
     }
@@ -488,7 +488,7 @@ export function createConversations({
     }
     controls.form.hidden = true;
     controls.orderControls.hidden = false;
-    controls.list.textContent = "正在加载聊天记录…";
+    controls.list.textContent = "正在加载对话…";
     try {
       const section = scope === "chapter" ? anchorSection : null;
       const loaded = await store.conversations(editionId, section);
@@ -497,8 +497,8 @@ export function createConversations({
       renderConversation();
     } catch {
       if (generation === scopeGeneration) {
-        controls.list.textContent = "无法加载聊天记录";
-        report("无法加载聊天记录", true);
+        controls.list.textContent = "无法加载对话";
+        report("无法加载对话", true);
       }
     }
   }
@@ -526,6 +526,10 @@ export function createConversations({
         null;
       const parent = conversation.messages.find((message) => message.id === parentId);
       onConversationChange(conversation.id);
+      const returnLabel =
+        !expectedRootId && returnFocus()?.matches(".annotation-item-main") ? "返回笔记" : "返回阅读";
+      controls.close.setAttribute("aria-label", returnLabel);
+      controls.close.title = returnLabel;
       editing = edit ? parent : null;
       if (editing) {
         composer()?.setValue(editing.contentJson, editing.text);
@@ -549,7 +553,7 @@ export function createConversations({
         composer()?.focus();
       });
     } catch {
-      report("无法打开阅读对话", true);
+      report("无法打开对话", true);
     }
   }
 
@@ -563,7 +567,7 @@ export function createConversations({
         const body = document.createElement("div");
         time.dateTime = new Date(revision.createdAt).toISOString();
         time.textContent = new Date(revision.createdAt).toLocaleString();
-        composer()?.render(body, revision.contentJson, revision.text || "纯标注");
+        composer()?.render(body, revision.contentJson, revision.text || "仅标注原文");
         article.append(time, body);
         return article;
       }),

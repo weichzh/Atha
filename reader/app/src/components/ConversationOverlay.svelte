@@ -46,7 +46,7 @@
     >
       <ArrowLeft aria-hidden="true" />
     </button>
-    <h2 id="message-conversation-title">阅读对话</h2>
+    <h2 id="message-conversation-title">对话</h2>
     <button
       id="message-conversation-fullscreen"
       class="message-icon-button"
@@ -60,11 +60,11 @@
     </button>
   </header>
 
-  <nav class="message-view-controls" aria-label="聊天记录范围与顺序">
-    <div class="message-segmented" role="group" aria-label="标记范围">
-      <button type="button" data-message-scope="mark" aria-pressed="true">本条标记</button>
-      <button type="button" data-message-scope="chapter" aria-pressed="false">本章标记</button>
-      <button type="button" data-message-scope="book" aria-pressed="false">本书标记</button>
+  <nav class="message-view-controls" aria-label="对话范围与顺序">
+    <div class="message-segmented" role="group" aria-label="对话范围">
+      <button type="button" data-message-scope="mark" aria-pressed="true">当前</button>
+      <button type="button" data-message-scope="chapter" aria-pressed="false">本章</button>
+      <button type="button" data-message-scope="book" aria-pressed="false">本书</button>
     </div>
     <div id="message-order-controls" class="message-segmented message-order-controls" role="group" aria-label="排列顺序" hidden>
       <button type="button" data-message-order="time" aria-pressed="true">时间顺序</button>
