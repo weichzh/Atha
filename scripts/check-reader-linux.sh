@@ -813,6 +813,12 @@ return Boolean(button);') == true ]] || die 'could not open a reading memory res
     'reading memory result did not validate and open')
   jq -e '.navigation == "ok"' <<<"$jump" >/dev/null ||
     die "reading memory result is incomplete (state: $(jq -c . <<<"$jump"))"
+  execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
+    die 'could not close the reading memory conversation'
+  wait_for_script \
+    'return { conversation: !document.querySelector("#message-conversation")?.hidden, focused: document.activeElement === document.querySelector(".reader"), error: document.documentElement.dataset.error || null };' \
+    '.conversation == false and .focused == true and .error == null' \
+    'reading memory conversation did not return focus to reading' >/dev/null
   open_library "$expected_books"
 }
 

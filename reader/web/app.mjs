@@ -426,7 +426,8 @@ annotations = createAnnotations({
     finishReaderToolNavigation("notes");
   },
   onOpenConversation: messageMode
-    ? (conversationId, messageId, edit = false) => conversations?.open(conversationId, messageId, edit)
+    ? (conversationId, messageId, edit = false, expectedRootId = null) =>
+        conversations?.open(conversationId, messageId, edit, expectedRootId)
     : null,
   assert,
 });
@@ -648,7 +649,8 @@ async function start() {
       closeTools: () => closeReaderTools(false, workspaceTools[2].panel),
       editionId: session.describe().contentVersion,
       readingSurface: content.book,
-      returnFocus: () => {
+      returnFocus: (toNotes = false) => {
+        if (!toNotes) return reader;
         const selected = annotations.conversationFocusTarget();
         return selected?.getClientRects().length ? selected : reader;
       },

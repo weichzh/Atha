@@ -336,7 +336,9 @@ export function createAnnotations({
     pendingSelection = null;
     content.book.getRootNode().getSelection?.().removeAllRanges();
     await redraw();
-    if (note && result.conversationId) onOpenConversation?.(result.conversationId, result.id);
+    if (note && result.conversationId) {
+      onOpenConversation?.(result.conversationId, result.id, false, result.id);
+    }
     return result;
   }
 
@@ -645,7 +647,7 @@ export function createAnnotations({
           : await addSelection("");
         if (result?.ok) {
           finishSelection();
-          await onOpenConversation(result.conversationId, result.id, true);
+          await onOpenConversation(result.conversationId, result.id, true, result.id);
         }
         return;
       }

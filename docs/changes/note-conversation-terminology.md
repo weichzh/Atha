@@ -65,7 +65,7 @@ none
 ## Iteration Control
 
 - Mode: `iterative`
-- Maximum repair iterations: `2`
+- Maximum repair iterations: `3`
 - Unchanged-delta limit: `1`
 - Human stop: 只能通过新增消息参与者 / 身份数据、重新定义标注与笔记产品边界或真实辅助技术判断才能判定。
 - Per-iteration receipt: change 的 `Result` 与 `Evidence And Residual Risks`；完整命令和输出由 `project-workflow` 工站保存。
@@ -109,7 +109,17 @@ none
 - `validation cases`：精简门和完整 `scripts/check-reader-linux.sh` 均通过；完整门覆盖 360 / 600 / 1000 / 1280 / 1600 px、13 个手势场景、220 次测量、两类返回名称、对话范围 / 聚合、Locator、输入可见性和 AppLog 隐私。Svelte check / build、Node 测试、AutoCorrect、文档门和 `git diff --check` 通过；
 - `remaining_delta`：实现与验收范围内无 blocking 差异；候选提交后的两轴 review、committed-HEAD required gate 和工作流收据属于收尾；
 - `evidence level`：静态 / 构建 + Linux Tauri / WebKitGTK 真壳自动化 + 当前 GUI / 同图 Design QA；
-- `stop reason`：第二轮清空实现差异并达到最大修复轮数，停止 Repair。
+- `stop reason`：第二轮清空首次实现差异，进入候选两轴 review。
+
+### Iteration 3
+
+- `iteration`：`3`；
+- `review findings`：Spec review 发现横屏笔记栏已打开时从正文新建笔记仍会按选中新列表行误判返回来源；Standards 与 Spec review 同时发现 `READER-CORE` 保留“跨书消息 / 消息与快照”，GUI 证据元数据也早于候选提交；
+- `repair`：正文入口复用已有根消息校验参数声明直接来源，关闭动作按已经确定的返回语义恢复正文或列表焦点，线程内切换保持原返回目标；同步 `READER-CORE`，并让 Linux 门验证阅读记忆关闭后真实返回正文焦点；
+- `validation cases`：Svelte check / build、Conversation Node 测试、脚本语法、精简与完整 Linux Tauri 门通过；完整门继续覆盖两类返回名称，并新增阅读记忆关闭后的正文焦点断言，13 个场景和 220 次测量通过；
+- `remaining_delta`：修复后两轴复核、committed-HEAD 截图元数据和 required gate 属于收尾；
+- `evidence level`：静态 / 构建 + Linux Tauri / WebKitGTK 真壳自动化；
+- `stop reason`：第三轮修复当前 review 差异并达到修复上限，停止 Repair。
 
 ## Review
 

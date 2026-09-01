@@ -293,7 +293,9 @@ export function createConversations({
     composer()?.collapse();
     controls.overlay.hidden = true;
     onLayoutChange();
-    returnFocus().focus({ preventScroll: true });
+    returnFocus(controls.close.getAttribute("aria-label") === "返回笔记").focus({
+      preventScroll: true,
+    });
   }
 
   function setFullscreen(fullscreen) {
@@ -525,9 +527,12 @@ export function createConversations({
         conversation.messages.find((message) => !message.deleted)?.id ||
         null;
       const parent = conversation.messages.find((message) => message.id === parentId);
+      const returnLabel = controls.overlay.hidden
+        ? expectedRootId
+          ? "返回阅读"
+          : "返回笔记"
+        : controls.close.getAttribute("aria-label") || "返回阅读";
       onConversationChange(conversation.id);
-      const returnLabel =
-        !expectedRootId && returnFocus()?.matches(".annotation-item-main") ? "返回笔记" : "返回阅读";
       controls.close.setAttribute("aria-label", returnLabel);
       controls.close.title = returnLabel;
       editing = edit ? parent : null;
