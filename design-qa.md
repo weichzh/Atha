@@ -75,6 +75,43 @@ final result: passed
 
 ---
 
+# 笔记响应式结构 Design QA
+
+## Source Visual Truth
+
+- 参考图是用户在当前任务中提供的 Telegram 竖屏会话列表与当前线程，均为 764 × 1336 px；只参考成熟的列表 → 线程 → 返回层级、固定输入器和消息密度，不复制品牌、颜色、群组、头像或社交功能。
+- 产品结构由用户明确为：正文 `A`、笔记 / 对话列表 `B`、当前消息线程 `C`。字母同时规定横屏从左到右的空间顺序；竖屏则在同一笔记窗口中以 `B → C → B` 切页。
+
+## Implementation Evidence
+
+- 当前 Linux Tauri / WebKitGTK 截图、DOM 几何和 `uiux-evidence.json` 位于 Git 忽略目录 `artifacts/local/audits/atha-notes-responsive-panes-20260901/`。
+- 同状态实现图包括 360 × 800 CSS px 的 `uiux-09-mobile-notes.png`、`uiux-10-mobile-conversation.png`、`uiux-11-mobile-notes-return.png`，1280 × 800 的 `uiux-03-notes-panel.png`、`uiux-05-conversation-thread.png`，以及 1600 × 900 的 `uiux-05b-conversation-three-pane.png`；截图像素为 CSS 视口的两倍。
+- 参考列表 / 线程和实现列表 / 线程已经分别在同一视觉输入中比较；横屏三种组合另外按 DOM 边界和完整截图检查。
+
+## Fidelity And Product Judgment
+
+- 竖屏保留参考图的页面关系，而不是聊天产品的频道、未读、头像和置顶信息；Atha 的列表行只呈现真实存在的原文标题、笔记摘要、当前选择和编辑 / 删除动作。
+- 线程按标题、范围、原文上下文、消息流、固定输入器从上到下排列。当前 Message 没有发送者角色，因此不通过左右气泡、头像或“作者”标签虚构双方身份；这降低了表面上的聊天相似度，但优先保护数据语义。
+- 默认视觉继续使用 Atha 的纸张 / 浅色 token 和克制边框；Telegram 在这里是交互结构参照，不是换肤目标。
+- 横屏结构最终严格按任务连续性排列：`A+B` 保留阅读与索引，进入线程后中等宽度改为 `B+C`，宽屏从左到右显示 `A+B+C`。隐藏一栏不会创建第二份 Message 或 Reader 状态。
+
+## Findings And Bias Record
+
+1. P1：首轮三栏被实现为 `B+A+C`，正文错误地位于中间。原因不是技术限制，而是评审时套用了常见“列表在左、详情在右”的桌面惯例，权重高于用户已经明确给出的 `A / B / C` 顺序。这暴露了偏向通用组件范式、低估具体产品语义的认知偏差。现已改为从左到右 `A+B+C`，Linux 真壳几何为 `A 0–800 / B 800–1120 / C 1120–1600`。
+2. P2：旧竖屏列表是全屏 panel、线程是半屏 sheet，前后页没有同一对象感。现改为共同的 12 px 外边距、336 × 776 CSS px 窗口，并保持返回后的当前行、焦点与滚动位置。
+3. P2：列表操作曾显示“编辑 / 删除”文字，返回焦点只框住行内主按钮。现复用既有 Fluent 编辑 / 删除图标，并把焦点环扩展到完整列表行。
+4. P3：当前夹具只有一个根笔记，无法验证长列表的真实扫读密度；正式门已验证滚动位置不因进入 / 退出线程重置，但仍需在真实长期书库中观察摘要截断和大量线程的可扫读性。
+
+## Result And Limits
+
+没有未关闭的 P0、P1 或 P2。360 px 的列表 / 线程边界一致，1000 和 1280 px 的 `A+B` / `B+C` 无重叠，1600 px 从左到右为 `A+B+C`；进入、关闭、缩放重排后的 Locator 保持稳定。
+
+证据等级是 Linux Tauri 真壳上的 WebDriver 自动化、截图与 DOM 几何。未覆盖 Windows、PCT-AL10 自然手指触摸、真实输入法、屏幕阅读器和具有大量真实笔记的长期使用。
+
+final result: passed
+
+---
+
 # 离线书架设计 QA
 
 ## 输入与归一

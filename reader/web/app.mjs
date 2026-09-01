@@ -10,7 +10,7 @@ const preferencesTool = document.querySelector(".reader-tool.preferences");
 if (bottomToolbar && preferencesTool?.parentElement !== bottomToolbar) {
   bottomToolbar.append(preferencesTool);
 }
-const desktopWorkspaceMedia = matchMedia("(min-width: 1100px)");
+const desktopWorkspaceMedia = matchMedia("(orientation: landscape) and (min-width: 800px)");
 const workspaceTools = ["directory", "search", "notes"].map((name) => ({
   name,
   panel: document.querySelector(`.reader-tool.${name}`),
@@ -75,10 +75,11 @@ function bindVisualViewport() {
 
 bindVisualViewport();
 
-function closeReaderTools(includeWorkspace = false) {
+function closeReaderTools(includeWorkspace = false, preservePanel = null) {
   const desktop = root.hasAttribute("data-desktop-workspace");
-  root.removeAttribute("data-reader-tools");
+  if (!preservePanel?.open) root.removeAttribute("data-reader-tools");
   for (const panel of document.querySelectorAll(".reader-tool[open]")) {
+    if (panel === preservePanel) continue;
     if (includeWorkspace || !desktop || !workspacePanels.has(panel)) panel.open = false;
   }
   if (includeWorkspace) delete root.dataset.workspacePanel;
@@ -644,10 +645,24 @@ async function start() {
     conversations = createConversations({
       store: annotationStore,
       annotations,
-      closeTools: closeReaderTools,
+      closeTools: () => closeReaderTools(false, workspaceTools[2].panel),
       editionId: session.describe().contentVersion,
       readingSurface: content.book,
-      returnFocus: reader,
+      returnFocus: () => {
+        const selected = annotations.conversationFocusTarget();
+        return selected?.getClientRects().length ? selected : reader;
+      },
+      onConversationChange: (conversationId) => annotations.selectConversation(conversationId),
+      onLayoutChange: () => {
+        if (
+          root.hasAttribute("data-reader-ready") &&
+          desktopWorkspaceMedia.matches &&
+          innerWidth >= 1440 &&
+          workspaceTools[2].panel.open
+        ) {
+          window.dispatchEvent(new Event("resize"));
+        }
+      },
       controls: {
         overlay: document.querySelector("#message-conversation"),
         scopeButtons: document.querySelectorAll("[data-message-scope]"),

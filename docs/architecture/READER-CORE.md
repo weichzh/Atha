@@ -18,7 +18,7 @@
 
 ### 应用壳与宿主
 
-产品入口采用 Tauri 2 与 Svelte 5，但每个平台仍只有一个 WebView。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。至少 `1100px` 的阅读视口具备把既有目录、书内搜索和笔记 / Message `details` 互斥投影为固定左侧工作区的能力，但初始保持专注阅读，只有用户明确打开工具后才占用工作区；窄屏仍使用原覆盖式工具面板。两者共用同一状态、搜索、Message 和 Locator，关闭或 Escape 不自动重开最近工具。
+产品入口采用 Tauri 2 与 Svelte 5，但每个平台仍只有一个 WebView。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。横向且至少 `800px` 的阅读视口可把目录与书内搜索投影为固定左侧工作区；笔记按正文 `A`、列表 `B`、线程 `C` 从左到右投影为 `A+B`、`B+C` 或至少 `1440px` 时的 `A+B+C`。更窄视口在书页上使用同边界的笔记列表 / 线程两页。所有投影初始仍是专注阅读，并共用同一搜索、Message、Locator 与内核状态。
 
 Tauri 复用后端书根、全部已支持格式导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限；浏览器暴露策略检查 API 时，reader 会从真实文档策略复核关键能力确实不可用，WebKitGTK 未暴露该 API 时仍由原生响应头和 Rust 静态检查守住边界。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
 
@@ -108,7 +108,7 @@ R6 只提供不区分大小写的字面量搜索。查询最长 128 个 UTF-16 c
 
 Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，只把当前 section 的未删除根 Message 投影到浏览器 CSS Custom Highlight。切章和重新渲染后按事实重画，字号与样式重排继续使用同一 Range；Range 与 overlay 不进入存储。有效新选区附近显示查词、复制、标注和笔记；点击已有标注则恢复其 Range，并显示查词、复制、重选、笔记和删除。选区有效性由 `content.selectionRange()` 统一以真实 `Range.collapsed` 和正文归属判定，不信任厂商 WebView 可误报的 `Selection.isCollapsed`。重选使用浏览器原生选区分两步创建新的 Anchor 与 Snapshot，保持 Message 身份与笔记修订；重叠命中选择最近更新的一条。
 
-笔记入口负责新建、为 source-only Message 添加正文和预填编辑，并打开定位根消息的半屏对话。标注笔记 dialog 与消息输入器共用 `VisualViewport` 几何；软键盘缩小可视区域时，当前输入和保存 / 发送操作保持可见。消息输入器使用最长 8000 字符的受限 Tiptap JSON，由后端派生纯文本；可视编辑与原始 Markdown 共用同一耐久事实，Markdown 无法表示的结构会保留原内容并拒绝切换。全屏笔记页投影所有未删除根 Message，并提供章节 / 全文筛选、本书导出和对话入口；对话浮层负责回复、引用、修订、关系、快照和跳回。删除写入 Message 墓碑并立即撤销正文投影。标注颜色、notebook、同步和 tombstone 压缩留待后续真实需求。
+笔记入口负责新建、为 source-only Message 添加正文和预填编辑，并打开定位根消息的当前线程。标注笔记 dialog 与消息输入器共用 `VisualViewport` 几何；软键盘缩小可视区域时，当前输入和保存 / 发送操作保持可见。消息输入器使用最长 8000 字符的受限 Tiptap JSON，由后端派生纯文本；可视编辑与原始 Markdown 共用同一耐久事实，Markdown 无法表示的结构会保留原内容并拒绝切换。笔记列表投影所有未删除根 Message，并提供章节 / 全文筛选、本书导出和线程入口；竖屏列表与线程是同一悬浮窗口中的前后页，横屏复用同一 DOM 按 `A+B`、`B+C` 或 `A+B+C` 分栏。线程负责回复、引用、修订、关系、快照和跳回。删除写入 Message 墓碑并立即撤销正文投影。标注颜色、notebook、同步和 tombstone 压缩留待后续真实需求。
 
 ### 翻页输入
 
@@ -170,7 +170,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### FB2 / FBZ 入口门槛
 
-`scripts/check-reader-linux.sh` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳；测试专用启动环境变量只接受 `360x760`、`600x760`、`1000x760`、`1280x800` 与 `1600x900` 五个固定尺寸，避免把 WebDriver 不生效的运行时 resize 当成多视口证据。门禁覆盖拖放事件、网格 / 列表、资料库管理、阅读记忆、默认专注阅读、显式桌面工作区、760 CSS px 单栏尺度、32 CSS px 边距、完整导入诊断、跨 section 回退、当前手势矩阵和 AppLog 隐私。
+`scripts/check-reader-linux.sh` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳；测试专用启动环境变量只接受 `360x760`、`600x760`、`1000x760`、`1280x800` 与 `1600x900` 五个固定尺寸。门禁覆盖拖放事件、网格 / 列表、资料库管理、阅读记忆、默认专注阅读、显式桌面工作区、竖屏笔记两页、横屏 `A+B` / `B+C` / `A+B+C` 顺序、选中与返回焦点、760 CSS px 单栏尺度、32 CSS px 边距、Locator 稳定、完整导入诊断、跨 section 回退、当前手势矩阵和 AppLog 隐私。
 
 当前 WebKitGTK 2.52.5 的 W3C touch Actions 会挂起，因此 Linux 门明确请求可信 `mouse` Pointer Actions，逐次核对真实命中、`isTrusted`、左右点按 / 横拖、媒体误开、纵向意图、宽表双向内部滚动与双向边界移交，并记录请求与实际 `pointerType`。该门只算可信自动化指针与主线程性能证据，不冒充实体触摸；PCT-AL10 自动滑动、SurfaceFlinger presentation 与用户自然手指触摸分别保留真实目标证据边界。
 

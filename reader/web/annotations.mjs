@@ -37,6 +37,7 @@ export function createAnnotations({
   let filterTimer = null;
   let selectionChangeTimer = null;
   let searchConversations = null;
+  let selectedConversationId = null;
 
   function textNodes() {
     const nodes = [];
@@ -179,14 +180,26 @@ export function createAnnotations({
         edit.className = "annotation-item-action annotation-item-edit";
         edit.dataset.annotationId = item.id;
         edit.dataset.annotationAction = "edit";
-        edit.textContent = "编辑";
         edit.setAttribute("aria-label", item.note ? "编辑笔记" : "为标注添加笔记");
+        edit.title = edit.getAttribute("aria-label");
+        const editIcon = document.createElement("span");
+        editIcon.className = "fluent-icon";
+        editIcon.setAttribute("aria-hidden", "true");
+        editIcon.textContent = "\uE70F";
+        edit.append(editIcon);
         removeButton.type = "button";
         removeButton.className = "annotation-item-action annotation-item-delete";
         removeButton.dataset.annotationId = item.id;
         removeButton.dataset.annotationAction = "delete";
-        removeButton.textContent = "删除";
         removeButton.setAttribute("aria-label", "删除标注");
+        removeButton.title = removeButton.getAttribute("aria-label");
+        const deleteIcon = document.createElement("span");
+        deleteIcon.className = "fluent-icon";
+        deleteIcon.setAttribute("aria-hidden", "true");
+        deleteIcon.textContent = "\uE74D";
+        removeButton.append(deleteIcon);
+        row.dataset.conversationId = item.conversationId;
+        row.dataset.selected = String(item.conversationId === selectedConversationId);
         actions.append(edit, removeButton);
         row.append(button, actions);
         return row;
@@ -219,6 +232,17 @@ export function createAnnotations({
       searchConversations = new Set();
     }
     sync();
+  }
+
+  function selectConversation(conversationId) {
+    selectedConversationId = conversationId;
+    for (const row of controls.list.querySelectorAll(".annotation-item")) {
+      row.dataset.selected = String(row.dataset.conversationId === conversationId);
+    }
+  }
+
+  function conversationFocusTarget() {
+    return controls.list.querySelector('.annotation-item[data-selected="true"] .annotation-item-main');
   }
 
   function fail(error) {
@@ -899,11 +923,13 @@ export function createAnnotations({
   return Object.freeze({
     addSelection,
     bind,
+    conversationFocusTarget,
     dismissSelection,
     go,
     redraw,
     remove,
     restore,
+    selectConversation,
     snapshot,
     sourceAnchor: store.sourceAnchor,
     updateNote,

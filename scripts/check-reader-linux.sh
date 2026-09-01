@@ -813,6 +813,7 @@ return Boolean(button);') == true ]] || die 'could not open a reading memory res
 
 verify_desktop_workspace() {
   local baseline resized restored workspace search notes directory keyboard medium narrow tool tool_switch
+  local notes_two notes_return notes_wide notes_wide_return medium_notes medium_thread portrait_notes portrait_thread portrait_return
   local baseline_anchor resized_anchor restored_anchor workspace_anchor tool_switch_anchor
 
   baseline=$(wait_for_script \
@@ -904,18 +905,56 @@ const event = new KeyboardEvent("keydown", {key: "ArrowRight", bubbles: true, ca
 summary?.dispatchEvent(event);
 return event.defaultPrevented;') == true ]] || die 'desktop workspace arrow navigation was not handled'
   notes=$(wait_for_script \
-    'return { active: document.documentElement.dataset.workspacePanel || null, focused: document.activeElement === document.querySelector(".reader-tool.notes > summary"), items: document.querySelectorAll(".annotation-item-main").length, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length };' \
-    '.active == "notes" and .focused == true and .items > 0 and .openPanels == 1' \
+    'const panel = document.querySelector(".notes-panel")?.getBoundingClientRect(); const list = document.querySelector(".annotation-list"); return { active: document.documentElement.dataset.workspacePanel || null, focused: document.activeElement === document.querySelector(".reader-tool.notes > summary"), items: document.querySelectorAll(".annotation-item-main").length, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, scroll: list?.scrollTop || 0, viewport: {width: innerWidth, height: innerHeight}, width: panel?.width || 0, left: panel?.left ?? -1, right: panel?.right ?? -1, top: panel?.top ?? -1, bottom: panel?.bottom ?? -1, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null };' \
+    '.active == "notes" and .focused == true and .items > 0 and .openPanels == 1 and .width >= 319 and .width <= 321 and ((.right - .viewport.width) | fabs) <= 2 and ((.left - (.viewport.width - 320)) | fabs) <= 2 and (.top | fabs) <= 1 and ((.bottom - .viewport.height) | fabs) <= 2 and .locator != null' \
     'desktop notes workspace did not become ready')
   [[ $(execute_sync '
 document.querySelector(".annotation-item-main")?.click();
 return true;') == true ]] || die 'could not open a desktop message conversation'
-  wait_for_script \
-    'const overlay = document.querySelector("#message-conversation"); return { open: Boolean(overlay && !overlay.hidden), source: Boolean(document.querySelector("#message-conversation-source")?.textContent), error: document.documentElement.dataset.error || null };' \
-    '.open == true and .source == true and .error == null' \
-    'desktop message conversation did not open' >/dev/null
+  notes_two=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const thread = overlay?.getBoundingClientRect(); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); return { viewport: {width: innerWidth, height: innerHeight}, open: Boolean(overlay && !overlay.hidden), source: Boolean(document.querySelector("#message-conversation-source")?.textContent), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, notes: notes ? {left: notes.left, right: notes.right, top: notes.top, bottom: notes.bottom} : null, thread: thread ? {left: thread.left, right: thread.right, top: thread.top, bottom: thread.bottom} : null, frame: frame ? {left: frame.left, right: frame.right} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == true and .source == true and .active == "notes" and .openPanels == 1 and .selected == 1 and (.notes.left | fabs) <= 1 and ((.notes.right - 320) | fabs) <= 2 and (.notes.top | fabs) <= 1 and ((.notes.bottom - .viewport.height) | fabs) <= 2 and ((.thread.left - .notes.right) | fabs) <= 2 and ((.thread.right - .viewport.width) | fabs) <= 2 and (.thread.top | fabs) <= 1 and ((.thread.bottom - .viewport.height) | fabs) <= 2 and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewport.width - 320)) | fabs) <= 2 and .locator != null and .error == null' \
+    'desktop B+C message workspace did not become ready')
   execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
     die 'could not close the desktop message conversation'
+  notes_return=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); const list = document.querySelector(".annotation-list"); const selected = document.querySelector(".annotation-item[data-selected=true] .annotation-item-main"); return { open: Boolean(overlay && !overlay.hidden), notesOpen: document.querySelector(".reader-tool.notes")?.open || false, active: document.documentElement.dataset.workspacePanel || null, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, focused: document.activeElement === selected, scroll: list?.scrollTop || 0, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == false and .notesOpen == true and .active == "notes" and .selected == 1 and .focused == true and .locator != null and .error == null' \
+    'closing the desktop thread did not restore the notes list')
+  [[ $(jq '.scroll' <<<"$notes_return") == "$(jq '.scroll' <<<"$notes")" ]] ||
+    die 'closing the desktop thread reset the notes list scroll position'
+  [[ $(jq -r '.locator' <<<"$notes_return") == "$(jq -r '.locator' <<<"$notes_two")" ]] ||
+    die 'opening and closing the desktop thread changed the current locator'
+
+  webdriver_value POST "/session/$session_id/window/rect" '{"width":1600,"height":900}' >/dev/null ||
+    die 'could not widen the active notes workspace'
+  wait_for_script \
+    'const reader = document.querySelector(".reader"); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, frame: frame ? {left: frame.left, right: frame.right} : null, error: document.documentElement.dataset.error || null };' \
+    '.active == "notes" and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2 and .error == null' \
+    'wide A+B notes workspace did not stabilize' >/dev/null
+  execute_sync 'document.querySelector(".annotation-item[data-selected=true] .annotation-item-main")?.click(); return true;' >/dev/null ||
+    die 'could not reopen the selected wide message conversation'
+  notes_wide=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const thread = overlay?.getBoundingClientRect(); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, open: Boolean(overlay && !overlay.hidden), active: document.documentElement.dataset.workspacePanel || null, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, stable: document.documentElement.dataset.viewportStable === expected, notes: notes ? {left: notes.left, right: notes.right} : null, thread: thread ? {left: thread.left, right: thread.right, width: thread.width} : null, frame: frame ? {left: frame.left, right: frame.right, width: frame.width} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == true and .active == "notes" and .selected == 1 and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - .notes.left) | fabs) <= 2 and ((.notes.right - .thread.left) | fabs) <= 2 and .frame.width >= 600 and .thread.width >= 440 and .thread.width <= 520 and ((.thread.right - .viewportWidth) | fabs) <= 2 and .locator != null and .error == null' \
+    'wide A+B+C message workspace did not become ready')
+  [[ $(jq -r '.locator' <<<"$notes_wide") == "$(jq -r '.locator' <<<"$notes_return")" ]] ||
+    die 'opening the wide thread changed the current locator'
+  execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
+    die 'could not close the wide message conversation'
+  notes_wide_return=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); const reader = document.querySelector(".reader"); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, open: Boolean(overlay && !overlay.hidden), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, focused: document.activeElement === document.querySelector(".annotation-item[data-selected=true] .annotation-item-main"), frame: frame ? {left: frame.left, right: frame.right} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == false and .active == "notes" and .stable == true and .focused == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2 and .locator != null and .error == null' \
+    'closing the wide thread did not restore A+B')
+  [[ $(jq -r '.locator' <<<"$notes_wide_return") == "$(jq -r '.locator' <<<"$notes_wide")" ]] ||
+    die 'closing the wide thread changed the current locator'
+
+  webdriver_value POST "/session/$session_id/window/rect" '{"width":1280,"height":800}' >/dev/null ||
+    die 'could not restore the active notes workspace width'
+  wait_for_script \
+    'const reader = document.querySelector(".reader"); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, frame: frame ? {left: frame.left, right: frame.right} : null };' \
+    '.active == "notes" and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2' \
+    'restored A+B notes workspace did not stabilize' >/dev/null
 
   execute_sync 'document.querySelector(".reader-tool.directory > summary")?.click(); return true;' >/dev/null ||
     die 'could not switch to the desktop directory'
@@ -962,9 +1001,38 @@ return {pageHandled: event.defaultPrevented, beforePage: before.navigation.curre
 
   set_window_size 1000 760
   medium=$(wait_for_script \
-    'const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, pageMargin: reader ? parseFloat(getComputedStyle(reader).getPropertyValue("--page-left-margin")) / devicePixelRatio : 0, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, error: document.documentElement.dataset.error || null };' \
-    '.desktop == false and .active == null and .stable == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .pageMargin >= 31 and .pageMargin <= 33 and .overflow == false and .error == null' \
+    'const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, pageMargin: reader ? parseFloat(getComputedStyle(reader).getPropertyValue("--page-left-margin")) / devicePixelRatio : 0, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.desktop == true and .active == null and .stable == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .pageMargin >= 31 and .pageMargin <= 33 and .overflow == false and .locator != null and .error == null' \
     'medium reader did not preserve the centered reading measure')
+  execute_sync 'document.querySelector(".reader-tool.notes > summary")?.click(); return true;' >/dev/null ||
+    die 'could not open the medium notes workspace'
+  medium_notes=$(wait_for_script \
+    'const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewport: {width: innerWidth, height: innerHeight}, active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, notes: notes ? {left: notes.left, right: notes.right, top: notes.top, bottom: notes.bottom} : null, frame: frame ? {left: frame.left, right: frame.right} : null, items: document.querySelectorAll(".annotation-item-main").length, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.active == "notes" and .stable == true and .items > 0 and ((.notes.right - .viewport.width) | fabs) <= 2 and ((.notes.left - (.viewport.width - 320)) | fabs) <= 2 and (.notes.top | fabs) <= 1 and ((.notes.bottom - .viewport.height) | fabs) <= 2 and (.frame.left | fabs) <= 2 and ((.frame.right - .notes.left) | fabs) <= 2 and .locator != null and .error == null' \
+    'medium A+B notes workspace did not become ready')
+  execute_sync 'document.querySelector(".annotation-item-main")?.click(); return true;' >/dev/null ||
+    die 'could not open the medium message conversation'
+  medium_thread=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const thread = overlay?.getBoundingClientRect(); return { viewport: {width: innerWidth, height: innerHeight}, open: Boolean(overlay && !overlay.hidden), notesOpen: document.querySelector(".reader-tool.notes")?.open || false, active: document.documentElement.dataset.workspacePanel || null, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, notes: notes ? {right: notes.right, top: notes.top, bottom: notes.bottom} : null, thread: thread ? {left: thread.left, right: thread.right, top: thread.top, bottom: thread.bottom} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == true and .notesOpen == true and .active == "notes" and .selected == 1 and ((.notes.right - 320) | fabs) <= 2 and ((.thread.left - .notes.right) | fabs) <= 2 and ((.thread.right - .viewport.width) | fabs) <= 2 and (.thread.top | fabs) <= 1 and ((.thread.bottom - .viewport.height) | fabs) <= 2 and .locator != null and .error == null' \
+    'medium B+C message workspace did not become ready')
+  [[ $(jq -r '.locator' <<<"$medium_thread") == "$(jq -r '.locator' <<<"$medium_notes")" ]] ||
+    die 'opening the medium thread changed the current locator'
+  execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
+    die 'could not close the medium message conversation'
+  wait_for_script \
+    'return { open: !document.querySelector("#message-conversation")?.hidden, notesOpen: document.querySelector(".reader-tool.notes")?.open || false, focused: document.activeElement === document.querySelector(".annotation-item[data-selected=true] .annotation-item-main") };' \
+    '.open == false and .notesOpen == true and .focused == true' \
+    'closing the medium thread did not restore the notes list' >/dev/null
+  execute_sync '
+const target = document.activeElement;
+const event = new KeyboardEvent("keydown", {key: "Escape", bubbles: true, cancelable: true});
+target?.dispatchEvent(event);
+return event.defaultPrevented;' >/dev/null || die 'could not close the medium notes workspace'
+  wait_for_script \
+    'const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, focused: document.activeElement === reader };' \
+    '.active == null and .openPanels == 0 and .stable == true and .focused == true' \
+    'medium notes workspace did not return to focus reading' >/dev/null
   execute_sync '
 const control = document.querySelector("#reading-mode");
 control.value = "scroll";
@@ -986,7 +1054,7 @@ return true;' >/dev/null || die 'could not switch the medium reader to scroll mo
     'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), workspace: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), error: document.documentElement.dataset.error || null };' \
     '.desktop == false and .workspace == null and .openPanels == 0 and .stable == true and .full == true and .error == null' \
     'narrow reader did not restore the mobile tool layout' >/dev/null
-  for tool in directory search notes; do
+  for tool in directory search; do
     execute_sync "
 document.documentElement.setAttribute('data-reader-tools', '');
 document.querySelector('.reader-tool.$tool > summary')?.click();
@@ -998,6 +1066,45 @@ return true;" >/dev/null || die "could not open the narrow $tool tool"
     execute_sync "document.querySelector('.reader-tool.$tool').open = false; document.documentElement.removeAttribute('data-reader-tools'); return true;" >/dev/null ||
       die "could not close the narrow $tool tool"
   done
+
+  set_window_size 360 760
+  wait_for_script \
+    'const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), stable: document.documentElement.dataset.viewportStable === expected, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length };' \
+    '.desktop == false and .stable == true and .openPanels == 0' \
+    'portrait reader did not stabilize before opening notes' >/dev/null
+  execute_sync '
+document.documentElement.setAttribute("data-reader-tools", "");
+document.querySelector(".reader-tool.notes > summary")?.click();
+return true;' >/dev/null || die 'could not open the portrait notes window'
+  portrait_notes=$(wait_for_script \
+    'const panel = document.querySelector(".notes-panel")?.getBoundingClientRect(); const list = document.querySelector(".annotation-list"); return { viewport: {width: innerWidth, height: innerHeight}, open: document.querySelector(".reader-tool.notes")?.open || false, items: document.querySelectorAll(".annotation-item-main").length, panel: panel ? {left: panel.left, right: panel.right, top: panel.top, bottom: panel.bottom, width: panel.width, height: panel.height} : null, scroll: list?.scrollTop || 0, overflow: document.querySelector(".notes-panel")?.scrollWidth > document.querySelector(".notes-panel")?.clientWidth, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null };' \
+    '.open == true and .items > 0 and ((.panel.left - 12) | fabs) <= 2 and ((.panel.right - (.viewport.width - 12)) | fabs) <= 2 and ((.panel.top - 12) | fabs) <= 2 and ((.panel.bottom - (.viewport.height - 12)) | fabs) <= 2 and ((.panel.width - (.viewport.width - 24)) | fabs) <= 2 and ((.panel.height - (.viewport.height - 24)) | fabs) <= 2 and .overflow == false and .locator != null' \
+    'portrait notes list page did not become ready')
+  execute_sync 'document.querySelector(".annotation-item-main")?.click(); return true;' >/dev/null ||
+    die 'could not open the portrait message thread page'
+  portrait_thread=$(wait_for_script \
+    'const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const overlay = document.querySelector("#message-conversation"); const thread = overlay?.getBoundingClientRect(); return { open: Boolean(overlay && !overlay.hidden), notesOpen: document.querySelector(".reader-tool.notes")?.open || false, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, notes: notes ? {left: notes.left, right: notes.right, top: notes.top, bottom: notes.bottom} : null, thread: thread ? {left: thread.left, right: thread.right, top: thread.top, bottom: thread.bottom} : null, fullscreenHidden: document.querySelector("#message-conversation-fullscreen")?.getClientRects().length == 0, overflow: overlay ? overlay.scrollWidth > overlay.clientWidth : true, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == true and .notesOpen == true and .selected == 1 and ((.thread.left - .notes.left) | fabs) <= 2 and ((.thread.right - .notes.right) | fabs) <= 2 and ((.thread.top - .notes.top) | fabs) <= 2 and ((.thread.bottom - .notes.bottom) | fabs) <= 2 and .fullscreenHidden == true and .overflow == false and .locator != null and .error == null' \
+    'portrait message thread did not reuse the notes window geometry')
+  [[ $(jq -r '.locator' <<<"$portrait_thread") == "$(jq -r '.locator' <<<"$portrait_notes")" ]] ||
+    die 'opening the portrait thread changed the current locator'
+  execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
+    die 'could not return from the portrait message thread'
+  portrait_return=$(wait_for_script \
+    'const list = document.querySelector(".annotation-list"); const selected = document.querySelector(".annotation-item[data-selected=true] .annotation-item-main"); return { threadOpen: !document.querySelector("#message-conversation")?.hidden, notesOpen: document.querySelector(".reader-tool.notes")?.open || false, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, focused: document.activeElement === selected, scroll: list?.scrollTop || 0, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null };' \
+    '.threadOpen == false and .notesOpen == true and .selected == 1 and .focused == true and .locator != null' \
+    'portrait thread back did not restore the notes list page')
+  [[ $(jq '.scroll' <<<"$portrait_return") == "$(jq '.scroll' <<<"$portrait_notes")" ]] ||
+    die 'portrait thread back reset the notes list scroll position'
+  [[ $(jq -r '.locator' <<<"$portrait_return") == "$(jq -r '.locator' <<<"$portrait_thread")" ]] ||
+    die 'closing the portrait thread changed the current locator'
+  execute_sync 'document.querySelector(".notes-panel [data-close-reader-tools]")?.click(); return true;' >/dev/null ||
+    die 'could not close the portrait notes window'
+  wait_for_script \
+    'return { notesOpen: document.querySelector(".reader-tool.notes")?.open || false, tools: document.documentElement.hasAttribute("data-reader-tools"), focused: document.activeElement === document.querySelector(".reader") };' \
+    '.notesOpen == false and .tools == false and .focused == true' \
+    'portrait notes back did not restore reading' >/dev/null
+
   [[ $(execute_sync '
 document.documentElement.removeAttribute("data-reader-tools");
 const reader = document.querySelector(".reader");
@@ -1023,7 +1130,11 @@ return document.documentElement.hasAttribute("data-reader-tools");') == false ]]
     --argjson mediumPageWidth "$(jq '.pageWidth' <<<"$medium")" \
     --argjson narrowPageWidth "$(jq '.pageWidth' <<<"$narrow")" \
     --argjson pageMargin "$(jq '.pageMargin' <<<"$baseline")" \
-    '{widths: [360, 600, 1000, 1280, 1600], defaultMode: "focus-reading", workspaceMode: "explicit", tools: ["directory", "search", "notes"], pageWidths: {desktop: $desktopPageWidth, workspace: $workspacePageWidth, medium: $mediumPageWidth, narrow: $narrowPageWidth}, pageMarginCss: $pageMargin, pagedAndScrollMeasure: true, searchResults: $searchResults, messages: $messages, locatorStable: true, keyboard: true, focusVerified: true, narrowRegression: true}')
+    --argjson twoPane "$notes_two" \
+    --argjson threePane "$notes_wide" \
+    --argjson mediumPane "$medium_thread" \
+    --argjson portrait "$portrait_thread" \
+    '{widths: [360, 600, 1000, 1280, 1600], defaultMode: "focus-reading", workspaceMode: "explicit", tools: ["directory", "search", "notes"], pageWidths: {desktop: $desktopPageWidth, workspace: $workspacePageWidth, medium: $mediumPageWidth, narrow: $narrowPageWidth}, pageMarginCss: $pageMargin, noteLayouts: {portraitPages: $portrait, mediumBC: $mediumPane, desktopBC: $twoPane, wideABC: $threePane}, pagedAndScrollMeasure: true, searchResults: $searchResults, messages: $messages, locatorStable: true, keyboard: true, focusVerified: true, narrowRegression: true}')
 }
 
 verify_reader_runtime_errors() {
@@ -1109,6 +1220,13 @@ return rect ? {x: rect.left + 8, y: rect.bottom - 8} : null;') ||
     'return globalThis.__athaReaderDiagnostics.previewState();' \
     '.open == false and .focusRestored == true' \
     'image backdrop did not close the preview')
+
+  webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
+    die 'could not prepare the portrait interface viewport'
+  wait_for_script \
+    'const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return {desktop: document.documentElement.hasAttribute("data-desktop-workspace"), stable: document.documentElement.dataset.viewportStable === expected};' \
+    '.desktop == false and .stable == true' \
+    'portrait interface viewport did not stabilize' >/dev/null
 
   [[ $(execute_sync '
 document.documentElement.setAttribute("data-reader-tools", "");

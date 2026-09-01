@@ -34,7 +34,7 @@ schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词�
 
 ## Done：桌面阅读工作区
 
-目录、书内搜索和消息已经在宽屏投影为与书页共存的互斥左侧工作区，并补齐键鼠与焦点导航。分页使用真实 reader frame，经既有 Navigation / Locator 在工作区出现、隐藏和窗口变化后恢复正文位置；窄屏继续复用覆盖式工具面板，没有建立桌面专用状态或阅读内核。
+目录和书内搜索已经在横屏投影为与书页共存的互斥左侧工作区；笔记另按正文、列表和当前线程的主从关系投影。分页使用真实 reader frame，经既有 Navigation / Locator 在工作区出现、隐藏和窗口变化后恢复正文位置；所有尺寸共用同一状态与阅读内核。
 
 ## Done：日常入口与内部可安装候选
 
@@ -44,7 +44,7 @@ Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联
 
 ## Now：UI / UX 整理
 
-当前阶段不扩展功能清单，而是让已经存在的阅读、消息和词典形成清楚的产品构图。第一切片先让 24 / 32 / 48 左右边距按视觉 CSS px 跨 DPR 生效，把分页与滚动正文限制为约 760 CSS px 的居中单栏，并让宽屏目录、搜索和笔记只在用户明确打开时占用工作区。下一切片按已提供的 Telegram 参照整理笔记：竖屏以悬浮窗口承载笔记列表和单条对话的前后切换，横屏则由左侧笔记 / 对话列表与右侧当前消息线程组成；不是把正文与对话各占一栏。之后再统一用户术语。
+当前阶段不扩展功能清单，而是让已经存在的阅读、消息和词典形成清楚的产品构图。阅读版面切片已经让 24 / 32 / 48 左右边距按视觉 CSS px 跨 DPR 生效，并把分页与滚动正文限制为约 760 CSS px 的居中单栏。笔记切片已经按 Telegram 的成熟层级整理为竖屏同一悬浮窗口中的 `B → C → B` 两页；横屏从左到右显示 `A+B`、`B+C` 或 `A+B+C`，其中 `A` 是正文、`B` 是笔记 / 对话列表、`C` 是当前消息线程。下一切片统一用户术语。
 
 本阶段以微信读书式安静阅读和 Telegram 式稳定消息流为参照，但只复用适合 Atha 主循环的设计判断，不照搬品牌外观。数据丢失、内容安全、引用错位和 Android 性能回归仍高于视觉扩展；每次只关闭一个可验证切片，不预建新框架、设置项、社区服务或同步 schema。内部候选的平台补证保留为后续交付条件，不与当前视觉判断混为一项。
 
@@ -80,7 +80,7 @@ Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联
 | 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/architecture/READER-CORE.md` |
 | 完整本地数据生命周期 | `.atha-data` 完整备份 / 恢复、恢复日志、分类占用、两级删除和 Linux 真壳管理界面 | `docs/decisions/ADR-0010-local-data-lifecycle.md`、`docs/architecture/READER-CORE.md` |
 | 跨书阅读记忆中心 | 最近阅读、跨书 Message 搜索、有书安全跳回、缺书及历史 Snapshot | `docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md` |
-| 桌面阅读工作区 | 宽屏目录 / 搜索 / Message 侧栏、键鼠焦点、真实 frame 分页与窄屏回归 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
+| 桌面阅读工作区 | 横屏目录 / 搜索侧栏，笔记 `A+B` / `B+C` / `A+B+C` 投影，键鼠焦点、真实 frame 分页与窄屏回归 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
 | 日常入口与内部候选 | 桌面拖放、网格 / 列表、冷启动文件关联、Linux AppImage 与 PCT-AL10 内部候选门 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
 | 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md` |
 | 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |

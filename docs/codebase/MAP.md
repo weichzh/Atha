@@ -2,7 +2,7 @@
 
 ## 仓库状态
 
-当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、FB2 / FBZ、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核。Linux Tauri / WebKitGTK 已成为日常 GUI 目标，资料库拖放、网格 / 列表、文件关联候选、阅读记忆、默认专注阅读、显式桌面工作区与阅读回归通过正式 Linux WebDriver 入口；Android 保留既有模拟器纵切，并有 PCT-AL10 内部候选覆盖安装与启动证据。直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
+当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、FB2 / FBZ、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核。Linux Tauri / WebKitGTK 已成为日常 GUI 目标，资料库拖放、网格 / 列表、文件关联候选、阅读记忆、默认专注阅读、显式桌面工作区、响应式笔记列表 / 线程与阅读回归通过正式 Linux WebDriver 入口；Android 保留既有模拟器纵切，并有 PCT-AL10 内部候选覆盖安装与启动证据。直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
 
 ## 顶层结构
 
@@ -25,8 +25,8 @@
 | `reader/app/src/components/LibraryView.svelte`、`reader/app/src/library.ts` | 系统选择器 / 桌面拖放共用导入结果、网格 / 列表书架、长按选择 / 右键菜单、自定义封面、冷启动一次性打开，以及独立应用主题、全书阅读默认恢复、词典和本地资料设置投影 | Linux GUI 已验证 |
 | `reader/app/src/components/MemoryCenter.svelte` | 最近阅读、跨书消息搜索、有书跳回和缺书 / 历史 Snapshot 资料库投影 | Linux GUI 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
-| `reader/theme.css`、`reader/atha-reader.html`、`reader/atha-reader.css` | 应用 / 阅读共享颜色 token、唯一阅读页结构、分页 / 原生滚动、760 CSS px 居中单栏、显式宽屏工作区、底栏设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 已验证；当前候选已安装 PCT-AL10，软键盘与自然双指仍待交互复核 |
-| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、视觉 CSS px 到设备像素换算、真实 frame 分页、桌面工作区绑定、诊断、benchmark 和页面组合入口 | Linux GUI 已验证 |
+| `reader/theme.css`、`reader/atha-reader.html`、`reader/atha-reader.css` | 应用 / 阅读共享颜色 token、唯一阅读页结构、分页 / 原生滚动、760 CSS px 居中单栏、横屏工作区、竖屏笔记两页、横屏 `A+B` / `B+C` / `A+B+C`、底栏设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板与内容 dialog | Linux GUI 已验证；当前候选已安装 PCT-AL10，软键盘与自然双指仍待交互复核 |
+| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/线程、标注列表与当前选择投影、内容安全、视觉 CSS px 到设备像素换算、真实 frame 分页、响应式工作区绑定、诊断、benchmark 和页面组合入口 | Linux GUI 已验证 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的解析、序列化、大小 / 字段 / 重复 ID 与注入式 CSS 校验边界 | 已实现 |
 | `reader/app/src/components/panels/DictionaryPanel.svelte`、`DictionarySettings.svelte`、`reader/app/src/dictionary.ts` | 阅读界面的选区查词与安全富文本词条，以及应用设置中的本地词典管理、持久化来源 / 六档释义字号；移动查词使用 75% 高底部抽屉 | PCT-AL10 release 本地测试候选已自动化验证 |
 | `reader/samples.json` | 四个本地验收样本的入口、manifest、内容、搜索和边界断言清单 | M2 已验证 |
@@ -86,7 +86,7 @@
 - 阅读界面的词典面板只显示选区查词结果；来源导入、移除和 Readest 对照的 85%、100%、115%、130%、150%、175% 释义字号位于应用设置。浏览器本地 schema 1 设置只保存 64 位当前词典 ID 与允许字号，重载恢复且不改变正文偏好；损坏设置或已移除来源回退到首个可用本地词典，存储失败只影响持久化，不阻止本次查词；
 - `atha`、`atha-book` 与 `atha-cover` 自定义协议只提供应用资源、当前书根与已登记封面；Windows / Android 使用 `https://*.localhost`，Linux 使用 `<scheme>://localhost`。同书校验比较协议与 host，不能依赖 custom scheme 恒为 `null` 的 `URL.origin`；导航、新窗口、下载与外部请求默认拒绝；
 - 原生 host 的 `main.rs` 只选择 Windows 入口；`windows.rs` 组合事件循环，`launch`、`protocol` 与 `diagnostics` module 分别拥有参数和窗口、受控资源、稳定状态键、日志与 benchmark；WebView2 使用持久 profile；
-- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`interaction` 以一次序列一个 owner 仲裁翻页、横向溢出和内容激活，`pagination` 用单个 rAF 写入拖动预览，长章节改写原生横向滚动，并缓存稳定页与当前 section 的 fragment 偏移；`session` 保留 live DOM 直到目标准备和排版完成，失败时恢复上一稳定内容与位置；`content` 用共享三槽和 8 Mi 字符预算复用已校验 detached section 或相邻 XHTML 原文，并以 generation 与 Promise identity 拒绝关闭后的在途回写；`reader-state` 拥有偏好、书签、进度和应用级阅读统计记录；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式投影稳定 `aspect-ratio`，再执行当前页优先校验、解码、章节内短期复用和稳定书内几何缓存；可见资源写入前捕获一次 Locator，前后几何未变时不重排，成功加载后几何变化、失败替换及几何变化的迟到成功统一交给 `pagination` 的既有锚点重排；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表与筛选；`conversations` 负责回复、引用、修订、关系、快照、跳回、本条 / 本章 / 本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 组合流程、把共享主题样式与阅读样式一并注入 Shadow / Snapshot、用 `VisualViewport` 约束软键盘上的标注笔记和消息输入器、以既有启动遮罩覆盖 `content-loaded` 到 `layout-stable` 的中间分页，并禁用默认右键菜单；
+- 阅读页源码保持原生 ES module：`locator`、`navigation`、`preferences`、`session` 与 `pagination` 拥有既有阅读热路径；`interaction` 以一次序列一个 owner 仲裁翻页、横向溢出和内容激活，`pagination` 用单个 rAF 写入拖动预览，长章节改写原生横向滚动，并缓存稳定页与当前 section 的 fragment 偏移；`session` 保留 live DOM 直到目标准备和排版完成，失败时恢复上一稳定内容与位置；`content` 用共享三槽和 8 Mi 字符预算复用已校验 detached section 或相邻 XHTML 原文，并以 generation 与 Promise identity 拒绝关闭后的在途回写；`reader-state` 拥有偏好、书签、进度和应用级阅读统计记录；`content` 与 `search` 在解析前只白名单并剥离 HTML5、XHTML 1.1 和兼容扩展 XHTML 1.0 Strict 固定声明，主动内容仍拒绝；`content` 额外从已验证 Range 捕获 Snapshot 候选，并对具有显式宽高的 SVG 公式投影稳定 `aspect-ratio`，再执行当前页优先校验、解码、章节内短期复用和稳定书内几何缓存；可见资源写入前捕获一次 Locator，前后几何未变时不重排，成功加载后几何变化、失败替换及几何变化的迟到成功统一交给 `pagination` 的既有锚点重排；`message-store` 把 Tauri Message client 适配为标注投影并迁移旧记录；`annotations` 负责选择、重选、重锚、高亮、根消息列表、筛选与当前线程行投影；`conversations` 负责保留列表状态地打开 / 关闭线程，以及回复、引用、修订、关系、快照、跳回、本条 / 本章 / 本书查询投影和本书导出；`diagnostics` 继续拥有验证与 benchmark；`app` 组合流程、根据横竖屏和可用宽度投影 `A / B / C`、把共享主题样式与阅读样式一并注入 Shadow / Snapshot、用 `VisualViewport` 约束软键盘上的标注笔记和消息输入器、以既有启动遮罩覆盖 `content-loaded` 到 `layout-stable` 的中间分页，并禁用默认右键菜单；
 - 十九份页面源码由 Vite 或应用资源协议按固定顺序交付为单个 `atha-reader` runtime，避免为源码分层增加多次请求；浏览器验证服务器使用同一顺序，并对各 module 与拼接后的整体 bundle 运行语法检查；
 - Locator 以内容版本、section id 和 DOM 文本 UTF-16 偏移表示 point/range；R2 range 限于单 section 并检查实际文本边界，无效输入安全回落并留下诊断，页码不作为内容坐标；窗口重排暂时无法测量文字矩形时保留已校验偏移和当前页，错误界面显示稳定代码与阶段而不暴露书籍内容；
 - 上一页和下一页可跨 section；manifest TOC 与已有书签继续共用隐藏的原生 `select` 数据源，壳层把它投影为全屏目录按钮，书签紧随对应章节并通过 Locator 跳转；用户点击章节或书签后等待导航稳定并返回沉浸阅读；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
@@ -102,7 +102,7 @@
 
 - 日常 GUI 使用当前 GNOME Wayland 会话中的 Tauri / WebKitGTK，不启动 Android 模拟器；发布前与移动端专项验收才恢复 Android 门禁；
 - Linux 应用根是 `tauri://localhost`，书根与封面分别是 `atha-book://localhost`、`atha-cover://localhost`；平台常量统一供路由、维护 command、前端资源和 CSP 使用；
-- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。测试专用启动尺寸只允许 360 / 600 / 1000 / 1280 / 1600 五个已声明视口，避免把当前不生效的 WebDriver resize 当成证据。当前 Bash 门覆盖拖放事件、冷导入封面、空 / 有书架、网格 / 列表、长按选择、右键菜单、资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot、安全跳回、默认专注阅读、显式宽屏工作区、760 CSS px 单栏、32 CSS px 边距和窄屏回归；阅读页继续覆盖完整导入诊断、预览滚轮 / 合成双指缩放、可视视口输入器、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。当前 WebKitGTK 的 touch Actions 会挂起，门禁明确请求并核对可信 `mouse` Pointer Actions；双指和长按用合成 DOM 事件验证状态入口，因此都不是实体触摸证据。
+- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。测试专用启动尺寸只允许 360 / 600 / 1000 / 1280 / 1600 五个已声明视口。当前 Bash 门覆盖拖放事件、冷导入封面、空 / 有书架、网格 / 列表、长按选择、右键菜单、资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot、安全跳回、默认专注阅读、显式宽屏工作区、竖屏笔记列表 / 线程同边界返回、横屏 `A+B` / `B+C` / `A+B+C` 顺序、当前选择、焦点与 Locator、760 CSS px 单栏、32 CSS px 边距和窄屏回归；阅读页继续覆盖完整导入诊断、预览滚轮 / 合成双指缩放、可视视口输入器、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。当前 WebKitGTK 的 touch Actions 会挂起，门禁明确请求并核对可信 `mouse` Pointer Actions；双指和长按用合成 DOM 事件验证状态入口，因此都不是实体触摸证据。
 - `scripts/check-reader-candidate.sh` 从干净目录构建唯一 AppImage，检查 desktop MIME、Windows 扩展声明与 Android 关联隔离；随后直接驱动解包的候选 `AppRun` 完成冷启动文件关联、重复关联、普通启动与完整多视口真壳回归，不回退 debug 产物。
 
 ### Android EPUB 纵切
@@ -143,7 +143,7 @@
 - schema v2 `MessageStore`、不可变修订、墓碑、回复、正反向引用、SourceAnchor/SourceSnapshot 版本、当前修订 FTS5 与事务 Outbox；
 - HTML/CSS/呈现参数与图片资源双层信任边界校验，资源按 SHA-256 内容寻址；
 - localStorage 标注原子幂等迁移、Edition/单对话自包含 ZIP 导出与公开完整性检查；
-- Tauri TypeScript client、根 Message 标注/笔记投影、全屏筛选、半屏/全屏对话浮层、本条/本章/本书记录及时间/书序投影、受限富文本与 Markdown 输入、历史/关系/快照/跳回和本书导出入口。
+- Tauri TypeScript client、根 Message 标注 / 笔记投影、竖屏列表 / 线程两页、横屏 `A+B` / `B+C` / `A+B+C`、本条 / 本章 / 本书记录及时间 / 书序投影、受限富文本与 Markdown 输入、历史 / 关系 / 快照 / 跳回和本书导出入口。
 - 资料库阅读记忆投影：严格最近阅读、跨 Edition 当前消息搜索、根墓碑排除、完整内容身份可用性、有书深链复核与缺书 Snapshot。
 
 ## 验证证据

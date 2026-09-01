@@ -252,6 +252,8 @@ export function createConversations({
   editionId,
   readingSurface,
   returnFocus,
+  onConversationChange = () => {},
+  onLayoutChange = () => {},
 }) {
   let conversation = null;
   let parentId = null;
@@ -290,7 +292,8 @@ export function createConversations({
     scopeGeneration += 1;
     composer()?.collapse();
     controls.overlay.hidden = true;
-    returnFocus.focus({ preventScroll: true });
+    onLayoutChange();
+    returnFocus().focus({ preventScroll: true });
   }
 
   function setFullscreen(fullscreen) {
@@ -522,6 +525,7 @@ export function createConversations({
         conversation.messages.find((message) => !message.deleted)?.id ||
         null;
       const parent = conversation.messages.find((message) => message.id === parentId);
+      onConversationChange(conversation.id);
       editing = edit ? parent : null;
       if (editing) {
         composer()?.setValue(editing.contentJson, editing.text);
@@ -534,6 +538,7 @@ export function createConversations({
       setFullscreen(false);
       renderConversation();
       closeTools();
+      onLayoutChange();
       if (navigationFailed) report("当前原文位置已失效，可查看历史引用", true);
       requestAnimationFrame(() => {
         if (parentId) {
@@ -747,7 +752,11 @@ export function createConversations({
     controls.overlay.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
     });
-    readingSurface.addEventListener("pointerdown", () => (controls.overlay.hidden = true));
+    readingSurface.addEventListener("pointerdown", () => {
+      if (controls.overlay.hidden) return;
+      controls.overlay.hidden = true;
+      onLayoutChange();
+    });
     controls.exportAllButton.addEventListener("click", async () => {
       try {
         if (!(await store.export(editionId, null))) return;
