@@ -2,7 +2,7 @@
 
 ## 仓库状态
 
-当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、FB2 / FBZ、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核。Linux Tauri / WebKitGTK 已成为日常 GUI 目标，资料库拖放、网格 / 列表、文件关联候选、阅读记忆、桌面工作区与阅读回归通过正式 Linux WebDriver 入口；Android 保留既有模拟器纵切，并有 PCT-AL10 内部候选覆盖安装与启动证据。直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
+当前生产代码包含根 Cargo workspace、正式后端 crate、EPUB3、EPUB2 / NCX 子集、CBZ JPEG / PNG、FB2 / FBZ、Markdown 与 TXT 导入、本地书架、正式消息数据库、Tauri 2 产品 host、Svelte 5 应用壳和无框架阅读内核。Linux Tauri / WebKitGTK 已成为日常 GUI 目标，资料库拖放、网格 / 列表、文件关联候选、阅读记忆、默认专注阅读、显式桌面工作区与阅读回归通过正式 Linux WebDriver 入口；Android 保留既有模拟器纵切，并有 PCT-AL10 内部候选覆盖安装与启动证据。直接 Wry / Tao host 暂留为 Windows 回归基线。精确演进历史由 Git 保存，本文件只描述当前结构。
 
 ## 顶层结构
 
@@ -25,8 +25,8 @@
 | `reader/app/src/components/LibraryView.svelte`、`reader/app/src/library.ts` | 系统选择器 / 桌面拖放共用导入结果、网格 / 列表书架、长按选择 / 右键菜单、自定义封面、冷启动一次性打开，以及独立应用主题、全书阅读默认恢复、词典和本地资料设置投影 | Linux GUI 已验证 |
 | `reader/app/src/components/MemoryCenter.svelte` | 最近阅读、跨书消息搜索、有书跳回和缺书 / 历史 Snapshot 资料库投影 | Linux GUI 已验证 |
 | `reader/atha-reader-host/src/` | 共享 CLI、窗口尺寸和诊断逻辑；Wry/Tao 基线 host | 已验证 |
-| `reader/theme.css`、`reader/atha-reader.html`、`reader/atha-reader.css` | 应用 / 阅读共享颜色 token、唯一阅读页结构、分页 / 原生滚动、宽屏工作区、底栏设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 已验证；当前候选已安装 PCT-AL10，软键盘与自然双指仍待交互复核 |
-| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、真实 frame 分页、桌面工作区绑定、诊断、benchmark 和页面组合入口 | Linux GUI 已验证 |
+| `reader/theme.css`、`reader/atha-reader.html`、`reader/atha-reader.css` | 应用 / 阅读共享颜色 token、唯一阅读页结构、分页 / 原生滚动、760 CSS px 居中单栏、显式宽屏工作区、底栏设置抽屉、默认样式、可视阅读偏好、CSS 模块 fallback、书签、消息投影、搜索面板、对话浮层与内容 dialog | Linux GUI 已验证；当前候选已安装 PCT-AL10，软键盘与自然双指仍待交互复核 |
+| `reader/web/` | Locator、导航、偏好、输入与内容动作、阅读会话、状态、书签、搜索、消息适配/对话、标注投影、内容安全、视觉 CSS px 到设备像素换算、真实 frame 分页、桌面工作区绑定、诊断、benchmark 和页面组合入口 | Linux GUI 已验证 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的解析、序列化、大小 / 字段 / 重复 ID 与注入式 CSS 校验边界 | 已实现 |
 | `reader/app/src/components/panels/DictionaryPanel.svelte`、`DictionarySettings.svelte`、`reader/app/src/dictionary.ts` | 阅读界面的选区查词与安全富文本词条，以及应用设置中的本地词典管理、持久化来源 / 六档释义字号；移动查词使用 75% 高底部抽屉 | PCT-AL10 release 本地测试候选已自动化验证 |
 | `reader/samples.json` | 四个本地验收样本的入口、manifest、内容、搜索和边界断言清单 | M2 已验证 |
@@ -90,9 +90,9 @@
 - 十九份页面源码由 Vite 或应用资源协议按固定顺序交付为单个 `atha-reader` runtime，避免为源码分层增加多次请求；浏览器验证服务器使用同一顺序，并对各 module 与拼接后的整体 bundle 运行语法检查；
 - Locator 以内容版本、section id 和 DOM 文本 UTF-16 偏移表示 point/range；R2 range 限于单 section 并检查实际文本边界，无效输入安全回落并留下诊断，页码不作为内容坐标；窗口重排暂时无法测量文字矩形时保留已校验偏移和当前页，错误界面显示稳定代码与阶段而不暴露书籍内容；
 - 上一页和下一页可跨 section；manifest TOC 与已有书签继续共用隐藏的原生 `select` 数据源，壳层把它投影为全屏目录按钮，书签紧随对应章节并通过 Locator 跳转；用户点击章节或书签后等待导航稳定并返回沉浸阅读；字号重排按变化前 Locator 恢复到包含同一偏移的页面；
-- `reader/theme.css` 是应用壳和阅读壳颜色字面量的唯一事实所有者，`library.css`、`shell.css` 与 `atha-reader.css` 只消费语义 token；应用壳与阅读壳各在运行时把显式 / 系统选择解析为一个 `data-*-tone`，系统主题不复制调色板声明，受控 Node 检查阻止功能样式重新声明颜色或恢复重复媒体分支。应用壳主题以独立 `atha.app.appearance.v1` 保存跟随系统 / 浅色 / 深色，不改写阅读记录；全书阅读默认拥有系统 / 浅色 / 纸张 / 深色书页主题、亮度、16–40 逻辑 CSS px 字号、字体和紧凑 / 标准 / 舒展密度；本书覆盖拥有左右翻页 / 上下滚动、书源样式、24 / 32 / 48 左右边距、顶格 / 2em 段首缩进、段距和最多 32 个有序 CSS 模块。旧点击 / 滑动开关和自由边距字段在恢复时忽略。旧单段 CSS 无损迁入本地模块，超过新组合上限时停用但不丢弃。模块包解析、序列化与结构限制由独立 codec 复用 `content.validateStylesheet()`，Preferences 保留 UI、按模块预览 timer、组合和每书持久化；CodeMirror 只按需增强同一 textarea，失败统一回滚；书签与进度按 host 提供的书籍状态键分区，位置高频写与低频状态分离；阅读统计使用独立的有界应用记录，只累计稳定、沉浸、可见、聚焦且未闲置的短区间，并投影今日、近 7 天、本书和连续阅读；
+- `reader/theme.css` 是应用壳和阅读壳颜色字面量的唯一事实所有者，`library.css`、`shell.css` 与 `atha-reader.css` 只消费语义 token；应用壳与阅读壳各在运行时把显式 / 系统选择解析为一个 `data-*-tone`，系统主题不复制调色板声明，受控 Node 检查阻止功能样式重新声明颜色或恢复重复媒体分支。应用壳主题以独立 `atha.app.appearance.v1` 保存跟随系统 / 浅色 / 深色，不改写阅读记录；全书阅读默认拥有系统 / 浅色 / 纸张 / 深色书页主题、亮度、16–40 逻辑 CSS px 字号、字体和紧凑 / 标准 / 舒展密度；本书覆盖拥有左右翻页 / 上下滚动、书源样式、24 / 32 / 48 视觉 CSS px 左右边距、顶格 / 2em 段首缩进、段距和最多 32 个有序 CSS 模块。旧点击 / 滑动开关和自由边距字段在恢复时忽略。旧单段 CSS 无损迁入本地模块，超过新组合上限时停用但不丢弃。模块包解析、序列化与结构限制由独立 codec 复用 `content.validateStylesheet()`，Preferences 保留 UI、按模块预览 timer、组合和每书持久化；CodeMirror 只按需增强同一 textarea，失败统一回滚；书签与进度按 host 提供的书籍状态键分区，位置高频写与低频状态分离；阅读统计使用独立的有界应用记录，只累计稳定、沉浸、可见、聚焦且未闲置的短区间，并投影今日、近 7 天、本书和连续阅读；
 - 公式按源尺寸随字号缩放，行间公式使用独立 `1.5` 倍率并在逻辑内容列中居中；
-- 阅读页内部设备像素尺寸跟随 WebView 视口与 DPR，字号以逻辑 CSS px 保存并按 `字号 × DPR` 写入正文，再以 `1 / devicePixelRatio` 隔离系统 DPI；分页模式使用 CSS 多栏，显示宽度不超过 20,000px 的章节横向 transform，超过阈值的长章节改用原生 `scrollLeft`，滚动模式则启用单栏原生纵向滚动。分页总数使用从书根到最后有意义内容的 Range，并忽略尾部空盒；待加载与已加载公式统一使用零字体和零行高，合法显式宽高另投影为 `aspect-ratio`，使旧 Chromium 不会把无 `src` 图片的 `alt` 回退文本或缺失内在比例分进多栏。移动阅读壳层默认沉浸，48 CSS px 工具栏只覆盖固定 144 设备像素的页眉页脚安全区且不参与分页；普通图片按页内可用面积等比限幅，符合 v5 增强条件的图片以原生宽高与书源 CSS 之前最多 512 个零特异性 `contain-intrinsic-size` 规则稳定解码前几何，常见未分层作者和用户 CSS 可继续覆盖；几何盒随正文进入待揭示 DOM，像素异步绘制。首次章节渲染只在当前页资源与分页稳定后揭示，不等待章节剩余资源或全书。失败占位优先保持连接状态下的非零实际盒，再退回合法尺寸属性。表格在正文固定页宽并裁掉超高内容，全屏投影保留 DOM 结构，待加载公式以三个并发的可取消 worker 等待各自真实终态并渐进填充，图片和表格均可缩放及双向滚动；
+- 阅读页内部设备像素尺寸跟随 WebView 视口与 DPR，字号和 24 / 32 / 48 左右边距都以视觉 CSS px 保存并乘 DPR 写入内部画布，再以 `1 / devicePixelRatio` 隔离系统 DPI；分页和原生纵向滚动共用最多 760 视觉 CSS px 的居中单栏，窄视口由所选边距和可用宽度收缩。分页模式使用 CSS 多栏，显示宽度不超过 20,000px 的章节横向 transform，超过阈值的长章节改用原生 `scrollLeft`。分页总数使用从书根到最后有意义内容的 Range，并忽略尾部空盒；待加载与已加载公式统一使用零字体和零行高，合法显式宽高另投影为 `aspect-ratio`，使旧 Chromium 不会把无 `src` 图片的 `alt` 回退文本或缺失内在比例分进多栏。移动阅读壳层默认沉浸，48 CSS px 工具栏只覆盖固定 144 设备像素的页眉页脚安全区且不参与分页；普通图片按页内可用面积等比限幅，符合 v5 增强条件的图片以原生宽高与书源 CSS 之前最多 512 个零特异性 `contain-intrinsic-size` 规则稳定解码前几何，常见未分层作者和用户 CSS 可继续覆盖；几何盒随正文进入待揭示 DOM，像素异步绘制。首次章节渲染只在当前页资源与分页稳定后揭示，不等待章节剩余资源或全书。失败占位优先保持连接状态下的非零实际盒，再退回合法尺寸属性。表格在正文固定页宽并裁掉超高内容，全屏投影保留 DOM 结构，待加载公式以三个并发的可取消 worker 等待各自真实终态并渐进填充，图片和表格均可缩放及双向滚动；
 - Windows 窗口与壳层控件使用系统逻辑像素，默认内部尺寸为 430 × 820，最小为 360 × 640，可自由调整和最大化；窗口变化经 Navigation 队列恢复 Locator；
 - 书内文档的宿主 IPC 只接收固定、限长、非内容性的性能与状态事件；
 - Tauri 产品入口保持单 WebView；Svelte 组件拥有书架、阅读记忆、应用设置、应用壳和对话 DOM。书架只对受限 DTO 与严格浏览器状态投影标题 / 作者、进度和最近阅读；阅读记忆只消费跨书 Message 查询和 SourceCapture DTO，不复制数据库事实。应用设置只承载应用外观、全书阅读默认恢复、词典管理和本地资料维护，阅读排版与本书覆盖仍在阅读界面。Vite 直接拼接十九份 reader module，书籍 DOM、消息事实和分页热路径不进入组件状态；无阅读路由时不加载 reader bundle，历史 Snapshot 渲染函数按需从已有 `conversations` module 加载，CodeMirror chunk 只在进入 CSS 模块页后加载；
@@ -102,7 +102,7 @@
 
 - 日常 GUI 使用当前 GNOME Wayland 会话中的 Tauri / WebKitGTK，不启动 Android 模拟器；发布前与移动端专项验收才恢复 Android 门禁；
 - Linux 应用根是 `tauri://localhost`，书根与封面分别是 `atha-book://localhost`、`atha-cover://localhost`；平台常量统一供路由、维护 command、前端资源和 CSP 使用；
-- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。测试专用启动尺寸只允许 360 / 600 / 1000 / 1280 / 1600 五个已声明视口，避免把当前不生效的 WebDriver resize 当成证据。当前 Bash 门覆盖拖放事件、冷导入封面、空 / 有书架、网格 / 列表、长按选择、右键菜单、资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot、安全跳回、宽屏工作区和窄屏回归；阅读页继续覆盖完整导入诊断、预览滚轮 / 合成双指缩放、可视视口输入器、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。当前 WebKitGTK 的 touch Actions 会挂起，门禁明确请求并核对可信 `mouse` Pointer Actions；双指和长按用合成 DOM 事件验证状态入口，因此都不是实体触摸证据。
+- `scripts/check-reader-linux.sh` 使用官方 `tauri-driver` 与系统 WebKitWebDriver 驱动真实 Tauri 壳，隔离 XDG 数据并在结束后清理；创建窗口后先拒绝 hidden 或零尺寸的无活动显示环境，避免 rAF 永久等待。测试专用启动尺寸只允许 360 / 600 / 1000 / 1280 / 1600 五个已声明视口，避免把当前不生效的 WebDriver resize 当成证据。当前 Bash 门覆盖拖放事件、冷导入封面、空 / 有书架、网格 / 列表、长按选择、右键菜单、资料库管理、存储分类、两级删除、最近阅读、有书 / 缺书跨书搜索、当前 / 历史 Snapshot、安全跳回、默认专注阅读、显式宽屏工作区、760 CSS px 单栏、32 CSS px 边距和窄屏回归；阅读页继续覆盖完整导入诊断、预览滚轮 / 合成双指缩放、可视视口输入器、跨 section 末页回退、普通 / 公式 / 表格 / 内部滚动与双向边界场景及 AppLog 隐私。拖动帧指标使用 pointer down 至 pointer up 间全部连续 rAF 的相邻间隔，并独立检查视觉更新数量；它是 WebKit 主线程 cadence，不是 compositor presentation 或真实 FPS。当前 WebKitGTK 的 touch Actions 会挂起，门禁明确请求并核对可信 `mouse` Pointer Actions；双指和长按用合成 DOM 事件验证状态入口，因此都不是实体触摸证据。
 - `scripts/check-reader-candidate.sh` 从干净目录构建唯一 AppImage，检查 desktop MIME、Windows 扩展声明与 Android 关联隔离；随后直接驱动解包的候选 `AppRun` 完成冷启动文件关联、重复关联、普通启动与完整多视口真壳回归，不回退 debug 产物。
 
 ### Android EPUB 纵切

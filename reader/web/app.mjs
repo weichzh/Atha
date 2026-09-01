@@ -75,12 +75,13 @@ function bindVisualViewport() {
 
 bindVisualViewport();
 
-function closeReaderTools() {
+function closeReaderTools(includeWorkspace = false) {
   const desktop = root.hasAttribute("data-desktop-workspace");
-  if (!desktop) root.removeAttribute("data-reader-tools");
+  root.removeAttribute("data-reader-tools");
   for (const panel of document.querySelectorAll(".reader-tool[open]")) {
-    if (!desktop || !workspacePanels.has(panel)) panel.open = false;
+    if (includeWorkspace || !desktop || !workspacePanels.has(panel)) panel.open = false;
   }
+  if (includeWorkspace) delete root.dataset.workspacePanel;
 }
 
 function finishReaderToolNavigation(toolName) {
@@ -92,19 +93,17 @@ function finishReaderToolNavigation(toolName) {
 
 function toggleReaderTools() {
   annotations?.dismissSelection();
-  if (root.hasAttribute("data-desktop-workspace")) return;
-  if (root.hasAttribute("data-reader-tools")) closeReaderTools();
-  else root.setAttribute("data-reader-tools", "");
+  if (root.hasAttribute("data-reader-tools") || root.hasAttribute("data-workspace-panel")) {
+    closeReaderTools(true);
+  } else root.setAttribute("data-reader-tools", "");
 }
 
 function bindDesktopWorkspace() {
-  let lastTool = workspaceTools[0];
   let settling = false;
   let workspaceVisible = false;
 
   const open = (tool, focus = false) => {
     for (const panel of readerTools) panel.open = panel === tool.panel;
-    lastTool = tool;
     root.dataset.workspacePanel = tool.name;
     if (focus) requestAnimationFrame(() => tool.panel.querySelector("summary")?.focus());
   };
@@ -118,12 +117,8 @@ function bindDesktopWorkspace() {
     settling = false;
     if (!desktopWorkspaceMedia.matches) return;
     const active = workspaceTools.find((tool) => tool.panel.open);
-    const auxiliaryOpen = readerTools.some((panel) => panel.open && !workspacePanels.has(panel));
     if (active) {
-      lastTool = active;
       root.dataset.workspacePanel = active.name;
-    } else if (!auxiliaryOpen) {
-      open(lastTool);
     } else {
       delete root.dataset.workspacePanel;
     }
@@ -137,7 +132,9 @@ function bindDesktopWorkspace() {
   const applyViewport = () => {
     root.toggleAttribute("data-desktop-workspace", desktopWorkspaceMedia.matches);
     if (desktopWorkspaceMedia.matches) {
-      open(workspaceTools.find((tool) => tool.panel.open) || lastTool);
+      const active = workspaceTools.find((tool) => tool.panel.open);
+      if (active) open(active);
+      else delete root.dataset.workspacePanel;
     } else {
       for (const tool of workspaceTools) tool.panel.open = false;
       delete root.dataset.workspacePanel;
@@ -181,6 +178,7 @@ function bindDesktopWorkspace() {
         event.target.closest?.(".reader-tool.directory, .reader-tool.search, .reader-tool.notes")
       ) {
         event.preventDefault();
+        closeReaderTools(true);
         reader.focus({ preventScroll: true });
       }
     },

@@ -812,30 +812,47 @@ return Boolean(button);') == true ]] || die 'could not open a reading memory res
 }
 
 verify_desktop_workspace() {
-  local baseline resized restored search notes directory keyboard tool tool_switch
-  local baseline_anchor resized_anchor restored_anchor tool_switch_anchor
+  local baseline resized restored workspace search notes directory keyboard medium narrow tool tool_switch
+  local baseline_anchor resized_anchor restored_anchor workspace_anchor tool_switch_anchor
 
   baseline=$(wait_for_script \
-    'const frame = document.querySelector(".reader-frame"); const panel = document.querySelector(".reader-tool.directory > .tool-panel"); const frameRect = frame?.getBoundingClientRect(); const panelRect = panel?.getBoundingClientRect(); const readerRect = document.querySelector(".reader")?.getBoundingClientRect(); return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, layout: Boolean(frameRect && panelRect && readerRect && panelRect.right <= frameRect.left + 1 && Math.abs(frameRect.right - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth || (panel ? panel.scrollWidth > panel.clientWidth : true), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
-    '.desktop == true and .active == "directory" and .openPanels == 1 and .layout == true and .overflow == false and .locator != null and .error == null' \
-    'desktop directory workspace did not become ready')
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const controls = document.querySelector(".reader-controls"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; const controlsStyle = controls ? getComputedStyle(controls) : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, pageMargin: reader ? parseFloat(getComputedStyle(reader).getPropertyValue("--page-left-margin")) / devicePixelRatio : 0, controlsHidden: controlsStyle?.visibility === "hidden", overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.desktop == true and .active == null and .openPanels == 0 and .stable == true and .full == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .pageMargin >= 31 and .pageMargin <= 33 and .controlsHidden == true and .overflow == false and .locator != null and .error == null' \
+    'desktop focus-reading layout did not become ready')
   baseline_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$baseline")
 
   set_window_size 1600 900
   resized=$(wait_for_script \
-    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const panel = document.querySelector(".reader-tool.directory > .tool-panel"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const panelRect = panel?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, layout: Boolean(frameRect && readerRect && panelRect && panelRect.right <= frameRect.left + 1 && Math.abs(frameRect.right - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
-    '.desktop == true and .active == "directory" and .stable == true and .layout == true and .locator != null and .error == null' \
-    'resized desktop workspace did not stabilize')
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.desktop == true and .active == null and .openPanels == 0 and .stable == true and .full == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .locator != null and .error == null' \
+    'resized desktop focus-reading layout did not stabilize')
   resized_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$resized")
   [[ $resized_anchor == "$baseline_anchor" ]] || die 'desktop resize did not preserve the current locator'
 
   set_window_size 1280 800
   restored=$(wait_for_script \
-    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const panel = document.querySelector(".reader-tool.directory > .tool-panel"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const panelRect = panel?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { stable: document.documentElement.dataset.viewportStable === expected, layout: Boolean(frameRect && readerRect && panelRect && panelRect.right <= frameRect.left + 1 && Math.abs(frameRect.right - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
-    '.stable == true and .layout == true and .locator != null and .error == null' \
-    'restored desktop workspace did not stabilize')
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.active == null and .stable == true and .full == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .locator != null and .error == null' \
+    'restored desktop focus-reading layout did not stabilize')
   restored_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$restored")
   [[ $restored_anchor == "$baseline_anchor" ]] || die 'desktop restore did not preserve the current locator'
+
+  [[ $(execute_sync '
+const reader = document.querySelector(".reader");
+const rect = reader.getBoundingClientRect();
+for (const type of ["pointerdown", "pointerup"]) {
+  reader.dispatchEvent(new PointerEvent(type, {pointerId: 41, pointerType: "mouse", isPrimary: true, button: 0, bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2}));
+}
+return document.documentElement.hasAttribute("data-reader-tools");') == true ]] ||
+    die 'desktop center click did not reveal the reader tools'
+  execute_sync 'document.querySelector(".reader-tool.directory > summary")?.click(); return true;' >/dev/null ||
+    die 'could not open the desktop directory workspace'
+  workspace=$(wait_for_script \
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const panel = document.querySelector(".reader-tool.directory > .tool-panel"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const panelRect = panel?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, workspace: Boolean(frameRect && readerRect && panelRect && panelRect.right <= frameRect.left + 1 && Math.abs(panelRect.width - 320) <= 2 && Math.abs(frameRect.right - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.active == "directory" and .openPanels == 1 and .stable == true and .workspace == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .locator != null and .error == null' \
+    'explicit desktop directory workspace did not become ready')
+  workspace_anchor=$(jq -r '.locator | fromjson | [.start.section, .start.offset] | @tsv' <<<"$workspace")
+  [[ $workspace_anchor == "$baseline_anchor" ]] || die 'opening the desktop workspace changed the current locator'
 
   for tool in search notes directory; do
     execute_sync "document.querySelector('.reader-tool.$tool > summary')?.click(); return true;" >/dev/null ||
@@ -920,14 +937,49 @@ jq -e '.clicked == true and .shortcut == true' <<<"$directory" >/dev/null || die
     ".section != $(jq '.before' <<<"$directory") and .active == \"search\" and .focused == \"search-query\" and .error == null" \
     'desktop directory navigation stole focus from a later search shortcut' >/dev/null
 
-  keyboard=$(wait_for_script \
-    'const input = document.querySelector("#search-query"); const inputFocused = document.activeElement === input; const event = new KeyboardEvent("keydown", {key: "Escape", bubbles: true, cancelable: true}); input.dispatchEvent(event); const before = globalThis.__athaReaderDiagnostics.snapshot(); const pageEvent = new KeyboardEvent("keydown", {key: "PageDown", bubbles: true, cancelable: true}); document.querySelector(".reader")?.dispatchEvent(pageEvent); return {inputFocused, focused: document.activeElement === document.querySelector(".reader"), escapeHandled: event.defaultPrevented, pageHandled: pageEvent.defaultPrevented, beforeSection: before.session.currentIndex, beforePage: before.navigation.current};' \
-    '.inputFocused == true and .focused == true and .escapeHandled == true and .pageHandled == true' \
-    'desktop escape or page keyboard navigation was not handled')
+  keyboard=$(execute_sync '
+const input = document.querySelector("#search-query");
+const inputFocused = document.activeElement === input;
+const event = new KeyboardEvent("keydown", {key: "Escape", bubbles: true, cancelable: true});
+input.dispatchEvent(event);
+return {inputFocused, escapeHandled: event.defaultPrevented};') || die 'could not dismiss the desktop workspace'
+  jq -e '.inputFocused == true and .escapeHandled == true' <<<"$keyboard" >/dev/null ||
+    die 'desktop Escape was not handled'
+  wait_for_script \
+    'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { active: document.documentElement.dataset.workspacePanel || null, tools: document.documentElement.hasAttribute("data-reader-tools"), openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), focused: document.activeElement === reader, error: document.documentElement.dataset.error || null };' \
+    '.active == null and .tools == false and .openPanels == 0 and .stable == true and .full == true and .focused == true and .error == null' \
+    'desktop Escape did not restore focus reading' >/dev/null
+  keyboard=$(execute_sync '
+const before = globalThis.__athaReaderDiagnostics.snapshot();
+const event = new KeyboardEvent("keydown", {key: "PageDown", bubbles: true, cancelable: true});
+document.querySelector(".reader")?.dispatchEvent(event);
+return {pageHandled: event.defaultPrevented, beforePage: before.navigation.current};') || die 'could not dispatch desktop PageDown'
+  jq -e '.pageHandled == true' <<<"$keyboard" >/dev/null || die 'desktop PageDown was not handled'
   wait_for_script \
     'const state = globalThis.__athaReaderDiagnostics?.snapshot(); return { current: state?.navigation.current || null, error: document.documentElement.dataset.error || null };' \
     "(.current != $(jq -c '.beforePage' <<<"$keyboard")) and .error == null" \
     'desktop PageDown did not navigate' >/dev/null
+
+  set_window_size 1000 760
+  medium=$(wait_for_script \
+    'const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, pageMargin: reader ? parseFloat(getComputedStyle(reader).getPropertyValue("--page-left-margin")) / devicePixelRatio : 0, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, error: document.documentElement.dataset.error || null };' \
+    '.desktop == false and .active == null and .stable == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .pageMargin >= 31 and .pageMargin <= 33 and .overflow == false and .error == null' \
+    'medium reader did not preserve the centered reading measure')
+  execute_sync '
+const control = document.querySelector("#reading-mode");
+control.value = "scroll";
+control.dispatchEvent(new Event("change", {bubbles: true}));
+return true;' >/dev/null || die 'could not switch the medium reader to scroll mode'
+  wait_for_script \
+    'const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { mode: reader?.dataset.readingMode || null, stable: document.documentElement.dataset.viewportStable === expected, centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, error: document.documentElement.dataset.error || null };' \
+    '.mode == "scroll" and .stable == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .overflow == false and .error == null' \
+    'scroll mode did not preserve the centered reading measure' >/dev/null
+
+  set_window_size 360 760
+  narrow=$(wait_for_script \
+    'const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, pageMargin: reader ? parseFloat(getComputedStyle(reader).getPropertyValue("--page-left-margin")) / devicePixelRatio : 0, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, error: document.documentElement.dataset.error || null };' \
+    '.desktop == false and .active == null and .stable == true and .centered == true and .pageWidth >= 280 and .pageWidth <= 300 and .pageMargin >= 31 and .pageMargin <= 33 and .overflow == false and .error == null' \
+    'narrow reader did not preserve its visual page margins')
 
   set_window_size 600 760
   wait_for_script \
@@ -966,7 +1018,12 @@ return document.documentElement.hasAttribute("data-reader-tools");') == false ]]
   desktop_workspace_evidence=$(jq -n \
     --argjson searchResults "$(jq '.count' <<<"$search")" \
     --argjson messages "$(jq '.items' <<<"$notes")" \
-    '{widths: [1280, 1600], tools: ["directory", "search", "notes"], searchResults: $searchResults, messages: $messages, locatorStable: true, keyboard: true, focusVerified: true, narrowRegression: true}')
+    --argjson desktopPageWidth "$(jq '.pageWidth' <<<"$baseline")" \
+    --argjson workspacePageWidth "$(jq '.pageWidth' <<<"$workspace")" \
+    --argjson mediumPageWidth "$(jq '.pageWidth' <<<"$medium")" \
+    --argjson narrowPageWidth "$(jq '.pageWidth' <<<"$narrow")" \
+    --argjson pageMargin "$(jq '.pageMargin' <<<"$baseline")" \
+    '{widths: [360, 600, 1000, 1280, 1600], defaultMode: "focus-reading", workspaceMode: "explicit", tools: ["directory", "search", "notes"], pageWidths: {desktop: $desktopPageWidth, workspace: $workspacePageWidth, medium: $mediumPageWidth, narrow: $narrowPageWidth}, pageMarginCss: $pageMargin, pagedAndScrollMeasure: true, searchResults: $searchResults, messages: $messages, locatorStable: true, keyboard: true, focusVerified: true, narrowRegression: true}')
 }
 
 verify_reader_runtime_errors() {
@@ -1823,9 +1880,9 @@ window.__TAURI_INTERNALS__.invoke("import_library_paths", { paths: ["/tmp/atha-o
 jq -e '.rejected == true and .code == "invalid-origin"' <<<"$origin_rejection" >/dev/null ||
   die "reader page accepted a library path import (state: $(jq -c . <<<"$origin_rejection"))"
 wait_for_script \
-  'const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const panel = document.querySelector(".directory-panel")?.getBoundingClientRect(); return {width: innerWidth, desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, layout: Boolean(frame && panel && panel.right <= frame.left + 1 && Math.abs(frame.right - innerWidth) <= 2), error: document.documentElement.dataset.error || null};' \
-  '.desktop == true and .active == "directory" and .layout == true and .error == null' \
-  'normal desktop reader startup did not produce the workspace' >/dev/null
+  'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const controls = document.querySelector(".reader-controls"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const controlsStyle = controls ? getComputedStyle(controls) : null; return {width: innerWidth, desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, pageMargin: reader ? parseFloat(getComputedStyle(reader).getPropertyValue("--page-left-margin")) / devicePixelRatio : 0, controlsHidden: controlsStyle?.visibility === "hidden", error: document.documentElement.dataset.error || null};' \
+  '.desktop == true and .active == null and .openPanels == 0 and .full == true and .centered == true and .pageWidth >= 700 and .pageWidth <= 761 and .pageMargin >= 31 and .pageMargin <= 33 and .controlsHidden == true and .error == null' \
+  'normal desktop reader startup did not produce focus reading' >/dev/null
 set_window_size 600 760
 enable_diagnostics
 set_window_size 1280 800

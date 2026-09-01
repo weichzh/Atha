@@ -91,7 +91,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 
 | 想调整的部分 | 选择器或变量 |
 | --- | --- |
-| 书页边距 | `reader/atha-reader.css` 的 `--page-top-margin`、`--page-right-margin`、`--page-bottom-margin`、`--page-left-margin`；上下固定，左右由本书 `#page-margin` 在 24 / 32 / 48 设备像素间选择 |
+| 书页边距 | `reader/atha-reader.css` 的 `--page-top-margin`、`--page-right-margin`、`--page-bottom-margin`、`--page-left-margin`；上下固定，左右由本书 `#page-margin` 在 24 / 32 / 48 视觉 CSS px 间选择，再按 DPR 换算为内部设备像素 |
 | 顶部栏 | `.top-toolbar`、`.top-toolbar-actions` |
 | 底部栏 | `.toolbar`、`.icon-button`、`.fluent-icon` |
 | 所有弹出面板 | `.tool-panel` |
@@ -116,7 +116,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - 华为 WebView 114 对 adb 和部分真实触摸会给出空 `pointerType`，`interaction.mjs` 将其归一为 touch；原生 `pan-y` 取消 pointer 时使用仍会到达的 `touchend` 处理章节边界。正文与 reader 的 touch 监听复用 inside / outside 去重，闭合 Shadow DOM 内的链接、表格、代码、dialog 和选择不会被外层事件误判。
 - `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；投影目录中的章节或书签完成跳转后自动关闭目录。
 - `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
-- `#font-size` 是原生 range，input burst 每帧只预览一次，change 后才通过原 Locator 提交重排；`#density` 使用 1.55 / 1.8 / 2.05 无单位行距。`#page-margin` 按书选择 24 / 32 / 48 设备像素左右边距，`#paragraph-indent` 以顶格 / 2em 卡片切换，`#paragraph-spacing` 生成受控可视 CSS。上下 144 设备像素安全区固定不变，旧应用记录中的四个自由边距字段仍会被忽略。
+- `#font-size` 是原生 range，input burst 每帧只预览一次，change 后才通过原 Locator 提交重排；`#density` 使用 1.55 / 1.8 / 2.05 无单位行距。`#page-margin` 按书选择 24 / 32 / 48 视觉 CSS px 左右边距，再按 DPR 写入内部画布；`#paragraph-indent` 以顶格 / 2em 卡片切换，`#paragraph-spacing` 生成受控可视 CSS。上下 144 设备像素安全区固定不变，旧应用记录中的四个自由边距字段仍会被忽略。
 - CSS 模块页直接复用每书偏好：最多 32 个模块，支持搜索、分组、排序、批量启停和 schema 1 JSON 导入导出；独立 codec 统一解析、序列化、字段、大小、重复 ID 与 CSSOM 校验，不包含网络或 provider registry。新模块单个 32 KiB、启用组合 64 KiB，超限旧 CSS 只作为停用恢复副本保留。CodeMirror 在页面首次可见时按需加载，100 ms 显示 lint，180 ms 后通过同一 textarea 触发预览；输入草稿绑定原模块，任一验证、重排或持久化失败均恢复上次有效状态、渲染与 Locator。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
 - 进度面板在进度摘要和拖动条之间投影今日、近 7 天、本书与连续阅读。桌面为四列，600 px 及以下为 2 × 2；指标使用分隔线而非嵌套卡片。统计在工具层打开时暂停，关闭后由同一阅读状态接口恢复。

@@ -1,5 +1,6 @@
 const SOURCE_FONT_SIZE = 16;
 const DISPLAY_FORMULA_MULTIPLIER = 1.5;
+const MAX_READER_CONTENT_WIDTH = 760;
 const MAX_TRANSFORM_WIDTH = 20_000;
 const SETTLE_DURATION_MS = 300;
 
@@ -251,10 +252,14 @@ export function createPagination({
     document.documentElement.style.setProperty("--page-scale", String(visualScale));
     document.documentElement.style.setProperty("--reader-width", `${width}px`);
     document.documentElement.style.setProperty("--reader-height", `${height}px`);
+    document.documentElement.style.setProperty(
+      "--reader-content-max-width",
+      `${readerPixels(MAX_READER_CONTENT_WIDTH)}px`,
+    );
   }
 
   function applyFormulaScale() {
-    const fontScale = fontSizePixels(state.fontSize) / SOURCE_FONT_SIZE;
+    const fontScale = readerPixels(state.fontSize) / SOURCE_FONT_SIZE;
     const contentWidth = book.clientWidth;
     for (const formula of book.querySelectorAll("img.math-inline, img.math-display")) {
       if (!formula.dataset.sourceWidth) {
@@ -342,7 +347,7 @@ export function createPagination({
   function layout() {
     offsetCache = null;
     fragmentOffsetCache.clear();
-    const pixels = fontSizePixels(state.fontSize);
+    const pixels = readerPixels(state.fontSize);
     book.style.fontSize = `${pixels}px`;
     book.style.setProperty("--atha-display-formula-margin", `${pixels * 0.9}px`);
     reader.dataset.fontPixels = String(pixels);
@@ -539,7 +544,7 @@ export function createPagination({
         const height = rect.height / fitScale;
         const isDisplay = formula.classList.contains("math-display");
         const maximumScale = Math.min(
-          (fontSizePixels(state.fontSize) / SOURCE_FONT_SIZE) *
+          (readerPixels(state.fontSize) / SOURCE_FONT_SIZE) *
             (isDisplay ? DISPLAY_FORMULA_MULTIPLIER : 1),
           columnWidth / sourceWidth,
         );

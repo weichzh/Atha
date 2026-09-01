@@ -9,6 +9,7 @@
   --reader-content-bottom: 144px;
   --reader-width: 780px;
   --reader-height: 1680px;
+  --reader-content-max-width: 760px;
   --workspace-width: 320px;
   --page-scale: 1;
   --reader-brightness: 1;
@@ -997,8 +998,13 @@ textarea:focus-visible,
   --page-right-margin: 32px;
   --page-bottom-margin: max(144px, var(--reader-content-bottom));
   --page-left-margin: 32px;
-  --content-width: calc(
+  --available-content-width: calc(
     var(--reader-width) - var(--page-left-margin) - var(--page-right-margin)
+  );
+  --content-width: min(var(--available-content-width), var(--reader-content-max-width));
+  --page-inline-start: max(
+    var(--page-left-margin),
+    calc((var(--reader-width) - var(--content-width)) / 2)
   );
   --content-height: calc(
     var(--reader-height) - var(--page-top-margin) - var(--page-bottom-margin)
@@ -1029,7 +1035,7 @@ textarea:focus-visible,
 .page {
   position: absolute;
   top: var(--page-top-margin);
-  left: var(--page-left-margin);
+  left: var(--page-inline-start);
   width: var(--content-width);
   height: var(--content-height);
   overflow: hidden;
@@ -1072,11 +1078,11 @@ textarea:focus-visible,
   position: relative;
   top: 0;
   left: 0;
-  width: auto;
+  width: var(--content-width);
   height: auto;
   min-height: 100%;
-  padding: var(--page-top-margin) var(--page-right-margin) var(--page-bottom-margin)
-    var(--page-left-margin);
+  margin-inline: auto;
+  padding: var(--page-top-margin) 0 var(--page-bottom-margin);
   overflow: visible;
 }
 
@@ -1299,15 +1305,15 @@ textarea:focus-visible,
 
 .chapter-label {
   top: var(--reader-chapter-top);
-  left: var(--page-left-margin);
-  max-width: calc(100% - var(--page-left-margin) - var(--page-right-margin));
+  left: var(--page-inline-start);
+  max-width: var(--content-width);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .reading-position {
-  right: var(--page-right-margin);
+  right: var(--page-inline-start);
   bottom: 48px;
 }
 
@@ -3100,7 +3106,7 @@ textarea:focus-visible,
 }
 
 @media (min-width: 1100px) {
-  :root[data-desktop-workspace] .reader-controls {
+  :root[data-desktop-workspace][data-workspace-panel] .reader-controls {
     visibility: visible;
     opacity: 1;
   }
@@ -3110,7 +3116,7 @@ textarea:focus-visible,
     margin-left: var(--workspace-width);
   }
 
-  :root[data-desktop-workspace] .toolbar {
+  :root[data-desktop-workspace][data-workspace-panel] .toolbar {
     right: auto;
     width: var(--workspace-width);
   }

@@ -27,7 +27,7 @@ const UTF8 = new TextEncoder();
 const LINE_HEIGHT_RATIOS = Object.freeze({ compact: 1.55, standard: 1.8, comfortable: 2.05 });
 const PAGE_MARGINS = Object.freeze({ narrow: 24, standard: 32, wide: 48 });
 
-function fontSizePixels(value) {
+function readerPixels(value) {
   return Math.round(value * devicePixelRatio);
 }
 
@@ -39,6 +39,13 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   const { validateModules } = modulePackages;
   const darkScheme = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
   const systemBars = globalThis.AthaSystemBars;
+
+  function syncPageMargins() {
+    const margin = `${readerPixels(PAGE_MARGINS[book.pageMargin])}px`;
+    reader.style.setProperty("--page-left-margin", margin);
+    reader.style.setProperty("--page-right-margin", margin);
+  }
+  globalThis.addEventListener?.("resize", syncPageMargins);
 
   function syncSafeAreaInsets() {
     try {
@@ -354,9 +361,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       "--reader-line-height",
       String(LINE_HEIGHT_RATIOS[application.density]),
     );
-    const margin = `${PAGE_MARGINS[book.pageMargin]}px`;
-    reader.style.setProperty("--page-left-margin", margin);
-    reader.style.setProperty("--page-right-margin", margin);
+    syncPageMargins();
     syncControls();
     return snapshot();
   }

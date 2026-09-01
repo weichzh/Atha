@@ -18,7 +18,7 @@
 
 ### 应用壳与宿主
 
-产品入口采用 Tauri 2 与 Svelte 5，但每个平台仍只有一个 WebView。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。至少 `1100px` 的阅读视口把既有目录、书内搜索和笔记 / Message `details` 互斥投影为固定左侧工作区，窄屏仍使用原覆盖式工具面板；两者共用同一状态、搜索、Message 和 Locator。
+产品入口采用 Tauri 2 与 Svelte 5，但每个平台仍只有一个 WebView。Svelte 只拥有顶部栏、底部工具栏、面板和 dialog；现有 reader kernel 继续直接控制 closed Shadow DOM，不把 XHTML、页内节点或分页热状态放进组件树。Vite 构建时按既定顺序拼接现有阅读模块，避免形成第二份内核。至少 `1100px` 的阅读视口具备把既有目录、书内搜索和笔记 / Message `details` 互斥投影为固定左侧工作区的能力，但初始保持专注阅读，只有用户明确打开工具后才占用工作区；窄屏仍使用原覆盖式工具面板。两者共用同一状态、搜索、Message 和 Locator，关闭或 Escape 不自动重开最近工具。
 
 Tauri 复用后端书根、全部已支持格式导入、共享 CLI、窗口尺寸和诊断逻辑。书籍资源仍走受控 `atha-book` 协议；可信的 Svelte 应用壳只调用固定书架 command，书内文档没有 command 接口，XHTML 和图片不经 IPC 传输。阅读器遥测仍由严格校验、串行发送的独立 command 接收。应用响应使用 `Permissions-Policy` 禁用相机、麦克风、定位、显示捕获等浏览器权限；浏览器暴露策略检查 API 时，reader 会从真实文档策略复核关键能力确实不可用，WebKitGTK 未暴露该 API 时仍由原生响应头和 Rust 静态检查守住边界。直接 Wry/Tao 的 `atha-reader-host` 在迁移期保留为回归基线。
 
@@ -26,7 +26,7 @@ Android 继续 edge-to-edge，但不依赖旧系统 WebView 尚未完整支持�
 
 ## 样式层
 
-默认样式提供稳定、克制的阅读体验。`reader/theme.css` 是应用壳与阅读壳颜色 token 的唯一事实所有者，并随阅读样式进入书籍 Shadow DOM 与 Snapshot；功能 CSS 只声明布局和语义引用。Preferences 把系统/浅色/纸张/深色书页主题、亮度、16–40 逻辑 CSS px 字号、字体和三档行距作为全书阅读默认值，把左右翻页 / 上下滚动、书源样式开关、三档左右边距、段首缩进、段距和有序 CSS 模块作为本书覆盖。应用壳另用 `atha.app.appearance.v1` 保存跟随系统 / 浅色 / 深色界面主题；它只影响书架、阅读记忆和应用设置，不复用或改写阅读主题。旧的单段 `userStylesheet` 恢复时迁移为 `legacy-user-css` 模块；旧阅读默认记录中的四个自由边距字段和点击 / 滑动开关继续忽略。上下正文安全区固定为 144 设备像素，Android 只在顶部 / 底部安全区更大时扩大对应排版边距；左右边距默认 32，可按书选择 24 / 32 / 48 设备像素。亮度只过滤阅读页，不改变壳层控件。
+默认样式提供稳定、克制的阅读体验。`reader/theme.css` 是应用壳与阅读壳颜色 token 的唯一事实所有者，并随阅读样式进入书籍 Shadow DOM 与 Snapshot；功能 CSS 只声明布局和语义引用。Preferences 把系统/浅色/纸张/深色书页主题、亮度、16–40 逻辑 CSS px 字号、字体和三档行距作为全书阅读默认值，把左右翻页 / 上下滚动、书源样式开关、三档左右边距、段首缩进、段距和有序 CSS 模块作为本书覆盖。应用壳另用 `atha.app.appearance.v1` 保存跟随系统 / 浅色 / 深色界面主题；它只影响书架、阅读记忆和应用设置，不复用或改写阅读主题。旧的单段 `userStylesheet` 恢复时迁移为 `legacy-user-css` 模块；旧阅读默认记录中的四个自由边距字段和点击 / 滑动开关继续忽略。上下正文安全区固定为 144 设备像素，Android 只在顶部 / 底部安全区更大时扩大对应排版边距；左右边距按视觉 CSS px 解释，默认 32，可按书选择 24 / 32 / 48，再由 Preferences 换算为内部设备像素。亮度只过滤阅读页，不改变壳层控件。
 
 书籍 Shadow DOM 中固定按书源 CSS、Atha 阅读样式、可视排版 CSS 与已启用用户模块排列。书内 style、stylesheet link 和元素 inline style 都纳入书源样式开关，外链与内联 CSS 保持原 DOM 顺序。每书至多 32 个用户模块，新建或导入模块单个至多 32 KiB、启用组合至多 64 KiB；旧单段 CSS 仍按原 32768 UTF-16 字符上限完整迁移，超过组合上限时只保留为停用恢复副本。名称、分组、ID、顺序、启停和 schema 1 JSON 导入均严格校验。`style-module-package.mjs` 独立拥有模块包解析、序列化和结构限制，并注入 `content.validateStylesheet()` 复用同一 CSSOM 边界；Preferences 只拥有 UI、每书状态、按模块隔离的预览 timer 和组合。手动保存只取消同模块的待处理预览，删除、导入和重置清理失效任务。任一启用组合仍拒绝 `@import`、子资源、转义和 Shadow 边界选择器；验证、重排或持久化失败统一恢复上次状态、渲染与 Locator。CodeMirror 只在模块页可见时按需增强隐藏 textarea 的编辑体验，不能修改应用壳或绕过 CSSOM。主题、字体、密度或样式层变化统一由 Navigation 在重排前捕获 Locator，布局稳定后恢复。
 
@@ -140,9 +140,9 @@ Annotations 从原生选择产生 `SourceAnchor` 与 `SourceSnapshot` 候选，�
 
 长期验收样本位于本机忽略目录 `fixtures/local/`。当前清单包含三个既有单章节样本，以及从《数学及其历史 (2026)》固定哈希源文件重复导出的“1.1 算术与几何”“1.2 勾股数组”“1.3 圆上的有理点”三章节 R1 样本；源 EPUB 不修改，也不提交样本内容到仓库。`scripts/export_reader_sample.py` 支持导出单章节或带 manifest 的多章节样本，`scripts/check-reader-samples.ps1` 统一运行实际 Windows host 与明暗主题截图验收。
 
-阅读页填充当前 `.reader-frame`，内部画布宽度等于 frame CSS 宽度乘 `devicePixelRatio`，高度仍等于 WebView CSS 高度乘 `devicePixelRatio`。用户字号以 16–40 逻辑 CSS px 保存，默认 19；Pagination 写入 `字号 × devicePixelRatio` 的内部设备像素，显示层再以 `1 / devicePixelRatio` 抵消系统 DPI，因此同一档保持可解释的 CSS 绝对大小。正文边距、栏宽、公式和图形继续使用设备像素，Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素。窗口或桌面工作区改变 frame 宽度、用户改变排版后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；同宽度工具互切不重排。短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
+阅读页填充当前 `.reader-frame`，内部画布宽度等于 frame CSS 宽度乘 `devicePixelRatio`，高度仍等于 WebView CSS 高度乘 `devicePixelRatio`。用户字号以 16–40 逻辑 CSS px 保存，默认 19；Pagination 写入 `字号 × devicePixelRatio` 的内部设备像素，显示层再以 `1 / devicePixelRatio` 抵消系统 DPI，因此同一档保持可解释的 CSS 绝对大小。Preferences 同样把 24 / 32 / 48 视觉 CSS px 边距换算为设备像素；分页和滚动模式的单栏正文最多为 760 视觉 CSS px，并在当前 frame 内居中，窄视口再由可用宽度自然收缩。公式和图形继续使用内部设备像素，Windows 窗口、48 CSS px 覆盖工具层和错误提示使用系统逻辑像素。窗口或桌面工作区改变 frame 宽度、用户改变排版后，Pagination 经 Navigation 队列以变化前 Locator 重排并恢复位置；同宽度工具互切不重排。短暂无文字矩形时保留已校验偏移和当前页，而非误判内容不安全。安全失败在界面显示稳定错误代码与处理阶段，但不暴露书籍路径或内容。
 
-正式内容回归覆盖 780 × 1680、960 × 720 的 DPR 1 视口，以及 390 × 840 的 DPR 2 视口。780 × 1680 不再是产品页面的固定尺寸；benchmark 记录每次运行的真实内部设备像素尺寸，以免跨布局误判性能。阅读器的一页是有受控边距的分页内容区，不是任意滚动位置的截图：不得裁切文字行、公式或图形。上下边距固定为 144 设备像素，其中包含不会被系统缩放工具栏越过的页眉页脚安全区；左右边距默认 32，并可按书选择 24 / 32 / 48。默认字号为 19 逻辑 CSS px，行距为无单位 1.8；两者均可从阅读设置调整。
+正式内容回归覆盖 780 × 1680、960 × 720 的 DPR 1 视口，以及 390 × 840 的 DPR 2 视口。780 × 1680 不再是产品页面的固定尺寸；benchmark 记录每次运行的真实内部设备像素尺寸，以免跨布局误判性能。阅读器的一页是有受控边距的分页内容区，不是任意滚动位置的截图：不得裁切文字行、公式或图形。上下边距固定为 144 设备像素，其中包含不会被系统缩放工具栏越过的页眉页脚安全区；左右边距默认 32 视觉 CSS px，并可按书选择 24 / 32 / 48。默认字号为 19 逻辑 CSS px，行距为无单位 1.8；两者均可从阅读设置调整。
 
 普通图片以读者可用宽高为上限等比缩放；内嵌表格固定为页宽、固定布局并裁掉超高内容，完整内容由查看层缩放和原生双向滚动，块级预格式化内容仍由受控容器限制在单页。`countCutRects()` 继续进入 ready 遥测与 verify-sample / benchmark 门，但不再让普通首开、字号、窗口重排或延迟资源完成失败；真正的资源、安全、Locator 与持续布局不稳定错误仍阻断阅读。
 
@@ -170,7 +170,7 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### FB2 / FBZ 入口门槛
 
-`scripts/check-reader-linux.sh` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳；测试专用启动环境变量只接受 `360x760`、`600x760`、`1000x760`、`1280x800` 与 `1600x900` 五个固定尺寸，避免把 WebDriver 不生效的运行时 resize 当成多视口证据。门禁覆盖拖放事件、网格 / 列表、资料库管理、阅读记忆、桌面工作区、完整导入诊断、跨 section 回退、当前手势矩阵和 AppLog 隐私。
+`scripts/check-reader-linux.sh` 从 Rust 测试 writer 生成原创 FB2，并在仓库 `.tmp` 下种入隔离的真实 `LocalLibrary`。入口运行 Svelte 与 Tauri build，再用官方 `tauri-driver` / WebKitWebDriver 驱动当前 Linux Tauri 壳；测试专用启动环境变量只接受 `360x760`、`600x760`、`1000x760`、`1280x800` 与 `1600x900` 五个固定尺寸，避免把 WebDriver 不生效的运行时 resize 当成多视口证据。门禁覆盖拖放事件、网格 / 列表、资料库管理、阅读记忆、默认专注阅读、显式桌面工作区、760 CSS px 单栏尺度、32 CSS px 边距、完整导入诊断、跨 section 回退、当前手势矩阵和 AppLog 隐私。
 
 当前 WebKitGTK 2.52.5 的 W3C touch Actions 会挂起，因此 Linux 门明确请求可信 `mouse` Pointer Actions，逐次核对真实命中、`isTrusted`、左右点按 / 横拖、媒体误开、纵向意图、宽表双向内部滚动与双向边界移交，并记录请求与实际 `pointerType`。该门只算可信自动化指针与主线程性能证据，不冒充实体触摸；PCT-AL10 自动滑动、SurfaceFlinger presentation 与用户自然手指触摸分别保留真实目标证据边界。
 
