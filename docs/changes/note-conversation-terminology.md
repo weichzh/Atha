@@ -6,7 +6,7 @@ description: 笔记、标注、对话与消息的用户术语契约、界面统�
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -117,17 +117,20 @@ none
 - `review findings`：Spec review 发现横屏笔记栏已打开时从正文新建笔记仍会按选中新列表行误判返回来源；Standards 与 Spec review 同时发现 `READER-CORE` 保留“跨书消息 / 消息与快照”，GUI 证据元数据也早于候选提交；
 - `repair`：正文入口复用已有根消息校验参数声明直接来源，关闭动作按已经确定的返回语义恢复正文或列表焦点，线程内切换保持原返回目标；同步 `READER-CORE`，并让 Linux 门验证阅读记忆关闭后真实返回正文焦点；
 - `validation cases`：Svelte check / build、Conversation Node 测试、脚本语法、精简与完整 Linux Tauri 门通过；完整门继续覆盖两类返回名称，并新增阅读记忆关闭后的正文焦点断言，13 个场景和 220 次测量通过；
-- `remaining_delta`：修复后两轴复核、committed-HEAD 截图元数据和 required gate 属于收尾；
+- `remaining_delta`：实现、规范和候选证据均无 blocking 差异；required gate 与工作流关闭收据属于收尾；
 - `evidence level`：静态 / 构建 + Linux Tauri / WebKitGTK 真壳自动化；
 - `stop reason`：第三轮修复当前 review 差异并达到修复上限，停止 Repair。
 
 ## Review
 
-候选提交后，以任务基线、本 change 和当前产品定义执行 Standards 与 Spec 两轴独立复核；收据在最终提交中回填。
+- Standards：独立复核 `2db459f...e9cbc36`，先前 `READER-CORE` 事实所有者遗漏已关闭；return-target 修复复用已有根消息校验与焦点目标，没有发现 blocking 或 non-blocking 代码标准问题。
+- Spec：独立复核 `TERM-CONTRACT-01` 至 `TERM-EVIDENCE-08`；正文直接进入返回正文、笔记列表进入返回列表、阅读记忆进入返回正文三条链路成立，术语、布局、回归与事实同步没有 blocking 或 non-blocking 差异。
+- Evidence：修复后的完整 Linux 门通过；候选 `e9cbc36` 已重新采集四种视口、宽屏三栏与竖屏两页截图，`uiux-evidence.json` 的 commit 与候选一致。
+- Residual：Windows、PCT-AL10、自然触控、真实输入法、真实屏幕阅读器和大型长期笔记库属于已声明的平台 / 人工边界，不阻塞本切片。
 
 ## Evidence And Residual Risks
 
 - 静态 / 构建：`pnpm --dir reader/app check` 为 0 errors / 0 warnings，Vite build 与 `node --test reader/web/conversations.test.mjs` 通过；生产 reader 与 Linux 门中未再检出旧用户术语；
-- Linux Tauri 真壳：精简门和完整门均通过，完整门为 WebKitGTK 0.55.1、13 个场景、220 次测量；新文案在全部五种视口无溢出，`A+B`、`B+C`、`A+B+C` 与 `B → C → B` 的 Locator 和几何不变；
-- GUI / Design QA：最新截图、DOM 指标、Telegram 参考并置图与 `uiux-evidence.json` 位于 Git 忽略目录 `artifacts/local/audits/atha-note-terminology-20260901/`；没有未关闭 P0 / P1 / P2；
+- Linux Tauri 真壳：精简门和完整门均通过，候选环境为 WebKitGTK 2.52.6、WebDriver browserVersion 0.55.1，完整门执行 13 个场景和 220 次测量；新文案在全部五种视口无溢出，`A+B`、`B+C`、`A+B+C` 与 `B → C → B` 的 Locator 和几何不变，列表与阅读记忆返回焦点均通过；
+- GUI / Design QA：候选 `e9cbc36` 的截图、DOM 指标、Telegram 参考并置图与 `uiux-evidence.json` 位于 Git 忽略目录 `artifacts/local/audits/atha-note-terminology-20260901/`；没有未关闭 P0 / P1 / P2；
 - 未覆盖：Windows 与 PCT-AL10 当前候选、自然手指、真实输入法、真实屏幕阅读器和大量长期笔记库。Linux WebDriver 的鼠标自动化与 DOM 名称不替代这些平台 / 人工证据。
