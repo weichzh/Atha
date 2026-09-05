@@ -1,14 +1,14 @@
 :root {
-  --reader-accent: #1497e8;
-  --ui-canvas: #dddeda;
+  --reader-accent: #246653;
+  --ui-canvas: #f5f6f5;
   --ui-surface: #ffffff;
-  --ui-surface-muted: #f3f4f1;
+  --ui-surface-muted: #f5f6f5;
   --ui-bar-bg: rgb(255 255 255 / 94%);
-  --ui-input-bg: #f7f8f5;
-  --ui-text: #222725;
-  --ui-muted: #747b77;
-  --ui-border: #d4d8d3;
-  --ui-shadow: rgb(32 40 36 / 16%);
+  --ui-input-bg: #f5f6f5;
+  --ui-text: #252b29;
+  --ui-muted: #616b66;
+  --ui-border: #dde2df;
+  --ui-shadow: rgb(32 40 36 / 10%);
   --ui-backdrop: rgb(18 23 21 / 42%);
   --ui-error: #a32921;
   --ui-error-bg: #fff0ed;
@@ -25,30 +25,36 @@
   --ui-preview-border: rgb(255 255 255 / 10%);
   --ui-dialog-shadow: rgb(0 0 0 / 24%);
   --ui-preview-shadow: rgb(0 0 0 / 28%);
-  --theme-preview-light-text: #242725;
-  --theme-preview-light-bg: #f8f8f6;
+  --theme-preview-light-text: #252b29;
+  --theme-preview-light-bg: #ffffff;
   --theme-preview-light-border: rgb(31 35 33 / 14%);
   --theme-preview-system-text: #e8e9e7;
   --theme-preview-system-bg: #363a38;
   --theme-preview-paper-text: #3a3427;
   --theme-preview-paper-bg: #eee3c7;
-  --theme-preview-dark-text: #eceeec;
-  --theme-preview-dark-bg: #242725;
+  --theme-preview-dark-text: #f2f2f3;
+  --theme-preview-dark-bg: #222725;
 
-  --library-bg: #050505;
-  --library-surface: #19191b;
-  --library-surface-raised: #232326;
+  --library-bg: #191c1b;
+  --library-surface: #222725;
+  --library-surface-raised: #2b302e;
   --library-text: #f2f2f3;
-  --library-muted: #8b8b91;
+  --library-muted: #a4ada8;
   --library-border: rgb(255 255 255 / 11%);
-  --library-accent: #1888d8;
-  --library-header-bg: rgb(5 5 5 / 95%);
+  --library-accent: #a1d7bf;
+  --library-header-bg: #191c1b;
+  --library-sidebar: #202422;
   --library-divider: rgb(255 255 255 / 7%);
   --library-hover: rgb(255 255 255 / 5%);
-  --library-active: rgb(255 255 255 / 8%);
+  --library-active: #2c4036;
   --library-secondary: #c5c5c9;
   --library-faint: #57575d;
   --library-cover-bg: #1b1b1e;
+  --library-cover-ink: #f5f5f0;
+  --library-cover-forest: #38564a;
+  --library-cover-clay: #845551;
+  --library-cover-ocean: #425f72;
+  --library-cover-olive: #666a45;
   --library-cover-icon: #67676e;
   --library-selection-bg: #1b1b1d;
   --library-danger: #ef5b61;
@@ -62,8 +68,8 @@
   --library-error-text: #e7b7b9;
   --library-drop-bg: rgb(5 5 5 / 88%);
   --library-drop-text: #f2f2f3;
-  --library-on-accent: #ffffff;
-  --library-cover-shadow: rgb(0 0 0 / 34%);
+  --library-on-accent: #18382b;
+  --library-cover-shadow: rgb(0 0 0 / 16%);
   --library-selection-mask: rgb(0 0 0 / 50%);
   --library-selection-icon: rgb(255 255 255 / 78%);
   --library-menu-shadow: rgb(0 0 0 / 42%);
@@ -71,7 +77,7 @@
   --library-dialog-backdrop: rgb(0 0 0 / 68%);
   --library-work-backdrop: rgb(0 0 0 / 58%);
   --library-memory-icon: #aaaab0;
-  --library-quote-border: #9f8e59;
+  --library-quote-border: var(--library-accent);
   --library-jump-border: rgb(24 136 216 / 45%);
   --library-snapshot-backdrop: rgb(0 0 0 / 72%);
   --library-snapshot-bg: #ffffff;
@@ -79,17 +85,19 @@
 }
 
 :root[data-app-tone="light"] {
-  --library-bg: #f6f6f8;
+  --library-bg: #ffffff;
   --library-surface: #ffffff;
   --library-surface-raised: #ffffff;
-  --library-text: #1d1d1f;
-  --library-muted: #66666d;
-  --library-border: rgb(0 0 0 / 13%);
-  --library-accent: #006fb9;
-  --library-header-bg: rgb(246 246 248 / 95%);
+  --library-text: #252b29;
+  --library-muted: #616b66;
+  --library-border: #dde2df;
+  --library-accent: #246653;
+  --library-header-bg: #ffffff;
+  --library-sidebar: #f5f6f5;
+  --library-on-accent: #ffffff;
   --library-divider: rgb(0 0 0 / 8%);
   --library-hover: rgb(0 0 0 / 4%);
-  --library-active: rgb(0 0 0 / 6%);
+  --library-active: #eaf2ed;
   --library-secondary: #49494f;
   --library-faint: #9a9aa0;
   --library-cover-bg: #ededf0;
@@ -100,7 +108,7 @@
   --library-copy: #4f4f55;
   --library-gold: #79651c;
   --library-gold-muted: #79651c;
-  --library-link: #006fb9;
+  --library-link: #246653;
   --library-error-border: #b52f37;
   --library-error-bg: rgb(181 47 55 / 8%);
   --library-error-text: #8c2027;
@@ -110,14 +118,14 @@
 }
 
 :root[data-theme="light"] {
-  --ui-canvas: #e7e9e6;
+  --ui-canvas: #f5f6f5;
   --ui-surface: #ffffff;
-  --ui-surface-muted: #f3f5f2;
+  --ui-surface-muted: #f5f6f5;
   --ui-bar-bg: rgb(255 255 255 / 94%);
-  --ui-input-bg: #f6f8f5;
-  --ui-text: #202522;
-  --ui-muted: #747b77;
-  --ui-border: #d6dad5;
+  --ui-input-bg: #f5f6f5;
+  --ui-text: #252b29;
+  --ui-muted: #616b66;
+  --ui-border: #dde2df;
   --page-bg: #ffffff;
   --page-text: #282b29;
   --page-muted: rgb(40 43 41 / 50%);
@@ -125,10 +133,11 @@
 }
 
 :root[data-theme-tone="dark"] {
-  --reader-accent: #1497e8;
-  --ui-canvas: #101513;
-  --ui-surface: #202724;
-  --ui-surface-muted: #29312e;
+  --reader-accent: #a1d7bf;
+  --ui-on-accent: #18382b;
+  --ui-canvas: #191c1b;
+  --ui-surface: #222725;
+  --ui-surface-muted: #2b302e;
   --ui-bar-bg: rgb(26 32 29 / 94%);
   --ui-input-bg: #29312e;
   --ui-text: #edf0ed;

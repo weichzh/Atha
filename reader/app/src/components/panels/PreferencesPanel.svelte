@@ -15,7 +15,6 @@
     ListIndentIncrease,
     MoveHorizontal,
     MoveVertical,
-    Palette,
     Plus,
     Save,
     Search,
@@ -74,40 +73,63 @@
         <X aria-hidden="true" />
       </button>
     </header>
+    <div class="reader-quick-settings">
+      <div class="setting-label-row">
+        <label class="setting-label" for="font-size">字号 · 阅读默认</label>
+        <output id="font-size-value" for="font-size">19</output>
+      </div>
+      <label class="font-size-control">
+        <span class="font-choice-small" aria-hidden="true">A</span>
+        <input id="font-size" type="range" min="16" max="40" step="1" value="19" aria-label="正文字号" />
+        <span class="font-choice-large" aria-hidden="true">A</span>
+      </label>
+      <div class="theme-swatches" role="radiogroup" aria-label="书页主题 · 阅读默认">
+        <button type="button" role="radio" aria-checked="true" data-preference-for="theme" data-preference-value="system" data-swatch="system"><span class="theme-preview">Aa</span><span>跟随系统</span></button>
+        <button type="button" role="radio" aria-checked="false" data-preference-for="theme" data-preference-value="light" data-swatch="light"><span class="theme-preview">Aa</span><span>浅色</span></button>
+        <button type="button" role="radio" aria-checked="false" data-preference-for="theme" data-preference-value="paper" data-swatch="paper"><span class="theme-preview">Aa</span><span>纸张</span></button>
+        <button type="button" role="radio" aria-checked="false" data-preference-for="theme" data-preference-value="dark" data-swatch="dark"><span class="theme-preview">Aa</span><span>深色</span></button>
+      </div>
+      <select id="theme" class="preference-source-select" aria-hidden="true" tabindex="-1">
+        <option value="system" selected>跟随系统</option>
+        <option value="light">浅色</option>
+        <option value="paper">纸张</option>
+        <option value="dark">深色</option>
+      </select>
+    </div>
     <div class="settings-list">
       <button type="button" data-settings-target="font">
         <Type aria-hidden="true" />
-        <span>字体</span>
+        <span>字体<small>阅读默认</small></span>
         <ChevronRight aria-hidden="true" />
       </button>
       <button type="button" data-settings-target="layout">
         <Columns3 aria-hidden="true" />
-        <span>布局</span>
+        <span>布局<small>默认行距与本书排版</small></span>
         <ChevronRight aria-hidden="true" />
       </button>
       <button type="button" data-settings-target="theme">
-        <Palette aria-hidden="true" />
-        <span>主题与亮度</span>
+        <SunMedium aria-hidden="true" />
+        <span>亮度<small>阅读默认</small></span>
         <ChevronRight aria-hidden="true" />
       </button>
       <button type="button" data-settings-target="behavior">
         <Hand aria-hidden="true" />
-        <span>阅读行为</span>
+        <span>阅读行为<small>当前书籍</small></span>
         <ChevronRight aria-hidden="true" />
       </button>
       <button type="button" data-settings-target="book">
         <BookOpenText aria-hidden="true" />
-        <span>本书样式</span>
+        <span>本书样式<small>当前书籍</small></span>
         <ChevronRight aria-hidden="true" />
       </button>
       <button type="button" data-settings-target="modules">
         <Braces aria-hidden="true" />
-        <span>CSS 模块</span>
+        <span>CSS 模块<small>当前书籍</small></span>
         <ChevronRight aria-hidden="true" />
       </button>
     </div>
     <button id="reset-application-preferences" class="quiet-button" type="button">
-      恢复应用默认
+      恢复阅读默认
     </button>
   </section>
 
@@ -124,17 +146,6 @@
       <h2 tabindex="-1">字体</h2>
     </header>
     <div class="setting-group">
-      <div class="setting-row setting-row-stacked font-size-setting">
-        <div class="setting-label-row">
-          <span class="setting-label">字号</span>
-          <output id="font-size-value" for="font-size">19</output>
-        </div>
-        <label class="font-size-control">
-          <span class="font-choice-small" aria-hidden="true">A</span>
-          <input id="font-size" type="range" min="16" max="40" step="1" value="19" aria-label="正文字号" />
-          <span class="font-choice-large" aria-hidden="true">A</span>
-        </label>
-      </div>
       <div class="setting-row setting-row-stacked">
         <span class="setting-label">字体</span>
         <div class="segmented-control segmented-control-wide" role="radiogroup" aria-label="正文字体">
@@ -165,7 +176,7 @@
     </header>
     <div class="setting-group">
       <div class="setting-row setting-row-stacked">
-        <span class="setting-label">行距</span>
+        <span class="setting-label">行距 · 阅读默认</span>
         <div class="segmented-control segmented-control-wide" role="radiogroup" aria-label="行距">
           <button type="button" role="radio" aria-checked="false" data-preference-for="density" data-preference-value="compact">紧凑</button>
           <button type="button" role="radio" aria-checked="true" data-preference-for="density" data-preference-value="standard">标准</button>
@@ -178,7 +189,7 @@
         <option value="comfortable">舒展</option>
       </select>
       <div class="setting-row setting-row-stacked">
-        <span class="setting-label">段首缩进</span>
+        <span class="setting-label">段首缩进 · 本书</span>
         <div class="choice-cards" role="radiogroup" aria-label="段首缩进">
           <button type="button" role="radio" aria-checked="true" data-preference-for="paragraph-indent" data-preference-value="none">
             <TextAlignJustify class="indent-preview" aria-hidden="true" /><span>首行顶格</span>
@@ -193,7 +204,7 @@
         <option value="two">缩进两字</option>
       </select>
       <div class="setting-row setting-row-stacked">
-        <span class="setting-label">段落间距</span>
+        <span class="setting-label">段落间距 · 本书</span>
         <div class="segmented-control segmented-control-wide" role="radiogroup" aria-label="段落间距">
           <button type="button" role="radio" aria-checked="true" data-preference-for="paragraph-spacing" data-preference-value="book">跟随书源</button>
           <button type="button" role="radio" aria-checked="false" data-preference-for="paragraph-spacing" data-preference-value="compact">紧凑</button>
@@ -206,7 +217,7 @@
         <option value="comfortable">舒展</option>
       </select>
       <div class="setting-row setting-row-stacked">
-        <span class="setting-label">左右边距</span>
+        <span class="setting-label">左右边距 · 本书</span>
         <div class="segmented-control segmented-control-wide" role="radiogroup" aria-label="左右边距">
           <button type="button" role="radio" aria-checked="false" data-preference-for="page-margin" data-preference-value="narrow">窄</button>
           <button type="button" role="radio" aria-checked="true" data-preference-for="page-margin" data-preference-value="standard">标准</button>
@@ -231,7 +242,7 @@
       >
         <ArrowLeft aria-hidden="true" />
       </button>
-      <h2 tabindex="-1">主题与亮度</h2>
+      <h2 tabindex="-1">亮度</h2>
     </header>
     <div class="setting-group">
       <label class="setting-row brightness-row">
@@ -239,18 +250,6 @@
         <input id="brightness" type="range" min="70" max="120" value="100" aria-label="亮度" />
         <SunMedium class="brightness-high" aria-hidden="true" />
       </label>
-      <div class="theme-swatches" role="radiogroup" aria-label="主题">
-        <button type="button" role="radio" aria-checked="true" data-preference-for="theme" data-preference-value="system" data-swatch="system"><span class="theme-preview">Aa</span><span>跟随系统</span></button>
-        <button type="button" role="radio" aria-checked="false" data-preference-for="theme" data-preference-value="light" data-swatch="light"><span class="theme-preview">Aa</span><span>浅色</span></button>
-        <button type="button" role="radio" aria-checked="false" data-preference-for="theme" data-preference-value="paper" data-swatch="paper"><span class="theme-preview">Aa</span><span>纸张</span></button>
-        <button type="button" role="radio" aria-checked="false" data-preference-for="theme" data-preference-value="dark" data-swatch="dark"><span class="theme-preview">Aa</span><span>深色</span></button>
-      </div>
-      <select id="theme" class="preference-source-select" aria-hidden="true" tabindex="-1">
-        <option value="system" selected>跟随系统</option>
-        <option value="light">浅色</option>
-        <option value="paper">纸张</option>
-        <option value="dark">深色</option>
-      </select>
     </div>
   </section>
 

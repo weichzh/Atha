@@ -101,6 +101,7 @@ export interface RootMessageView {
   revisionId: string;
   kind: "source-only" | "text";
   text: string;
+  latestText: string;
   source: MessageSource;
   updatedAt: number;
 }

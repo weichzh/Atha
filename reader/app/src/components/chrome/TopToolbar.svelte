@@ -6,6 +6,10 @@
   <button id="reader-back" class="icon-button" type="button" aria-label="返回" title="返回">
     <ArrowLeft aria-hidden="true" />
   </button>
+  <div class="reader-context">
+    <span id="reader-toolbar-chapter"></span>
+    <output id="reader-toolbar-progress" class="reader-toolbar-progress"></output>
+  </div>
   <div class="top-toolbar-actions">
     <button
       id="add-bookmark"

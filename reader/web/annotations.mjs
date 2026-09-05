@@ -3,6 +3,11 @@ const ANNOTATION_MAX_NOTE_LENGTH = 2000;
 const ANNOTATION_CONTEXT_LENGTH = 32;
 const HIGHLIGHT_NAME = "atha-annotations";
 const SELECTION_CHANGE_SETTLE_MS = 120;
+const ANNOTATION_TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
 export function dispatchDictionaryLookup(selection, target = globalThis) {
   if (!selection) return false;
@@ -154,54 +159,32 @@ export function createAnnotations({
       ...active.map((item) => {
         const row = document.createElement("article");
         const button = document.createElement("button");
-        const kind = document.createElement("span");
         const quote = document.createElement("span");
-        const actions = document.createElement("span");
-        const edit = document.createElement("button");
-        const removeButton = document.createElement("button");
+        const response = document.createElement("span");
+        const time = document.createElement("time");
+        const responseText = item.latestText ?? item.note;
         row.className = "annotation-item";
         button.type = "button";
         button.className = "annotation-item-main";
         button.dataset.annotationId = item.id;
         button.dataset.annotationAction = onOpenConversation ? "conversation" : "go";
-        kind.className = "annotation-item-kind";
-        kind.textContent = item.type === "note" ? "笔记" : "标注";
         quote.className = "annotation-item-quote";
         quote.textContent = item.sourceAnchor.selectedText.replace(/\s+/gu, " ").trim().slice(0, 100);
-        button.append(kind, quote);
-        if (item.note) {
-          const note = document.createElement("span");
-          note.className = "annotation-item-note";
-          note.textContent = item.note.replace(/\s+/gu, " ").trim().slice(0, 140);
-          button.append(note);
-        }
-        actions.className = "annotation-item-actions";
-        edit.type = "button";
-        edit.className = "annotation-item-action annotation-item-edit";
-        edit.dataset.annotationId = item.id;
-        edit.dataset.annotationAction = "edit";
-        edit.setAttribute("aria-label", item.note ? "编辑笔记" : "为这段原文添加笔记");
-        edit.title = edit.getAttribute("aria-label");
-        const editIcon = document.createElement("span");
-        editIcon.className = "fluent-icon";
-        editIcon.setAttribute("aria-hidden", "true");
-        editIcon.textContent = "\uE70F";
-        edit.append(editIcon);
-        removeButton.type = "button";
-        removeButton.className = "annotation-item-action annotation-item-delete";
-        removeButton.dataset.annotationId = item.id;
-        removeButton.dataset.annotationAction = "delete";
-        removeButton.setAttribute("aria-label", item.note ? "删除笔记" : "删除标注");
-        removeButton.title = removeButton.getAttribute("aria-label");
-        const deleteIcon = document.createElement("span");
-        deleteIcon.className = "fluent-icon";
-        deleteIcon.setAttribute("aria-hidden", "true");
-        deleteIcon.textContent = "\uE74D";
-        removeButton.append(deleteIcon);
+        response.className = "annotation-item-note";
+        response.textContent = responseText
+          ? responseText.replace(/\s+/gu, " ").trim().slice(0, 140)
+          : "还没有回应";
+        time.className = "annotation-item-time";
+        time.dateTime = new Date(item.updatedAt).toISOString();
+        time.textContent = ANNOTATION_TIME_FORMAT.format(new Date(item.updatedAt));
+        button.setAttribute(
+          "aria-label",
+          `${quote.textContent}。${responseText ? `最近回应：${response.textContent}` : response.textContent}。${time.textContent}`,
+        );
         row.dataset.conversationId = item.conversationId;
         row.dataset.selected = String(item.conversationId === selectedConversationId);
-        actions.append(edit, removeButton);
-        row.append(button, actions);
+        button.append(quote, response, time);
+        row.append(button);
         return row;
       }),
     );
@@ -657,6 +640,7 @@ export function createAnnotations({
     controls.delete.addEventListener("click", async () => {
       const item = selectedItem();
       if (!item) return fail("annotation-missing");
+      if (!globalThis.confirm("删除这段笔记后，对话将不再出现在笔记列表中。继续吗？")) return;
       await remove(item.id);
       finishSelection();
     });
@@ -679,16 +663,7 @@ export function createAnnotations({
     controls.list.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-annotation-id]");
       if (!button) return;
-      if (button.dataset.annotationAction === "edit") {
-        const item = store.item(button.dataset.annotationId);
-        if (item && onOpenConversation) {
-          await onOpenConversation(item.conversationId, item.id, true);
-        } else {
-          openNoteDialog(button.dataset.annotationId);
-        }
-      } else if (button.dataset.annotationAction === "delete") {
-        await remove(button.dataset.annotationId);
-      } else if (button.dataset.annotationAction === "conversation") {
+      if (button.dataset.annotationAction === "conversation") {
         const item = store.item(button.dataset.annotationId);
         if (item) {
           await onOpenConversation(item.conversationId, item.id);

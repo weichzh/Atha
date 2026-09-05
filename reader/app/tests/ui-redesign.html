@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Atha UI Test Fixture</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+
+      const books = ["山间来信", "城市的另一面", "长日漫步", "夜航随笔", "草木集", "海岸线", "一段非常长的书名用于检查窄屏布局以及连续文字截断", "ReadingWithoutSpacesMustNotResizeTheGrid", "雨后"]
+        .map((title, index) => ({ id: String(index + 1).padStart(64, "0"), title, authors: ["测试作者"], hasCover: false, hasCustomCover: false, importedAt: 10 - index, prepared: true }));
+      window.testCommands = [];
+      mockWindows("main");
+      mockIPC((command) => {
+        window.testCommands.push(command);
+        if (command === "list_library_books") return books;
+        if (command === "pending_library_book_deletions" || command === "list_local_dictionaries") return [];
+        if (command === "pending_local_data_restore" || command === "take_startup_import") return null;
+        if (command === "reading_memory_search") return books.slice(0, 2).map((book, index) => ({
+          messageId: `test-message-${index}`, rootMessageId: `test-root-${index}`, editionId: book.id,
+          conversationId: `test-conversation-${index}`, section: "test-section", canonicalLocator: "",
+          title: book.title, authors: book.authors, updatedAt: 1788580800000,
+          selectedText: "山的轮廓渐渐隐入暮色，远处的灯光一盏盏亮起来。",
+          text: "再次读到这里，才留意到时间与距离的变化。",
+        }));
+        throw new Error(`Unexpected test IPC: ${command}`);
+      }, { shouldMockEvents: true });
+      await import("../src/main.ts");
+    </script>
+  </body>
+</html>

@@ -241,6 +241,7 @@ pub struct RootMessageView {
     pub revision_id: String,
     pub kind: String,
     pub text: String,
+    pub latest_text: String,
     pub source: MessageSourceView,
     pub updated_at: i64,
 }

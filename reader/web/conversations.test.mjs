@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   conversationFeed,
+  currentConversationMessages,
   formatMessageTime,
   isSnapshotCssSafe,
   linkedMessagePreviews,
@@ -91,9 +92,21 @@ const replyMessage = {
   referencePreviews: [{ id: "external", text: "外部引用", deleted: false }],
 };
 assert.deepEqual(linkedMessagePreviews(replyMessage, [rootMessage, replyMessage]), [
-  { id: "root", text: "根消息", local: true },
-  { id: "external", text: "外部引用", local: false },
+  { id: "root", text: "根消息", local: true, kind: "reply" },
+  { id: "external", text: "外部引用", local: false, kind: "reference" },
 ]);
+assert.deepEqual(linkedMessagePreviews(replyMessage, [rootMessage, replyMessage], "root"), [
+  { id: "external", text: "外部引用", local: false, kind: "reference" },
+]);
+assert.deepEqual(
+  currentConversationMessages({
+    messages: [
+      { id: "source-only", source: { selectedText: "原文" }, text: "", deleted: false },
+      { id: "response", source: null, text: "回应", deleted: false },
+    ],
+  }).map((message) => message.id),
+  ["response"],
+);
 assert.equal(formatMessageTime(new Date(2026, 0, 1, 14, 5).valueOf()), "14:05");
 
 const firstConversation = {

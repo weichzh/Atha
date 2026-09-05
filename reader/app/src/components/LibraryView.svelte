@@ -15,9 +15,12 @@
     Library,
     List as ListIcon,
     MessageSquareText,
+    Monitor,
+    Moon,
     Plus,
     Search,
     Settings,
+    Sun,
     Trash2,
     X,
   } from "@lucide/svelte";
@@ -692,7 +695,7 @@
       onkeydown={(event) => handleBookKeydown(event, book)}
       disabled={busy}
     >
-      <span class="library-cover">
+      <span class="library-cover" class:library-cover-missing={!book.hasCover || failedCovers.has(book.id)}>
         {#if book.hasCover && !failedCovers.has(book.id)}
           <img
             src={coverUrl(book.id, coverRevisions.get(book.id) ?? 0)}
@@ -703,7 +706,10 @@
             onerror={() => markCoverFailed(book.id)}
           />
         {:else}
-          <BookOpen aria-hidden="true" />
+          <span class="library-cover-fallback" aria-hidden="true">
+            <strong>{book.title}</strong>
+            <BookOpen />
+          </span>
         {/if}
         {#if selecting}
           <span class:selected={selectedIds.has(book.id)} class="library-book-selection" aria-hidden="true">
@@ -729,7 +735,8 @@
   aria-label="Atha 资料库"
   aria-busy={loading || busy}
 >
-  <header class="library-header">
+  <aside class="library-sidebar">
+    <div class="library-brand"><BookOpen aria-hidden="true" /><span>Atha</span></div>
     <nav class="library-sections" aria-label="资料库主导航">
       <button
         type="button"
@@ -763,7 +770,18 @@
       </button>
     </nav>
 
-    {#if section === "library"}
+  </aside>
+
+  <div class="library-content">
+  {#if section === "library"}
+  <header class="library-header">
+    <div class="library-titlebar">
+      <div class="library-title"><h1>书架</h1><span>{books.length} 本</span></div>
+      <button class="library-import" type="button" onclick={chooseBooks} disabled={loading || busy}>
+        <Plus aria-hidden="true" /><span>导入</span>
+      </button>
+    </div>
+    <div class="library-tools">
     <div class="library-search-bar">
       <label class="library-search-field">
         <Search aria-hidden="true" />
@@ -778,6 +796,21 @@
       </label>
     </div>
 
+    <div class="library-primary-actions">
+      <div class="library-layout-switch" role="group" aria-label="书架布局">
+        <button type="button" aria-label="网格视图" title="网格视图" aria-pressed={layout === "grid"} onclick={() => (layout = "grid")} disabled={loading || busy}>
+          <Grid2X2 aria-hidden="true" />
+        </button>
+        <button type="button" aria-label="列表视图" title="列表视图" aria-pressed={layout === "list"} onclick={() => (layout = "list")} disabled={loading || busy}>
+          <ListIcon aria-hidden="true" />
+        </button>
+      </div>
+      <button type="button" aria-label="选择书籍" title="选择书籍" aria-pressed={selecting} onclick={() => selecting ? cancelSelection() : startSelection()} disabled={loading || busy || books.length === 0}>
+        <CircleCheck aria-hidden="true" />
+      </button>
+    </div>
+    </div>
+
     {#if selecting}
       <div class="library-selection-header">
         <button type="button" onclick={toggleVisibleSelection} disabled={busy || visibleBooks.length === 0}>
@@ -788,42 +821,6 @@
           <span>已选择 {selectedIds.size} 本</span>
         </div>
         <button type="button" onclick={cancelSelection} disabled={busy}>取消</button>
-      </div>
-    {:else}
-      <div class="library-titlebar">
-        <h1>书架</h1>
-        <div class="library-primary-actions">
-          <div class="library-layout-switch" role="group" aria-label="书架布局">
-            <button
-              type="button"
-              aria-label="网格视图"
-              title="网格视图"
-              aria-pressed={layout === "grid"}
-              onclick={() => (layout = "grid")}
-              disabled={loading || busy}
-            >
-              <Grid2X2 aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              aria-label="列表视图"
-              title="列表视图"
-              aria-pressed={layout === "list"}
-              onclick={() => (layout = "list")}
-              disabled={loading || busy}
-            >
-              <ListIcon aria-hidden="true" />
-            </button>
-          </div>
-          <button type="button" onclick={chooseBooks} disabled={busy}>
-            <Plus aria-hidden="true" />
-            <span>导入</span>
-          </button>
-          <button type="button" onclick={startSelection} disabled={busy || books.length === 0}>
-            <CircleCheck aria-hidden="true" />
-            <span>选择</span>
-          </button>
-        </div>
       </div>
     {/if}
 
@@ -840,8 +837,8 @@
         </button>
       {/each}
     </nav>
-    {/if}
   </header>
+  {/if}
 
   {#if section === "memory"}
     <MemoryCenter {books} disabled={loading || busy} />
@@ -853,7 +850,7 @@
 
       <section class="library-settings-group" aria-labelledby="appearance-settings-heading">
         <h2 id="appearance-settings-heading">应用外观</h2>
-        <div class="library-setting-row">
+        <div class="library-setting-row library-appearance-row">
           <span>界面主题</span>
           <div class="library-theme-control" role="radiogroup" aria-label="应用界面主题">
             {#each [
@@ -864,10 +861,16 @@
               <button
                 type="button"
                 role="radio"
+                data-app-swatch={theme}
                 aria-checked={appTheme === theme}
                 onclick={() => chooseAppTheme(theme as AppTheme)}
                 disabled={busy}
-              >{label}</button>
+              >
+                <span class="library-theme-preview" aria-hidden="true">
+                  {#if theme === "system"}<Monitor />{:else if theme === "light"}<Sun />{:else}<Moon />{/if}
+                </span>
+                <span>{label}</span>
+              </button>
             {/each}
           </div>
         </div>
@@ -875,9 +878,6 @@
 
       <section class="library-settings-group" aria-labelledby="reading-defaults-settings-heading">
         <h2 id="reading-defaults-settings-heading">阅读默认</h2>
-        <p class="library-settings-description">
-          新打开的书沿用阅读界面保存的书页主题、字号、字体和行距；当前书的布局与样式仍在阅读时调整。
-        </p>
         <div class="library-data-actions">
           <button type="button" onclick={resetReadingDefaults} disabled={busy}>
             <BookOpen aria-hidden="true" />
@@ -993,6 +993,7 @@
     </div>
   {/if}
   {/if}
+  </div>
 
   {#if bookMenu}
     <div

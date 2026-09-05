@@ -38,6 +38,7 @@ export function createMessageStore({
       id: root.messageId,
       type: root.kind === "text" ? "note" : "highlight",
       note: root.text,
+      latestText: root.latestText,
       createdAt: root.updatedAt,
       updatedAt: root.updatedAt,
       deletedAt: null,

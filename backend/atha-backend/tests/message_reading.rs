@@ -651,6 +651,9 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
     let root_incoming = store
         .relationships(&first.message_id)
         .expect("reply parent relationships");
+    let roots = store
+        .roots(&edition().content_version, None)
+        .expect("list roots with latest response");
 
     assert_eq!(conversation.messages.len(), 2);
     assert_eq!(
@@ -688,6 +691,14 @@ fn replies_and_message_references_are_queryable_in_both_directions() {
     expected_incoming_ids.sort();
     assert_eq!(incoming_ids, expected_incoming_ids);
     assert_eq!(root_incoming.referenced_by, vec![reply.message_id]);
+    assert_eq!(
+        roots
+            .iter()
+            .find(|root| root.message_id == first.message_id)
+            .expect("first root")
+            .latest_text,
+        "把两处内容联系起来"
+    );
 }
 
 #[test]
@@ -909,6 +920,24 @@ fn seeds_reading_memory_gui_fixture() {
             text: Some("公共记忆中的可跳转笔记".into()),
         })
         .expect("create present memory");
+    let present_reply = store
+        .reply(ReplyDraft {
+            conversation_id: present.conversation_id.clone(),
+            reply_to_message_id: present.message_id.clone(),
+            text: "这条最近回应应出现在笔记索引中".into(),
+            rich_text: None,
+            reference_ids: Vec::new(),
+        })
+        .expect("create present memory reply");
+    store
+        .reply(ReplyDraft {
+            conversation_id: present.conversation_id.clone(),
+            reply_to_message_id: present_reply.message_id,
+            text: "这条回复用于验证消息之间的回应关系".into(),
+            rich_text: None,
+            reference_ids: Vec::new(),
+        })
+        .expect("create nested present memory reply");
     let original = store
         .source_captures(&present.message_id)
         .expect("read present source");

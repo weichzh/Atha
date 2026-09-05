@@ -11,6 +11,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | 文件 | 负责内容 |
 | --- | --- |
 | `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
+| `reader/app/src/components/LibraryView.svelte`、`reader/app/src/library.css` | 书架、应用设置、共享资料库导航与阅读记忆视觉；960 px 起使用侧边导航，窄屏使用底部导航 |
 | `reader/app/src/components/ReaderCanvas.svelte` | 自适应书页、章节和进度 DOM |
 | `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条、兼容笔记 dialog 与对话浮层的组合 |
 | `reader/app/src/components/ContentDialog.svelte` | 图片、公式和表格的全屏查看层，以及双指 / 滚轮、按钮、键盘缩放和复位控制 |
@@ -19,7 +20,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/app/src/message-editor.ts`、`message-markdown.ts` | 受限 Tiptap 扩展、链接规则及按需加载的 Markdown 双向转换 |
 | `reader/app/src/components/chrome/` | 顶部返回 / 书签和底部目录 / 搜索 / 笔记 / 进度 / 设置五图标 |
 | `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
-| `reader/app/src/components/panels/PreferencesPanel.svelte` | Readest 风格分层设置、字号滑块、排版卡片、两种阅读方式与 CSS 模块入口 |
+| `reader/app/src/components/panels/PreferencesPanel.svelte` | 首页字号与主题、两列分类入口、分层排版设置、两种阅读方式与 CSS 模块入口 |
 | `reader/app/src/components/CssEditor.svelte` | CSS 模块页可见时按需加载的 CodeMirror 6 渐进增强；隐藏 textarea 保持唯一状态入口 |
 | `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 桌面词典浮层、移动端 75% 高底部抽屉、来源 / 字号设置、选区精确查词与安全富文本词条 |
 | `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的无网络 codec；未来数据源只能经此复用字段、大小、重复 ID 与 CSS 安全校验 |
@@ -29,7 +30,7 @@ description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工�
 | `reader/web/interaction.mjs` | 左右模式的键盘、滚轮、页区和横向触摸；上下模式的原生滚动、边界跨章和中间点击工具层 |
 | `reader/web/content-actions.mjs`、`reader/web/structured-actions.mjs` | 图片 / 公式与安全表格投影的激活、查看、焦点返回和诊断检查 |
 | `reader/web/bookmarks.mjs` | 右上角书签切换、目录中的书签列表和书签跳转 |
-| `reader/web/message-store.mjs` | 正式根 Message 到标注/笔记投影的适配，以及旧 localStorage 记录迁移 |
+| `reader/web/message-store.mjs` | 正式根 Message 到标注 / 笔记索引的适配，包括最近未删除回应投影，以及旧 localStorage 记录迁移 |
 | `reader/web/conversations.mjs` | 对话浮层、当前 / 本章 / 本书范围、时间 / 书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
 | `reader/web/navigation.mjs` | 章节标题、目录选择、全书近似进度和进度拖动 |
 | `reader/web/reader-state.mjs` | 应用 / 本书偏好、书签、进度与有界本地阅读统计；统计只消费页面生命周期和既有导航稳定状态 |
@@ -55,15 +56,15 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 ├─ .reader-controls
 │  ├─ .top-toolbar
 │  │  ├─ #reader-back
+│  │  ├─ .reader-context / 当前章节与页码
 │  │  └─ .top-toolbar-actions
-│  │     ├─ .dictionary
-│  │     ├─ #add-bookmark
-│  │     └─ .preferences
+│  │     └─ #add-bookmark
 │  └─ .toolbar
 │     ├─ .directory
 │     ├─ .search
 │     ├─ .notes
 │     ├─ .progress
+│     └─ .preferences
 ├─ #selection-actions
 ├─ #annotation-note-dialog
 ├─ #message-conversation
@@ -71,7 +72,7 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 └─ #message-snapshot-dialog
 ```
 
-顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不把 XHTML 或分页热状态移进组件树。四个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。笔记是例外的响应式投影：竖屏的列表与当前线程使用同一悬浮窗口边界；横屏至少 800 px 时从左到右组合正文 `A`、列表 `B` 与线程 `C`，工作区变化后由同一 Locator 重排正文。可见名称固定为笔记入口、纯原文“标注”、当前“对话”和对话内“消息”，不把内部 MessageStore 名称投影给用户。
+顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不把 XHTML 或分页热状态移进组件树。五个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。笔记是例外的响应式投影：竖屏的列表与当前线程使用同一悬浮窗口边界；横屏至少 800 px 时从左到右组合正文 `A`、列表 `B` 与线程 `C`，工作区变化后由同一 Locator 重排正文。可见名称固定为笔记入口、纯原文“标注”、当前“对话”和对话内“消息”，不把内部 MessageStore 名称投影给用户。
 
 `.reader-startup` 从阅读路由首次挂载起用不透明书页底色覆盖书内内容；`app.mjs` 恢复上次 Locator 并绑定交互后设置根级 `data-reader-ready`，加载层才淡出。失败路径同样撤下加载层并显示错误，三点动画与淡出在 `prefers-reduced-motion` 下停用。
 
@@ -82,12 +83,18 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - 普通图片在单页可用宽高内等比缩放；v5 本地图片以原生 HTML 宽高和书源 CSS 之前的有界 `contain-intrinsic-size` 规则稳定解码前盒，书源与用户 CSS 继续覆盖，不等待资源完成后再揭示正文。内嵌表格忽略书源最小列宽，以固定布局、紧凑字号和省略号生成整页宽预览；超出单页高度的部分直接裁掉。代码块仍在 `.atha-structured-overflow` 内原生滚动。
 - 例如 4K 屏幕采用 200% 系统缩放且视口为 390 × 840 CSS 像素时，内部书页为 780 × 1680 设备像素；同一窗口放大后会按新的设备像素宽高重新分页。
 - `.top-toolbar` 与 `.toolbar` 固定为 48 CSS px；`.tool-panel` 和普通表单控件同样不跟随 `--page-scale`，而是遵循系统 CSS 像素和系统缩放。
-- 上下正文安全区最小为 144 设备像素；在 DPR 2 下正文为 y=72–768 CSS px，工具栏为 y=0–48 与 y=792–840，因此控制层只进入页眉页脚。
+- 上下正文安全区最小为 144 设备像素；840 CSS px 高、DPR 2 且无额外安全区时，正文为 y=72–768，工具栏为 y=0–48 与 y=780–828，因此工具条只进入页眉页脚。底栏宽度不超过 400 CSS px，左右至少 12 px，桌面侧栏打开时恢复既有 320 px 侧栏底部几何。
 - 尺寸变化等待 120ms 后进入 Navigation 串行队列，使用变化前 Locator 重排和恢复；正式回归覆盖 `390 840 2`、`780 1680 1` 与 `960 720 1`。
 
 ## 手工调整入口
 
 应用壳视觉在 `reader/app/src/shell.css` 中调整；书页内容只在 `reader/atha-reader.css` 中调整：
+
+生产 UI 使用白色 / 石墨灰和松绿色强调，颜色仍只由 `reader/theme.css` 提供。书架的 `.library-sidebar`、`.library-content`、`.library-tools` 分离导航、书籍内容与操作；标题和导入同排，搜索独立于排序与视图切换。真实封面等比完整显示，缺失封面使用书名排版回退，不修改书籍资源。桌面阅读记忆把搜索结果作为主列，最近阅读作为右列，窄屏按原 DOM 顺序堆叠。
+
+应用主题使用三种图标色样，仍只写应用外观；阅读设置菜单分别标识阅读默认与当前书籍。笔记索引为两行原文、两行最近回应和时间；对话使用左侧原文细线与右侧浅色回应，引用为消息内细线预览，不新增卡片层。桌面对话宽度为 `clamp(400px, 29vw, 480px)`；断点与 Locator 恢复仍由既有工作区逻辑控制。
+
+阅读正文保持无框版面与书源字体。顶栏的当前章节和本节页码由 `navigation.mjs` 的同一 `syncControls` 在初次打开与后续导航同步；沉浸态使用原章节页眉和居中页码。阅读设置首页直接显示原 `#font-size` 和四个阅读主题色样，下方为两列分类；字体页只选字体，亮度独立下钻，不新建偏好状态。
 
 | 想调整的部分 | 选择器或变量 |
 | --- | --- |
@@ -96,10 +103,10 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 | 底部栏 | `.toolbar`、`.icon-button`、`.fluent-icon` |
 | 所有弹出面板 | `.tool-panel` |
 | 目录和书签 | `.directory-panel`、`.directory-list`、`.directory-item`；隐藏数据源为 `#toc` 与 `option[data-bookmark-id]` |
-| 搜索 | `.search-panel`、`.search-actions` |
+| 搜索 | `.search-panel`、`.reader-search-field`、`.reader-primary-command` |
 | 选区动作与笔记 | `.selection-actions` 四图标动作栏、`#annotation-note-dialog`、`.notes-panel`、`.annotation-filters`、`.annotation-list`、`.annotation-item` |
 | 词典 | `.dictionary-backdrop`、`.dictionary-panel`、`.dictionary-content`、`.dictionary-source`、`.dictionary-result` |
-| 对话 | `.message-conversation`、`.message-view-controls`、`.message-segmented`、`.message-source-context`、`.message-feed-source`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
+| 对话 | `.message-conversation`、`.message-view-controls`、`.message-segmented`、`.message-source-turn`、`.message-source-context`、`.message-feed-source`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
 | 消息输入 | `.message-editor`、`.message-editor-toolbar-primary`、`.message-editor-toolbar-secondary`、`.message-editor-mode-switch`、`.message-editor-markdown` |
 | 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
 | 进度与统计 | `.progress-panel`、`.reading-statistics`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
@@ -119,10 +126,10 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 - `#font-size` 是原生 range，input burst 每帧只预览一次，change 后才通过原 Locator 提交重排；`#density` 使用 1.55 / 1.8 / 2.05 无单位行距。`#page-margin` 按书选择 24 / 32 / 48 视觉 CSS px 左右边距，再按 DPR 写入内部画布；`#paragraph-indent` 以顶格 / 2em 卡片切换，`#paragraph-spacing` 生成受控可视 CSS。上下 144 设备像素安全区固定不变，旧应用记录中的四个自由边距字段仍会被忽略。
 - CSS 模块页直接复用每书偏好：最多 32 个模块，支持搜索、分组、排序、批量启停和 schema 1 JSON 导入导出；独立 codec 统一解析、序列化、字段、大小、重复 ID 与 CSSOM 校验，不包含网络或 provider registry。新模块单个 32 KiB、启用组合 64 KiB，超限旧 CSS 只作为停用恢复副本保留。CodeMirror 在页面首次可见时按需加载，100 ms 显示 lint，180 ms 后通过同一 textarea 触发预览；输入草稿绑定原模块，任一验证、重排或持久化失败均恢复上次有效状态、渲染与 Locator。
 - `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
-- 进度面板在进度摘要和拖动条之间投影今日、近 7 天、本书与连续阅读。桌面为四列，600 px 及以下为 2 × 2；指标使用分隔线而非嵌套卡片。统计在工具层打开时暂停，关闭后由同一阅读状态接口恢复。
-- 原生正文选区在 `pointerup`、键盘选择或稳定后的 `selectionchange` 投影紧凑四图标 `#selection-actions`；`content.selectionRange()` 以真实 `Range.collapsed` 与正文归属为准，避开华为 WebView 114 对闭合 Shadow DOM 的 `Selection.isCollapsed` 误报。复制只触发浏览器 copy，标注和笔记在 Tauri 产品中写入同一根 Message。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存会追加 SourceAnchor/SourceSnapshot，笔记动作追加修订，删除写入墓碑。`#annotations` 支持章节和全文筛选；点击项目保留列表与当前行并打开线程，独立编辑和删除按钮不触发跳转。
+- 进度面板在章节、进度摘要和拖动条下方投影今日、近 7 天、本书与连续阅读。桌面为四列，600 px 及以下为 2 × 2；指标使用分隔线而非嵌套卡片。面板不超过 520 px，浮于紧凑工具条上方；统计在工具层打开时暂停，关闭后由同一阅读状态接口恢复。
+- 原生正文选区在 `pointerup`、键盘选择或稳定后的 `selectionchange` 投影紧凑四图标 `#selection-actions`；`content.selectionRange()` 以真实 `Range.collapsed` 与正文归属为准，避开华为 WebView 114 对闭合 Shadow DOM 的 `Selection.isCollapsed` 误报。复制只触发浏览器 copy，标注和笔记在 Tauri 产品中写入同一根 Message。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存会追加 SourceAnchor/SourceSnapshot，笔记动作追加修订，删除写入墓碑。`#annotations` 支持章节和全文筛选；每行按原文、最近回应和最近活动时间显示，纯标注显示“还没有回应”，点击后保留列表与当前行并打开线程。编辑和删除不再常驻列表行，删除由选择动作或消息菜单进入并先请求平台确认。
 - 选区“查词”复用同一待处理 Range，只向上下文词典面板发送受限查询；阅读顶栏不再常驻词典按钮。桌面保持锚定浮层，640 px 及以下按 RD-24 / RD-25 使用 75% 高底部抽屉、遮罩、固定词头与独立滚动区，点击遮罩或关闭按钮回到原阅读位置，并尊重 reduced-motion。当前词典、导入、移除和独立于正文的 85%–175% 六档释义字号在应用设置中管理；schema 1 本地设置只保存当前词典 ID 与允许字号，损坏、已移除来源或存储不可用时回退。可见词头下以应用内建样式呈现后端白名单允许的音标、词性、段落、义项、例句、列表、引用、表格、ruby 与上下标；来源 class、ID、内联样式、地址、脚本、资源和 CSS 均不进入 DOM，不加载网络或富 MDD 内容。
-- `#annotation-note-dialog` 与 `#message-conversation` 共用 `VisualViewport` 的高度、顶部和中心；软键盘出现时，标注笔记的输入 / 保存操作及普通、全屏、展开消息输入器都保持在可视区，并把当前输入滚到最近位置。竖屏列表与线程在书页上共用 12 px 外边距的悬浮窗口，按 `B → C → B` 切换；横屏 800–1439 px 在 `A+B` 与 `B+C` 间切换，至少 1440 px 的线程态从左到右显示 `A+B+C`。标题栏不提供收起、导出或共享。顶部可切换本条、本章和本书：本条显示当前 Conversation 的原文短预览、回复与更多；本章和本书是只读聚合记录，可按创建时间或根 Message Locator 的书内位置排列，点击“打开”后进入对应本条对话再写入。被回复消息和额外引用都以大引号摘要显示在回复正文上方，正文下方只常驻时间、回复和更多。每个摘要只读取直接目标自身的正文，不递归展开或复制目标已有的引用。编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单；引用摘要可跳到当前对话目标并短暂高亮。笔记列表以可见返回按钮关闭笔记窗口，导出本书消息只放在右上角更多菜单。
+- `#annotation-note-dialog` 与 `#message-conversation` 共用 `VisualViewport` 的高度、顶部和中心；软键盘出现时，标注笔记的输入 / 保存操作及普通、全屏、展开消息输入器都保持在可视区，并把当前输入滚到最近位置。竖屏列表与线程在书页上共用 12 px 外边距的悬浮窗口，按 `B → C → B` 切换；横屏 800–1439 px 在 `A+B` 与 `B+C` 间切换，至少 1440 px 的线程态从左到右显示 `A+B+C`。标题栏不提供收起、导出或共享。顶部可切换当前、本章和本书：当前范围以带“原文”标签的流内块作为起点，根笔记和后续回复都是右侧读者消息；纯标注不重复生成空消息。回复根消息不重复原文预览，回复其他消息显示“回复”，额外引用显示“引用”；预览只读取直接目标自身的正文，不递归展开。桌面悬停时消息动作渐进出现，触摸设备保持可用；编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单，删除先请求平台确认。引用预览可跳到当前对话目标并短暂高亮。本章和本书是只读聚合记录，可按创建时间或根 Message Locator 的书内位置排列，点击“打开”后进入对应当前对话再写入。输入器固定在内容区底部。笔记列表以可见返回按钮关闭笔记窗口，导出本书消息只放在右上角更多菜单。
 - `.message-editor` 随内容增高，到达紧凑上限后出现全屏按钮。全屏编辑顶部使用两层工具栏：第一层切换可视/Markdown 输入并保留撤销、重做与返回紧凑输入，第二层显示标题、粗体、斜体、列表、引用和安全链接。Markdown 转换按需加载，切回可视模式或发送前必须通过同一正文 schema；不支持的格式保留原文并显示错误，不静默丢失。
 - 设置入口位于阅读底栏，使用原生 `<details>`、backdrop、Escape、焦点返回和 CSS transition；600 px 以下为自适应高度底部抽屉，子页按内容收缩并以 72dvh 为上限，`prefers-reduced-motion` 下关闭进入、返回和翻页收束动画。
 - `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
@@ -154,6 +161,10 @@ Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
 微信读书源图与实现的同图对照位于 `artifacts/local/audits/reader-shell-usability/`。根目录 `design-qa.md` 记录尺寸归一、交互证据和修复历史；最终没有 P0、P1 或 P2 问题。
 
 笔记响应式结构的 Linux Tauri 截图和 DOM 几何位于忽略目录 `artifacts/local/audits/atha-notes-responsive-panes-20260901/`：覆盖 360 px 竖屏列表 / 线程 / 返回、1280 px `A+B` / `B+C` 和 1600 px 从左到右的 `A+B+C`。这些是真实 Linux 壳的自动化证据，不替代 Windows、PCT-AL10 自然触摸、真实输入法或屏幕阅读器验收。
+
+上一轮方案二笔记视觉语言的 Linux Tauri 截图、1600 px 与 360 px 同图对照、DOM 几何和 `design-qa.md` 位于忽略目录 `artifacts/local/audits/conversation-visual-language-20260904/`；该轮结论不自动覆盖后续重设计。
+
+2026-09-05 阅读主界面续做的最终 Linux Tauri 公共 fixture 截图位于 `artifacts/local/reader-linux-ui/atha-reader-linux-1819364-27142-1/`，包含三视口主阅读、进度与设置首页；完整默认采样 gate 和最终微调后的低采样全脚本回归通过，新增真实鼠标前后翻页、进度拖动、书签切换与还原。书架及阅读预览截图与设计参照位于 `artifacts/local/ui-redesign-20260905/`。`reader/app/tests/ui-redesign.test.mjs` 接受 Vite 书库和 production preview 阅读器两个 origin，准备与命令见当前 change；书库使用 mock IPC，阅读预览使用真实运行时与独立测试 XHTML，均不替代原生数据链路。以上不替代 Windows、PCT-AL10 自然触摸、真实输入法或屏幕阅读器验收。
 
 Readest 原图、逐图观察和本次 Linux 统计实现副本位于忽略目录 `fixtures/local/readest/`；统计设计复核使用 WR-05 与 RD-03，不以文字报告替代原图。
 

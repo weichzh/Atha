@@ -162,23 +162,32 @@ export function messagePreview(message) {
   return message.text || message.source?.selectedText || "仅标注原文";
 }
 
-export function linkedMessagePreviews(message, messages) {
+export function linkedMessagePreviews(message, messages, excludedReplyId = null) {
   const byId = new Map(messages.map((candidate) => [candidate.id, candidate]));
   const seen = new Set();
   const linked = [];
-  const add = (id, fallback = null) => {
-    if (!id || seen.has(id)) return;
+  const add = (id, fallback = null, kind = "reference") => {
+    if (!id || seen.has(id) || (kind === "reply" && id === excludedReplyId)) return;
     seen.add(id);
     const local = byId.get(id);
     linked.push({
       id,
       text: local ? messagePreview(local) : fallback?.deleted ? "这条消息已删除" : fallback?.text || "引用消息",
       local: Boolean(local),
+      kind,
     });
   };
-  add(message.replyToMessageId);
-  for (const preview of message.referencePreviews || []) add(preview.id, preview);
+  add(message.replyToMessageId, null, "reply");
+  for (const preview of message.referencePreviews || []) add(preview.id, preview, "reference");
   return linked;
+}
+
+export function currentConversationMessages(conversation) {
+  const messages = conversation?.messages || [];
+  const root = messages.find((message) => message.source && !message.deleted);
+  return messages.filter(
+    (message) => message.id !== root?.id || message.deleted || Boolean(message.text),
+  );
 }
 
 export function conversationFeed(conversations, order, compareSources = () => 0) {
@@ -347,6 +356,25 @@ export function createConversations({
     return button;
   }
 
+  function renderSourceTurn(root) {
+    const source = document.createElement("button");
+    const label = document.createElement("span");
+    const text = document.createElement("span");
+    const time = document.createElement("time");
+    source.type = "button";
+    source.className = "message-source-turn";
+    source.dataset.messageSourceJump = "";
+    source.setAttribute("aria-label", `返回原文：${root.source.selectedText}`);
+    label.className = "message-source-turn-label";
+    label.textContent = "原文";
+    text.className = "message-source-turn-text";
+    text.textContent = root.source.selectedText;
+    time.dateTime = new Date(root.createdAt).toISOString();
+    time.textContent = formatMessageTime(root.createdAt);
+    source.append(label, text, time);
+    return source;
+  }
+
   function renderMessageCard(entry) {
     const { conversation: entryConversation, root, message, index, showSource } = entry;
     const messages = entryConversation.messages;
@@ -357,6 +385,8 @@ export function createConversations({
     const time = document.createElement("time");
     const actions = document.createElement("div");
     card.className = "message-card";
+    card.dataset.aggregate = String(aggregate);
+    card.dataset.root = String(message.id === root.id);
     card.dataset.deleted = String(message.deleted);
     card.dataset.selected = String(!aggregate && message.id === parentId && index > 0);
     card.dataset.messageId = message.id;
@@ -370,9 +400,9 @@ export function createConversations({
       source.setAttribute("aria-label", `打开对话：${root.source.selectedText || "原文已删除"}`);
       card.append(source);
     }
-    for (const preview of linkedMessagePreviews(message, messages)) {
+    for (const preview of linkedMessagePreviews(message, messages, aggregate ? null : root.id)) {
       const quote = document.createElement(preview.local ? "button" : "div");
-      const mark = document.createElement("span");
+      const label = document.createElement("span");
       const text = document.createElement("span");
       quote.className = "message-reference-preview";
       if (preview.local) {
@@ -380,11 +410,10 @@ export function createConversations({
         quote.dataset.messageTarget = preview.id;
         quote.title = "跳到被引用消息";
       }
-      mark.className = "message-quote-mark";
-      mark.setAttribute("aria-hidden", "true");
-      mark.textContent = "“";
+      label.className = "message-reference-label";
+      label.textContent = preview.kind === "reply" ? "回复" : "引用";
       text.textContent = preview.text;
-      quote.append(mark, text);
+      quote.append(label, text);
       card.append(quote);
     }
     body.className = "message-card-body";
@@ -435,13 +464,16 @@ export function createConversations({
   }
 
   function renderConversation() {
+    const currentRoot = conversation?.messages.find(
+      (message) => message.source && !message.deleted,
+    );
     const entries =
       scope === "mark"
-        ? (conversation?.messages || []).map((message, index) => ({
+        ? currentConversationMessages(conversation).map((message) => ({
             conversation,
-            root: conversation.messages.find((candidate) => candidate.source && !candidate.deleted),
+            root: currentRoot,
             message,
-            index,
+            index: conversation.messages.indexOf(message),
             showSource: false,
           }))
         : conversationFeed(feedConversations, order, store.compareSources);
@@ -450,9 +482,10 @@ export function createConversations({
       scope === "mark" ? "原文引用" : scope === "chapter" ? "本章对话" : "本书对话";
     controls.source.textContent =
       scope === "mark"
-        ? entries[0]?.root?.source?.selectedText || "原文已删除"
+        ? currentRoot?.source?.selectedText || "原文已删除"
         : `${conversationCount} 个对话 · ${entries.length} 条消息`;
     controls.sourceJump.hidden = scope !== "mark";
+    controls.sourceContext.hidden = scope === "mark";
     controls.form.hidden = scope !== "mark";
     controls.orderControls.hidden = scope === "mark";
     for (const button of controls.scopeButtons) {
@@ -461,14 +494,16 @@ export function createConversations({
     for (const button of controls.orderButtons) {
       button.setAttribute("aria-pressed", String(button.dataset.messageOrder === order));
     }
-    if (!entries.length) {
+    if (!entries.length && scope !== "mark") {
       const empty = document.createElement("p");
       empty.className = "message-feed-empty";
       empty.textContent = scope === "chapter" ? "本章还没有对话" : "本书还没有对话";
       controls.list.replaceChildren(empty);
       return;
     }
-    controls.list.replaceChildren(...entries.map(renderMessageCard));
+    const children = entries.map(renderMessageCard);
+    if (scope === "mark" && currentRoot) children.unshift(renderSourceTurn(currentRoot));
+    controls.list.replaceChildren(...children);
   }
 
   async function reload() {
@@ -664,6 +699,15 @@ export function createConversations({
         composer()?.focus();
         break;
       case "delete":
+        if (
+          !globalThis.confirm(
+            message.source
+              ? "删除这段笔记后，对话将不再出现在笔记列表中。继续吗？"
+              : "删除这条消息？",
+          )
+        ) {
+          break;
+        }
         await store.deleteMessage(message.id, message.revisionId);
         await reload();
         await annotations.redraw();
@@ -746,7 +790,7 @@ export function createConversations({
         if (scope !== "mark") renderConversation();
       });
     }
-    controls.sourceJump.addEventListener("click", async () => {
+    const jumpToSource = async () => {
       const sourceMessage = conversation?.messages.find(
         (message) => message.source && !message.deleted,
       );
@@ -757,7 +801,8 @@ export function createConversations({
       } catch {
         report("无法返回原文", true);
       }
-    });
+    };
+    controls.sourceJump.addEventListener("click", jumpToSource);
     controls.overlay.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
     });
@@ -779,6 +824,10 @@ export function createConversations({
     controls.list.addEventListener("click", (event) => {
       if (event.target.closest(".message-card-body a")) {
         event.preventDefault();
+        return;
+      }
+      if (event.target.closest("button[data-message-source-jump]")) {
+        jumpToSource();
         return;
       }
       const conversationButton = event.target.closest("button[data-conversation-open]");

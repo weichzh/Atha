@@ -21,7 +21,19 @@ impl MessageStore {
             .prepare(
                 "SELECT c.id, m.id, r.id, r.kind, r.plain_text,
                         a.id, a.original_locator_json, a.current_locator_json, a.section_id,
-                        a.selected_text, a.prefix_text, a.suffix_text, a.content_hash, c.updated_at_ms
+                        a.selected_text, a.prefix_text, a.suffix_text, a.content_hash,
+                        COALESCE((
+                            SELECT latest_revision.plain_text
+                            FROM message latest
+                            JOIN message_revision latest_revision
+                              ON latest_revision.id = latest.current_revision_id
+                             AND latest_revision.message_id = latest.id
+                            WHERE latest.conversation_id = c.id
+                              AND latest.deleted_at_ms IS NULL
+                            ORDER BY latest.ordinal DESC
+                            LIMIT 1
+                        ), ''),
+                        c.updated_at_ms
                  FROM conversation c
                  JOIN message m ON m.id = c.root_message_id AND m.conversation_id = c.id
                  JOIN message_revision r ON r.id = m.current_revision_id AND r.message_id = m.id
@@ -44,6 +56,7 @@ impl MessageStore {
                     revision_id: encode_hex(&revision),
                     kind: row.get(3)?,
                     text: row.get(4)?,
+                    latest_text: row.get(13)?,
                     source: MessageSourceView {
                         id: encode_hex(&source),
                         original_locator: row.get(6)?,
@@ -54,7 +67,7 @@ impl MessageStore {
                         suffix_text: row.get(11)?,
                         content_hash: encode_hex(&content_hash),
                     },
-                    updated_at: row.get(13)?,
+                    updated_at: row.get(14)?,
                 })
             })
             .map_err(|_| MessageError::Database)?

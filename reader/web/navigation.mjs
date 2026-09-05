@@ -48,6 +48,8 @@ export function createNavigation({
   progressChapter,
   progressBook,
   progressPosition,
+  toolbarChapter,
+  toolbarProgress,
   progressRange,
   previous,
   next,
@@ -98,12 +100,14 @@ export function createNavigation({
     next.disabled = state.currentIndex + 1 === state.sections && page.page + 1 === page.pages;
     const index = currentTocIndex(preferredTocIndex, contentOffset);
     if (index >= 0) toc.value = String(index);
-    const label = book().toc[index]?.label || book().sections[state.currentIndex]?.id || "";
+    const label = book().toc[index]?.label || `第 ${state.currentIndex + 1} 节`;
     const ratio = encodeProgress(state.currentIndex, state.sections, page.page, page.pages);
     chapterLabel.textContent = label;
     progressChapter.textContent = label;
     progressBook.textContent = `全书约 ${Math.round(ratio * 100)}%`;
     progressPosition.textContent = `第 ${state.currentIndex + 1}/${state.sections} 节 · 本节 ${page.page + 1}/${page.pages} 页`;
+    if (toolbarChapter) toolbarChapter.textContent = label;
+    if (toolbarProgress) toolbarProgress.textContent = progressPosition.textContent;
     progressRange.value = String(ratio * Number(progressRange.max));
   }
 

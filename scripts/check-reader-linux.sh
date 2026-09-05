@@ -126,7 +126,7 @@ resolve_input_file() {
   realpath -e -- "$candidate"
 }
 
-for command in curl jq mise realpath sha256sum ss systemctl systemd-run WebKitWebDriver; do
+for command in base64 curl jq mise realpath sha256sum ss systemctl systemd-run WebKitWebDriver; do
   command -v "$command" >/dev/null || die "$command is required"
 done
 [[ $(uname -s) == Linux ]] || die 'this gate requires Linux'
@@ -199,6 +199,17 @@ execute_sync() {
 
 execute_async() {
   execute_script async "$1" "${2:-[]}"
+}
+
+capture_public_ui() {
+  [[ -z $formula_epub ]] || return 0
+  local dimensions image_dir="$repo_root/artifacts/local/reader-linux-ui/$unit"
+  wait_for_script \
+    'const controls = document.querySelector(".reader-controls"); const style = controls && getComputedStyle(controls); return { settled: (!style || style.visibility === "hidden" || style.opacity === "1") && document.getAnimations().every(animation => animation.playState !== "running" || animation.effect.getTiming().iterations === Infinity) };' \
+    '.settled == true' 'reader controls did not finish appearing before screenshot' >/dev/null
+  dimensions=$(execute_sync 'return `${innerWidth}x${innerHeight}`;' | jq -r .)
+  mkdir -p -- "$image_dir"
+  webdriver_value GET "/session/$session_id/screenshot" | jq -r . | base64 --decode >"$image_dir/$1-$dimensions.png"
 }
 
 cleanup_gesture() {
@@ -526,9 +537,15 @@ window.__TAURI_INTERNALS__.invoke('delete_library_book_data', { id: '$public_id'
     fire_tauri_drag_event 'tauri://drag-drop' "$repo_root/.tmp/fb2-gate.fb2" >/dev/null ||
       die 'could not drop into the empty library'
     wait_for_script \
-      'const image = document.querySelector(".library-cover img"); return { cards: document.querySelectorAll(".library-book-open").length, cover: Boolean(image?.complete && image.naturalWidth > 0), overlay: Boolean(document.querySelector(".library-drop-overlay")), working: Boolean(document.querySelector(".library-work-overlay")), status: document.querySelector(".library-status")?.textContent || "" };' \
-      '.cards == 1 and .cover == true and .overlay == false and .working == false and .status == "已加入书架。"' \
+      'const image = document.querySelector(".library-cover img"); const bounds = image?.getBoundingClientRect(); const cover = image?.parentElement.getBoundingClientRect(); return { cards: document.querySelectorAll(".library-book-open").length, cover: Boolean(image?.complete && image.naturalWidth > 0), contained: Boolean(image && getComputedStyle(image).objectFit === "contain" && bounds.width > 0 && bounds.height > 0 && bounds.width <= cover.width && bounds.height <= cover.height), overlay: Boolean(document.querySelector(".library-drop-overlay")), working: Boolean(document.querySelector(".library-work-overlay")), status: document.querySelector(".library-status")?.textContent || "" };' \
+      '.cards == 1 and .cover == true and .contained == true and .overlay == false and .working == false and .status == "已加入书架。"' \
       'drop did not add a prepared book with its cover to the empty library' >/dev/null
+    execute_sync 'document.querySelector(".library-cover img")?.dispatchEvent(new Event("error")); return true;' >/dev/null ||
+      die 'could not probe cover load failure'
+    wait_for_script \
+      'return { images: document.querySelectorAll(".library-cover img").length, fallback: document.querySelector(".library-cover-fallback strong")?.textContent || "", title: document.querySelector(".library-book-title")?.textContent || "" };' \
+      '.images == 0 and .fallback != "" and .fallback == .title' \
+      'cover load failure did not reveal the book-title fallback' >/dev/null
   fi
 
   fire_tauri_drag_event 'tauri://drag-drop' "$unsupported_file" >/dev/null ||
@@ -656,8 +673,9 @@ return {
   color: style.color,
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
 };' \
-    '.shell == "light" and .root == "light" and .tone == "light" and .stored == "light" and .readerUnchanged == true and .background == "rgb(246, 246, 248)" and .color == "rgb(29, 29, 31)" and .overflow == false' \
+    '.shell == "light" and .root == "light" and .tone == "light" and .stored == "light" and .readerUnchanged == true and .background == "rgb(255, 255, 255)" and .color == "rgb(37, 43, 41)" and .overflow == false' \
     'independent application theme did not become ready') || die 'could not inspect the application theme'
+  capture_public_ui settings
   [[ $(execute_sync '
 const button = [...document.querySelectorAll(".library-theme-control button")]
   .find((item) => item.textContent.trim() === "跟随系统");
@@ -916,21 +934,33 @@ const event = new KeyboardEvent("keydown", {key: "ArrowRight", bubbles: true, ca
 summary?.dispatchEvent(event);
 return event.defaultPrevented;') == true ]] || die 'desktop workspace arrow navigation was not handled'
   notes=$(wait_for_script \
-    'const panel = document.querySelector(".notes-panel")?.getBoundingClientRect(); const list = document.querySelector(".annotation-list"); const search = document.querySelector("#annotation-filter-query"); return { active: document.documentElement.dataset.workspacePanel || null, focused: document.activeElement === document.querySelector(".reader-tool.notes > summary"), heading: document.querySelector("#annotation-heading")?.textContent || "", search: search?.placeholder || "", searchLabel: search?.getAttribute("aria-label") || "", listLabel: list?.getAttribute("aria-label") || "", count: document.querySelector("#annotations-status")?.textContent || "", items: document.querySelectorAll(".annotation-item-main").length, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, scroll: list?.scrollTop || 0, viewport: {width: innerWidth, height: innerHeight}, width: panel?.width || 0, left: panel?.left ?? -1, right: panel?.right ?? -1, top: panel?.top ?? -1, bottom: panel?.bottom ?? -1, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null };' \
-    '.active == "notes" and .focused == true and .heading == "笔记" and .search == "搜索笔记或标注" and .searchLabel == "搜索笔记或标注" and .listLabel == "笔记和标注列表" and (.count | test("^共 [0-9]+ 条$")) and .items > 0 and .openPanels == 1 and .width >= 319 and .width <= 321 and ((.right - .viewport.width) | fabs) <= 2 and ((.left - (.viewport.width - 320)) | fabs) <= 2 and (.top | fabs) <= 1 and ((.bottom - .viewport.height) | fabs) <= 2 and .locator != null' \
+    'const panel = document.querySelector(".notes-panel")?.getBoundingClientRect(); const list = document.querySelector(".annotation-list"); const search = document.querySelector("#annotation-filter-query"); const item = document.querySelector(".annotation-item"); return { active: document.documentElement.dataset.workspacePanel || null, focused: document.activeElement === document.querySelector(".reader-tool.notes > summary"), heading: document.querySelector("#annotation-heading")?.textContent || "", search: search?.placeholder || "", searchLabel: search?.getAttribute("aria-label") || "", listLabel: list?.getAttribute("aria-label") || "", count: document.querySelector("#annotations-status")?.textContent || "", items: document.querySelectorAll(".annotation-item-main").length, item: {source: item?.querySelector(".annotation-item-quote")?.textContent || "", response: item?.querySelector(".annotation-item-note")?.textContent || "", time: item?.querySelector(".annotation-item-time")?.textContent || "", types: item?.querySelectorAll(".annotation-item-kind").length || 0, actions: item?.querySelectorAll(".annotation-item-actions").length || 0}, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, scroll: list?.scrollTop || 0, viewport: {width: innerWidth, height: innerHeight}, width: panel?.width || 0, left: panel?.left ?? -1, right: panel?.right ?? -1, top: panel?.top ?? -1, bottom: panel?.bottom ?? -1, overflow: Boolean(list && list.scrollWidth > list.clientWidth), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null };' \
+    '.active == "notes" and .focused == true and .heading == "笔记" and .search == "搜索笔记或标注" and .searchLabel == "搜索笔记或标注" and .listLabel == "笔记和标注列表" and (.count | test("^共 [0-9]+ 条$")) and .items > 0 and .item.source == "第二节正文" and .item.response == "这条回复用于验证消息之间的回应关系" and (.item.time | test("^[0-9]{2}:[0-9]{2}$")) and .item.types == 0 and .item.actions == 0 and .openPanels == 1 and .width >= 319 and .width <= 321 and ((.right - .viewport.width) | fabs) <= 2 and ((.left - (.viewport.width - 320)) | fabs) <= 2 and (.top | fabs) <= 1 and ((.bottom - .viewport.height) | fabs) <= 2 and .overflow == false and .locator != null' \
     'desktop notes workspace did not become ready')
   [[ $(execute_sync '
 document.querySelector(".annotation-item-main")?.click();
 return true;') == true ]] || die 'could not open a desktop message conversation'
   notes_two=$(wait_for_script \
-    'const overlay = document.querySelector("#message-conversation"); const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const thread = overlay?.getBoundingClientRect(); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); return { viewport: {width: innerWidth, height: innerHeight}, open: Boolean(overlay && !overlay.hidden), title: document.querySelector("#message-conversation-title")?.textContent || "", scopes: [...document.querySelectorAll("[data-message-scope]")].map((button) => button.textContent.trim()), scopeLabel: document.querySelector(".message-segmented")?.getAttribute("aria-label") || "", closeLabel: document.querySelector("#message-conversation-close")?.getAttribute("aria-label") || "", source: Boolean(document.querySelector("#message-conversation-source")?.textContent), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, notes: notes ? {left: notes.left, right: notes.right, top: notes.top, bottom: notes.bottom} : null, thread: thread ? {left: thread.left, right: thread.right, top: thread.top, bottom: thread.bottom} : null, frame: frame ? {left: frame.left, right: frame.right} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
-    '.open == true and .title == "对话" and .scopes == ["当前", "本章", "本书"] and .scopeLabel == "对话范围" and .closeLabel == "返回笔记" and .source == true and .active == "notes" and .openPanels == 1 and .selected == 1 and (.notes.left | fabs) <= 1 and ((.notes.right - 320) | fabs) <= 2 and (.notes.top | fabs) <= 1 and ((.notes.bottom - .viewport.height) | fabs) <= 2 and ((.thread.left - .notes.right) | fabs) <= 2 and ((.thread.right - .viewport.width) | fabs) <= 2 and (.thread.top | fabs) <= 1 and ((.thread.bottom - .viewport.height) | fabs) <= 2 and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewport.width - 320)) | fabs) <= 2 and .locator != null and .error == null' \
+    'const overlay = document.querySelector("#message-conversation"); const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const thread = overlay?.getBoundingClientRect(); const composer = document.querySelector("#message-composer")?.getBoundingClientRect(); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const list = document.querySelector(".message-conversation-list")?.getBoundingClientRect(); const cards = [...document.querySelectorAll(".message-card")]; const sourceTurn = document.querySelector(".message-source-turn"); return { viewport: {width: innerWidth, height: innerHeight}, open: Boolean(overlay && !overlay.hidden), title: document.querySelector("#message-conversation-title")?.textContent || "", scopes: [...document.querySelectorAll("[data-message-scope]")].map((button) => button.textContent.trim()), scopeLabel: document.querySelector(".message-segmented")?.getAttribute("aria-label") || "", closeLabel: document.querySelector("#message-conversation-close")?.getAttribute("aria-label") || "", source: sourceTurn?.querySelector(".message-source-turn-text")?.textContent || "", sourceLabel: sourceTurn?.querySelector(".message-source-turn-label")?.textContent || "", sourceHeaderVisible: Boolean(document.querySelector(".message-source-context")?.getClientRects().length), cards: cards.length, rootReplyPreviews: cards[1]?.querySelectorAll(".message-reference-preview").length ?? -1, nestedReplyLabel: cards[2]?.querySelector(".message-reference-label")?.textContent || "", rightAligned: Boolean(list && cards.every((card) => Math.abs(card.getBoundingClientRect().right - (list.right - 20)) <= 2)), composerBottom: composer?.bottom ?? -1, active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, notes: notes ? {left: notes.left, right: notes.right, top: notes.top, bottom: notes.bottom} : null, thread: thread ? {left: thread.left, right: thread.right, top: thread.top, bottom: thread.bottom} : null, frame: frame ? {left: frame.left, right: frame.right} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == true and .title == "对话" and .scopes == ["当前", "本章", "本书"] and .scopeLabel == "对话范围" and .closeLabel == "返回笔记" and .source == "第二节正文" and .sourceLabel == "原文" and .sourceHeaderVisible == false and .cards == 3 and .rootReplyPreviews == 0 and .nestedReplyLabel == "回复" and .rightAligned == true and .active == "notes" and .openPanels == 1 and .selected == 1 and (.notes.left | fabs) <= 1 and ((.notes.right - 320) | fabs) <= 2 and (.notes.top | fabs) <= 1 and ((.notes.bottom - .viewport.height) | fabs) <= 2 and ((.thread.left - .notes.right) | fabs) <= 2 and ((.thread.right - .viewport.width) | fabs) <= 2 and (.thread.top | fabs) <= 1 and ((.thread.bottom - .viewport.height) | fabs) <= 2 and ((.composerBottom - .thread.bottom) | fabs) <= 2 and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewport.width - 320)) | fabs) <= 2 and .locator != null and .error == null' \
     'desktop B+C message workspace did not become ready')
+  [[ $(execute_sync '
+globalThis.__athaOriginalConfirm = globalThis.confirm;
+globalThis.__athaDeleteConfirmCalls = 0;
+globalThis.confirm = () => { globalThis.__athaDeleteConfirmCalls += 1; return false; };
+document.querySelector(".message-card [data-message-action=delete]")?.click();
+return true;') == true ]] || die 'could not probe message deletion cancellation'
+  wait_for_script \
+    'return {calls: globalThis.__athaDeleteConfirmCalls || 0, cards: document.querySelectorAll(".message-card").length, items: document.querySelectorAll(".annotation-item").length};' \
+    '.calls == 1 and .cards == 3 and .items == 1' \
+    'canceling message deletion changed the conversation' >/dev/null
+  execute_sync 'globalThis.confirm = globalThis.__athaOriginalConfirm; delete globalThis.__athaOriginalConfirm; return true;' >/dev/null ||
+    die 'could not restore the platform confirmation function'
   execute_sync 'document.querySelector("[data-message-scope=chapter]")?.click(); return true;' >/dev/null ||
     die 'could not open the chapter conversation scope'
   terminology=$(wait_for_script \
-    'return { label: document.querySelector("#message-conversation-source-label")?.textContent || "", summary: document.querySelector("#message-conversation-source")?.textContent || "", pressed: document.querySelector("[data-message-scope=chapter]")?.getAttribute("aria-pressed") || "" };' \
-    '.label == "本章对话" and (.summary | test("^[0-9]+ 个对话 · [0-9]+ 条消息$")) and .pressed == "true"' \
+    'const source = document.querySelector(".message-source-context")?.getBoundingClientRect(); const content = document.querySelector(".message-conversation-content")?.getBoundingClientRect(); const overlay = document.querySelector("#message-conversation")?.getBoundingClientRect(); return { label: document.querySelector("#message-conversation-source-label")?.textContent || "", summary: document.querySelector("#message-conversation-source")?.textContent || "", pressed: document.querySelector("[data-message-scope=chapter]")?.getAttribute("aria-pressed") || "", sourceVisible: Boolean(document.querySelector(".message-source-context")?.getClientRects().length), sourceBottom: source?.bottom ?? -1, contentTop: content?.top ?? -1, contentBottom: content?.bottom ?? -1, overlayBottom: overlay?.bottom ?? -1 };' \
+    '.label == "本章对话" and (.summary | test("^[0-9]+ 个对话 · [0-9]+ 条消息$")) and .pressed == "true" and .sourceVisible == true and ((.contentTop - .sourceBottom) | fabs) <= 2 and ((.contentBottom - .overlayBottom) | fabs) <= 2' \
     'chapter conversation terminology did not become ready')
   execute_sync 'document.querySelector("[data-message-scope=book]")?.click(); return true;' >/dev/null ||
     die 'could not open the book conversation scope'
@@ -969,6 +999,7 @@ return true;') == true ]] || die 'could not open a desktop message conversation'
     'wide A+B+C message workspace did not become ready')
   [[ $(jq -r '.locator' <<<"$notes_wide") == "$(jq -r '.locator' <<<"$notes_return")" ]] ||
     die 'opening the wide thread changed the current locator'
+  capture_public_ui reader-abc
   execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
     die 'could not close the wide message conversation'
   notes_wide_return=$(wait_for_script \
@@ -1047,6 +1078,7 @@ return {pageHandled: event.defaultPrevented, beforePage: before.navigation.curre
     'medium B+C message workspace did not become ready')
   [[ $(jq -r '.locator' <<<"$medium_thread") == "$(jq -r '.locator' <<<"$medium_notes")" ]] ||
     die 'opening the medium thread changed the current locator'
+  capture_public_ui reader-bc
   execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
     die 'could not close the medium message conversation'
   wait_for_script \
@@ -1109,14 +1141,16 @@ return true;' >/dev/null || die 'could not open the portrait notes window'
     'const panel = document.querySelector(".notes-panel")?.getBoundingClientRect(); const list = document.querySelector(".annotation-list"); const controls = [...document.querySelectorAll(".notes-panel button, .notes-panel input, .notes-panel select")]; return { viewport: {width: innerWidth, height: innerHeight}, open: document.querySelector(".reader-tool.notes")?.open || false, heading: document.querySelector("#annotation-heading")?.textContent || "", search: document.querySelector("#annotation-filter-query")?.placeholder || "", listLabel: list?.getAttribute("aria-label") || "", items: document.querySelectorAll(".annotation-item-main").length, panel: panel ? {left: panel.left, right: panel.right, top: panel.top, bottom: panel.bottom, width: panel.width, height: panel.height} : null, scroll: list?.scrollTop || 0, overflow: document.querySelector(".notes-panel")?.scrollWidth > document.querySelector(".notes-panel")?.clientWidth, clipped: controls.some((control) => control.scrollWidth > control.clientWidth || control.scrollHeight > control.clientHeight), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null };' \
     '.open == true and .heading == "笔记" and .search == "搜索笔记或标注" and .listLabel == "笔记和标注列表" and .items > 0 and ((.panel.left - 12) | fabs) <= 2 and ((.panel.right - (.viewport.width - 12)) | fabs) <= 2 and ((.panel.top - 12) | fabs) <= 2 and ((.panel.bottom - (.viewport.height - 12)) | fabs) <= 2 and ((.panel.width - (.viewport.width - 24)) | fabs) <= 2 and ((.panel.height - (.viewport.height - 24)) | fabs) <= 2 and .overflow == false and .clipped == false and .locator != null' \
     'portrait notes list page did not become ready')
+  capture_public_ui reader-notes
   execute_sync 'document.querySelector(".annotation-item-main")?.click(); return true;' >/dev/null ||
     die 'could not open the portrait message thread page'
   portrait_thread=$(wait_for_script \
-    'const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const overlay = document.querySelector("#message-conversation"); const thread = overlay?.getBoundingClientRect(); const controls = [...(overlay?.querySelectorAll("button") || [])]; return { open: Boolean(overlay && !overlay.hidden), notesOpen: document.querySelector(".reader-tool.notes")?.open || false, title: document.querySelector("#message-conversation-title")?.textContent || "", scopes: [...document.querySelectorAll("[data-message-scope]")].map((button) => button.textContent.trim()), closeLabel: document.querySelector("#message-conversation-close")?.getAttribute("aria-label") || "", selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, notes: notes ? {left: notes.left, right: notes.right, top: notes.top, bottom: notes.bottom} : null, thread: thread ? {left: thread.left, right: thread.right, top: thread.top, bottom: thread.bottom} : null, fullscreenHidden: document.querySelector("#message-conversation-fullscreen")?.getClientRects().length == 0, overflow: overlay ? overlay.scrollWidth > overlay.clientWidth : true, clipped: controls.some((control) => control.scrollWidth > control.clientWidth || control.scrollHeight > control.clientHeight), locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
-    '.open == true and .notesOpen == true and .title == "对话" and .scopes == ["当前", "本章", "本书"] and .closeLabel == "返回笔记" and .selected == 1 and ((.thread.left - .notes.left) | fabs) <= 2 and ((.thread.right - .notes.right) | fabs) <= 2 and ((.thread.top - .notes.top) | fabs) <= 2 and ((.thread.bottom - .notes.bottom) | fabs) <= 2 and .fullscreenHidden == true and .overflow == false and .clipped == false and .locator != null and .error == null' \
+    'const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const overlay = document.querySelector("#message-conversation"); const thread = overlay?.getBoundingClientRect(); const composer = document.querySelector("#message-composer")?.getBoundingClientRect(); const controls = [...(overlay?.querySelectorAll("button") || [])].filter((control) => control.getClientRects().length); const clippedControls = controls.filter((control) => control.scrollWidth > control.clientWidth || control.scrollHeight > control.clientHeight).map((control) => ({className: control.className, text: control.textContent.trim().slice(0, 40), client: [control.clientWidth, control.clientHeight], scroll: [control.scrollWidth, control.scrollHeight]})); return { open: Boolean(overlay && !overlay.hidden), notesOpen: document.querySelector(".reader-tool.notes")?.open || false, title: document.querySelector("#message-conversation-title")?.textContent || "", scopes: [...document.querySelectorAll("[data-message-scope]")].map((button) => button.textContent.trim()), closeLabel: document.querySelector("#message-conversation-close")?.getAttribute("aria-label") || "", selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, notes: notes ? {left: notes.left, right: notes.right, top: notes.top, bottom: notes.bottom} : null, thread: thread ? {left: thread.left, right: thread.right, top: thread.top, bottom: thread.bottom} : null, composerBottom: composer?.bottom ?? -1, fullscreenHidden: document.querySelector("#message-conversation-fullscreen")?.getClientRects().length == 0, overflow: overlay ? overlay.scrollWidth > overlay.clientWidth : true, clipped: clippedControls.length > 0, clippedControls, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
+    '.open == true and .notesOpen == true and .title == "对话" and .scopes == ["当前", "本章", "本书"] and .closeLabel == "返回笔记" and .selected == 1 and ((.thread.left - .notes.left) | fabs) <= 2 and ((.thread.right - .notes.right) | fabs) <= 2 and ((.thread.top - .notes.top) | fabs) <= 2 and ((.thread.bottom - .notes.bottom) | fabs) <= 2 and ((.composerBottom - .thread.bottom) | fabs) <= 2 and .fullscreenHidden == true and .overflow == false and .clipped == false and .locator != null and .error == null' \
     'portrait message thread did not reuse the notes window geometry')
   [[ $(jq -r '.locator' <<<"$portrait_thread") == "$(jq -r '.locator' <<<"$portrait_notes")" ]] ||
     die 'opening the portrait thread changed the current locator'
+  capture_public_ui reader-thread
   execute_sync 'document.querySelector("#message-conversation-close")?.click(); return true;' >/dev/null ||
     die 'could not return from the portrait message thread'
   portrait_return=$(wait_for_script \
@@ -1164,6 +1198,95 @@ return document.documentElement.hasAttribute("data-reader-tools");') == false ]]
     --argjson mediumPane "$medium_thread" \
     --argjson portrait "$portrait_thread" \
     '{widths: [360, 600, 1000, 1280, 1600], defaultMode: "focus-reading", workspaceMode: "explicit", tools: ["directory", "search", "notes"], pageWidths: {desktop: $desktopPageWidth, workspace: $workspacePageWidth, medium: $mediumPageWidth, narrow: $narrowPageWidth}, pageMarginCss: $pageMargin, noteLayouts: {portraitPages: $portrait, mediumBC: $mediumPane, desktopBC: $twoPane, wideABC: $threePane}, pagedAndScrollMeasure: true, searchResults: $searchResults, messages: $messages, locatorStable: true, keyboard: true, focusVerified: true, narrowRegression: true}')
+}
+
+verify_reader_redesign() {
+  local width height result saved point selector before bookmark expected
+  saved=$(execute_sync 'return localStorage.getItem("atha.reader.application.v1");')
+  for width in 360 1000 1600; do
+    height=760
+    ((width != 1600)) || height=900
+    set_window_size "$width" "$height"
+    execute_sync '
+document.querySelectorAll(".reader-tool[open]").forEach(tool => { tool.open = false; });
+document.documentElement.setAttribute("data-reader-tools", "");
+return true;' >/dev/null
+    result=$(wait_for_script '
+const bar = document.querySelector(".toolbar").getBoundingClientRect();
+const page = document.querySelector(".page").getBoundingClientRect();
+const chapter = document.querySelector("#reader-toolbar-chapter").textContent;
+const progress = document.querySelector("#reader-toolbar-progress").textContent;
+return {chapter, synced: chapter === document.querySelector("#progress-chapter").textContent && progress === document.querySelector("#progress-position").textContent, valid: !/NaN/.test(progress), fits: bar.left >= 0 && bar.right <= innerWidth && bar.bottom <= innerHeight && bar.width <= 401 && bar.top >= page.bottom, targets: [...document.querySelectorAll(".toolbar > .reader-tool > summary")].every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; })};' \
+      '.chapter != "" and .synced and .valid and .fits and .targets' \
+      'reader context or compact toolbar did not fit')
+    capture_public_ui reader-main
+    bookmark=$(execute_sync 'return document.querySelector("#add-bookmark").getAttribute("aria-pressed");')
+    for expected in "$(jq -r 'if . == "true" then "false" else "true" end' <<<"$bookmark")" "$(jq -r . <<<"$bookmark")"; do
+      point=$(execute_sync 'const r = document.querySelector("#add-bookmark").getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + r.height / 2};')
+      perform_pointer_action "$point" tap || die 'could not toggle reader bookmark'
+      wait_for_script 'return {pressed: document.querySelector("#add-bookmark").getAttribute("aria-pressed")};' \
+        ".pressed == \"$expected\"" 'bookmark did not toggle and restore' >/dev/null
+    done
+    before=$(execute_sync 'return document.querySelector("#progress-position").textContent;')
+    execute_sync 'document.querySelector(".progress > summary").click(); return true;' >/dev/null
+    for selector in next previous; do
+      point=$(execute_sync 'const r = document.getElementById(arguments[0]).getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + r.height / 2};' "[\"$selector\"]")
+      perform_pointer_action "$point" tap || die "could not click reader $selector"
+      expected=".position != $before"
+      [[ $selector != previous ]] || expected=".position == $before"
+      wait_for_script 'return {position: document.querySelector("#progress-position").textContent};' \
+        "$expected" 'previous/next controls did not navigate and return' >/dev/null
+    done
+    point=$(execute_sync '
+const range = document.querySelector("#progress-range");
+const r = range.getBoundingClientRect();
+return {x: r.left + 8 + (r.width - 16) * Number(range.value) / Number(range.max), y: r.top + r.height / 2, endX: r.right - 16, endY: r.top + r.height / 2};')
+    perform_pointer_action "$point" drag || die 'could not drag reading progress'
+    wait_for_script 'return {position: document.querySelector("#progress-position").textContent};' \
+      ".position != $before" 'progress drag did not navigate' >/dev/null
+    point=$(execute_sync '
+const range = document.querySelector("#progress-range");
+const r = range.getBoundingClientRect();
+return {x: r.left + 8 + (r.width - 16) * Number(range.value) / Number(range.max), y: r.top + r.height / 2, endX: r.left + 2, endY: r.top + r.height / 2};')
+    perform_pointer_action "$point" drag || die 'could not restore reading progress'
+    wait_for_script 'return {position: document.querySelector("#progress-position").textContent};' \
+      ".position == $before" 'progress drag did not return to the opening page' >/dev/null
+    capture_public_ui reader-progress
+    execute_sync 'document.querySelector(".progress > summary").click(); return true;' >/dev/null
+    execute_sync 'document.querySelector(".preferences > summary").click(); return true;' >/dev/null
+    wait_for_script '
+const panel = document.querySelector(".preferences-panel");
+const elements = [document.querySelector("#font-size"), ...document.querySelectorAll("[data-preference-for=theme]")];
+const outer = panel.getBoundingClientRect();
+return {fits: elements.length === 5 && elements.every(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top >= outer.top && r.bottom <= outer.bottom && r.left >= 0 && r.right <= innerWidth; }), overflow: panel.scrollWidth > panel.clientWidth};' \
+      '.fits and (.overflow | not)' 'quick reading settings were not visible' >/dev/null
+    capture_public_ui reader-quick-settings
+    execute_sync '
+const size = document.querySelector("#font-size");
+size.value = "24";
+size.dispatchEvent(new Event("change", {bubbles: true}));
+document.querySelector("[data-preference-for=theme][data-preference-value=dark]").click();
+return true;' >/dev/null
+    wait_for_script '
+const prefs = JSON.parse(localStorage.getItem("atha.reader.application.v1") || "null")?.preferences;
+return {saved: prefs?.fontSize === 24 && prefs?.theme === "dark", applied: document.querySelector("#theme").value === "dark" && document.querySelector("#font-size-value").textContent.includes("24")};' \
+      '.saved and .applied' 'quick reading settings did not save' >/dev/null
+    webdriver_value POST "/session/$session_id/refresh" '{}' >/dev/null
+    wait_for_script '
+return {ready: document.documentElement.hasAttribute("data-reader-ready"), size: document.querySelector("#font-size")?.value, theme: document.querySelector("#theme")?.value};' \
+      '.ready and .size == "24" and .theme == "dark"' 'quick reading settings did not survive reload' >/dev/null
+    execute_sync '
+const original = arguments[0];
+if (original === null) localStorage.removeItem("atha.reader.application.v1");
+else localStorage.setItem("atha.reader.application.v1", original);
+return true;' "$(jq -cn --argjson saved "$saved" '[$saved]')" >/dev/null
+    webdriver_value POST "/session/$session_id/refresh" '{}' >/dev/null
+    wait_for_script 'return {ready: document.documentElement.hasAttribute("data-reader-ready")};' \
+      '.ready == true' 'restored reader did not become ready' >/dev/null
+    [[ $(execute_sync 'return localStorage.getItem("atha.reader.application.v1");') == "$saved" ]] ||
+      die 'quick reading settings did not restore the original record'
+  done
+  say 'reader redesign: 360/1000/1600 chrome, quick controls, save/reload/restore passed'
 }
 
 verify_reader_runtime_errors() {
@@ -1766,6 +1889,7 @@ ATHA_READING_MEMORY_GATE_SECTION=$memory_section \
 printf '%s\n' "$repo_root/.tmp/fb2-gate.fb2" 'fb2-gate.fb2' >>"$privacy_file"
 printf '%s\n' \
   '公共记忆中的可跳转笔记' '公共记忆中的缺书笔记' \
+  '这条最近回应应出现在笔记索引中' '这条回复用于验证消息之间的回应关系' \
   '正文重点' '第二节正文' '缺失原书引用' \
   '已移出的公共书籍' '公共作者' >>"$privacy_file"
 add_record_privacy_tokens "$public_record"
@@ -2035,6 +2159,7 @@ enable_diagnostics
 set_window_size 1280 800
 desktop_workspace_evidence=null
 verify_desktop_workspace
+verify_reader_redesign
 verify_reader_runtime_errors
 
 webdriver_request DELETE "/session/$session_id" >/dev/null || die 'could not close the Tauri session'
