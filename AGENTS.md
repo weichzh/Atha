@@ -11,9 +11,13 @@
 
 不得默认通读 `docs/` 或旧档案。
 
-## 全局工作流
+## Issue 主导的工作流
 
-开始、恢复或关闭仓库任务前读取 `docs/agents/workflow.md`，并使用全局 `project-workflow` 管理 task claim、工站和关闭证据。项目事实与命令仍保存在本仓库；真正需要项目专属流程时才在 `.agents/skills/` 增加 skill。
+长期工作、跨会话研究、涉及真实书库/设备验收及需长期恢复的质量问题，都以 GitHub Issue 为目标、进度、验收与下一步的事实来源；项目总览见 [项目总控](https://github.com/users/weichzh/projects/1)。具体规则见 `docs/agents/issue-tracker.md`。
+
+默认按仓库现有 `audit` / `fast` / `change` 路径执行，不启用全局 `project-workflow` 的任务登记、claim、工站或 close 控制器。单次局部可回滚问题不必造 Issue。开始长期任务读关联 Issue 正文与最新评论，并核对当前 HEAD、工作区和实际证据；不从旧聊天推测进度。
+
+已明确授权的任务可在独立任务分支内实施、按风险验证并创建草稿 PR；不要把“已验证开发”当成发布或真机可用。合并 main、外发用户书库、安装真实设备与正式发布单独确认。保留未提交修改，不为流程做 reset/clean。
 
 ## 当前文档
 

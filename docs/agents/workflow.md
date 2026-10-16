@@ -1,88 +1,25 @@
-# ATHA 项目工作流适配
+# Atha 执行与验证入口
 
-全局 `project-workflow` 管理任务 claim、工站证据、关闭状态和跨项目日志；本仓库只提供项目事实与真实检查命令。进入任务时仍按 `AGENTS.md` 读取 `CONTEXT.md`、`ACTIVE.md` 和对应 Context Bundle。
+长期任务的事实来源是 [GitHub Issue](issue-tracker.md)；本文件只提供 Atha 的开发、证据和授权边界，不维护第二套任务状态机。进入任务先读仓库 `AGENTS.md`、`CONTEXT.md`、`docs/ACTIVE.md` 和该任务关联的 Context Bundle；必要时读取 `docs/agents/references.md` 的对应条目。旧聊天中的 SHA、版本与“已通过”不是今天的事实。
 
-`docs/agents/references.md` 是外部技术与标准的项目参考地图。进入任务时先读它；涉及框架行为、API 语义、兼容性、错误或性能时，从地图直达对应版本的官方文档或源码，不凭记忆试错。
+## 工作类型
 
-## 路由
+- **audit**：有边界、可复核的只读调查；有结论、疑点和证据缺口就交付，不因为研究而默认修改代码。
+- **fast**：局部可回滚改动；直接实施并运行覆盖变化的最小检查。短期任务可不建 Issue。
+- **change**：产品行为、依赖、数据库/数据生命周期、架构或跨模块变化。在实施前确认需求和授权，将范围、验收与设计依据存入复用的 `docs/changes/<topic>.md`。变更文档保存实现细节，Issue 保存长期业务进度，避免维护两份状态表。
 
-- `audit` 是有停止条件的只读调查，不 claim 文件，也不要求提交；
-- `fast` 直接维护局部实现及其事实所有者；
-- `change` 必须对应一份已获批准且状态为 `accepted` 的 `docs/changes/*.md`，关闭前完成独立 review；
-- GitHub issue 是外部请求入口，`docs/changes/` 是仓库内跨模块实施记录；具体生命周期由 `docs/workflow/PROTOCOL.md` 定义。
+## Issue / PR / 会话恢复
 
-## 工站语义
+1. 已有长期 Issue 则复用；新建时记录目标、为何要做、可观察验收、风险边界与当前已知证据。
+2. 恢复时读关联 Issue 与最新进度，核对本地分支、HEAD、未提交内容和实际运行回执；遇到冲突先按证据调查，不覆盖他人工作。
+3. 允许在明确授权的范围内按里程碑完成局部修改、提交任务分支、推送和建草稿 PR；不因研究或任务创建自动合并、正式发布或操作真机。
+4. 里程碑、暂停、阻塞与待验收时更新 Issue，写明 commit、已执行命令、运行环境、失败/跳过/未知、可恢复下一步。Issue 已通过的验收项才打勾。
+5. 合并、Windows/Android 实设备验证、升级与发行各自标明；关闭 Issue 只表示所定义目标满足，不等于所有平台已发行。
 
-全局 `project-workflow` 工站由 Atha 新任务主动填写的 activity 只使用 `research`、`specification`、`planning`、`implementation`、`verification`、`review`、`delivery` 和 `waiting`。任务名、检查目标、red/green、重跑次数和模块名属于 scope 或真实命令，不再创造 activity。`start`、`resume`、`cancel` 和 `checkpoint` 等 CLI 自动记录不受此约束。
+## 实际验证
 
-检查必须从成本最低且最能区分假设的步骤开始：先做配置、语法和静态预检，再做受影响 Module 的目标检查，最后才运行完整 gate、真实浏览器或 benchmark。中间失败即停止扩展；修复后先重跑失败步骤，最终候选提交再运行 required gate。
+先跑最低成本的有区分度检查；目标正确后才运行相关模块的完整门禁。文档：`bash scripts/check-docs.sh`；流程文档：`bash scripts/check-workflow.sh`；局部快速检查：`bash scripts/check-fast.sh`；桌面/Android 入口从 `scripts/` 与 `docs/agents/references.md` 按需选用。不要为只读研究或纯文档变更启动全套真实设备、性能或书库测试。
 
-预期拒绝、受控失败或 red 探针必须由项目脚本解释结果：观察到预期拒绝时脚本返回零；意外接受、错误的失败类型或未完成探针时返回非零。不得把原始预期非零直接登记为失败工站，也不得吞掉真实失败。
+阅读、正文、选区、笔记和消息持久化要区分静态、合成样本、真实 GUI、真实书籍与真实设备。私人书库、对话资产与带凭证数据不进入公开 Issue、PR、日志或提交。所有失败与跳过如实说明；不能用代码存在或截图替代体验结果。
 
-任务在首次编辑前 claim 精确路径。`--adopt` 只用于用户明确接管既有改动、已记录 handoff 或取消任务的后继任务，并在 change 中说明来源；不因 gate 扫描范围较大而扩大 claim。
-
-上述规则的证据和计数保存在对应 workflow change；当前只有 Atha 一个仓库样本，因此本地契约与检查脚本优先，全局 CLI 保持不变。
-
-## 迭代修复
-
-`docs/workflow/PROTOCOL.md` 独占 Review、Repair、Validate、迭代模式、收据与停止条件。本文件只规定工站映射：Review 使用 `review` activity 且不修改文件，Repair 使用 `implementation` activity，Validate 使用 `verification` activity 并运行实际检查。所有轮次留在同一个 task 和 change；完整命令与输出由工站保存，change 只保留语义摘要，不复制日志。
-
-## 检查
-
-`docs` 是可交付任务的默认 gate。修改本仓库流程脚本时，在任务开始时追加 `workflow-self-check`；阅读器继续使用已有正式检查脚本，不为已停止的引擎实验保留 gate。
-
-`scripts/check-docs.sh` 是 `docs` required gate 的 Bash 入口；它通过 `mise exec` 依次运行 `doc_guard.py` 和 `doc_length_check.py`。`scripts/check-workflow.sh` 先拒绝任何 Bash 检查脚本调用 PowerShell，再复用文档入口并运行文档守卫 self-check。旧 `scripts/Invoke-Atha.ps1` 保留为兼容入口，工站事件与报告聚合由全局 `project-workflow` 负责，不在仓库内复制实现。
-
-本项目当前不需要 dotenv 变量；Rust 版本继续由 `rust-toolchain.toml` 固定。
-
-```project-workflow
-{
-  "schema": 1,
-  "task_tracker": {
-    "kind": "local-markdown",
-    "path": "docs/changes"
-  },
-  "task_types": {
-    "audit": {
-      "gates": [],
-      "delivery": "none",
-      "review_required": false
-    },
-    "fast": {
-      "gates": [
-        "docs"
-      ],
-      "review_required": false
-    },
-    "change": {
-      "gates": [
-        "docs"
-      ],
-      "review_required": true
-    }
-  },
-  "gates": {
-    "docs": [
-      [
-        "bash",
-        "scripts/check-docs.sh"
-      ]
-    ],
-    "workflow-self-check": [
-      [
-        "bash",
-        "scripts/check-workflow.sh"
-      ]
-    ]
-  },
-  "delivery": {
-    "review_required": false,
-    "allow_waiver": false
-  },
-  "environment": {},
-  "project_skill_roots": [
-    ".agents/skills"
-  ],
-  "snapshot_excludes": []
-}
-```
+本仓库不自动启用新的 CI / 工作流控制器；需要增加额外验证基础设施时，应先有明确的成本与风险依据。
