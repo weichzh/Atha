@@ -1,23 +1,15 @@
-# Issue tracker: GitHub
+# GitHub Issues：Atha 长期目标与交接入口
 
-Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+仓库 <https://github.com/weichzh/Atha> 当前为**公开仓库**；长期任务属于 Issue，不在 `docs/ACTIVE.md` 或旧对话里复制一份进度总表。跨项目优先级和状态由 <https://github.com/users/weichzh/projects/1> 管理，技术事实由代码、变更文档和原始证据决定。
 
-## Conventions
+- 跨会话、会中断、需人工设备验收或长期讨论的工作创建/复用 Issue。单次可完成的局部修复不必建 Issue，也不把每个回归或提交都拆成新任务。
+- Issue 至少有问题/目标、证据与来源、授权与禁止事项、可观察验收标准、当前进度、阻塞、下一步。
+- 新会话先检查 Issue 正文、最新评论、当前分支/完整 SHA、工作树和相应证据；只有验证通过才勾选，不能凭聊天或单次截图宣称完成。
+- `docs/changes/*.md` 保存被确认的产品/技术决策、实施和测试明细；Issue 是长期进度和最终结论的入口。避免让两者同时充当状态机。研究失败、未知、否定结论也保留证据。
+- 长任务采用短期任务分支与 PR；允许已授权范围的 commit/push/草稿 PR，合并到 main、真实设备安装和正式发布由明确授权控制。变更不应混入本机他人未提交内容。
+- 测试分级：本地静态/模块、Linux GUI、Windows、Android/真机、真实私人书库是不同证据。完成标准必须注明适用范围，未运行写“未覆盖”。
+- 公开 Issue 严禁私人书库正文、截图、笔记、邮箱、账号、Token、真实个人路径、许可证受限材料和原始使用日志。可用匿名化/原创夹具及 SHA/统计结果。
+- 进度仅在有意义的检查点、阻塞或交付时更新，不为每步命令生成评论；关闭 Issue 前核对每条验收标准和用户仍需决定的事项。
+- 中文标题、正文、提交和 PR 内容默认中文；标识符、路径和证据原名保持原文。
 
-- **Create an issue**: `gh issue create --title "..." --body "..."`.
-- **Read an issue**: `gh issue view <number> --comments`.
-- **List issues**: `gh issue list --state open`.
-- **Comment on an issue**: `gh issue comment <number> --body "..."`.
-- **Apply/remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`.
-- **Close**: `gh issue close <number> --comment "..."`.
-
-Infer the repository from `git remote -v`.
-
-## Pull requests as a triage surface
-
-**PRs as a request surface: no.**
-
-## Skill operations
-
-- “Publish to the issue tracker”: create a GitHub issue.
-- “Fetch the relevant ticket”: run `gh issue view <number> --comments`.
+GitHub 应用可用时优先直接访问 Issues，不可用可在仓库内使用 `gh issue view <n> --comments`、`gh issue create --body-file <file>`、`gh issue comment <n> --body-file <file>`。本仓库 PR 不是外部需求入口。
