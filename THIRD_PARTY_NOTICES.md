@@ -5,14 +5,15 @@ Atha 包含以下第三方资产。它们保留各自的版权与许可证，不
 ## Kindle 直接依赖
 
 - `boko 0.5.0`：GPL-3.0-or-later；上游：<https://crates.io/crates/boko/0.5.0>；固定源码：<https://github.com/zacharydenton/boko/tree/8f412fb1a507399bce320d591feb517467cdb5f7>
-- Atha 以 `default-features = false` 使用未修改的 crates.io 发布包；PDB / MOBI 预检、安全预算、HTML / 资源投影与原子发布属于 Atha 自有 adapter，不是对 `boko` 源码的复制或修改。
+- Atha 以 `default-features = false` 使用未修改的 crates.io 发布包；共享 `reader::huffcdic` 的解码与尾部裁剪改编自 `boko 0.5.0`，保留 GPL-3.0-or-later。普通书籍和经典 Kindle 词典共同使用该实现。
+- `web_atoms 0.2.5`：MIT OR Apache-2.0；Copyright (c) 2014 The html5ever Project Developers；上游：<https://crates.io/crates/web_atoms/0.2.5>。Atha 只用其未修改的 HTML5 命名字符表；许可全文见 [MIT](LICENSES/web_atoms-MIT.txt) 和 [Apache-2.0](LICENSES/Apache-2.0.txt)。
 
 GPL-3.0-or-later 全文见 `LICENSES/GPL-3.0-or-later.txt`。
 
 ## 离线词典
 
 - `mdict-rs 0.1.4`：AGPL-3.0-only；上游：<https://crates.io/crates/mdict-rs/0.1.4>；固定源码：<https://github.com/Initsnow/mdict-rs/tree/d4bc67d1128e9561a27b714f085ad970dfed6c09>；Atha 启用其 `lzo` feature，未修改上游源码。
-- `reader::dictionary` 的经典 Kindle HUFF/CDIC 解压与尾部数据裁剪改编自 `boko 0.5.0`，保留 GPL-3.0-or-later；该模块的 INDX/TAGX 行为还参考了 `libmobi 0.12`，未复制其源码。固定参考源码：<https://github.com/bfabiszewski/libmobi/tree/85dcfe803fc2a21020ddcf15c3eb66b93d388add>。
+- `reader::dictionary` 的 INDX/TAGX 行为参考了 `libmobi 0.12`，未复制其源码。固定参考源码：<https://github.com/bfabiszewski/libmobi/tree/85dcfe803fc2a21020ddcf15c3eb66b93d388add>。
 
 `mdict-rs` 与 Atha 的 AGPL-3.0 许可全文见根目录 `LICENSE`；`boko` 的 GPL-3.0-or-later 全文见 `LICENSES/GPL-3.0-or-later.txt`。
 

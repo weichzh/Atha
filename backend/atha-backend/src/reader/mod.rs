@@ -7,6 +7,7 @@ pub mod cbz;
 pub mod dictionary;
 pub mod epub;
 pub mod fb2;
+mod huffcdic;
 pub mod kindle;
 pub mod library;
 pub mod resources;

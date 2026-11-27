@@ -1,5 +1,10 @@
 //! Bounded MOBI and KF8 projection through the shared reader manifest.
 
+mod guide;
+mod huff;
+mod projection;
+mod structure;
+
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -9,17 +14,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use boko::{Book, Format, TocEntry};
+use boko::{Book, ChapterId, Format, Importer, Metadata, SpineEntry, TocEntry};
 use quick_xml::{
     Reader, Writer, XmlVersion,
-    events::{BytesStart, Event},
+    events::{BytesStart, BytesText, Event},
 };
 use serde::{Deserialize, Serialize};
 
 use super::{
     MAX_MANIFEST_SECTIONS, MAX_MANIFEST_TOC_ITEMS,
     epub::READER_MANIFEST,
-    resources::MAX_RESOURCE_BYTES,
+    resources::{MAX_READER_RESOURCES, MAX_RESOURCE_BYTES},
     source::{self, SourceError},
 };
 
@@ -28,11 +33,12 @@ const IMPORT_MARKER: &str = ".atha-kindle-import";
 const IMPORT_MARKER_VERSION: &str = "atha-kindle-import-v1";
 const BOOK_METADATA: &str = ".atha-book.json";
 const OUTPUT_ROOT: &str = ".atha-kindle";
+const SECTION_PREFIX: &str = ".atha-kindle/";
 const MAX_KINDLE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_RECORD_ZERO_BYTES: u64 = 1024 * 1024;
 const MAX_TEXT_BYTES: u64 = 128 * 1024 * 1024;
-const MAX_HUFF_PROCESS_BUDGET: u64 = 256 * 1024 * 1024;
-const MAX_RESOURCES: usize = 2_000;
+const LEGACY_HUFF_BUDGET: u64 = 256 * 1024 * 1024;
+const MAX_LEGACY_IMAGES: usize = 2_000;
 const MAX_RESOURCE_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_IMAGE_SIDE: usize = 8_192;
 const MAX_IMAGE_PIXELS: usize = 20_000_000;
@@ -106,6 +112,7 @@ struct ManifestTocItem {
 
 struct Preflight {
     format: Format,
+    huff: Option<huff::Plan>,
     input_bytes: u64,
 }
 
@@ -221,21 +228,29 @@ pub fn import_kindle(
     }
     let result = (|| {
         let parse_started = std::time::Instant::now();
-        let book = Book::open_format(&snapshot, preflight.format)
-            .map_err(|_| ImportError::InvalidStructure)?;
-        if book.spine().is_empty() {
-            return Err(ImportError::Unsupported);
-        }
-        if book.spine().len() > MAX_MANIFEST_SECTIONS {
-            return Err(ImportError::TooManySections);
-        }
-        if !book.toc().is_empty() {
-            book.resolve_links()
+        let (book_source, mut book, image_records) = if let Some(huff) = preflight.huff {
+            let normalized = staging.join(".source.unpacked.kindle");
+            let image_records = huff.normalize(&snapshot, &normalized)?;
+            fs::remove_file(&snapshot).map_err(|_| ImportError::WriteFailed)?;
+            let importer = huff::open_raw(&normalized, preflight.format)?;
+            (
+                normalized,
+                BookView::Raw {
+                    importer,
+                    toc: None,
+                },
+                Some(image_records),
+            )
+        } else {
+            let book = Book::open_format(&snapshot, preflight.format)
                 .map_err(|_| ImportError::InvalidStructure)?;
-        }
+            (snapshot, BookView::Existing(book), None)
+        };
+        book.prepare_toc()?;
         let parse_ms = parse_started.elapsed().as_millis();
         let render_started = std::time::Instant::now();
-        let (sections, resources, toc, cover_path) = write_book(&book, &staging)?;
+        let (sections, resources, toc, cover_path) =
+            write_book(&book, &staging, image_records.as_ref())?;
         let output_toc_items = toc.len();
         write_json(
             &staging.join(READER_MANIFEST),
@@ -283,7 +298,7 @@ pub fn import_kindle(
             render_write_ms: render_started.elapsed().as_millis(),
         };
         drop(book);
-        fs::remove_file(&snapshot).map_err(|_| ImportError::WriteFailed)?;
+        fs::remove_file(&book_source).map_err(|_| ImportError::WriteFailed)?;
         publish(&staging, &target, &content_version)?;
         Ok(stats)
     })();
@@ -419,43 +434,137 @@ fn preflight(file: &mut File) -> Result<Preflight, ImportError> {
     if declared_text_bytes == 0 || declared_text_bytes > MAX_TEXT_BYTES {
         return Err(ImportError::TextTooLarge);
     }
-    let compressed_text_bytes = (1..=text_record_count).try_fold(0_u64, |total, index| {
-        let end = offsets.get(index + 1).copied().unwrap_or(input_bytes);
-        total
-            .checked_add(end - offsets[index])
-            .ok_or(ImportError::TextTooLarge)
-    })?;
-    match compression {
-        1 if compressed_text_bytes <= MAX_TEXT_BYTES => {}
-        2 if compressed_text_bytes.saturating_mul(5) <= MAX_TEXT_BYTES => {}
+    let compressed_text_bytes = offsets
+        .get(text_record_count + 1)
+        .copied()
+        .unwrap_or(input_bytes)
+        - offsets[1];
+    let huff = match compression {
+        1 if compressed_text_bytes <= MAX_TEXT_BYTES => None,
+        2 if compressed_text_bytes.saturating_mul(5) <= MAX_TEXT_BYTES => None,
         0x4448 => {
-            let huff_index = be_u32(&record_zero, 0x70)?;
-            let huff_count = be_u32(&record_zero, 0x74)?;
-            if huff_index == NULL_INDEX
-                || huff_count < 2
-                || u64::from(huff_index) + u64::from(huff_count) > record_count as u64
-            {
+            let huff_index = be_u32(&record_zero, 0x70)? as usize;
+            let huff_count = be_u32(&record_zero, 0x74)? as usize;
+            let end = huff_index
+                .checked_add(huff_count)
+                .filter(|end| *end <= record_count)
+                .ok_or(ImportError::InvalidStructure)?;
+            if huff_count < 2 {
                 return Err(ImportError::InvalidStructure);
             }
-            // ponytail: boko 0.5 budgets HUFF by whole-file bytes; keep the process bound until its reader exposes a hard output cap.
-            if input_bytes
-                .saturating_mul(64)
-                .saturating_add(4 * 1024 * 1024)
-                > MAX_HUFF_PROCESS_BUDGET
-                || compressed_text_bytes
-                    .saturating_mul(64)
-                    .saturating_add(4 * 1024 * 1024)
-                    > MAX_HUFF_PROCESS_BUDGET
-            {
-                return Err(ImportError::TextTooLarge);
+            // Preserve the pre-P0 path for already admitted books. Only
+            // previously rejected HUFF files need the new conservative proof.
+            if legacy_huff_admitted(input_bytes, compressed_text_bytes) {
+                None
+            } else {
+                offsets.push(input_bytes);
+                Some(huff::Plan {
+                    offsets,
+                    table,
+                    record_zero,
+                    text_records: text_record_count,
+                    codebook: huff_index..end,
+                    is_kf8: matches!(format, Format::Azw3),
+                })
             }
         }
         _ => return Err(ImportError::Unsupported),
-    }
+    };
     Ok(Preflight {
         format,
         input_bytes,
+        huff,
     })
+}
+
+// The original boko HUFF admission rule; compressed bytes are included
+// explicitly to document the old contract.
+fn legacy_huff_admitted(file: u64, packed: u64) -> bool {
+    [file, packed]
+        .into_iter()
+        .all(|size| size.saturating_mul(64).saturating_add(4 * 1024 * 1024) <= LEGACY_HUFF_BUDGET)
+}
+
+// Keep the established importer for previously admitted books. The extended HUFF path consumes
+// only the raw spine, assets and resolved TOC hrefs; it never builds boko IR.
+enum BookView {
+    Existing(Book),
+    Raw {
+        importer: Box<dyn Importer>,
+        toc: Option<Vec<TocEntry>>,
+    },
+}
+
+impl BookView {
+    fn prepare_toc(&mut self) -> Result<(), ImportError> {
+        if self.spine().is_empty() {
+            return Err(ImportError::Unsupported);
+        }
+        if self.spine().len() > MAX_MANIFEST_SECTIONS {
+            return Err(ImportError::TooManySections);
+        }
+        if !self.toc().is_empty() {
+            match self {
+                Self::Existing(book) => {
+                    book.resolve_links()
+                        .map_err(|_| ImportError::InvalidStructure)?;
+                }
+                // Book::resolve_links also fills TOC .target (IR nodes), but
+                // ReaderManifest consumes only .href. Resolve those directly.
+                Self::Raw { importer, toc } => *toc = importer.resolve_toc(),
+            }
+        }
+        Ok(())
+    }
+
+    fn spine(&self) -> &[SpineEntry] {
+        match self {
+            Self::Existing(book) => book.spine(),
+            Self::Raw { importer, .. } => importer.spine(),
+        }
+    }
+
+    fn metadata(&self) -> &Metadata {
+        match self {
+            Self::Existing(book) => book.metadata(),
+            Self::Raw { importer, .. } => importer.metadata(),
+        }
+    }
+
+    fn toc(&self) -> &[TocEntry] {
+        match self {
+            Self::Existing(book) => book.toc(),
+            Self::Raw { importer, toc } => toc.as_deref().unwrap_or_else(|| importer.toc()),
+        }
+    }
+
+    fn source_id(&self, id: ChapterId) -> Option<&str> {
+        match self {
+            Self::Existing(book) => book.source_id(id),
+            Self::Raw { importer, .. } => importer.source_id(id),
+        }
+    }
+
+    fn load_raw(&self, id: ChapterId) -> boko::Result<Vec<u8>> {
+        match self {
+            Self::Existing(book) => book.load_raw(id),
+            Self::Raw { importer, .. } => importer.load_raw(id),
+        }
+    }
+
+    fn list_assets(&self) -> &[String] {
+        match self {
+            Self::Existing(book) => book.list_assets(),
+            Self::Raw { importer, .. } => importer.list_assets(),
+        }
+    }
+
+    fn load_asset(&self, path: &str) -> boko::Result<Vec<u8>> {
+        match self {
+            Self::Existing(book) => book.load_asset(path),
+            Self::Raw { importer, .. } => importer.load_asset(path),
+        }
+    }
 }
 
 type WriteResult = (
@@ -465,28 +574,43 @@ type WriteResult = (
     Option<String>,
 );
 
-fn write_book(book: &Book, staging: &Path) -> Result<WriteResult, ImportError> {
+fn write_book(
+    book: &BookView,
+    staging: &Path,
+    image_records: Option<&huff::ImageRecords>,
+) -> Result<WriteResult, ImportError> {
     let output_root = staging.join(OUTPUT_ROOT);
     let image_root = output_root.join("images");
     fs::create_dir_all(&image_root).map_err(|_| ImportError::WriteFailed)?;
     let mut asset_map = HashMap::new();
     let mut resources = Vec::new();
     let mut resource_total = 0_u64;
+    let image_limit = if image_records.is_some() {
+        MAX_READER_RESOURCES
+    } else {
+        MAX_LEGACY_IMAGES
+    };
     for source_path in book.list_assets() {
         let Some(kind) = image_kind(source_path) else {
             continue;
         };
-        if resources.len() >= MAX_RESOURCES || asset_map.contains_key(source_path) {
+        if resources.len() >= image_limit || asset_map.contains_key(source_path) {
             return Err(ImportError::ResourceTooLarge);
+        }
+        let expected_bytes = image_records
+            .map(|records| records.bytes(source_path))
+            .transpose()?;
+        if let Some(bytes) = expected_bytes {
+            check_image_budget(bytes, resource_total)?;
         }
         let bytes = book
             .load_asset(source_path)
             .map_err(|_| ImportError::InvalidImage)?;
+        if expected_bytes.is_some_and(|expected| expected != bytes.len() as u64) {
+            return Err(ImportError::InvalidImage);
+        }
         validate_image(&bytes, kind)?;
-        resource_total = resource_total
-            .checked_add(bytes.len() as u64)
-            .filter(|total| *total <= MAX_RESOURCE_TOTAL_BYTES)
-            .ok_or(ImportError::ResourceTooLarge)?;
+        resource_total = check_image_budget(bytes.len() as u64, resource_total)?;
         let name = format!("image-{:04}.{}", resources.len() + 1, kind.extension());
         let manifest_path = format!("{OUTPUT_ROOT}/images/{name}");
         fs::write(image_root.join(&name), bytes).map_err(|_| ImportError::WriteFailed)?;
@@ -513,6 +637,7 @@ fn write_book(book: &Book, staging: &Path) -> Result<WriteResult, ImportError> {
         });
     }
     let mut text_total = 0_u64;
+    let mut guides = guide::Targets::default();
     for (entry, section) in book.spine().iter().zip(&sections) {
         let source_path = book
             .source_id(entry.id)
@@ -524,12 +649,13 @@ fn write_book(book: &Book, staging: &Path) -> Result<WriteResult, ImportError> {
             .checked_add(raw.len() as u64)
             .filter(|total| *total <= MAX_TEXT_BYTES)
             .ok_or(ImportError::TextTooLarge)?;
-        let xhtml = sanitize_xhtml(&raw, source_path, &source_map, &asset_map)?;
+        let xhtml = sanitize_xhtml(&raw, source_path, &source_map, &asset_map, &mut guides)?;
         if xhtml.len() as u64 > MAX_RESOURCE_BYTES {
             return Err(ImportError::ResourceTooLarge);
         }
         fs::write(staging.join(&section.href), xhtml).map_err(|_| ImportError::WriteFailed)?;
     }
+    guides.verify(staging)?;
     let mut toc = Vec::new();
     flatten_toc(book.toc(), &source_map, &mut HashSet::new(), &mut toc)?;
     if toc.is_empty() {
@@ -552,17 +678,32 @@ fn write_book(book: &Book, staging: &Path) -> Result<WriteResult, ImportError> {
     Ok((sections, resources, toc, cover_path))
 }
 
+fn check_image_budget(bytes: u64, total: u64) -> Result<u64, ImportError> {
+    if bytes == 0 || bytes > MAX_RESOURCE_BYTES {
+        return Err(ImportError::ResourceTooLarge);
+    }
+    total
+        .checked_add(bytes)
+        .filter(|total| *total <= MAX_RESOURCE_TOTAL_BYTES)
+        .ok_or(ImportError::ResourceTooLarge)
+}
+
 fn sanitize_xhtml(
     source: &[u8],
     current_source: &str,
     source_map: &HashMap<String, String>,
     asset_map: &HashMap<String, String>,
+    guides: &mut guide::Targets,
 ) -> Result<Vec<u8>, ImportError> {
     let mut reader = Reader::from_reader(source);
     reader.config_mut().trim_text(false);
     let mut writer = Writer::new(Vec::with_capacity(source.len()));
     let mut saw_html = false;
     let mut saw_body = false;
+    let mut depth = 0_usize;
+    let mut root_html = false;
+    let mut in_head = false;
+    let mut in_guide = false;
     loop {
         match reader
             .read_event()
@@ -580,7 +721,18 @@ fn sanitize_xhtml(
                     current_source,
                     source_map,
                     asset_map,
+                    None,
                 )?;
+                if depth == 0 {
+                    root_html = event.name().as_ref() == b"html";
+                }
+                if depth == 1 && root_html && event.name().as_ref() == b"head" {
+                    in_head = true;
+                }
+                if depth == 2 && in_head && event.name().as_ref() == b"guide" {
+                    in_guide = true;
+                }
+                depth += 1;
                 saw_html |= name == "html";
                 saw_body |= name == "body";
                 writer
@@ -599,14 +751,25 @@ fn sanitize_xhtml(
                     current_source,
                     source_map,
                     asset_map,
+                    (depth == 3 && in_guide && event.name().as_ref() == b"reference")
+                        .then_some(&mut *guides),
                 )?;
                 writer
                     .write_event(Event::Empty(output))
                     .map_err(|_| ImportError::InvalidMarkup)?;
             }
-            Event::End(event) => writer
-                .write_event(Event::End(event.into_owned()))
-                .map_err(|_| ImportError::InvalidMarkup)?,
+            Event::End(event) => {
+                depth = depth.checked_sub(1).ok_or(ImportError::InvalidMarkup)?;
+                if depth == 2 {
+                    in_guide = false;
+                }
+                if depth == 1 {
+                    in_head = false;
+                }
+                writer
+                    .write_event(Event::End(event.into_owned()))
+                    .map_err(|_| ImportError::InvalidMarkup)?;
+            }
             Event::Text(event) => writer
                 .write_event(Event::Text(event.into_owned()))
                 .map_err(|_| ImportError::InvalidMarkup)?,
@@ -619,8 +782,14 @@ fn sanitize_xhtml(
             Event::GeneralRef(event) if safe_reference(event.as_ref()) => writer
                 .write_event(Event::GeneralRef(event.into_owned()))
                 .map_err(|_| ImportError::InvalidMarkup)?,
+            Event::GeneralRef(event) => {
+                let text = html_entity_text(event.as_ref())?;
+                writer
+                    .write_event(Event::Text(BytesText::new(&text)))
+                    .map_err(|_| ImportError::InvalidMarkup)?;
+            }
             Event::Comment(_) | Event::DocType(_) => {}
-            Event::PI(_) | Event::GeneralRef(_) => return Err(ImportError::InvalidMarkup),
+            Event::PI(_) => return Err(ImportError::InvalidMarkup),
             Event::Eof => break,
         }
     }
@@ -637,6 +806,7 @@ fn safe_start(
     current_source: &str,
     source_map: &HashMap<String, String>,
     asset_map: &HashMap<String, String>,
+    guides: Option<&mut guide::Targets>,
 ) -> Result<BytesStart<'static>, ImportError> {
     if matches!(
         name,
@@ -664,6 +834,8 @@ fn safe_start(
             .map_err(|_| ImportError::InvalidMarkup)?
             .to_owned(),
     );
+    let mut guide_href = None;
+    let mut is_toc_reference = false;
     for attribute in event.attributes().with_checks(true) {
         let attribute = attribute.map_err(|_| ImportError::InvalidMarkup)?;
         let key = std::str::from_utf8(attribute.key.as_ref())
@@ -684,6 +856,13 @@ fn safe_start(
             .into_owned();
         if value.len() > 4096 {
             return Err(ImportError::InvalidMarkup);
+        }
+        if guides.is_some() && key == "type" && value == "toc" {
+            is_toc_reference = true;
+        }
+        if guides.is_some() && key == "href" {
+            guide_href = Some(value);
+            continue;
         }
         if lower == "href"
             && name == "a"
@@ -708,6 +887,24 @@ fn safe_start(
             _ => value,
         };
         output.push_attribute((key.as_str(), value.as_str()));
+    }
+    if let (Some(guides), Some(href)) = (guides, guide_href) {
+        if is_toc_reference {
+            if output
+                .try_get_attribute(guide::TARGET_ATTRIBUTE)
+                .map_err(|_| ImportError::InvalidMarkup)?
+                .is_some()
+            {
+                return Err(ImportError::InvalidMarkup);
+            }
+            let target = guides.project(&href, current_source, source_map)?;
+            // Keep metadata inert; the ReaderManifest TOC is separate.
+            output.push_attribute((guide::TARGET_ATTRIBUTE, target.as_str()));
+        } else if href.starts_with('#') {
+            output.push_attribute(("href", href.as_str()));
+        } else {
+            return Err(ImportError::InvalidReference);
+        }
     }
     Ok(output.into_owned())
 }
@@ -873,6 +1070,27 @@ fn safe_reference(value: &[u8]) -> bool {
             .is_some_and(|digits| !digits.is_empty() && digits.iter().all(u8::is_ascii_hexdigit))
 }
 
+fn html_entity_text(name: &[u8]) -> Result<String, ImportError> {
+    // Look up only a complete standard name. No DTD, custom declarations,
+    // attribute expansion or recursive interpretation enters this path.
+    let mut key = [0; 33];
+    if name.len() >= key.len() || !name.iter().all(u8::is_ascii_alphanumeric) {
+        return Err(ImportError::InvalidMarkup);
+    }
+    key[..name.len()].copy_from_slice(name);
+    key[name.len()] = b';';
+    let (first, second) = web_atoms::NAMED_ENTITIES
+        .get(std::str::from_utf8(&key[..=name.len()]).unwrap())
+        .copied()
+        .ok_or(ImportError::InvalidMarkup)?;
+    let mut text = String::with_capacity(8);
+    text.push(char::from_u32(first).ok_or(ImportError::InvalidMarkup)?);
+    if second != 0 {
+        text.push(char::from_u32(second).ok_or(ImportError::InvalidMarkup)?);
+    }
+    Ok(text)
+}
+
 fn local_name(value: &[u8]) -> Result<String, ImportError> {
     let value = value.rsplit(|byte| *byte == b':').next().unwrap_or(value);
     std::str::from_utf8(value)
@@ -1029,6 +1247,80 @@ fn publish(staging: &Path, target: &Path, content_version: &str) -> Result<(), I
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn html_named_characters_are_written_as_xml_text() {
+        let render = |raw: &[u8]| {
+            sanitize_xhtml(
+                raw,
+                "chapter.html",
+                &HashMap::new(),
+                &HashMap::new(),
+                &mut guide::Targets::default(),
+            )
+            .map(|bytes| String::from_utf8(bytes).unwrap())
+        };
+        let text = render(b"<html><body>&ldquo;A&nbsp;B&rdquo; &LT;em&gt;</body></html>").unwrap();
+        assert!(text.contains("“A\u{a0}B” &lt;em&gt;"));
+        assert_eq!(
+            render(b"<html><body>&unrecognizedName;</body></html>"),
+            Err(ImportError::InvalidMarkup)
+        );
+    }
+
+    #[test]
+    fn guide_keeps_only_declared_toc_targets_as_passive_metadata() {
+        let spine = HashMap::from([
+            (
+                "chapter-1.html".into(),
+                ".atha-kindle/section-0001.xhtml".into(),
+            ),
+            (
+                "chapter-2.html".into(),
+                ".atha-kindle/section-0002.xhtml".into(),
+            ),
+        ]);
+        let sanitize = |fragment: &str| {
+            let raw = format!(
+                "<html><head><guide>{fragment}</guide></head><body><p>Read</p></body></html>"
+            );
+            sanitize_xhtml(
+                raw.as_bytes(),
+                "chapter-1.html",
+                &spine,
+                &HashMap::new(),
+                &mut guide::Targets::default(),
+            )
+            .map(|bytes| String::from_utf8(bytes).unwrap())
+        };
+        let output = sanitize(
+            r##"<reference title="Contents" href="./chapter-2.html#toc" type="toc"/><reference type="toc" href="#local-toc"/>"##,
+        )
+        .unwrap();
+        assert!(output.contains(r##"<reference title="Contents" type="toc" data-atha-guide-href="section-0002.xhtml#toc"/>"##));
+        assert!(output.contains(r##"data-atha-guide-href="#local-toc""##));
+        let legacy = sanitize(r##"<reference type="text" href="#legacy"/>"##).unwrap();
+        assert!(legacy.contains(r##"<reference type="text" href="#legacy"/>"##));
+        assert!(!legacy.contains(guide::TARGET_ATTRIBUTE));
+        for reference in [
+            r#"<reference type="toc" href="pending.html#toc"/>"#,
+            r#"<reference type="text" href="chapter-2.html#toc"/>"#,
+            r#"<reference type="toc" href="chapter-2.html"/>"#,
+        ] {
+            assert_eq!(sanitize(reference), Err(ImportError::InvalidReference));
+        }
+        let body_reference = br#"<html><head/><body><reference type="toc" href="chapter-2.html#toc"/></body></html>"#;
+        assert_eq!(
+            sanitize_xhtml(
+                body_reference,
+                "chapter-1.html",
+                &spine,
+                &HashMap::new(),
+                &mut guide::Targets::default()
+            ),
+            Err(ImportError::InvalidReference)
+        );
+    }
 
     #[test]
     fn toc_requires_a_section_path() {

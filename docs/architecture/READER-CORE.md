@@ -176,6 +176,8 @@ EPUB2 / NCX 兼容测试由 Rust 测试代码动态生成原创最小书和恶�
 
 ### Kindle 入口门槛
 
+普通 Kindle 导入先沿用原预检和缓存；原预检仅因 HUFF 正文估算拒绝且未命中缓存时，才在暂存区按实际正文输出、字典缓存、结构重组和链接投影工作量计量。暂存记录保留编号，不改变书籍版本、目录片段或已声明资源。未声明、越根和不支持的协议仍拒绝。真实书库测试由显式清单驱动；公开 `scripts/check-book-corpus.mjs` 用合成输入验证运行器。
+
 Kindle 当前最低 Bash 检查为 `mise exec -- cargo test --locked -p atha-backend --test kindle_import`。忽略目录中的两个普通 KF8 与一个词典样本已有 importer、release benchmark 和 WebKitGTK 历史证据；继续该路线前必须把私密基准、目录 / 搜索 / 重排 / 恢复和 AppLog 隐私迁入 Bash 入口，不再执行旧 PowerShell 门。该 Linux 证据不替代 Android ARM64 真机性能。
 
 ### 离线词典入口门槛
