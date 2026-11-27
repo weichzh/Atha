@@ -1,6 +1,6 @@
 # 当前工作
 
-本文件只登记当前可执行工作的路由，不保存完成摘要、验收流水或候选需求。
+本页指向当前工作的入口。
 
 - `change`：GitHub Flow 流程切换与审查 → `docs/changes/github-flow.md`；按 [`workflow` Bundle](INDEX.md#context-bundles) 读取。
 - `now`：UI 重设计候选交接，等待用户复核书架与阅读主界面。

@@ -77,7 +77,7 @@ PCT-AL10 候选使用 `bash scripts/check-pct-reader.sh build` 和 `verify`；�
 
 采用 GitHub Flow：独立任务从最新远端 `main` 开短期分支，运行相称检查，通过 PR 审查后合入。小修可直接走 PR；跨会话需求、研究和验收用 [GitHub Issues](https://github.com/weichzh/Atha/issues) 交接。产品行为或跨模块变化先按[工作协议](docs/workflow/PROTOCOL.md)确认获批的 change。
 
-从 [AGENTS.md](AGENTS.md) 和[仓库协作规则](docs/agents/workflow.md)进入。不要把 PR 合并当作真机验收或正式发布。
+从 [AGENTS.md](AGENTS.md) 和[仓库协作规则](docs/agents/workflow.md)进入。
 
 ## 许可证
 

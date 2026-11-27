@@ -8,8 +8,6 @@ proposed / accepted / implemented
 
 ## Scope
 
-## Non-Goals
-
 ## Architecture Impact
 
 none / present

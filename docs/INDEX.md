@@ -11,7 +11,7 @@
 | `reader` | `architecture/READER-CORE.md`、`codebase/MAP.md`、相关 ADR、活动 change 与样本契约 |
 | `messages` | `architecture/MESSAGE-READING.md`、`codebase/DATABASE.md`、活动 change |
 | `workflow` | `agents/workflow.md`、`agents/issue-tracker.md`、`agents/references.md`、`workflow/PROTOCOL.md`、活动 change |
-| `audit` | 直接事实所有者与一份必要证据；不自动升级为实施 |
+| `audit` | 直接事实所有者与一份必要证据 |
 
 ## 当前注册表
 
@@ -42,7 +42,7 @@
 - `ACTIVE.md` 只指向正在执行的工作；任务关闭后清除 change 指针。
 - `changes/` 保留活动变更及仍为未决验收提供上下文的记录；关闭后由 Git 追溯。
 - `research/` 只保存尚未形成结论的问题；结论进入事实所有者后删除研究文件。
-- 已完成里程碑只在 `ROADMAP.md` 保留一行能力摘要，不保留平行的 milestone、spec、plan 和 review 副本。
+- 已实现能力的摘要见[路线图](roadmap/ROADMAP.md)。
 
 ## 模板
 
