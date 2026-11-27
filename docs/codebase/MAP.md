@@ -56,9 +56,9 @@
 | `scripts/check-epub-source.ps1` | 固定 EPUB3 的 Rust 检查、真实导入形状与 WebView2 import probe | M3 已通过 |
 | `scripts/check-cbz-source.ps1` | 动态原创 CBZ、workspace Rust 检查、导入形状与 Windows WebView2 import probe | Windows 已通过 |
 | `scripts/check-library-shelf.ps1` | 本地书架后端、production build、真实 Tauri 无参数启动，以及四视口搜索 / 视图 / 菜单 / 触控 / 安全区 UI 检查 | Windows 已通过 |
-| `scripts/Invoke-Atha.ps1` | 统一工程 CLI；自动记录 `check docs`、`station` 与 `report` | 本地已验证 |
-| `scripts/Measure-Workflow.ps1` | schema v1/v2 本机流程日志、兼容汇总与自检 | 本地已验证 |
-| `docs/agents/workflow.md`、`docs/agents/references.md` | 全局工作流的项目契约，以及外部技术的官方入口和快速用法 | 已配置 |
+| `scripts/Invoke-Atha.ps1` | Windows 历史兼容入口；保留 `check docs`、`station` 与 `report` | 既有本地验证 |
+| `scripts/Measure-Workflow.ps1` | 旧工作流 schema v1/v2 的日志兼容汇总与自检 | 既有本地验证 |
+| `docs/agents/workflow.md`、`docs/agents/references.md` | GitHub Flow、仓库检查入口和外部技术参考 | 当前入口 |
 | `docs/` | 当前事实、路线、长期决策、活动 change 与未决研究 | 已建立 |
 
 `p0/` 只保存技术验证，不是生产后端。后续正式代码不得直接在 P0 目录上堆叠。
@@ -148,11 +148,11 @@
 
 ## 验证证据
 
-本文件只登记验证入口和当前最高证据等级，不保存逐次运行流水。精确提交、命令、计数、基准 run id 与关闭收据由 Git 和 `project-workflow` 保存。
+本文件只登记验证入口和当前最高证据等级。逐次检查的受测提交与结果见对应 PR 或 change；完整本机收据按需留在 Git 忽略的 `artifacts/local/`。
 
 | 范围 | 正式入口 | 当前最高证据 |
 | --- | --- | --- |
-| 文档与流程 | `scripts/Invoke-Atha.ps1 check docs` | Windows 本地静态检查 |
+| 文档与流程 | `bash scripts/check-docs.sh`、`bash scripts/check-workflow.sh` | 本地静态与守卫自检 |
 | 后端 | `scripts/check-backend.ps1` | Windows 本地构建、lint、测试与文档 |
 | 阅读内核 | `scripts/check-reader-samples.ps1`、`scripts/check-reader-gate.ps1` | 真实 Windows WebView2 困难样本、恢复、内存与性能门槛 |
 | 产品入口 | `scripts/check-tauri-reader.ps1`、`scripts/check-library-shelf.ps1` | 真实 Windows Tauri / WebView2 本地链路 |

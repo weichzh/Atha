@@ -2,11 +2,16 @@
 
 本文件只保存 Atha 直接依赖的外部边界、版本事实来源和最短用法，不复制官方文档。进入任务时完整读取；当任务涉及下列边界的行为、API 语义、兼容性、错误、安全或性能时，先打开对应官方入口再诊断或修改。
 
+## GitHub Flow
+
+- 官方入口：[GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow)、[PR 与 Issue 的关联和自动关闭](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)。
+- 项目快速用法：按 [仓库协作规则](workflow.md) 从短期分支经 PR 合入 `main`。待验收项按 [Issue 交接规则](issue-tracker.md) 保持开放。
+
 ## Codex 迭代开发工作流
 
 - 官方入口：[Iterating Development Workflows with Codex](https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex)、[Build iterative repair loops with Codex](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)。
-- 项目快速用法：Atha 复用现有 `AGENTS.md`、事实所有者、单份 change、`project-workflow` 工站和正式检查，不复制示例的 `GOALS.md`、`PLANS.md`、`PROMPTS.md` 或 `harness/`。困难修复在同一 task 内按 Review、Repair、Validate 迭代，并把结构化剩余差异反馈到下一轮。
-- 最短检查：`project_workflow.py benchmark --summary --task <task>`、`mise exec -- python3 scripts/doc_guard.py --self-check` 与 `bash scripts/check-workflow.sh`。
+- 项目快速用法：Atha 复用 `AGENTS.md`、事实所有者、单份 change 和仓库检查脚本。困难修复在同一份 change 内按 Review、Repair、Validate 迭代，并把结构化剩余差异反馈到下一轮；本机检查收据按需保存在 Git 忽略的 `artifacts/local/`。
+- 最短检查：`mise exec -- python3 scripts/doc_guard.py --self-check` 与 `bash scripts/check-workflow.sh`；按改动范围追加对应仓库检查脚本。
 - 必须重查：Codex 官方约定变化、结构化输出能力、自动化审批边界，以及任何把模型 judge、并行执行或无人值守修复扩展到真实设备、用户数据、外部系统或发布链路的提议。
 
 ## Tauri 2

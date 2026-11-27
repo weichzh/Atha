@@ -14,7 +14,5 @@ proposed / accepted / superseded
 
 ## 相关文档
 
-- 里程碑：
-- 规格：
-- 计划：
-- 讨论：
+- 对应事实所有者：
+- 相关 change、Issue 或 PR（如有）：

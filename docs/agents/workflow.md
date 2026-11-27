@@ -1,88 +1,30 @@
-# ATHA 项目工作流适配
+# Atha 仓库协作与检查入口
 
-全局 `project-workflow` 管理任务 claim、工站证据、关闭状态和跨项目日志；本仓库只提供项目事实与真实检查命令。进入任务时仍按 `AGENTS.md` 读取 `CONTEXT.md`、`ACTIVE.md` 和对应 Context Bundle。
+开始、恢复或关闭仓库任务前读取 `AGENTS.md`、`CONTEXT.md`、`docs/ACTIVE.md` 和对应 Context Bundle。外部技术与标准的官方入口见 `docs/agents/references.md`；涉及框架行为、API、兼容性、错误或性能时，按需核对对应版本的官方文档或源码。
 
-`docs/agents/references.md` 是外部技术与标准的项目参考地图。进入任务时先读它；涉及框架行为、API 语义、兼容性、错误或性能时，从地图直达对应版本的官方文档或源码，不凭记忆试错。
+## GitHub Flow
 
-## 路由
+1. **开短期分支**：独立任务从最新远端 `main` 开分支；依赖未合并工作时，记录所依赖的分支和提交。共享工作区正在使用或有在途改动时，用独立 worktree 开工。
+2. **提交并验证**：一个分支只处理一项相关变化，按影响范围跑现有检查。跨会话工作关联 [Issue](issue-tracker.md)。
+3. **开 PR**：获准外发后，按实际目标分支核对差异与提交，确认发布范围和材料，再推送任务分支并开 PR；需要早期反馈时可开 Draft PR。PR 写清范围、被测提交、环境、结果和未覆盖项。
+4. **审查并合入**：PR 最终合入 `main`。处理阻塞意见和适用检查；候选或目标基线变化时，复核受影响的证据。获得明确授权后才合并。真实验收、发布和设备安装分别确认。
+5. **收尾**：合并后更新相应 Issue；仍待验收的 Issue 保持打开。确认无后续分支依赖且获准清理后，删除短期分支。
 
-- `audit` 是有停止条件的只读调查，不 claim 文件，也不要求提交；
-- `fast` 直接维护局部实现及其事实所有者；
-- `change` 必须对应一份已获批准且状态为 `accepted` 的 `docs/changes/*.md`，关闭前完成独立 review；
-- GitHub issue 是外部请求入口，`docs/changes/` 是仓库内跨模块实施记录；具体生命周期由 `docs/workflow/PROTOCOL.md` 定义。
+## 工作路径
 
-## 工站语义
+按[工作协议](../workflow/PROTOCOL.md)选择 `audit`、`fast` 或 `change`。在获批范围内工作，保留其他在途改动。
 
-全局 `project-workflow` 工站由 Atha 新任务主动填写的 activity 只使用 `research`、`specification`、`planning`、`implementation`、`verification`、`review`、`delivery` 和 `waiting`。任务名、检查目标、red/green、重跑次数和模块名属于 scope 或真实命令，不再创造 activity。`start`、`resume`、`cancel` 和 `checkpoint` 等 CLI 自动记录不受此约束。
+## Review、迭代与证据
 
-检查必须从成本最低且最能区分假设的步骤开始：先做配置、语法和静态预检，再做受影响 Module 的目标检查，最后才运行完整 gate、真实浏览器或 benchmark。中间失败即停止扩展；修复后先重跑失败步骤，最终候选提交再运行 required gate。
+独立 review 只读检查实现与验收条件，并把发现分为 `blocking`、`non-blocking`、`out-of-scope`。迭代任务在同一份 change 中按 Review、Repair、Validate 记录轮次、剩余差异、停止原因与证据等级；完整命令和输出按需保存在 Git 忽略的 `artifacts/local/`。
 
-预期拒绝、受控失败或 red 探针必须由项目脚本解释结果：观察到预期拒绝时脚本返回零；意外接受、错误的失败类型或未完成探针时返回非零。不得把原始预期非零直接登记为失败工站，也不得吞掉真实失败。
+检查从成本最低且最能区分假设的步骤开始：配置、语法和静态预检，受影响 Module 的目标检查，仓库 gate，最后才是高成本 GUI、真实目标或 benchmark。低成本检查失败时先停止扩展并修复；预期拒绝必须由项目脚本确认正确失败类型并返回零，意外接受、错误失败类型或未完成检查返回非零。
 
-任务在首次编辑前 claim 精确路径。`--adopt` 只用于用户明确接管既有改动、已记录 handoff 或取消任务的后继任务，并在 change 中说明来源；不因 gate 扫描范围较大而扩大 claim。
+## 仓库检查
 
-上述规则的证据和计数保存在对应 workflow change；当前只有 Atha 一个仓库样本，因此本地契约与检查脚本优先，全局 CLI 保持不变。
+- `bash scripts/check-docs.sh`：文档守卫与长度检查；
+- `bash scripts/check-workflow.sh`：仓库流程文档与脚本自检；
+- `bash scripts/check-fast.sh`：本地快速检查集合；
+- `bash scripts/check-reader-linux.sh`、`bash scripts/check-pct-reader.sh` 和各领域脚本：按任务与目标选择，并记录验证环境。
 
-## 迭代修复
-
-`docs/workflow/PROTOCOL.md` 独占 Review、Repair、Validate、迭代模式、收据与停止条件。本文件只规定工站映射：Review 使用 `review` activity 且不修改文件，Repair 使用 `implementation` activity，Validate 使用 `verification` activity 并运行实际检查。所有轮次留在同一个 task 和 change；完整命令与输出由工站保存，change 只保留语义摘要，不复制日志。
-
-## 检查
-
-`docs` 是可交付任务的默认 gate。修改本仓库流程脚本时，在任务开始时追加 `workflow-self-check`；阅读器继续使用已有正式检查脚本，不为已停止的引擎实验保留 gate。
-
-`scripts/check-docs.sh` 是 `docs` required gate 的 Bash 入口；它通过 `mise exec` 依次运行 `doc_guard.py` 和 `doc_length_check.py`。`scripts/check-workflow.sh` 先拒绝任何 Bash 检查脚本调用 PowerShell，再复用文档入口并运行文档守卫 self-check。旧 `scripts/Invoke-Atha.ps1` 保留为兼容入口，工站事件与报告聚合由全局 `project-workflow` 负责，不在仓库内复制实现。
-
-本项目当前不需要 dotenv 变量；Rust 版本继续由 `rust-toolchain.toml` 固定。
-
-```project-workflow
-{
-  "schema": 1,
-  "task_tracker": {
-    "kind": "local-markdown",
-    "path": "docs/changes"
-  },
-  "task_types": {
-    "audit": {
-      "gates": [],
-      "delivery": "none",
-      "review_required": false
-    },
-    "fast": {
-      "gates": [
-        "docs"
-      ],
-      "review_required": false
-    },
-    "change": {
-      "gates": [
-        "docs"
-      ],
-      "review_required": true
-    }
-  },
-  "gates": {
-    "docs": [
-      [
-        "bash",
-        "scripts/check-docs.sh"
-      ]
-    ],
-    "workflow-self-check": [
-      [
-        "bash",
-        "scripts/check-workflow.sh"
-      ]
-    ]
-  },
-  "delivery": {
-    "review_required": false,
-    "allow_waiver": false
-  },
-  "environment": {},
-  "project_skill_roots": [
-    ".agents/skills"
-  ],
-  "snapshot_excludes": []
-}
-```
+Issue 保存跨会话交接，change 保存获批范围、技术决策和验收证据，PR 保存候选差异与审查，`ACTIVE` 指向当前工作。关闭任务前更新事实所有者和 `ACTIVE` 指针，运行相称检查，记录实际结果及覆盖缺口。Rust 版本由 `rust-toolchain.toml` 固定。

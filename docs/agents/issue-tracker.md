@@ -1,23 +1,10 @@
-# Issue tracker: GitHub
+# GitHub Issues：需求与验收交接
 
-Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+跨会话需求、研究、质量问题和真实环境验收使用 GitHub Issue。优先复用已有 Issue。
 
-## Conventions
+- **创建**：写目标、可观察的验收条件和必要边界。需要跨会话时，在最新交接说明中给出候选分支或 PR、提交、实际验证和未覆盖项，以及下一步与负责人。链接对应 change 或 PR，供接手者查阅实现细节和检查明细。
+- **恢复**：先读 Issue 正文及最近的有效交接，再核对分支、提交、工作区和证据。注明验证针对的是哪个候选。若没有可确认的候选或回执，明确写缺项和恢复动作。
+- **关闭**：只有 PR 合入默认分支就能满足全部验收时，才用 `Closes` 等关闭关键字或 GitHub 会自动关闭 Issue 的关联方式。若还要做真机、真实书库、发布或其他验收，在 PR 正文普通引用 Issue 编号，合并后留下下一步，验收完成后关闭。
+- **公开记录**：公开 Issue、PR 与提交使用可公开摘要、脱敏数据或原创样本；外发材料先脱敏，私人内容和凭证留在受控存储。
 
-- **Create an issue**: `gh issue create --title "..." --body "..."`.
-- **Read an issue**: `gh issue view <number> --comments`.
-- **List issues**: `gh issue list --state open`.
-- **Comment on an issue**: `gh issue comment <number> --body "..."`.
-- **Apply/remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`.
-- **Close**: `gh issue close <number> --comment "..."`.
-
-Infer the repository from `git remote -v`.
-
-## Pull requests as a triage surface
-
-**PRs as a request surface: no.**
-
-## Skill operations
-
-- “Publish to the issue tracker”: create a GitHub issue.
-- “Fetch the relevant ticket”: run `gh issue view <number> --comments`.
+用已配置的 GitHub 工具处理 Issues；CLI 可用 `gh issue view <编号> --comments` 查看。创建、编辑、评论和关闭 Issue 均按外部写入授权执行。

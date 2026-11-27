@@ -4,7 +4,7 @@ Atha 是本地优先的高保真个人阅读系统：阅读是入口，引用消
 
 ## 当前稳定目标
 
-- 以 WebView2 浏览器呈现作为唯一阅读渲染路径，先做常规优化，再由真实功能与性能证据驱动后续工作；
+- 以平台 WebView 作为唯一阅读渲染路径，平台对应关系以 `AGENTS.md` 为准；先做常规优化，再由真实功能与性能证据驱动后续工作；
 - 不可信书籍默认不能执行脚本或访问网络；
 - 引用必须能回到书籍版本与原文，并保留历史渲染快照；
 - 用户数据本地优先、可迁移、可导出；AI 不是产品成立前提。
@@ -38,7 +38,8 @@ _Avoid_：脱离书籍的通用聊天室。
 | 当前执行指针 | `docs/ACTIVE.md` |
 | 当前文档注册表和最小上下文 | `docs/INDEX.md` |
 | 任务分类与变更生命周期 | `docs/workflow/PROTOCOL.md` |
-| 全局工作流的项目契约与检查 gate | `docs/agents/workflow.md` |
+| GitHub Flow、协作规则与检查入口 | `docs/agents/workflow.md` |
+| Issue 交接与关闭规则 | `docs/agents/issue-tracker.md` |
 | 外部技术与标准的官方入口和项目快速用法 | `docs/agents/references.md` |
 | 产品目标和体验边界 | `docs/product/OVERVIEW.md` |
 | 长期架构与领域边界 | `docs/architecture/` |
@@ -52,9 +53,9 @@ _Avoid_：脱离书籍的通用聊天室。
 | 路径 | 职责 |
 | --- | --- |
 | `backend/` | 平台无关后端与资源边界 |
-| `reader/` | WebView2 阅读 host 与唯一阅读页实现 |
+| `reader/` | 平台 WebView 阅读 host 与唯一阅读页实现 |
 | `p0/` | 不进入正式产品的技术验证 |
 | `docs/` | 当前规则、事实所有者、活动变更和未决研究 |
 | `artifacts/local/` | Git 忽略的本机性能与验收证据 |
 
-发生冲突时，先服从用户当前指令和 `AGENTS.md`；机器行为以真实代码、测试和正式命令为准；产品与流程意图以当前所有者和已接受的活动 change 为准。旧文档只解释原因，不能覆盖当前事实。
+发生冲突时，先服从用户当前指令和 `AGENTS.md`；机器行为以真实代码、测试和正式命令为准；产品与流程意图以当前所有者和已接受的活动 change 为准。

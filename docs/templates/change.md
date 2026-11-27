@@ -8,8 +8,6 @@ proposed / accepted / implemented
 
 ## Scope
 
-## Non-Goals
-
 ## Architecture Impact
 
 none / present
@@ -28,6 +26,8 @@ none / present
 
 ## Files And Steps
 
+有关联 Issue 或 PR 时在此链接。
+
 ## Checks
 
 ## Iteration Control
@@ -36,7 +36,7 @@ none / present
 - Maximum repair iterations: `1`
 - Unchanged-delta limit: `1`
 - Human stop: 需要用户决定、外部批准或真实目标操作时停止。
-- Per-iteration receipt: `Result` 与 `Evidence And Residual Risks`；完整输出保留在工站或既有忽略证据目录。
+- Per-iteration receipt: 记入 `Result` 与 `Evidence And Residual Risks`；完整本机输出按需留在 Git 忽略的 `artifacts/local/`。
 
 ## Rollback
 
