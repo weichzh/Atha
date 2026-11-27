@@ -15,7 +15,7 @@
 
 - 新修改采用 GitHub Flow：在短期分支上工作，验证并经 PR 审查后合入 `main`，不直接在 `main` 上开发。
 - 开始、恢复或关闭任务前，读[仓库协作规则](docs/agents/workflow.md)。跨会话工作读关联 Issue 及最新交接；局部小修不强制建 Issue。
-- 直接运行仓库检查脚本，不启用全局 `project-workflow`，不登记任务、claim 或工站。只有确需项目专属流程时才在 `.agents/skills/` 增加 skill。
+- 按改动范围运行仓库检查脚本。只有确需项目专属流程时才在 `.agents/skills/` 增加 skill。
 
 ## 当前文档
 
