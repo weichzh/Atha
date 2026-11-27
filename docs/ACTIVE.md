@@ -2,6 +2,7 @@
 
 本文件只登记当前可执行工作的路由，不保存完成摘要、验收流水或候选需求。
 
+- `change`：GitHub Flow 流程切换与审查 → `docs/changes/github-flow.md`
 - `now`：UI 重设计候选交接，等待用户复核书架与阅读主界面。
 - `change`：UI 重设计 → `docs/changes/ui-redesign.md`
 - `previous`：`docs/changes/uiux-document-evidence-restructure.md`、`docs/changes/ui-constraint-ablation.md`。

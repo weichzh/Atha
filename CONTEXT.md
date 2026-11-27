@@ -38,7 +38,8 @@ _Avoid_：脱离书籍的通用聊天室。
 | 当前执行指针 | `docs/ACTIVE.md` |
 | 当前文档注册表和最小上下文 | `docs/INDEX.md` |
 | 任务分类与变更生命周期 | `docs/workflow/PROTOCOL.md` |
-| 全局工作流的项目契约与检查 gate | `docs/agents/workflow.md` |
+| GitHub Flow、协作规则与检查入口 | `docs/agents/workflow.md` |
+| Issue 交接与关闭规则 | `docs/agents/issue-tracker.md` |
 | 外部技术与标准的官方入口和项目快速用法 | `docs/agents/references.md` |
 | 产品目标和体验边界 | `docs/product/OVERVIEW.md` |
 | 长期架构与领域边界 | `docs/architecture/` |

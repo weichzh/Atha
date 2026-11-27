@@ -22,7 +22,7 @@
 
 | 信号 | 路由 | 处理 |
 | --- | --- | --- |
-| 重复失败、长等待、claim 冲突、改动无法归因，或任务状态与当前文档漂移 | `project-workflow` | 先检查工作流基准和必要 run 记录；只有 Atha 的证据留在项目契约、脚本或文档，跨项目证据才进入全局工具 |
+| 重复失败、长等待、改动无法归因，或任务状态与当前文档漂移 | Atha 仓库工作流 | 检查当前规则、Git 差异、仓库检查脚本和必要的忽略目录证据；在事实所有者与 change 中记录结论 |
 | 用户无法完成打开、阅读、引用消息、讨论、搜索或回顾主循环 | Atha 产品 | 更新产品事实与路线图，只选择一个可独立验收的纵向切片 |
 | 质量场景、Module、Interface、Seam、Adapter、数据语义、信任边界或运行拓扑需要变化 | Atha 架构 | 按架构规范评估替代方案，并通过 `accepted` change 和必要 ADR 实施 |
 | 已获批切片内的局部实现问题 | 所属代码 Module | 在既有范围内修复并运行最小相关检查，不借机扩张流程或架构 |
@@ -42,7 +42,7 @@ workflow 只负责要求这些输入存在并保存验收证据；具体架构�
 
 每份处于 `ACTIVE` 的 change 必须包含 `Iteration Control`，且只能有一个 `Mode`，值为 `single-pass` 或 `iterative`。局部且预期一次验证即可关闭的工作使用 `single-pass`；验证失败后若要继续编辑，必须先切换为 `iterative`。迭代模式在下一轮 Repair 前写明最大修复轮数、连续不变 `remaining_delta` 上限和人工 / 真实目标停止条件，不因本轮尚未通过而自动扩大范围。历史 change 不批量迁移，只在重新成为 `ACTIVE` 时补齐。
 
-迭代修复使用同一个 change 和 task：Review 只读并形成有证据的发现，Repair 只处理本轮阻塞与上一轮剩余差异，Validate 实际执行最小检查并按成本扩展。每轮在 `Result` 记录 `iteration`、`review findings`、`repair`、`validation cases`、`remaining_delta`、`evidence level` 和 `stop reason`；工站保存命令与完整结果，`Evidence And Residual Risks` 只汇总证据等级和未覆盖项。计划命令、模型判断或截图均不能冒充未执行的通过证据。验证通过、达到轮数上限、差异停滞或需要人工 / 真实目标决定时停止，并如实保留未关闭差异。
+迭代修复使用同一份 change：Review 只读并形成有证据的发现，Repair 只处理本轮阻塞与上一轮剩余差异，Validate 实际执行最小检查并按成本扩展。每轮在 `Result` 记录 `iteration`、`review findings`、`repair`、`validation cases`、`remaining_delta`、`evidence level` 和 `stop reason`；完整命令与输出按需保存在 Git 忽略的 `artifacts/local/`，change 汇总证据等级和未覆盖项。计划命令、模型判断或截图均不能冒充未执行的通过证据。验证通过、达到轮数上限、差异停滞或需要人工 / 真实目标决定时停止，并如实保留未关闭差异。
 
 同一事实不复制到 `ACTIVE`、计划和评审。实现完成后进行一次独立 review pass：
 
@@ -62,10 +62,10 @@ workflow 只负责要求这些输入存在并保存验收证据；具体架构�
 ## 收尾与检查
 
 - `ACTIVE.md` 只保留当前指针；详细范围、检查和风险更新到事实所有者或活动 change；
-- 全局 `project-workflow` 按 `docs/agents/workflow.md` 管理 task claim、工站证据与关闭；本协议仍独占任务分类和 change 生命周期；
-- 已接入的正式检查由全局 `project-workflow` 工站调用对应 Bash 入口；`scripts/check-docs.sh` 和 `scripts/check-workflow.sh` 是 required 文档门，旧 PowerShell 脚本只保留为 Windows 兼容记录层；
+- `docs/agents/workflow.md` 维护仓库协作规则与检查入口；本协议独占任务分类和 change 生命周期；
+- 直接运行仓库 Bash 检查入口；`scripts/check-docs.sh` 和 `scripts/check-workflow.sh` 提供文档及流程自检，旧 PowerShell 脚本只保留为 Windows 兼容入口；
 - 预期拒绝类检查由项目脚本把“观察到预期拒绝”转换为成功退出；任何非预期接受、失败类型或未完成检查仍非零退出；
 - 检查按静态预检、受影响 Module、required gate、真实目标或 benchmark 的成本顺序推进，不在低成本失败未收敛时运行高成本链路；
 - 修改中文 Markdown 后，只处理本次文件的 `autocorrect --fix`、适用格式化和 `autocorrect --lint`；
-- 运行相称的测试、`python3 scripts/doc_guard.py`、`python3 scripts/doc_length_check.py` 和 `git diff --check`；
+- 从低成本到高成本运行相称检查；文档改动运行仓库文档门，其他检查按任务选择，并执行 `git diff --check`；
 - 未运行或未覆盖的检查必须明确记录，不用静态或本地证据代替真实目标验收。
