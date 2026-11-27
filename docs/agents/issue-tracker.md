@@ -7,4 +7,4 @@
 - **关闭**：只有 PR 合入默认分支就能满足全部验收时，才用 `Closes` 等关闭关键字或 GitHub 会自动关闭 Issue 的关联方式。若还要做真机、真实书库、发布或其他验收，只在 PR 正文普通引用 Issue 编号，合并后留下下一步，验收满足后再关闭。
 - **公开记录**：只发布可公开的摘要、脱敏数据或原创样本。私人书籍、笔记、原始日志和凭证不进入公开 Issue、PR 或提交。
 
-用已配置的 GitHub 工具处理 Issues；CLI 可用 `gh issue view <编号> --comments` 查看。创建、评论和关闭 Issue 均属于外部写入，按授权执行。
+用已配置的 GitHub 工具处理 Issues；CLI 可用 `gh issue view <编号> --comments` 查看。创建、编辑、评论和关闭 Issue 均按外部写入授权执行。

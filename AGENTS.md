@@ -7,13 +7,15 @@
 1. `AGENTS.md`；
 2. `CONTEXT.md`；
 3. `docs/ACTIVE.md`；
-4. `ACTIVE` 指定的 Context Bundle；只有信息不足时才读 `docs/INDEX.md`。
+4. `ACTIVE` 指向的相关 Context Bundle；没有合适入口时，从 [文档索引](docs/INDEX.md#context-bundles) 选一个匹配的 Bundle。
 
 不得默认通读 `docs/` 或旧档案。
 
 ## 仓库工作流
 
-新开发默认采用 GitHub Flow：在短期分支上工作，经 PR 合入 `main`，不直接在 `main` 上开发。开始、恢复或关闭任务前读取 `docs/agents/workflow.md`。本仓库不使用全局 `project-workflow`，不登记任务、claim 或工站；直接运行仓库现有检查脚本。真正需要项目专属流程时才在 `.agents/skills/` 增加 skill。
+- 新修改采用 GitHub Flow：在短期分支上工作，验证并经 PR 审查后合入 `main`，不直接在 `main` 上开发。
+- 开始、恢复或关闭任务前，读[仓库协作规则](docs/agents/workflow.md)。跨会话工作读关联 Issue 及最新交接；局部小修不强制建 Issue。
+- 直接运行仓库检查脚本，不启用全局 `project-workflow`，不登记任务、claim 或工站。只有确需项目专属流程时才在 `.agents/skills/` 增加 skill。
 
 ## 当前文档
 
@@ -42,4 +44,4 @@
 
 ## 收尾
 
-修改版本控制文件后更新事实所有者与 `ACTIVE` 指针，运行相称检查。触碰中文 Markdown 时只格式化本次文件；不推送或发布，除非用户明确要求。
+修改版本控制文件后更新受影响的事实所有者和 `ACTIVE` 指针，运行相称检查。触碰中文 Markdown 时只格式化本次文件。推送、合并和发布分别按用户授权执行。

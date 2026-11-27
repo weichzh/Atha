@@ -10,7 +10,6 @@ Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系
 - `backend/atha-backend/`：后端库、书根边界、EPUB2 / EPUB3、CBZ、FB2 / FBZ、MOBI / AZW / AZW3、Markdown 与 TXT 导入、正式消息数据库；
 - `reader/app/`：Tauri 2、Svelte 5 应用壳和 production 前端构建；
 - `reader/web/`：不依赖前端框架的阅读内核；
-- 全局 `project-workflow`：管理任务 claim、工站证据与关闭；
 - `scripts/check-docs.sh`、`scripts/check-reader-linux.sh`：当前 Bash 文档门与 Linux GUI 阅读门；
 - `p0/`：独立实验，不进入根 workspace。
 
@@ -73,9 +72,12 @@ PCT-AL10 候选使用 `bash scripts/check-pct-reader.sh build` 和 `verify`；�
 - 文档索引：`docs/INDEX.md`
 - 架构总览：`docs/architecture/OVERVIEW.md`
 - 路线图：`docs/roadmap/ROADMAP.md`
-- 协作规则：`AGENTS.md`
 
-生产代码必须经过规格、计划、交叉审阅和用户批准门禁。
+## 参与开发
+
+采用 GitHub Flow：独立任务从最新远端 `main` 开短期分支，运行相称检查，通过 PR 审查后合入。小修可直接走 PR；跨会话需求、研究和验收用 [GitHub Issues](https://github.com/weichzh/Atha/issues) 交接。产品行为或跨模块变化先按[工作协议](docs/workflow/PROTOCOL.md)确认获批的 change。
+
+从 [AGENTS.md](AGENTS.md) 和[仓库协作规则](docs/agents/workflow.md)进入。不要把 PR 合并当作真机验收或正式发布。
 
 ## 许可证
 
