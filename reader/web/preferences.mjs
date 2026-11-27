@@ -39,6 +39,19 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   const { validateModules } = modulePackages;
   const darkScheme = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
   const systemBars = globalThis.AthaSystemBars;
+  const modulePage = controls.moduleAdd.closest(".module-settings");
+  const modulePanel = modulePage?.closest(".preferences-panel");
+  const moduleEmpty = modulePage?.querySelector("#style-module-empty");
+  const moduleFilterEmpty = modulePage?.querySelector("#style-module-filter-empty");
+  const moduleEmptyAdd = moduleEmpty?.querySelector('[data-module-empty-action="add"]');
+  const moduleEmptyImport = moduleEmpty?.querySelector('[data-module-empty-action="import"]');
+  const clearModuleFiltersButton = moduleFilterEmpty?.querySelector("[data-clear-module-filters]");
+  const moduleHeaderActions = modulePage?.querySelector(".panel-heading-actions");
+  const moduleMasterSwitch = modulePage?.querySelector(".module-master-switch");
+  const moduleFilters = modulePage?.querySelector(".module-filters");
+  const moduleEditorControls = modulePage?.querySelectorAll(
+    ".module-batch-actions, .module-fields, .module-editor-heading, .css-editor-shell",
+  );
 
   function syncPageMargins() {
     const margin = `${readerPixels(PAGE_MARGINS[book.pageMargin])}px`;
@@ -60,7 +73,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       root.style.setProperty("--reader-chapter-top", `${insets.top + readerPixels(12)}px`);
       root.style.setProperty("--reader-chapter-size", `${readerPixels(14)}px`);
       root.style.setProperty("--reader-content-top", `${insets.top + readerPixels(64)}px`);
-      root.style.setProperty("--reader-content-bottom", `${insets.bottom + readerPixels(48)}px`);
+      root.style.setProperty("--reader-content-bottom", `${insets.bottom + readerPixels(64)}px`);
     } catch {
       // The native bridge is optional on desktop.
     }
@@ -221,6 +234,26 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     return book.styleModules.find((module) => module.id === selectedModuleId) || null;
   }
 
+  function clearModuleFilters() {
+    controls.moduleSearch.value = "";
+    controls.moduleFilter.value = "";
+  }
+
+  function syncModulesState(state) {
+    if ((!moduleEmpty && !moduleFilterEmpty) || modulePage.dataset.modulesState === state) return;
+    modulePage.dataset.modulesState = state;
+    if (modulePanel) modulePanel.dataset.modulesState = state;
+    const empty = state === "empty";
+    const filteredEmpty = state === "filtered-empty";
+    if (moduleEmpty) moduleEmpty.hidden = !empty;
+    if (moduleFilterEmpty) moduleFilterEmpty.hidden = !filteredEmpty;
+    if (moduleHeaderActions) moduleHeaderActions.hidden = empty;
+    if (moduleMasterSwitch) moduleMasterSwitch.hidden = empty;
+    if (moduleFilters) moduleFilters.hidden = empty;
+    controls.moduleListView.hidden = empty;
+    for (const control of moduleEditorControls) control.hidden = empty || filteredEmpty;
+  }
+
   function syncModuleControls() {
     const previousGroup = controls.moduleFilter.value;
     const groups = [...new Set(book.styleModules.map((module) => module.group).filter(Boolean))].sort(
@@ -233,7 +266,15 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       ),
     );
     controls.moduleFilter.value = groups.includes(previousGroup) ? previousGroup : "";
+    controls.moduleFilter.dispatchEvent(new Event("atha-select-sync"));
     const visible = visibleModules();
+    const state =
+      moduleEmpty && book.styleModules.length === 0
+        ? "empty"
+        : moduleFilterEmpty && book.styleModules.length > 0 && visible.length === 0
+          ? "filtered-empty"
+          : "ready";
+    syncModulesState(state);
     if (!visible.some((module) => module.id === selectedModuleId)) {
       selectedModuleId = visible[0]?.id ?? null;
     }
@@ -279,7 +320,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         : [
             Object.assign(document.createElement("p"), {
               className: "module-list-empty",
-              textContent: "暂无 CSS 模块",
+              textContent: state === "filtered-empty" ? "0 个匹配" : "暂无 CSS 模块",
             }),
           ]),
     );
@@ -297,6 +338,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     controls.moduleName.value = selected?.name ?? "";
     controls.moduleGroupName.value = selected?.group ?? "";
     controls.moduleEnabled.checked = selected?.enabled ?? false;
+    controls.moduleEnabled.dispatchEvent(new Event("atha-switch-sync"));
     controls.userStylesheet.value = selected?.css ?? "";
     controls.userStylesheet.dispatchEvent(new Event("atha-css-editor-sync"));
     const index = selected ? book.styleModules.findIndex((module) => module.id === selected.id) : -1;
@@ -315,13 +357,17 @@ export function createPreferences({ root, reader, content, controls, assert }) {
   function syncControls() {
     controls.theme.value = application.theme;
     controls.brightness.value = String(application.brightness);
+    controls.brightness.dispatchEvent(new Event("atha-range-sync"));
     controls.fontSize.value = String(application.fontSize);
-    controls.fontSizeValue.textContent = String(application.fontSize);
+    controls.fontSize.dispatchEvent(new Event("atha-range-sync"));
+    if (controls.fontSizeValue) controls.fontSizeValue.textContent = String(application.fontSize);
     controls.fontFamily.value = application.fontFamily;
     controls.density.value = application.density;
-    controls.readingMode.value = book.readingMode;
+    if (controls.readingMode) controls.readingMode.value = book.readingMode;
     controls.sourceStyles.checked = book.sourceStyles;
+    controls.sourceStyles.dispatchEvent(new Event("atha-switch-sync"));
     controls.userStylesEnabled.checked = book.userStylesEnabled;
+    controls.userStylesEnabled.dispatchEvent(new Event("atha-switch-sync"));
     controls.pageMargin.value = book.pageMargin;
     controls.paragraphIndent.value = book.paragraphIndent;
     controls.paragraphSpacing.value = book.paragraphSpacing;
@@ -334,7 +380,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       controls.paragraphIndent,
       controls.paragraphSpacing,
     ]) {
-      syncPreferenceChoices(control);
+      if (control) syncPreferenceChoices(control);
     }
     syncModuleControls();
   }
@@ -405,6 +451,9 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       clearTimeout(statusTimer);
       controls.status.textContent = message;
       controls.status.dataset.error = String(error);
+      if (message && (error || message !== "已应用")) {
+        globalThis.athaToast?.(message, error ? "error" : "default");
+      }
       if (message && !error) {
         statusTimer = setTimeout(() => {
           controls.status.textContent = "";
@@ -466,7 +515,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       root.style.setProperty("--reader-brightness", String(Number(controls.brightness.value) / 100));
     });
     controls.fontSize.addEventListener("input", () => {
-      controls.fontSizeValue.textContent = controls.fontSize.value;
+      if (controls.fontSizeValue) controls.fontSizeValue.textContent = controls.fontSize.value;
     });
     controls.brightness.addEventListener("change", () => {
       void run(
@@ -474,7 +523,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         "已应用",
       );
     });
-    controls.readingMode.addEventListener("change", () => {
+    controls.readingMode?.addEventListener("change", () => {
       void run(() => onUpdate("book", { readingMode: controls.readingMode.value }), "已应用");
     });
     controls.sourceStyles.addEventListener("change", () => {
@@ -543,6 +592,13 @@ export function createPreferences({ root, reader, content, controls, assert }) {
     });
     controls.moduleSearch.addEventListener("input", syncModuleControls);
     controls.moduleFilter.addEventListener("change", syncModuleControls);
+    moduleEmptyAdd?.addEventListener("click", () => controls.moduleAdd.click());
+    moduleEmptyImport?.addEventListener("click", () => controls.moduleTransferOpen.click());
+    clearModuleFiltersButton?.addEventListener("click", () => {
+      clearModuleFilters();
+      syncModuleControls();
+      controls.moduleSearch.focus({ preventScroll: true });
+    });
     controls.moduleAdd.addEventListener("click", () => {
       if (book.styleModules.length >= MAX_STYLE_MODULES) {
         report("最多 32 个模块", true);
@@ -555,21 +611,51 @@ export function createPreferences({ root, reader, content, controls, assert }) {
         enabled: true,
         css: ".book p {\n  \n}",
       };
+      const firstModule = modulePage?.dataset.modulesState === "empty";
+      clearModuleFilters();
       selectedModuleId = module.id;
       void run(
-        () => onUpdate("book", { styleModules: [...book.styleModules, module] }),
+        async () => {
+          await onUpdate("book", { styleModules: [...book.styleModules, module] });
+          if (firstModule && selectedModuleId === module.id) {
+            controls.moduleName.focus({ preventScroll: true });
+          }
+        },
         "模块已新增",
       );
     });
-    controls.moduleDelete.addEventListener("click", () => {
+    let deletingModule = false;
+    controls.moduleDelete.addEventListener("click", async () => {
       const selected = selectedModule();
-      if (!selected || !globalThis.confirm(`删除“${selected.name}”？`)) return;
-      cancelPreview(selected.id);
-      selectedModuleId = null;
-      void run(
-        () => onUpdate("book", { styleModules: book.styleModules.filter((module) => module.id !== selected.id) }),
-        "模块已删除",
-      );
+      if (!selected || deletingModule) return;
+      deletingModule = true;
+      try {
+        const description = `删除“${selected.name}”？`;
+        const confirmed = globalThis.athaConfirm
+          ? await globalThis.athaConfirm({
+              title: "删除 CSS 模块",
+              description,
+              confirmLabel: "删除",
+              tone: "danger",
+            })
+          : globalThis.confirm(description);
+        if (!confirmed || selectedModule()?.id !== selected.id) return;
+        cancelPreview(selected.id);
+        selectedModuleId = null;
+        void run(
+          async () => {
+            await onUpdate("book", {
+              styleModules: book.styleModules.filter((module) => module.id !== selected.id),
+            });
+            if (modulePage?.dataset.modulesState === "empty") {
+              moduleEmptyAdd?.focus({ preventScroll: true });
+            }
+          },
+          "模块已删除",
+        );
+      } finally {
+        deletingModule = false;
+      }
     });
     const move = (offset) => {
       const index = book.styleModules.findIndex((module) => module.id === selectedModuleId);
@@ -602,6 +688,7 @@ export function createPreferences({ root, reader, content, controls, assert }) {
       void run(() => {
         const modules = modulePackages.parse(controls.moduleTransfer.value);
         cancelPreviews();
+        clearModuleFilters();
         selectedModuleId = modules[0]?.id ?? null;
         return onUpdate("book", { styleModules: modules });
       }, "模块已导入");

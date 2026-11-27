@@ -1,0 +1,32 @@
+.chapter-kicker {
+  font-size: 0.78em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  margin-bottom: 0.5em;
+}
+
+.epigraph {
+  margin: 1.5em 0 2em;
+  padding: 0.9em 1.25em;
+  font-style: italic;
+  opacity: 0.88;
+}
+
+.verse {
+  margin: 1.4em 0;
+  padding-left: 1.5em;
+  line-height: 1.9;
+}
+
+.figure-diagram {
+  margin: 1.8em auto;
+  text-align: center;
+  break-inside: avoid;
+}
+
+.figure-caption {
+  margin-top: 0.65em;
+  font-size: 0.85em;
+  opacity: 0.72;
+}

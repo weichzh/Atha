@@ -81,10 +81,11 @@ pub(crate) async fn message_edition_context(
     require_reader_window(&window)?;
     let _operation = begin_local_data_operation(&runtime)?;
     let current = runtime
-        .current_edition
+        .reader
         .read()
         .map_err(|_| message_state_error("edition-context"))?;
     Ok(current
+        .edition
         .as_ref()
         .filter(|edition| edition.content_version == content_version)
         .cloned()

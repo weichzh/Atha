@@ -16,6 +16,7 @@ const workspaceTools = ["directory", "search", "notes"].map((name) => ({
   panel: document.querySelector(`.reader-tool.${name}`),
 }));
 const workspacePanels = new Set(workspaceTools.map((tool) => tool.panel));
+const notesPanel = workspaceTools[2].panel;
 const readerTools = [...document.querySelectorAll(".reader-tool")];
 const runtimeErrors = [];
 const errorBox = document.querySelector("#error");
@@ -75,14 +76,57 @@ function bindVisualViewport() {
 
 bindVisualViewport();
 
+const panelCloseTimers = new WeakMap();
+const prefersReducedMotion = () =>
+  globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+let settleWorkspace = () => {};
+
+function clearPanelClose(panel) {
+  const timer = panelCloseTimers.get(panel);
+  if (timer) {
+    clearTimeout(timer);
+    panelCloseTimers.delete(panel);
+  }
+  delete panel.dataset.closing;
+}
+
+function closePanelWithMotion(panel, immediate = false) {
+  if (!panel) return;
+  if (!panel.open) {
+    clearPanelClose(panel);
+    return;
+  }
+  if (immediate || prefersReducedMotion()) {
+    clearPanelClose(panel);
+    panel.open = false;
+    return;
+  }
+  if (panel.dataset.closing === "true") return;
+  panel.dataset.closing = "true";
+  const timer = setTimeout(() => {
+    panelCloseTimers.delete(panel);
+    delete panel.dataset.closing;
+    if (panel.open) panel.open = false;
+  }, 165);
+  panelCloseTimers.set(panel, timer);
+}
+
 function closeReaderTools(includeWorkspace = false, preservePanel = null) {
   const desktop = root.hasAttribute("data-desktop-workspace");
+  if (preservePanel !== notesPanel && (includeWorkspace || (!desktop && notesPanel.open))) {
+    conversations?.cancelPendingOpen();
+  }
   if (!preservePanel?.open) root.removeAttribute("data-reader-tools");
   for (const panel of document.querySelectorAll(".reader-tool[open]")) {
     if (panel === preservePanel) continue;
-    if (includeWorkspace || !desktop || !workspacePanels.has(panel)) panel.open = false;
+    if (includeWorkspace || !desktop || !workspacePanels.has(panel)) {
+      closePanelWithMotion(panel, Boolean(preservePanel));
+    }
   }
-  if (includeWorkspace) delete root.dataset.workspacePanel;
+  if (includeWorkspace) {
+    delete root.dataset.workspacePanel;
+    settleWorkspace();
+  }
 }
 
 function finishReaderToolNavigation(toolName) {
@@ -104,7 +148,12 @@ function bindDesktopWorkspace() {
   let workspaceVisible = false;
 
   const open = (tool, focus = false) => {
-    for (const panel of readerTools) panel.open = panel === tool.panel;
+    if (tool.panel !== notesPanel && notesPanel.open) conversations?.cancelPendingOpen();
+    clearPanelClose(tool.panel);
+    for (const panel of readerTools) {
+      if (panel === tool.panel) panel.open = true;
+      else closePanelWithMotion(panel, true);
+    }
     root.dataset.workspacePanel = tool.name;
     if (focus) requestAnimationFrame(() => tool.panel.querySelector("summary")?.focus());
   };
@@ -117,7 +166,9 @@ function bindDesktopWorkspace() {
   const settle = () => {
     settling = false;
     if (!desktopWorkspaceMedia.matches) return;
-    const active = workspaceTools.find((tool) => tool.panel.open);
+    const active = workspaceTools.find(
+      (tool) => tool.panel.open && tool.panel.dataset.closing !== "true",
+    );
     if (active) {
       root.dataset.workspacePanel = active.name;
     } else {
@@ -130,13 +181,17 @@ function bindDesktopWorkspace() {
     settling = true;
     queueMicrotask(settle);
   };
+  settleWorkspace = scheduleSettle;
   const applyViewport = () => {
     root.toggleAttribute("data-desktop-workspace", desktopWorkspaceMedia.matches);
     if (desktopWorkspaceMedia.matches) {
-      const active = workspaceTools.find((tool) => tool.panel.open);
+      const active = workspaceTools.find(
+        (tool) => tool.panel.open && tool.panel.dataset.closing !== "true",
+      );
       if (active) open(active);
       else delete root.dataset.workspacePanel;
     } else {
+      if (notesPanel.open) conversations?.cancelPendingOpen();
       for (const tool of workspaceTools) tool.panel.open = false;
       delete root.dataset.workspacePanel;
     }
@@ -176,6 +231,7 @@ function bindDesktopWorkspace() {
         requestAnimationFrame(() => document.querySelector("#search-query")?.focus());
       } else if (
         event.key === "Escape" &&
+        !document.querySelector('[role="alertdialog"], [data-select-content], [data-atha-dialog], .notes-actions[open], .message-card-menu:popover-open') &&
         event.target.closest?.(".reader-tool.directory, .reader-tool.search, .reader-tool.notes")
       ) {
         event.preventDefault();
@@ -197,10 +253,10 @@ function emit(message) {
 function revealReader() {
   root.setAttribute("data-reader-ready", "");
   readerShell.setAttribute("aria-busy", "false");
-  readerStartup.setAttribute("aria-hidden", "true");
+  readerStartup?.setAttribute("aria-hidden", "true");
 }
 
-function fail(code, operationStage = null) {
+function showReaderFailure(code, operationStage = null) {
   document.documentElement.dataset.status = "fail";
   document.documentElement.dataset.error = code;
   const detail = errorDetails[code] || "处理书籍内容时发生错误";
@@ -209,11 +265,20 @@ function fail(code, operationStage = null) {
   const diagnosticStage = operationStage
     ? "layout"
     : sessionStage?.token || "initialization";
-  errorBox.textContent = `${detail}（错误代码：${code}；阶段：${stage}）。`;
-  errorBox.hidden = false;
+  const errorPanel = document.querySelector("#reader-error") || errorBox;
+  if (errorBox) {
+    errorBox.textContent = `${detail}（错误代码：${code}；阶段：${stage}）。`;
+    errorBox.hidden = false;
+  }
+  if (errorPanel) errorPanel.hidden = false;
   revealReader();
+  document.querySelector("#error-back")?.focus({ preventScroll: true });
   emit(`error|${code}|${diagnosticStage}`);
   console.error(`Atha reader failed: ${code}`);
+}
+
+function fail(code, operationStage = null) {
+  showReaderFailure(code, operationStage);
   throw new Error(code);
 }
 
@@ -305,6 +370,7 @@ let annotations;
 let conversations;
 let bookmarks;
 let readingStatistics;
+let readingRevealed = false;
 async function renderCachedSource() {
   await content.renderCached();
   await pagination.renderFromStart();
@@ -325,9 +391,9 @@ const session = createReadingSession({
     if (root.hasAttribute("data-reader-ready")) {
       const loading = state === "content-loaded";
       readerShell.setAttribute("aria-busy", String(loading));
-      readerStartup.setAttribute("aria-hidden", String(!loading));
+      readerStartup?.setAttribute("aria-hidden", String(!loading));
     }
-    readingStatistics?.setStable(state === "layout-stable");
+    readingStatistics?.setStable(readingRevealed && state === "layout-stable");
   },
   assert,
   fail,
@@ -338,6 +404,14 @@ let readerState;
 let syncDirectorySelection = () => {};
 const keyPrefix = params.has("state-probe") ? "atha.reader.probe" : "atha.reader";
 const bookKey = params.get("state");
+const productReading = ![
+  "verify",
+  "verify-import",
+  "state-probe",
+  "gesture-probe",
+  "style-module-probe",
+  "benchmark",
+].some((flag) => params.has(flag));
 navigation = createNavigation({
   session,
   pagination,
@@ -358,8 +432,8 @@ navigation = createNavigation({
     document.documentElement.dataset.locatorFallback = reason;
   },
   onPreferences: (scope) => readerState?.savePreferences(scope),
-  onStable() {
-    readerState?.scheduleProgress();
+  onStable(advancesReading, reachedEnd, observedAt) {
+    readerState?.scheduleProgress(advancesReading, reachedEnd, observedAt);
     readingStatistics?.activity();
     bookmarks?.syncCurrent();
     syncDirectorySelection();
@@ -377,7 +451,9 @@ readerState = createReaderState({
   preferences,
   locator,
   assert,
+  recordShelfReading: productReading,
 });
+window.__athaFlushOnExit = () => readerState.flushOnExit();
 const legacyAnnotationStore = createAnnotationStore({
   storage: durableStorage(),
   requireDurable: !params.has("verify") || params.has("persist"),
@@ -427,10 +503,7 @@ annotations = createAnnotations({
   onNavigate() {
     finishReaderToolNavigation("notes");
   },
-  onOpenConversation: messageMode
-    ? (conversationId, messageId, edit = false, expectedRootId = null) =>
-        conversations?.open(conversationId, messageId, edit, expectedRootId)
-    : null,
+  onOpenConversation: messageMode ? (...args) => conversations?.open(...args) : null,
   assert,
 });
 bookmarks = createBookmarks({
@@ -456,11 +529,13 @@ const search = createSearch({
     query: document.querySelector("#search-query"),
     cancel: document.querySelector("#cancel-search"),
     results: document.querySelector("#search-results"),
+    resultList: document.querySelector("#search-result-list"),
     go: document.querySelector("#go-search-result"),
     status: document.querySelector("#search-status"),
   },
   assert,
   emit,
+  onNavigate: () => finishReaderToolNavigation("search"),
 });
 const contentActions = createContentActions({
   content,
@@ -496,6 +571,7 @@ const interaction = createInteraction({
 });
 
 document.querySelector("#reader-back").addEventListener("click", () => {
+  readerState.flushOnExit();
   if (history.length > 1) history.back();
   else window.close();
 });
@@ -505,6 +581,10 @@ function bindSettingsNavigation() {
   if (!panel) return;
   const owner = panel.closest("details");
   const show = (name = "menu") => {
+    const previous = panel.dataset.settingsView || "menu";
+    if (previous === "menu" && name !== "menu") panel.dataset.settingsDir = "forward";
+    else if (previous !== "menu" && name === "menu") panel.dataset.settingsDir = "back";
+    else delete panel.dataset.settingsDir;
     panel.dataset.settingsView = name;
     for (const page of panel.querySelectorAll("[data-settings-page]")) {
       page.hidden = page.dataset.settingsPage !== name;
@@ -583,17 +663,82 @@ async function openReadingMemoryLink() {
   }
   const navigation = await annotations.go(rootMessageId);
   root.dataset.readingMemoryNavigation = navigation.ok ? "ok" : "snapshot-only";
-  await conversations.open(
-    conversationId,
-    messageId,
-    false,
-    rootMessageId,
-    !navigation.ok,
-  );
+  await conversations.open(conversationId, {
+    scrollTarget: "message",
+    targetMessageId: messageId,
+    replyParentId: messageId,
+    focusMode: "dialog",
+    expectedRootId: rootMessageId,
+    navigationFailed: !navigation.ok,
+  });
 }
 
 document.querySelectorAll("[data-close-reader-tools]").forEach((button) => {
-  button.addEventListener("click", () => finishReaderToolNavigation(root.dataset.workspacePanel));
+  button.addEventListener("click", () => {
+    closeReaderTools(true);
+    reader.focus({ preventScroll: true });
+  });
+});
+
+// Named details are not exclusive on older system WebViews.
+for (const panel of readerTools) {
+  panel.addEventListener("toggle", () => {
+    if (!panel.open) {
+      clearPanelClose(panel);
+      if (panel === notesPanel) conversations?.cancelPendingOpen();
+      return;
+    }
+    if (panel.dataset.closing === "true") return;
+    clearPanelClose(panel);
+    if (panel !== notesPanel && notesPanel.open) conversations?.cancelPendingOpen();
+    if (!workspacePanels.has(panel)) root.setAttribute("data-reader-tools", "");
+    for (const other of readerTools) if (other !== panel) closePanelWithMotion(other, true);
+  });
+  panel.querySelector("summary")?.addEventListener("click", (event) => {
+    if (panel.dataset.closing === "true") {
+      event.preventDefault();
+      clearPanelClose(panel);
+      panel.open = true;
+      if (!workspacePanels.has(panel)) root.setAttribute("data-reader-tools", "");
+      else if (root.hasAttribute("data-desktop-workspace")) {
+        const tool = workspaceTools.find((item) => item.panel === panel);
+        if (tool) {
+          root.dataset.workspacePanel = tool.name;
+          settleWorkspace();
+        }
+      }
+      return;
+    }
+    if (panel.open) {
+      event.preventDefault();
+      if (panel === notesPanel) conversations?.cancelPendingOpen();
+      closeReaderTools(workspacePanels.has(panel) && root.hasAttribute("data-desktop-workspace"));
+      return;
+    }
+    clearPanelClose(panel);
+    if (!event.defaultPrevented && notesPanel.open && (panel === notesPanel || !panel.open)) {
+      conversations?.cancelPendingOpen();
+    }
+    requestAnimationFrame(() => {
+      const heading = panel.querySelector(".tool-panel h2");
+      if (!panel.open || panel.dataset.closing === "true" || !heading) return;
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    });
+  });
+}
+document.querySelector(".reader-controls").addEventListener("keydown", (event) => {
+  if (
+    event.key !== "Escape" ||
+    event.defaultPrevented ||
+    event.target.closest?.("dialog, [role='alertdialog']") ||
+    document.querySelector("[data-select-content], [data-atha-dialog], .notes-actions[open], .message-card-menu:popover-open")
+  ) {
+    return;
+  }
+  event.preventDefault();
+  closeReaderTools(true);
+  reader.focus({ preventScroll: true });
 });
 contentDialog.addEventListener("click", (event) => {
   if (event.target === contentDialogViewport && contentDialog.classList.contains("media-preview")) {
@@ -621,7 +766,6 @@ async function start() {
       streak: document.querySelector("#statistics-streak"),
     },
   });
-  readingStatistics.setStable(true);
   readingStatistics.bind();
   diagnostics = createDiagnostics({
     params,
@@ -648,9 +792,9 @@ async function start() {
     conversations = createConversations({
       store: annotationStore,
       annotations,
-      closeTools: () => closeReaderTools(false, workspaceTools[2].panel),
+      closeTools: () => closeReaderTools(false, notesPanel),
       editionId: session.describe().contentVersion,
-      readingSurface: content.book,
+      readingSurface: reader,
       returnFocus: (toNotes = false) => {
         if (!toNotes) return reader;
         const selected = annotations.conversationFocusTarget();
@@ -711,6 +855,19 @@ async function start() {
   interaction.bind();
   await openReadingMemoryLink();
   revealReader();
+  readingRevealed = true;
+  readingStatistics.setStable(true);
+  if (productReading) {
+    // Restoring preferences, Locators and memory links above is not a reading
+    // event. Count the open only once its actual reading surface is visible.
+    const activate = () => {
+      if (document.visibilityState !== "visible") return;
+      document.removeEventListener("visibilitychange", activate);
+      readerState.activateShelfReading();
+    };
+    if (document.visibilityState === "visible") activate();
+    else document.addEventListener("visibilitychange", activate);
+  }
   diagnostics.recordFirstStable(firstStableStarted);
 
   const stateProbe = params.get("state-probe");
@@ -750,6 +907,6 @@ start().catch((error) => {
   if (!document.documentElement.dataset.error) {
     const reason = typeof error === "string" ? error : error instanceof Error ? error.message : "";
     const code = /^[a-z-]+$/.test(reason) ? reason : "book-load";
-    fail(code);
+    showReaderFailure(code);
   }
 });

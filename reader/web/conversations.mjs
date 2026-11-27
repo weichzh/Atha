@@ -253,6 +253,48 @@ export function validConversationTarget(conversation, editionId, expectedRootId 
   );
 }
 
+export function normalizeConversationOpenOptions(
+  messageIdOrOptions = null,
+  edit = false,
+  expectedRootId = null,
+  navigationFailed = false,
+) {
+  if (messageIdOrOptions && typeof messageIdOrOptions === "object") {
+    const options = messageIdOrOptions;
+    return {
+      scrollTarget: options.scrollTarget === "message" ? "message" : "source",
+      targetMessageId: options.targetMessageId || null,
+      replyParentId: options.replyParentId || null,
+      edit: Boolean(options.edit),
+      focusMode: options.focusMode ?? (options.edit ? "composer" : "dialog"),
+      expectedRootId: options.expectedRootId || null,
+      navigationFailed: Boolean(options.navigationFailed),
+    };
+  }
+  const messageId = messageIdOrOptions || null;
+  return {
+    scrollTarget: edit || !messageId ? "source" : "message",
+    targetMessageId: messageId,
+    replyParentId: messageId,
+    edit: Boolean(edit),
+    focusMode: edit ? "composer" : "dialog",
+    expectedRootId,
+    navigationFailed: Boolean(navigationFailed),
+  };
+}
+
+export function resolveConversationScrollPlan(conversation, { scrollTarget, targetMessageId }) {
+  const top = { mode: "top", flashMessageId: null };
+  if (scrollTarget === "source" || !targetMessageId) return top;
+  const target = conversation?.messages.find(
+    (message) => message.id === targetMessageId && !message.deleted,
+  );
+  if (!target) return top;
+  const root = conversation.messages.find((message) => message.source && !message.deleted);
+  if (target.id === root?.id) return { mode: "top", flashMessageId: root.text ? root.id : null };
+  return { mode: "card", messageId: target.id };
+}
+
 export function createConversations({
   store,
   annotations,
@@ -268,12 +310,21 @@ export function createConversations({
   let parentId = null;
   let editing = null;
   let reportTimer = null;
+  let closeTimer = 0;
   let sheetDrag = null;
   let feedConversations = [];
   let scope = "mark";
   let order = "time";
   let anchorSection = null;
   let scopeGeneration = 0;
+  let pendingOpenGeneration = null;
+  let threadGeneration = 0;
+  let threadReadOrder = 0;
+  let appliedThreadRead = 0;
+  let latestThreadRefresh = 0;
+  let feedGeneration = 0;
+  let messageMenuSeq = 0;
+  const submittingDrafts = new Set();
 
   const composer = () => window.athaMessageComposer;
 
@@ -290,6 +341,9 @@ export function createConversations({
     clearTimeout(reportTimer);
     controls.status.textContent = message;
     controls.status.dataset.error = String(error);
+    if (message) {
+      globalThis.athaToast?.(message, error ? "error" : "default");
+    }
     if (!error && message) {
       reportTimer = setTimeout(() => {
         if (controls.status.textContent === message) controls.status.textContent = "";
@@ -297,11 +351,61 @@ export function createConversations({
     }
   }
 
-  function close() {
+  function invalidatePendingOpen() {
     scopeGeneration += 1;
+  }
+
+  function cancelPendingOpen() {
+    if (pendingOpenGeneration === scopeGeneration) invalidatePendingOpen();
+  }
+
+  function isActiveConversation(generation, conversationId) {
+    return generation === threadGeneration &&
+      conversation?.id === conversationId &&
+      !controls.overlay.hidden &&
+      controls.overlay.dataset.closing !== "true";
+  }
+
+  function invalidateThread() {
+    invalidatePendingOpen();
+    threadGeneration += 1;
+  }
+
+  function cancelCloseAnimation() {
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = 0;
+    }
+    delete controls.overlay.dataset.closing;
+  }
+
+  function hideOverlayWithMotion(immediate = false) {
+    if (controls.overlay.hidden) {
+      cancelCloseAnimation();
+      return;
+    }
+    const reduced =
+      immediate || globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (reduced) {
+      cancelCloseAnimation();
+      controls.overlay.hidden = true;
+      onLayoutChange();
+      return;
+    }
+    if (controls.overlay.dataset.closing === "true") return;
+    controls.overlay.dataset.closing = "true";
+    closeTimer = setTimeout(() => {
+      closeTimer = 0;
+      delete controls.overlay.dataset.closing;
+      controls.overlay.hidden = true;
+      onLayoutChange();
+    }, 185);
+  }
+
+  function close() {
+    invalidateThread();
     composer()?.collapse();
-    controls.overlay.hidden = true;
-    onLayoutChange();
+    hideOverlayWithMotion();
     returnFocus(controls.close.getAttribute("aria-label") === "返回笔记").focus({
       preventScroll: true,
     });
@@ -343,7 +447,12 @@ export function createConversations({
     editing = null;
     composer()?.clear();
     parentId = conversation?.messages.find((message) => !message.deleted)?.id || null;
-    setComposerContext(conversation?.messages.find((message) => message.id === parentId));
+    syncComposerContext();
+  }
+
+  function syncComposerContext() {
+    if (editing) setComposerContext(editing, "edit");
+    else setComposerContext(conversation?.messages.find((message) => message.id === parentId));
   }
 
   function openConversationButton(label, conversationId, messageId, className = "") {
@@ -432,31 +541,74 @@ export function createConversations({
     if (!message.deleted) actions.append(action("回复", "reply", message));
     const more = document.createElement("button");
     const menu = document.createElement("div");
+    const addMenuItem = (item) => {
+      item.setAttribute("role", "menuitem");
+      item.tabIndex = -1;
+      menu.append(item);
+    };
     more.type = "button";
     more.className = "message-more-button";
     more.textContent = "更多";
     more.dataset.messageMenu = message.id;
+    more.setAttribute("aria-haspopup", "menu");
     more.setAttribute("aria-expanded", "false");
     menu.id = `message-menu-${message.id}`;
     more.setAttribute("aria-controls", menu.id);
     menu.className = "message-menu message-card-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "消息操作");
     menu.setAttribute("popover", "auto");
     menu.addEventListener("toggle", () => {
       more.setAttribute("aria-expanded", String(menu.matches(":popover-open")));
     });
-    if (!message.deleted) {
-      menu.append(action(message.text ? "编辑" : "添加笔记", "edit", message));
-      if (message.source) {
-        menu.append(
-          action("历史引用", "snapshot", message),
-          action("跳回原文", "jump", message),
-        );
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        menu.hidePopover();
+        more.focus({ preventScroll: true });
+        return;
       }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        event.stopPropagation();
+        menu.hidePopover();
+        more.focus({ preventScroll: true });
+        return;
+      }
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      const items = [...menu.querySelectorAll('button[role="menuitem"]:not(:disabled)')];
+      if (!items.length) return;
+      event.preventDefault();
+      const index = items.indexOf(document.activeElement);
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? items.length - 1
+            : index === -1
+              ? 0
+              : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus({ preventScroll: true });
+    });
+    if (!message.deleted) {
+      addMenuItem(action(message.text ? "编辑" : "添加笔记", "edit", message));
+      if (message.source) {
+        addMenuItem(action("历史引用", "snapshot", message));
+        addMenuItem(action("跳回原文", "jump", message));
+      }
+    }
+    addMenuItem(action("修订历史", "history", message));
+    addMenuItem(action("引用关系", "relations", message));
+    if (!message.deleted) {
+      const separator = document.createElement("div");
+      separator.className = "message-menu-separator";
+      separator.setAttribute("role", "separator");
+      menu.append(separator);
       const remove = action("删除", "delete", message);
       remove.dataset.tone = "danger";
-      menu.append(remove);
+      addMenuItem(remove);
     }
-    menu.append(action("修订历史", "history", message), action("引用关系", "relations", message));
     actions.append(more);
     footer.append(time, actions);
     card.append(body, footer, menu);
@@ -502,75 +654,152 @@ export function createConversations({
       return;
     }
     const children = entries.map(renderMessageCard);
-    if (scope === "mark" && currentRoot) children.unshift(renderSourceTurn(currentRoot));
+    if (scope === "mark" && currentRoot) {
+      children.unshift(renderSourceTurn(currentRoot));
+      if (!entries.length) {
+        const empty = document.createElement("p");
+        empty.className = "message-thread-empty";
+        empty.textContent = "围绕这段原文写下想法，或随时回来继续补充";
+        children.push(empty);
+      }
+    }
     controls.list.replaceChildren(...children);
   }
 
-  async function reload() {
-    conversation = await store.conversation(conversation.id);
-    if (!conversation.messages.some((message) => message.id === parentId && !message.deleted)) {
+  async function reloadThread(conversationId, read, isCurrentRead) {
+    const loaded = await store.conversation(conversationId);
+    if (!isCurrentRead()) return;
+    conversation = loaded;
+    appliedThreadRead = read;
+    const activeMessage = (id) => loaded.messages.some((message) => message.id === id && !message.deleted);
+    if (!activeMessage(parentId)) {
       parentId = conversation.messages.find((message) => !message.deleted)?.id || null;
     }
-    setComposerContext(conversation.messages.find((message) => message.id === parentId));
-    renderConversation();
+    if (editing && !activeMessage(editing.id)) editing = null;
+    if (scope === "mark") renderConversation();
+    syncComposerContext();
+  }
+
+  async function refreshAfterWrite(generation, conversationId) {
+    const active = isActiveConversation(generation, conversationId);
+    const read = active ? ++threadReadOrder : null;
+    if (read !== null) latestThreadRefresh = read;
+    const isCurrentRead = () => read !== null && read === latestThreadRefresh && read >= appliedThreadRead &&
+      isActiveConversation(generation, conversationId);
+    const refreshed = await Promise.allSettled([
+      active ? reloadThread(conversationId, read, isCurrentRead) : undefined,
+      active && scope !== "mark" ? loadFeed(scope) : undefined,
+      annotations.redraw(),
+    ]);
+    if (!isCurrentRead()) return null;
+    return refreshed.every((result) => result.status === "fulfilled" && result.value !== false);
+  }
+
+  async function commitConversationWrite(write) {
+    try {
+      return { value: await write(), rootsRefreshed: true };
+    } catch (error) {
+      if (error?.code !== "message-roots-refresh") throw error;
+      return { value: error.committedResult, rootsRefreshed: false };
+    }
   }
 
   async function setScope(nextScope) {
     if (!["mark", "chapter", "book"].includes(nextScope)) return;
     scope = nextScope;
-    const generation = ++scopeGeneration;
+    invalidatePendingOpen();
     if (scope === "mark") {
       renderConversation();
+      syncComposerContext();
       return;
     }
+    feedConversations = null;
     controls.form.hidden = true;
     controls.orderControls.hidden = false;
     controls.list.textContent = "正在加载对话…";
+    await loadFeed(nextScope);
+  }
+
+  async function loadFeed(requestedScope) {
+    const generation = ++feedGeneration;
+    const thread = threadGeneration;
+    const conversationId = conversation?.id;
+    const isCurrentFeed = () => generation === feedGeneration && scope === requestedScope &&
+      isActiveConversation(thread, conversationId);
     try {
-      const section = scope === "chapter" ? anchorSection : null;
+      const section = requestedScope === "chapter" ? anchorSection : null;
       const loaded = await store.conversations(editionId, section);
-      if (generation !== scopeGeneration) return;
+      if (!isCurrentFeed()) return;
       feedConversations = loaded;
       renderConversation();
     } catch {
-      if (generation === scopeGeneration) {
+      if (!isCurrentFeed()) return;
+      if (feedConversations === null) {
+        feedConversations = [];
         controls.list.textContent = "无法加载对话";
         report("无法加载对话", true);
       }
+      return false;
     }
   }
 
-  async function open(
-    conversationId,
-    messageId = null,
-    edit = false,
-    expectedRootId = null,
-    navigationFailed = false,
-  ) {
+  function highlightMessage(messageId, block = null) {
+    if (!messageId) return;
+    const card = controls.list.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (!card) return;
+    if (block) {
+      const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      card.scrollIntoView({ block, behavior: reducedMotion ? "auto" : "smooth" });
+    }
+    card.dataset.flash = "true";
+    setTimeout(() => delete card.dataset.flash, 1200);
+  }
+
+  async function open(conversationId, ...openArgs) {
+    const options = normalizeConversationOpenOptions(...openArgs);
+    const openGeneration = ++scopeGeneration;
+    pendingOpenGeneration = openGeneration;
     try {
-      scopeGeneration += 1;
-      scope = "mark";
-      feedConversations = [];
       await window.athaEnsureMessageComposer?.();
-      conversation = await store.conversation(conversationId);
-      if (!validConversationTarget(conversation, editionId, expectedRootId)) {
+      const read = ++threadReadOrder;
+      const fetched = await store.conversation(conversationId);
+      if (openGeneration !== scopeGeneration) return;
+      const sameThread = isActiveConversation(threadGeneration, conversationId);
+      const keepCurrent = sameThread && appliedThreadRead > read;
+      const loaded = keepCurrent ? conversation : fetched;
+      if (!validConversationTarget(loaded, editionId, options.expectedRootId)) {
         throw new Error("invalid-message-conversation");
       }
+      pendingOpenGeneration = null;
+      if (!sameThread) threadGeneration += 1;
+      if (!keepCurrent) appliedThreadRead = read;
+      scope = "mark";
+      feedConversations = [];
+      conversation = loaded;
       anchorSection = conversation.messages.find((message) => message.source)?.source?.section || null;
       parentId =
-        conversation.messages.find((message) => message.id === messageId && !message.deleted)?.id ||
+        conversation.messages.find((message) => message.id === options.replyParentId && !message.deleted)?.id ||
         conversation.messages.find((message) => !message.deleted)?.id ||
         null;
       const parent = conversation.messages.find((message) => message.id === parentId);
       const returnLabel = controls.overlay.hidden
-        ? expectedRootId
+        ? options.expectedRootId
           ? "返回阅读"
           : "返回笔记"
         : controls.close.getAttribute("aria-label") || "返回阅读";
       onConversationChange(conversation.id);
       controls.close.setAttribute("aria-label", returnLabel);
       controls.close.title = returnLabel;
-      editing = edit ? parent : null;
+      editing = options.edit
+        ? conversation.messages.find(
+            (message) => message.id === options.targetMessageId && !message.deleted,
+          ) ?? parent
+        : null;
+      cancelCloseAnimation();
+      controls.overlay.hidden = false;
+      setFullscreen(false);
+      renderConversation();
+      controls.list.scrollTop = 0;
       if (editing) {
         composer()?.setValue(editing.contentJson, editing.text);
         setComposerContext(editing, "edit");
@@ -578,22 +807,22 @@ export function createConversations({
         composer()?.clear();
         setComposerContext(parent);
       }
-      controls.overlay.hidden = false;
-      setFullscreen(false);
-      renderConversation();
       closeTools();
       onLayoutChange();
-      if (navigationFailed) report("当前原文位置已失效，可查看历史引用", true);
+      report(options.navigationFailed ? "当前原文位置已失效，可查看历史引用" : "", options.navigationFailed);
       requestAnimationFrame(() => {
-        if (parentId) {
-          controls.list
-            .querySelector(`[data-message-id="${CSS.escape(parentId)}"]`)
-            ?.scrollIntoView({ block: "start" });
-        }
-        composer()?.focus();
+        if (openGeneration !== scopeGeneration || controls.overlay.hidden) return;
+        const plan = resolveConversationScrollPlan(loaded, options);
+        if (plan.mode === "card") highlightMessage(plan.messageId, "center");
+        else highlightMessage(plan.flashMessageId);
+        if (options.focusMode === "composer") composer()?.focus();
+        else controls.overlay.focus({ preventScroll: true });
       });
     } catch {
+      if (openGeneration !== scopeGeneration) return;
       report("无法打开对话", true);
+    } finally {
+      if (pendingOpenGeneration === openGeneration) pendingOpenGeneration = null;
     }
   }
 
@@ -698,21 +927,31 @@ export function createConversations({
         setComposerContext(message, "edit");
         composer()?.focus();
         break;
-      case "delete":
-        if (
-          !globalThis.confirm(
-            message.source
-              ? "删除这段笔记后，对话将不再出现在笔记列表中。继续吗？"
-              : "删除这条消息？",
-          )
-        ) {
+      case "delete": {
+        const description = message.source
+          ? "删除这段笔记后，对话将不再出现在笔记列表中。继续吗？"
+          : "删除这条消息？";
+        const confirmed = globalThis.athaConfirm
+          ? await globalThis.athaConfirm({
+              title: message.source ? "删除笔记" : "删除消息",
+              description,
+              confirmLabel: "删除",
+              tone: "danger",
+            })
+          : globalThis.confirm(description);
+        if (!confirmed) {
           break;
         }
-        await store.deleteMessage(message.id, message.revisionId);
-        await reload();
-        await annotations.redraw();
-        report("已删除");
+        const deleteGeneration = threadGeneration;
+        const targetConversationId = conversation.id;
+        const { rootsRefreshed } = await commitConversationWrite(() => store.deleteMessage(message.id, message.revisionId));
+        const refreshed = await refreshAfterWrite(deleteGeneration, targetConversationId);
+        if (refreshed !== null && isActiveConversation(deleteGeneration, targetConversationId)) {
+          const failure = !refreshed || !rootsRefreshed;
+          report(failure ? "已删除，部分内容未刷新" : "已删除", failure);
+        }
         break;
+      }
       case "history":
         await showHistory(message);
         break;
@@ -740,6 +979,16 @@ export function createConversations({
     const bounds = menu.getBoundingClientRect();
     menu.style.top = `${Math.max(8, Math.min(anchor.bottom + 4, innerHeight - bounds.height - 8))}px`;
     menu.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, innerWidth - bounds.width - 8))}px`;
+    if (typeof globalThis.athaPositionFloating === "function") {
+      const seq = ++messageMenuSeq;
+      void globalThis.athaPositionFloating(anchor, menu, {
+        placement: "bottom-end",
+        offsetPx: 6,
+        padding: 8,
+        shouldApply: () => seq === messageMenuSeq && menu.matches(":popover-open"),
+      });
+    }
+    menu.querySelector('button[role="menuitem"]')?.focus({ preventScroll: true });
   }
 
   function bind() {
@@ -787,7 +1036,7 @@ export function createConversations({
     for (const button of controls.orderButtons) {
       button.addEventListener("click", () => {
         order = button.dataset.messageOrder;
-        if (scope !== "mark") renderConversation();
+        if (scope !== "mark" && feedConversations !== null) renderConversation();
       });
     }
     const jumpToSource = async () => {
@@ -804,12 +1053,32 @@ export function createConversations({
     };
     controls.sourceJump.addEventListener("click", jumpToSource);
     controls.overlay.addEventListener("keydown", (event) => {
+      if (
+        (event.target instanceof Element && event.target.closest("dialog, [role='alertdialog']")) ||
+        document.querySelector('[role="alertdialog"], [data-select-content], [data-atha-dialog], .message-card-menu:popover-open')
+      ) {
+        return;
+      }
       if (event.key === "Escape") close();
     });
+    for (const dialog of [controls.historyDialog, controls.snapshotDialog]) {
+      let backdropDown = false;
+      dialog?.addEventListener("pointerdown", (event) => {
+        backdropDown = event.target === dialog;
+      });
+      dialog?.addEventListener("click", (event) => {
+        const shouldClose = backdropDown && event.target === dialog;
+        backdropDown = false;
+        if (shouldClose) dialog.close();
+      });
+    }
     readingSurface.addEventListener("pointerdown", () => {
-      if (controls.overlay.hidden) return;
-      controls.overlay.hidden = true;
-      onLayoutChange();
+      if (controls.overlay.hidden) {
+        cancelPendingOpen();
+        return;
+      }
+      invalidateThread();
+      hideOverlayWithMotion();
     });
     controls.exportAllButton.addEventListener("click", async () => {
       try {
@@ -832,7 +1101,14 @@ export function createConversations({
       }
       const conversationButton = event.target.closest("button[data-conversation-open]");
       if (conversationButton) {
-        open(conversationButton.dataset.conversationOpen, conversationButton.dataset.messageId);
+        const messageId = conversationButton.dataset.messageId || null;
+        const source = conversationButton.classList.contains("message-feed-source");
+        open(conversationButton.dataset.conversationOpen, {
+          scrollTarget: source ? "source" : "message",
+          targetMessageId: source ? null : messageId,
+          replyParentId: messageId,
+          focusMode: "dialog",
+        });
         return;
       }
       const menuButton = event.target.closest("button[data-message-menu]");
@@ -842,50 +1118,78 @@ export function createConversations({
       }
       const target = event.target.closest("button[data-message-target]");
       if (target) {
-        const card = controls.list.querySelector(
-          `[data-message-id="${CSS.escape(target.dataset.messageTarget)}"]`,
-        );
-        card?.scrollIntoView({ block: "center", behavior: "smooth" });
-        if (card) {
-          card.dataset.flash = "true";
-          setTimeout(() => delete card.dataset.flash, 1200);
-        }
+        highlightMessage(target.dataset.messageTarget, "center");
         return;
       }
       const button = event.target.closest("button[data-message-action]");
       if (button) {
         button.closest("[popover]")?.hidePopover();
-        handleAction(button).catch(() => report("操作失败，请重试", true));
+        const actionGeneration = threadGeneration;
+        const targetConversationId = conversation?.id;
+        handleAction(button).catch(() => {
+          if (isActiveConversation(actionGeneration, targetConversationId)) report("操作失败，请重试", true);
+        });
       }
     });
     controls.cancelEdit.addEventListener("click", resetComposer);
     controls.form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const value = composer()?.value();
-      if (!value?.text) return;
+      if (scope !== "mark" || controls.overlay.hidden) return;
+      const editor = composer();
+      if (!editor) return;
+      const submittedDraft = editor.draftVersion();
+      if (submittingDrafts.has(submittedDraft)) return;
+      const value = editor.value();
+      const targetConversationId = conversation?.id;
+      if (!value?.text || !targetConversationId) return;
+      const submitGeneration = threadGeneration;
+      const targetEditing = editing;
+      const targetParentId = parentId;
+      const sameContext = () =>
+        isActiveConversation(submitGeneration, targetConversationId) &&
+        composer() === editor &&
+        editing === targetEditing &&
+        parentId === targetParentId;
+      const sameDraft = () => sameContext() && editor.draftVersion() === submittedDraft;
+      submittingDrafts.add(submittedDraft);
+      let committed;
       try {
-        if (editing) {
-          await store.revise(editing.id, editing.revisionId, value.text, value.richText);
+        if (targetEditing) {
+          committed = await commitConversationWrite(() =>
+            store.revise(targetEditing.id, targetEditing.revisionId, value.text, value.richText),
+          );
+        } else {
+          if (!targetParentId) throw new Error("missing-message-parent");
+          committed = await commitConversationWrite(() =>
+            store.reply({
+              conversationId: targetConversationId,
+              replyToMessageId: targetParentId,
+              text: value.text,
+              richText: value.richText,
+              referenceIds: [],
+            }),
+          );
         }
-        else {
-          if (!parentId) throw new Error("missing-message-parent");
-          await store.reply({
-            conversationId: conversation.id,
-            replyToMessageId: parentId,
-            text: value.text,
-            richText: value.richText,
-            referenceIds: [],
-          });
-        }
-        await reload();
-        await annotations.redraw();
+      } catch {
+        if (sameDraft()) report("保存失败，请重试", true);
+        return;
+      } finally {
+        submittingDrafts.delete(submittedDraft);
+      }
+      if (sameDraft()) {
         resetComposer();
         report("已保存");
-      } catch {
-        report("保存失败，请重试", true);
+      } else if (targetEditing && sameContext()) {
+        // The next draft still edits this message, but its base is our own committed revision.
+        editing = { ...targetEditing, revisionId: committed.value.revisionId };
+      }
+      const refreshed = await refreshAfterWrite(submitGeneration, targetConversationId);
+      if (refreshed !== null && isActiveConversation(submitGeneration, targetConversationId)) {
+        if (!refreshed) report("消息已保存，未能刷新对话", true);
+        else if (!committed.rootsRefreshed) report("消息已保存，未能刷新笔记列表", true);
       }
     });
   }
 
-  return Object.freeze({ bind, open });
+  return Object.freeze({ bind, open, cancelPendingOpen });
 }

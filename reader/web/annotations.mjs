@@ -171,6 +171,7 @@ export function createAnnotations({
         quote.className = "annotation-item-quote";
         quote.textContent = item.sourceAnchor.selectedText.replace(/\s+/gu, " ").trim().slice(0, 100);
         response.className = "annotation-item-note";
+        response.dataset.empty = String(!responseText);
         response.textContent = responseText
           ? responseText.replace(/\s+/gu, " ").trim().slice(0, 140)
           : "还没有回应";
@@ -317,10 +318,15 @@ export function createAnnotations({
     if (!result.ok) return fail(result.error);
     lastError = null;
     pendingSelection = null;
-    content.book.getRootNode().getSelection?.().removeAllRanges();
+    content.clearSelection();
     await redraw();
     if (note && result.conversationId) {
-      onOpenConversation?.(result.conversationId, result.id, false, result.id);
+      onOpenConversation?.(result.conversationId, {
+        scrollTarget: "source",
+        replyParentId: result.id,
+        focusMode: "dialog",
+        expectedRootId: result.id,
+      });
     }
     return result;
   }
@@ -349,7 +355,7 @@ export function createAnnotations({
     const result = await store.replaceAnchor(id, sourceAnchor, range);
     if (!result.ok) return fail(result.error);
     lastError = null;
-    content.book.getRootNode().getSelection?.().removeAllRanges();
+    content.clearSelection();
     await redraw();
     return result;
   }
@@ -392,8 +398,12 @@ export function createAnnotations({
     return snapshot();
   }
 
+  let selectionPositionSeq = 0;
+
   function hideSelectionActions() {
+    selectionPositionSeq += 1;
     controls.selectionActions.hidden = true;
+    delete controls.selectionActions.dataset.positioned;
   }
 
   function cancelPendingSelectionChange() {
@@ -412,7 +422,7 @@ export function createAnnotations({
   function finishSelection() {
     dismissSelection();
     editingNoteId = null;
-    content.book.getRootNode().getSelection?.().removeAllRanges();
+    content.clearSelection();
   }
 
   function bind() {
@@ -473,6 +483,7 @@ export function createAnnotations({
     const positionSelectionActions = (range) => {
       const rect = range.getBoundingClientRect();
       if (!rect.width && !rect.height) return false;
+      const seq = ++selectionPositionSeq;
       controls.selectionActions.hidden = false;
       const toolbar = controls.selectionActions.getBoundingClientRect();
       const maxLeft = Math.max(8, innerWidth - toolbar.width - 8);
@@ -480,6 +491,18 @@ export function createAnnotations({
       const above = rect.top - toolbar.height - 8;
       controls.selectionActions.style.left = `${Math.min(maxLeft, Math.max(8, rect.left + rect.width / 2 - toolbar.width / 2))}px`;
       controls.selectionActions.style.top = `${Math.min(maxTop, Math.max(8, above >= 8 ? above : rect.bottom + 8))}px`;
+      if (typeof globalThis.athaPositionFloating === "function") {
+        void globalThis.athaPositionFloating(rect, controls.selectionActions, {
+          placement: "top",
+          offsetPx: 10,
+          padding: 8,
+          shouldApply: () => seq === selectionPositionSeq && !controls.selectionActions.hidden,
+        }).then((applied) => {
+          if (applied && seq === selectionPositionSeq && !controls.selectionActions.hidden) {
+            controls.selectionActions.dataset.positioned = "true";
+          }
+        });
+      }
       return true;
     };
     const showSelectionActions = () => {
@@ -521,10 +544,7 @@ export function createAnnotations({
         .sort((left, right) => right.updatedAt - left.updatedAt)[0];
       if (!item) return false;
       const range = renderedRanges.get(item.id);
-      const selection = content.book.getRootNode().getSelection?.();
-      if (!range || !selection) return false;
-      selection.removeAllRanges();
-      selection.addRange(range.cloneRange());
+      if (!range || !content.setSelectionRange(range)) return false;
       selectedAnnotationId = item.id;
       pendingSelection = range.cloneRange();
       requestAnimationFrame(showSelectionActions);
@@ -543,14 +563,12 @@ export function createAnnotations({
     };
     const copySelection = () => {
       if (!pendingSelection) return fail("annotation-selection");
-      const selection = content.book.getRootNode().getSelection?.();
       try {
-        if (!selection) throw new Error("copy");
-        selection.removeAllRanges();
-        selection.addRange(pendingSelection.cloneRange());
+        if (!content.setSelectionRange(pendingSelection)) throw new Error("copy");
         if (!document.execCommand("copy")) throw new Error("copy");
         lastError = null;
         controls.selectionStatus.textContent = "已复制";
+        globalThis.athaToast?.("已复制");
         finishSelection();
         sync();
         return Object.freeze({ ok: true });
@@ -615,7 +633,7 @@ export function createAnnotations({
         pendingSelection = null;
         controls.selectionStatus.textContent = "请重新选择标注文字";
         hideSelectionActions();
-        content.book.getRootNode().getSelection?.().removeAllRanges();
+        content.clearSelection();
         return;
       }
       if (!pendingSelection) return fail("annotation-selection");
@@ -630,7 +648,14 @@ export function createAnnotations({
           : await addSelection("");
         if (result?.ok) {
           finishSelection();
-          await onOpenConversation(result.conversationId, result.id, true, result.id);
+          await onOpenConversation(result.conversationId, {
+            scrollTarget: "source",
+            targetMessageId: result.id,
+            replyParentId: result.id,
+            edit: true,
+            focusMode: "composer",
+            expectedRootId: result.id,
+          });
         }
         return;
       }
@@ -640,9 +665,19 @@ export function createAnnotations({
     controls.delete.addEventListener("click", async () => {
       const item = selectedItem();
       if (!item) return fail("annotation-missing");
-      if (!globalThis.confirm("删除这段笔记后，对话将不再出现在笔记列表中。继续吗？")) return;
+      const description = "删除这段笔记后，对话将不再出现在笔记列表中。继续吗？";
+      const confirmed = globalThis.athaConfirm
+        ? await globalThis.athaConfirm({
+            title: "删除笔记",
+            description,
+            confirmLabel: "删除",
+            tone: "danger",
+          })
+        : globalThis.confirm(description);
+      if (!confirmed) return;
       await remove(item.id);
       finishSelection();
+      globalThis.athaToast?.("笔记已删除");
     });
     controls.noteInput.addEventListener("input", () => controls.noteInput.setCustomValidity(""));
     controls.noteForm.addEventListener("submit", async (event) => {
@@ -659,6 +694,21 @@ export function createAnnotations({
       if (result?.ok) controls.noteDialog.close();
     });
     controls.cancelNote.addEventListener("click", () => controls.noteDialog.close());
+    let noteDialogBackdropDown = false;
+    controls.noteDialog.addEventListener("pointerdown", (event) => {
+      noteDialogBackdropDown = event.target === controls.noteDialog;
+    });
+    controls.noteDialog.addEventListener("click", (event) => {
+      const shouldClose = noteDialogBackdropDown && event.target === controls.noteDialog;
+      noteDialogBackdropDown = false;
+      if (shouldClose) controls.noteDialog.close();
+    });
+    controls.noteInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        controls.noteForm.requestSubmit();
+      }
+    });
     controls.noteDialog.addEventListener("close", finishSelection);
     controls.list.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-annotation-id]");
@@ -666,7 +716,11 @@ export function createAnnotations({
       if (button.dataset.annotationAction === "conversation") {
         const item = store.item(button.dataset.annotationId);
         if (item) {
-          await onOpenConversation(item.conversationId, item.id);
+          await onOpenConversation(item.conversationId, {
+            scrollTarget: "source",
+            replyParentId: item.id,
+            focusMode: "dialog",
+          });
         }
       } else {
         const result = await go(button.dataset.annotationId);
@@ -831,10 +885,8 @@ export function createAnnotations({
     rangeEditingId = null;
     content.book.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     assert(selectedAnnotationId === null, "sample-boundary");
-    const selection = content.book.getRootNode().getSelection?.();
     const verifySelectionInput = async (event, target = content.book, settle = false) => {
-      selection.removeAllRanges();
-      selection.addRange(firstTextRange());
+      assert(content.setSelectionRange(firstTextRange()), "sample-boundary");
       target.dispatchEvent(event);
       if (settle) {
         await new Promise((resolve) => setTimeout(resolve, SELECTION_CHANGE_SETTLE_MS + 20));
@@ -851,20 +903,18 @@ export function createAnnotations({
       );
       dismissSelection();
     };
-    assert(selection, "sample-boundary");
     await verifySelectionInput(
       new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }),
     );
     await verifySelectionInput(new KeyboardEvent("keyup", { bubbles: true, key: "ArrowRight" }));
     await verifySelectionInput(new Event("selectionchange"), document, true);
-    selection.removeAllRanges();
-    selection.addRange(firstTextRange());
+    assert(content.setSelectionRange(firstTextRange()), "sample-boundary");
     document.dispatchEvent(new Event("selectionchange"));
     dismissSelection();
     await new Promise((resolve) => setTimeout(resolve, SELECTION_CHANGE_SETTLE_MS + 20));
     await new Promise(requestAnimationFrame);
     assert(controls.selectionActions.hidden, "sample-boundary");
-    selection.removeAllRanges();
+    content.clearSelection();
     content.book.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "ArrowRight" }));
     await new Promise(requestAnimationFrame);
     assert(controls.selectionActions.hidden, "sample-boundary");

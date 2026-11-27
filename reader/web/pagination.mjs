@@ -2,7 +2,45 @@ const SOURCE_FONT_SIZE = 16;
 const DISPLAY_FORMULA_MULTIPLIER = 1.5;
 const MAX_READER_CONTENT_WIDTH = 760;
 const MAX_TRANSFORM_WIDTH = 20_000;
-const SETTLE_DURATION_MS = 300;
+const SETTLE_DURATION_MS = 220;
+const READING_SCROLL_GRACE_MS = 300;
+
+export function createReadingScrollWitness(
+  readOffset,
+  now = () => performance.now(),
+  wallNow = () => Date.now(),
+) {
+  let intent = null;
+  let movedAt = null;
+
+  function observe() {
+    const at = now();
+    if (!intent || intent.until < at) return;
+    const offset = readOffset();
+    if (offset === intent.offset) return;
+    movedAt = wallNow();
+    intent = { offset, until: at + READING_SCROLL_GRACE_MS };
+  }
+
+  return {
+    observe,
+    noteInput() {
+      observe();
+      intent = { offset: readOffset(), until: now() + READING_SCROLL_GRACE_MS };
+    },
+    take() {
+      observe();
+      const result = movedAt;
+      intent = null;
+      movedAt = null;
+      return result;
+    },
+    reset() {
+      intent = null;
+      movedAt = null;
+    },
+  };
+}
 
 export function createPagination({
   book,
@@ -33,6 +71,7 @@ export function createPagination({
   let swipeOrigin = 0;
   let offsetCache = null;
   const fragmentOffsetCache = new Map();
+  const readingScroll = createReadingScrollWitness(() => reader.scrollTop);
   let nativePagedScroll = false;
 
   function isScrolled() {
@@ -295,6 +334,11 @@ export function createPagination({
   }
 
   function animatePageScroll(target) {
+    if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+      page.scrollLeft = target;
+      book.removeAttribute("data-swipe-settling");
+      return;
+    }
     const start = page.scrollLeft;
     const distance = target - start;
     const started = performance.now();
@@ -323,6 +367,7 @@ export function createPagination({
       book.setAttribute("data-swipe-settling", "");
     }
     if (isScrolled()) {
+      readingScroll.reset();
       book.style.transform = "none";
       page.scrollLeft = 0;
       reader.scrollTop = state.page * reader.clientHeight;
@@ -338,13 +383,14 @@ export function createPagination({
         settleTimer = setTimeout(() => {
           settleTimer = 0;
           book.removeAttribute("data-swipe-settling");
-        }, 320);
+        }, 240);
       }
     }
     updatePosition();
   }
 
   function layout() {
+    readingScroll.reset();
     offsetCache = null;
     fragmentOffsetCache.clear();
     const pixels = readerPixels(state.fontSize);
@@ -671,6 +717,7 @@ export function createPagination({
     range.setEnd(point.node, Math.min(point.offset + 1, point.node.textContent.length));
     const rect = [...range.getClientRects()].find((item) => item.height);
     if (rect) {
+      readingScroll.reset();
       const viewport = reader.getBoundingClientRect();
       reader.scrollTop += (rect.top - viewport.top) * (reader.clientHeight / viewport.height);
     }
@@ -753,7 +800,8 @@ export function createPagination({
     return true;
   }
 
-  function snapshot() {
+  function snapshot(refreshScroll = false) {
+    if (refreshScroll && isScrolled()) syncScrollPage();
     return { ...state, nativePagedScroll };
   }
 
@@ -838,6 +886,7 @@ export function createPagination({
     };
     reader.addEventListener("scroll", () => {
       if (!isScrolled()) return;
+      readingScroll.observe();
       scrollDirty = true;
       if (scrollFrame) return;
       scrollFrame = requestAnimationFrame(() => {
@@ -890,6 +939,8 @@ export function createPagination({
     initialize,
     isOffsetVisible,
     isScrolled,
+    noteReadingScroll: readingScroll.noteInput,
+    takeReadingScroll: readingScroll.take,
     move,
     nextFrame,
     offsetForFragment,

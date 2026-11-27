@@ -18,6 +18,8 @@ gesture_warmups=5
 gesture_measurements=20
 external_application=
 association_launch=0
+software_compositing=0
+cpu_painting=0
 
 usage() {
   printf '%s\n' \
@@ -32,6 +34,8 @@ usage() {
     '  --gesture-measurements N     Measurements per scenario (default: 20).' \
     '  --application PATH           Run this candidate executable instead of building debug.' \
     '  --association-launch         Start the candidate with the public fixture path.' \
+    '  --software-compositing       Disable accelerated compositing for this isolated run.' \
+    '  --cpu-painting               Request CPU Skia painting for this isolated run.' \
     '  -h, --help                   Show this help.'
 }
 
@@ -89,6 +93,14 @@ while (($#)); do
       association_launch=1
       shift
       ;;
+    --software-compositing)
+      software_compositing=1
+      shift
+      ;;
+    --cpu-painting)
+      cpu_painting=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -131,6 +143,38 @@ for command in base64 curl jq mise realpath sha256sum ss systemctl systemd-run W
 done
 [[ $(uname -s) == Linux ]] || die 'this gate requires Linux'
 
+# Fail before builds, fixture writes, or graphical sessions.
+source "$script_root/lib/reader-linux-preflight.sh"
+driver=$(atha_reader_driver "$repo_root" "$invocation_root") || exit 1
+graphics_environment=()
+compositing_mode=system-default
+painting_mode=system-default
+if ((software_compositing)); then
+  graphics_environment+=(--setenv=WEBKIT_DISABLE_COMPOSITING_MODE=1)
+  compositing_mode=software
+fi
+if ((cpu_painting)); then
+  graphics_environment+=(--setenv=WEBKIT_SKIA_ENABLE_CPU_RENDERING=1)
+  painting_mode=cpu
+fi
+
+user_environment=$(systemctl --user show-environment) || die 'systemd user manager is unavailable'
+grep -q '^XDG_RUNTIME_DIR=' <<<"$user_environment" || die 'systemd user manager lacks XDG_RUNTIME_DIR'
+grep -q '^DBUS_SESSION_BUS_ADDRESS=' <<<"$user_environment" ||
+  die 'systemd user manager lacks DBUS_SESSION_BUS_ADDRESS'
+gdk_backend=${ATHA_GDK_BACKEND:-}
+if [[ -n $gdk_backend ]]; then
+  [[ $gdk_backend == wayland || $gdk_backend == x11 ]] || die 'ATHA_GDK_BACKEND must be wayland or x11'
+  [[ $gdk_backend == wayland ]] && display_variable=WAYLAND_DISPLAY || display_variable=DISPLAY
+  grep -q "^$display_variable=" <<<"$user_environment" || die "$gdk_backend display is unavailable"
+elif grep -q '^WAYLAND_DISPLAY=' <<<"$user_environment"; then
+  gdk_backend=wayland
+elif grep -q '^DISPLAY=' <<<"$user_environment"; then
+  gdk_backend=x11
+else
+  die 'systemd user manager has no graphical display'
+fi
+
 formula_entry=
 formula_source_sha=
 if [[ -n $formula_epub ]]; then
@@ -160,6 +204,8 @@ unit_started=0
 gesture_active=0
 current_book_kind=
 diagnostics_enabled=0
+authoring_cycle_evidence=null
+pointer_action_timed_out=0
 
 webdriver_request() {
   local method=$1 path=$2 body=${3-}
@@ -176,7 +222,7 @@ webdriver_request() {
 
 webdriver_value() {
   local method=$1 path=$2 body=${3-} response
-  response=$(webdriver_request "$method" "$path" "$body") || return 1
+  response=$(webdriver_request "$method" "$path" "$body") || return "$?"
   if jq -e '
     (.value | type == "object") and
     (.value.error? != null) and
@@ -199,6 +245,31 @@ execute_sync() {
 
 execute_async() {
   execute_script async "$1" "${2:-[]}"
+}
+
+webdriver_element_id() {
+  local selector=$1 payload response
+  payload=$(jq -cn --arg selector "$selector" '{using: "css selector", value: $selector}')
+  response=$(webdriver_request POST "/session/$session_id/element" "$payload") || return 1
+  jq -er '.value["element-6066-11e4-a52e-4f735466cecf"]' <<<"$response"
+}
+
+webdriver_click_element_ref() {
+  local element_id=$1
+  webdriver_value POST "/session/$session_id/element/$element_id/click" '{}' >/dev/null
+}
+
+webdriver_click_element() {
+  local element_id
+  element_id=$(webdriver_element_id "$1") || return 1
+  webdriver_click_element_ref "$element_id"
+}
+
+webdriver_send_keys() {
+  local selector=$1 text=$2 element_id payload
+  element_id=$(webdriver_element_id "$selector") || return 1
+  payload=$(jq -cn --arg text "$text" '{text: $text, value: ($text | explode | map([.] | implode))}')
+  webdriver_value POST "/session/$session_id/element/$element_id/value" "$payload" >/dev/null
 }
 
 capture_public_ui() {
@@ -230,9 +301,13 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   set +e
-  cleanup_gesture >/dev/null 2>&1
-  if [[ -n $session_id ]]; then
-    webdriver_request DELETE "/session/$session_id" >/dev/null 2>&1
+  # A pending native mouse command can crash WebKitWebDriver when cancelled.
+  # Stop this run's unit directly after a transport timeout instead.
+  if ((pointer_action_timed_out == 0)); then
+    cleanup_gesture >/dev/null 2>&1
+    if [[ -n $session_id ]]; then
+      webdriver_request DELETE "/session/$session_id" >/dev/null 2>&1
+    fi
   fi
   if ((unit_started)); then
     systemctl --user stop "$unit.service" >/dev/null 2>&1
@@ -276,6 +351,53 @@ pick_free_port() {
     fi
   done
   die 'could not reserve a WebDriver port'
+}
+
+start_authoring_session() {
+  local launch_attempt driver_port native_port attempt driver_ready=0 payload session_response
+  session_id=
+  for ((launch_attempt = 1; launch_attempt <= 3; launch_attempt += 1)); do
+    driver_port=$(pick_free_port)
+    native_port=$(pick_free_port)
+    while [[ $native_port == "$driver_port" ]]; do native_port=$(pick_free_port); done
+    base_url=http://127.0.0.1:$driver_port
+    unit="atha-reader-linux-${BASHPID}-${RANDOM}-authoring-${launch_attempt}"
+
+    if systemd-run --user --quiet --collect --unit="$unit" --working-directory="$repo_root" \
+      --setenv="XDG_DATA_HOME=$data_home" --setenv="GDK_BACKEND=$gdk_backend" \
+      --setenv=ATHA_READER_GUI_GATE=1 \
+      "${graphics_environment[@]}" \
+      "$driver" --port "$driver_port" --native-port "$native_port"; then
+      unit_started=1
+      for ((attempt = 0; attempt < 100; attempt += 1)); do
+        if curl --silent --fail --max-time 1 "$base_url/status" >/dev/null; then
+          driver_ready=1
+          break
+        fi
+        sleep 0.1
+      done
+    fi
+    ((driver_ready)) && break
+    systemctl --user stop "$unit.service" >/dev/null 2>&1 || true
+    systemctl --user reset-failed "$unit.service" >/dev/null 2>&1 || true
+    unit_started=0
+  done
+  ((driver_ready)) || die 'authoring tauri-driver did not become ready'
+
+  payload=$(jq -cn --arg application "$application" '{
+    capabilities: {alwaysMatch: {"tauri:options": {application: $application}}}
+  }')
+  session_response=$(webdriver_request POST /session "$payload") ||
+    die 'tauri-driver could not create the isolated authoring session'
+  session_id=$(jq -er '.value.sessionId' <<<"$session_response") ||
+    die 'tauri-driver returned no isolated authoring session'
+  browser_version=$(jq -r '.value.capabilities.browserVersion // "unknown"' <<<"$session_response")
+  webdriver_value POST "/session/$session_id/window/rect" '{"width":800,"height":600}' >/dev/null ||
+    die 'could not initialize the isolated authoring window'
+  wait_for_script \
+    'return { visibility: document.visibilityState, width: innerWidth, height: innerHeight };' \
+    '.visibility == "visible" and .width > 0 and .height > 0' \
+    'isolated authoring GUI did not expose a usable viewport' >/dev/null
 }
 
 set_window_size() {
@@ -544,8 +666,8 @@ window.__TAURI_INTERNALS__.invoke('delete_library_book_data', { id: '$public_id'
       die 'could not probe cover load failure'
     wait_for_script \
       'return { images: document.querySelectorAll(".library-cover img").length, fallback: document.querySelector(".library-cover-fallback strong")?.textContent || "", title: document.querySelector(".library-book-title")?.textContent || "" };' \
-      '.images == 0 and .fallback != "" and .fallback == .title' \
-      'cover load failure did not reveal the book-title fallback' >/dev/null
+      '.images == 0 and .title != "" and .fallback == (.title | .[0:1] | ascii_upcase)' \
+      'cover load failure did not reveal the generated title-glyph fallback' >/dev/null
   fi
 
   fire_tauri_drag_event 'tauri://drag-drop' "$unsupported_file" >/dev/null ||
@@ -566,62 +688,284 @@ window.__TAURI_INTERNALS__.invoke('delete_library_book_data', { id: '$public_id'
     '{events: ["enter", "leave", "drop"], duplicateStable: true, unsupportedRejected: true, pathBoundary: 32, emptyShelf: $emptyShelf, firstImportCover: $emptyShelf, syntheticTauriEvents: true}')
 }
 
-verify_library_layout() {
-  local width=$1 height=$2 state
-  state=$(execute_sync '
-document.querySelector("button[aria-label=\"列表视图\"]")?.click();
+click_shelf_control() {
+  local selector=$1 label=$2 arguments
+  arguments=$(jq -cn --arg selector "$selector" '[$selector]')
+  [[ $(execute_sync '
+const button = document.querySelector(arguments[0]);
+if (!button || button.disabled || !button.getClientRects().length || getComputedStyle(button).visibility !== "visible") return false;
+button.focus({ preventScroll: true });
+button.click();
 return true;
-') || die 'could not switch to the library list view'
-  [[ $state == true ]] || die 'library list control is unavailable'
-  state=$(wait_for_script \
-    'const cards = [...document.querySelectorAll(".library-book")]; const valid = cards.every((card) => { const button = card.querySelector(".library-book-open"); const cover = card.querySelector(".library-cover"); const title = card.querySelector(".library-book-title"); const author = card.querySelector(".library-book-author"); const outer = button?.getBoundingClientRect(); const coverRect = cover?.getBoundingClientRect(); const titleRect = title?.getBoundingClientRect(); const authorRect = author?.getBoundingClientRect(); return Boolean(outer && coverRect && titleRect && authorRect && coverRect.left >= outer.left - 1 && coverRect.right <= titleRect.left + 1 && titleRect.right <= outer.right + 1 && authorRect.right <= outer.right + 1 && titleRect.top <= authorRect.top && coverRect.bottom <= outer.bottom + 1); }); const controls = [...document.querySelectorAll(".library-header button, .library-header input")]; const clippedControls = controls.filter((control) => control.scrollWidth > control.clientWidth + 1 || control.scrollHeight > control.clientHeight + 1); return { width: innerWidth, list: document.querySelector(".library-shell")?.classList.contains("library-list-view"), pressed: document.querySelector("button[aria-label=\"列表视图\"]")?.getAttribute("aria-pressed"), cards: cards.length, valid, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, clipped: clippedControls.length > 0, clippedControls: clippedControls.map((control) => ({ label: control.getAttribute("aria-label") || control.textContent.trim(), client: [control.clientWidth, control.clientHeight], scroll: [control.scrollWidth, control.scrollHeight] })) };' \
-    ".width >= $((width - 2)) and .width <= $((width + 2)) and .list == true and .pressed == \"true\" and .cards == $expected_books and .valid == true and .overflow == false and .clipped == false" \
-    "library list layout failed at ${width}x${height}")
+' "$arguments") == true ]] || die "$label"
+}
 
-  execute_sync 'document.querySelector("button[aria-label=\"网格视图\"]")?.click(); return true;' >/dev/null ||
-    die 'could not switch to the library grid view'
+click_book_menu_item() {
+  local arguments
+  arguments=$(jq -cn --arg label "$1" '[$label]')
+  [[ $(execute_sync '
+const item = [...document.querySelectorAll(".library-book-menu [role=menuitem]")]
+  .find((button) => button.textContent.trim() === arguments[0]);
+item?.click();
+return Boolean(item);' "$arguments") == true ]] || die "book menu item is unavailable: $1"
+}
+
+long_press_shelf_book() {
+  local arguments
+  arguments=$(jq -cn --arg selector "$1" '[$selector]')
+  [[ $(execute_async '
+const done = arguments[arguments.length - 1];
+const button = document.querySelector(arguments[0]);
+if (!button) return done(false);
+const rect = button.getBoundingClientRect();
+const event = (type) => new PointerEvent(type, {bubbles: true, cancelable: true, pointerId: 91, pointerType: "touch", button: 0, clientX: rect.left + 20, clientY: rect.top + 20});
+button.dispatchEvent(event("pointerdown"));
+setTimeout(() => {
+  button.dispatchEvent(event("pointerup"));
+  done(true);
+}, 560);' "$arguments") == true ]] || die 'could not long-press a shelf book'
+}
+
+choose_shelf_option() {
+  local selector=$1 arguments
+  click_shelf_control '.shelf-sort' 'could not open the shelf sort and view options'
+  click_shelf_control ".shelf-dialog[open] $selector" "shelf option is unavailable: $selector"
+  click_shelf_control '.shelf-sort' 'could not reopen the shelf sort and view options'
+  arguments=$(jq -cn --arg selector "$selector" '[$selector]')
+  [[ $(execute_sync 'return document.querySelector(`.shelf-dialog[open] ${arguments[0]}`)?.getAttribute("aria-pressed") === "true";' "$arguments") == true ]] ||
+    die "shelf option did not activate: $selector"
+  click_shelf_control '.shelf-dialog[open] button[aria-label="关闭"]' 'could not close the shelf options'
+}
+
+set_shelf_query() {
+  local arguments
+  arguments=$(jq -cn --arg query "$1" '[$query]')
+  [[ $(execute_sync '
+const input = document.querySelector(".shelf-search-field input");
+if (!input || !input.getClientRects().length || input.disabled) return false;
+input.value = arguments[0];
+input.dispatchEvent(new Event("input", { bubbles: true }));
+return true;' "$arguments") == true ]] || die 'could not set the shelf search query'
+}
+
+verify_library_layout() {
+  local width=$1 height=$2
+  choose_shelf_option 'button[aria-label="列表视图"]'
+  wait_for_script '
+const cards = [...document.querySelectorAll(".library-book")];
+const valid = cards.every((card) => {
+  const outer = card.querySelector(".library-book-open")?.getBoundingClientRect();
+  const cover = card.querySelector(".library-cover")?.getBoundingClientRect();
+  const title = card.querySelector(".library-book-title")?.getBoundingClientRect();
+  const author = card.querySelector(".library-book-author")?.getBoundingClientRect();
+  return Boolean(outer && cover && title && author && cover.left >= outer.left - 1 &&
+    cover.right <= title.left + 1 && title.right <= outer.right + 1 &&
+    author.right <= outer.right + 1 && title.top <= author.top && cover.bottom <= outer.bottom + 1);
+});
+const controls = [...document.querySelectorAll(".shelf-mast button, .shelf-mast input, .shelf-catalog-tools button")]
+  .filter((control) => control.getClientRects().length);
+const clipped = controls.filter((control) => control.scrollWidth > control.clientWidth + 1 || control.scrollHeight > control.clientHeight + 1);
+return {
+  width: innerWidth, list: document.querySelector(".library-shell")?.classList.contains("library-list-view"),
+  cards: cards.length, valid, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  controls: controls.length, clippedControls: clipped.map((control) => control.getAttribute("aria-label") || control.textContent.trim())
+};' \
+    ".width >= $((width - 2)) and .width <= $((width + 2)) and .list == true and .cards == $expected_books and .valid == true and .overflow == false and .controls >= 6 and .clippedControls == []" \
+    "library list layout failed at ${width}x${height}" >/dev/null
+
+  choose_shelf_option 'button[aria-label="网格视图"]'
   wait_for_script \
-    'const cards = [...document.querySelectorAll(".library-book")].map((card) => card.getBoundingClientRect()); const overlap = cards.some((left, index) => cards.slice(index + 1).some((right) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top)); return { width: innerWidth, grid: !document.querySelector(".library-shell")?.classList.contains("library-list-view"), pressed: document.querySelector("button[aria-label=\"网格视图\"]")?.getAttribute("aria-pressed"), cards: cards.length, overlap, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };' \
-    ".width >= $((width - 2)) and .width <= $((width + 2)) and .grid == true and .pressed == \"true\" and .cards == $expected_books and .overlap == false and .overflow == false" \
+    'const cards = [...document.querySelectorAll(".library-book")].map((card) => card.getBoundingClientRect()); const overlap = cards.some((left, index) => cards.slice(index + 1).some((right) => left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top)); return { width: innerWidth, grid: !document.querySelector(".library-shell")?.classList.contains("library-list-view"), cards: cards.length, overlap, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };' \
+    ".width >= $((width - 2)) and .width <= $((width + 2)) and .grid == true and .cards == $expected_books and .overlap == false and .overflow == false" \
     "library grid layout failed at ${width}x${height}" >/dev/null
 
   if ((width == 1000)); then
-    execute_sync '
-const input = document.querySelector(".library-search-field input");
-const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-setter?.call(input, "Atha FB2 Gate");
-input?.dispatchEvent(new Event("input", { bubbles: true }));
-return Boolean(input);
-' >/dev/null || die 'could not search the library'
+    set_shelf_query 'Atha FB2 Gate'
     wait_for_script \
       'return { cards: document.querySelectorAll(".library-book-open").length, title: document.querySelector(".library-book-title")?.textContent || "" };' \
       '.cards == 1 and .title == "Atha FB2 Gate"' \
       'library search no longer filters the shared result set' >/dev/null
-    execute_sync '
-const input = document.querySelector(".library-search-field input");
-const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-setter?.call(input, "");
-input?.dispatchEvent(new Event("input", { bubbles: true }));
-[...document.querySelectorAll(".library-views button")].find((button) => button.textContent.trim() === "书名")?.click();
-return true;
-' >/dev/null || die 'could not restore and sort the library'
+    set_shelf_query ''
+    choose_shelf_option 'button[data-shelf-sort="title"]'
     wait_for_script \
-      'return { cards: document.querySelectorAll(".library-book-open").length, selected: [...document.querySelectorAll(".library-views button")].find((button) => button.textContent.trim() === "书名")?.getAttribute("aria-current") || null };' \
-      ".cards == $expected_books and .selected == \"page\"" \
-      'library title sort no longer uses the shared result set' >/dev/null
-    execute_sync '
-[...document.querySelectorAll(".library-views button")].find((button) => button.textContent.trim() === "进度")?.click();
-return true;
-' >/dev/null || die 'could not open the progress grouping'
-    wait_for_script \
-      'return { groups: [...document.querySelectorAll(".library-group-heading h2")].map((heading) => heading.textContent), cards: document.querySelectorAll(".library-book-open").length };' \
-      ".groups == [\"在读\",\"未开始\"] and .cards == $expected_books" \
+      'return { cards: document.querySelectorAll(".library-book-open").length, continuous: Boolean(document.querySelector(".shelf-catalog > .library-grid")), letters: Boolean(document.querySelector(".shelf-jump")) };' \
+      ".cards == $expected_books and .continuous == true and .letters == true" \
+      'library title sort no longer uses the continuous catalogue' >/dev/null
+    choose_shelf_option 'button[data-shelf-sort="progress"]'
+    wait_for_script '
+const groups = [...document.querySelectorAll(".library-progress-groups > section")];
+return {
+  labels: groups.map((group) => group.querySelector(".library-group-heading h3")?.textContent),
+  counts: groups.map((group) => group.querySelectorAll(".library-book").length),
+  publicStarted: Boolean(groups[0]?.querySelector(".library-book-open[title=\"Atha FB2 Gate\"]")),
+  cards: document.querySelectorAll(".library-book-open").length
+};' \
+      ".labels == [\"已开始\",\"未开始\"] and .cards == $expected_books and (.counts | add) == $expected_books and .publicStarted == true" \
       'library progress grouping no longer uses the shared result set' >/dev/null
-    execute_sync '
-[...document.querySelectorAll(".library-views button")].find((button) => button.textContent.trim() === "默认")?.click();
-return true;
-' >/dev/null || die 'could not restore the default library view'
+    choose_shelf_option 'button[data-shelf-sort="title"]'
   fi
+}
+
+verify_continuous_shelf() {
+  local fixture=$run_root/ShelfGateRoundTrip.txt
+  local fixture_id fixture_source card open_book_button state body_point
+  printf '%s\n' 'Atha native shelf fixture body marker.' >"$fixture"
+  printf '%s\n' "$fixture" 'ShelfGateRoundTrip' 'Atha native shelf fixture body marker.' \
+    '原生验收标签' '原生验收主题' '原生验收系列' >>"$privacy_file"
+  fire_tauri_drag_event 'tauri://drag-drop' "$fixture" >/dev/null ||
+    die 'could not import the isolated shelf round-trip fixture'
+  state=$(wait_for_script '
+const cards = [...document.querySelectorAll(".library-book")];
+const added = cards.find((card) => card.querySelector(".library-book-title")?.textContent === "ShelfGateRoundTrip");
+return {cards: cards.length, fixture: added?.dataset.bookId || ""};' \
+    ".cards == $((expected_books + 1)) and (.fixture | test(\"^[a-f0-9]{64}$\"))" \
+    'the isolated shelf round-trip fixture did not import')
+  fixture_id=$(jq -er '.fixture' <<<"$state")
+  printf '%s\n' "$fixture_id" >>"$privacy_file"
+  fixture_source=$(jq -er '.sourcePath | select(test("^[a-f0-9]{64}\\.txt$"))' "$library_root/Library/$fixture_id.json") ||
+    die 'the shelf fixture has no staged source record'
+  card=".library-book[data-book-id=\"$fixture_id\"]"
+  open_book_button="$card .library-book-open"
+  click_shelf_control "$card .shelf-book-actions" 'could not open the fixture book actions'
+  click_book_menu_item '收藏'
+  wait_for_script \
+    'return {favorite: Boolean(document.querySelector(".library-book-open[title=ShelfGateRoundTrip][aria-label*=\"已收藏\"]")), menu: Boolean(document.querySelector(".library-book-menu"))};' \
+    '.favorite == true and .menu == false' 'the direct favorite action did not update the fixture' >/dev/null
+  click_shelf_control "$card .shelf-book-actions" 'could not reopen the fixture book actions'
+  click_book_menu_item '编辑分类'
+  [[ $(execute_sync '
+const dialog = document.querySelector(".shelf-edit-dialog[open]");
+const fields = {tags: "原生验收标签", subjects: "原生验收主题", series: "原生验收系列"};
+for (const [name, value] of Object.entries(fields)) {
+  const field = dialog?.querySelector(`textarea[name="${name}"]`);
+  if (!field) return false;
+  field.value = value;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+return true;') == true ]] || die 'could not edit the fixture classification'
+  click_shelf_control '.shelf-edit-dialog[open] button[type=submit]' 'could not submit fixture organization'
+  wait_for_script \
+    'return {saved: document.querySelector(".library-status")?.textContent === "书籍分类已保存。", open: Boolean(document.querySelector(".shelf-edit-dialog[open]"))};' \
+    '.saved == true and .open == false' 'fixture organization did not save' >/dev/null
+
+  execute_sync 'location.reload(); return true;' >/dev/null || die 'could not reload the organized shelf'
+  wait_for_script \
+    'return {favorite: Boolean(document.querySelector(".library-book-open[title=ShelfGateRoundTrip][aria-label*=\"已收藏\"]")), tag: Boolean(document.querySelector(".shelf-quick button[title=\"标签：原生验收标签\"]"))};' \
+    '.favorite == true and .tag == true' 'saved favorite and tag did not survive reload' >/dev/null
+  click_shelf_control '.shelf-filter-button' 'could not open shelf filters'
+  click_shelf_control '.shelf-dialog[open] [role="switch"]' 'could not enable the favorite filter'
+  [[ $(execute_sync '
+const tag = [...document.querySelectorAll(".shelf-dialog[open] [aria-label=\"标签\"] .shelf-chip")]
+  .find((button) => button.querySelector("span")?.textContent === "原生验收标签");
+tag?.click();
+return Boolean(tag);') == true ]] || die 'could not enable the saved tag filter'
+  click_shelf_control '.shelf-dialog[open] footer .shelf-dialog-confirm' 'could not apply the shelf filters'
+  set_shelf_query 'Atha FB2 Gate'
+  wait_for_script '
+return {
+  empty: Boolean(document.querySelector(".library-no-results")),
+  cards: document.querySelectorAll(".library-book").length,
+  conditions: document.querySelectorAll(".shelf-condition").length
+};' '.empty == true and .cards == 0 and .conditions == 3' \
+    'search ignored the active shelf conditions' >/dev/null
+  click_shelf_control '.library-no-results button' 'could not expand the search to the whole shelf'
+  wait_for_script '
+return {
+  title: document.querySelector(".library-book-title")?.textContent,
+  query: document.querySelector(".shelf-search-field input")?.value,
+  cards: document.querySelectorAll(".library-book").length,
+  conditions: document.querySelectorAll(".shelf-condition").length
+};' '.cards == 1 and .title == "Atha FB2 Gate" and .query == .title and .conditions == 1' \
+    'expanded search did not keep the keyword and expose the book outside the filters' >/dev/null
+
+  set_shelf_query '原生验收系列'
+  click_shelf_control '.shelf-quick button[title="标签：原生验收标签"]' 'could not reapply the saved tag'
+  choose_shelf_option 'button[data-shelf-sort="title-desc"]'
+  choose_shelf_option 'button[aria-label="列表视图"]'
+  [[ $(execute_sync 'return document.querySelectorAll(".library-book").length;') == 1 ]] ||
+    die 'search by saved series did not isolate the fixture'
+  webdriver_click_element "$open_book_button" || die 'could not open the filtered fixture'
+  wait_for_script '
+return {
+  status: document.documentElement.dataset.status || null,
+  ready: document.documentElement.hasAttribute("data-reader-ready"),
+  book: new URL(location.href).searchParams.get("state") || ""
+};' ".status == \"pass\" and .ready == true and .book == \"${fixture_id:0:16}\"" \
+    'filtered fixture did not open its own reader session' >/dev/null
+  body_point=$(execute_sync '
+const rect = document.querySelector(".reader").getBoundingClientRect();
+return {x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2};') ||
+    die 'could not locate the reader center'
+  perform_pointer_action "$body_point" tap || die 'could not reveal reader controls'
+  wait_for_script 'const controls = getComputedStyle(document.querySelector(".reader-controls")); return {visible: controls.visibility === "visible" && controls.opacity === "1"};' \
+    '.visible == true' 'the official reader back control did not become visible' >/dev/null
+  # The reader intentionally keeps rendered book markup in a closed shadow
+  # tree. Verify the distinctive body text through the reader's search UI.
+  webdriver_click_element '.reader-tool.search > summary' || die 'could not open reader search'
+  [[ $(execute_sync '
+const form = document.querySelector(".reader-tool.search[open] #search-form");
+const input = form?.querySelector("#search-query");
+if (!input) return false;
+input.value = "native shelf fixture body marker";
+form.requestSubmit();
+return true;') == true ]] || die 'could not search the opened fixture body'
+  wait_for_script '
+const items = [...document.querySelectorAll("#search-result-list button")];
+return {matches: items.length, exactBody: items.some((item) => item.textContent.includes("Atha native shelf fixture body marker."))};
+' '.matches == 1 and .exactBody == true' 'the opened reader did not find the distinctive fixture body text' >/dev/null
+  webdriver_click_element '#reader-back' || die 'could not return using the official reader back control'
+  wait_for_script '
+const button = document.querySelector(".library-book-open[title=ShelfGateRoundTrip]");
+return {
+  query: document.querySelector(".shelf-search-field input")?.value,
+  tag: document.querySelector(".shelf-quick button[title=\"标签：原生验收标签\"]")?.getAttribute("aria-pressed"),
+  sort: document.querySelector(".shelf-sort")?.textContent.trim(),
+  list: document.querySelector(".library-shell")?.classList.contains("library-list-view"),
+  cards: document.querySelectorAll(".library-book").length,
+  focused: Boolean(button && document.activeElement === button && !button.disabled),
+  recent: Boolean(document.querySelector(".shelf-recent-book[title=ShelfGateRoundTrip]"))
+};' '.query == "原生验收系列" and .tag == "true" and .sort == "书名 Z–A" and .list == true and .cards == 1 and .focused == true and .recent == true' \
+    'reader return did not restore the shelf query, filter, sort, view, and focus' >/dev/null
+
+  long_press_shelf_book '.shelf-recent-book[title=ShelfGateRoundTrip]'
+  wait_for_script '
+const menu = document.querySelector(".library-book-menu");
+return {name: menu?.getAttribute("aria-label"), items: [...(menu?.querySelectorAll("[role=menuitem]") || [])].map((item) => item.textContent.trim())};
+' '.name == "《ShelfGateRoundTrip》操作" and .items == ["打开","选择","取消收藏","编辑分类","更换封面","移出书架","删除本地数据"]' \
+    'long press in Recent Reading did not open the same book menu' >/dev/null
+  [[ $(execute_sync '
+document.activeElement.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true}));
+return !document.querySelector(".library-book-menu");') == true ]] || die 'could not close the recent book menu'
+
+  click_shelf_control '.shelf-clear' 'could not reset the shelf conditions'
+  choose_shelf_option 'button[data-shelf-sort="title"]'
+  choose_shelf_option 'button[aria-label="网格视图"]'
+  click_shelf_control "$card .shelf-book-actions" 'could not reopen the fixture book actions'
+  [[ $(execute_sync '
+const item = document.querySelector(".library-book-menu button.danger");
+if (!item || item.textContent.trim() !== "删除本地数据") return false;
+item.click();
+return true;') == true ]] || die 'could not trigger deletion confirmation of the isolated fixture'
+  wait_for_script '
+const dialog = document.querySelector("[data-atha-confirm-dialog]");
+const text = dialog?.textContent || "";
+return {
+  open: Boolean(dialog?.querySelector("[data-atha-confirm-accept]")),
+  valid: text.includes("删除这 1 本书的本地文件和阅读状态") && text.includes("笔记、标注和原文快照会保留")
+};' '.open == true and .valid == true' 'deletion confirmation dialog for isolated fixture did not appear' >/dev/null
+  webdriver_click_element '[data-atha-confirm-accept]' || die 'could not confirm deletion of the isolated fixture'
+  wait_for_script '
+return {
+  cards: document.querySelectorAll(".library-book").length,
+  fixture: Boolean(document.querySelector("[data-shelf-open][title=ShelfGateRoundTrip]")),
+  conditions: document.querySelectorAll(".shelf-condition").length,
+  deleted: document.querySelector(".library-status")?.textContent === "已删除 1 本书的本地数据。"
+};' ".cards == $expected_books and .fixture == false and .conditions == 0 and .deleted == true" \
+    'the fixture survived local deletion or left the original shelf filtered' >/dev/null
+  [[ ! -e $library_root/Library/$fixture_id.json && ! -e $library_root/ImportedBooks/$fixture_id &&
+    ! -e $library_root/SourceBooks/$fixture_source ]] ||
+    die 'local deletion left fixture library data behind'
+  continuous_shelf_evidence='{"savedOrganization":true,"organizationAfterReload":true,"scopedSearch":true,"expandedSearch":true,"realReaderContent":true,"returnedQueryFilterSortViewFocus":true,"recentReadingLongPressMenu":true,"fixtureDeleted":true}'
 }
 
 verify_library_settings() {
@@ -643,7 +987,7 @@ return {
   themeModes: [...(page?.querySelectorAll(".library-theme-control button") || [])].map((button) => button.textContent.trim()),
   themeChecked: page?.querySelector(".library-theme-control [aria-checked=true]")?.textContent.trim() || "",
   controls: controls.every((control) => control.getBoundingClientRect().height >= 40),
-  search: Boolean(document.querySelector(".library-search-field")),
+  search: Boolean(document.querySelector(".shelf-search-field")),
   legacyMenu: Boolean(document.querySelector(".library-management")),
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
 };' \
@@ -673,7 +1017,7 @@ return {
   color: style.color,
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
 };' \
-    '.shell == "light" and .root == "light" and .tone == "light" and .stored == "light" and .readerUnchanged == true and .background == "rgb(255, 255, 255)" and .color == "rgb(37, 43, 41)" and .overflow == false' \
+    '.shell == "light" and .root == "light" and .tone == "light" and .stored == "light" and .readerUnchanged == true and .background == "rgb(253, 252, 249)" and .color == "rgb(31, 29, 26)" and .overflow == false' \
     'independent application theme did not become ready') || die 'could not inspect the application theme'
   capture_public_ui settings
   [[ $(execute_sync '
@@ -682,21 +1026,28 @@ const button = [...document.querySelectorAll(".library-theme-control button")]
 button?.click();
 return Boolean(button);') == true ]] || die 'could not restore the system application theme'
   [[ $(execute_sync '
-const appearance = localStorage.getItem("atha.app.appearance.v1");
+globalThis.__athaAppearanceBeforeReset = localStorage.getItem("atha.app.appearance.v1");
 localStorage.setItem("atha.reader.application.v1", JSON.stringify({
   schema: 1,
   preferences: {theme: "paper", brightness: 90, fontSize: 24, fontFamily: "serif", density: "compact"}
 }));
-const originalConfirm = globalThis.confirm;
-globalThis.confirm = () => true;
 const button = [...document.querySelectorAll(".library-settings button")]
   .find((item) => item.textContent.trim() === "恢复阅读默认");
 button?.click();
-globalThis.confirm = originalConfirm;
+return Boolean(button);') == true ]] || die 'could not trigger reading defaults reset'
+  wait_for_script \
+    'return { open: Boolean(document.querySelector("[data-atha-confirm-dialog] [data-atha-confirm-accept]")) };' \
+    '.open == true' 'reset reading defaults confirmation did not appear' >/dev/null
+  webdriver_click_element '[data-atha-confirm-accept]' || die 'could not confirm reading defaults reset'
+  wait_for_script '
+const dialog = document.querySelector("[data-atha-confirm-dialog]");
 const preferences = JSON.parse(localStorage.getItem("atha.reader.application.v1") || "null")?.preferences;
-return Boolean(button) && localStorage.getItem("atha.app.appearance.v1") === appearance &&
-  JSON.stringify(preferences) === JSON.stringify({theme: "system", brightness: 100, fontSize: 19, fontFamily: "book", density: "standard"});') == true ]] ||
-    die 'reading defaults did not reset independently from application appearance'
+const sameAppearance = localStorage.getItem("atha.app.appearance.v1") === globalThis.__athaAppearanceBeforeReset;
+if (!dialog && sameAppearance && JSON.stringify(preferences) === JSON.stringify({theme: "system", brightness: 100, fontSize: 19, fontFamily: "book", density: "standard"})) {
+  delete globalThis.__athaAppearanceBeforeReset;
+  return { done: true };
+}
+return { done: false };' '.done == true' 'reading defaults did not reset independently from application appearance' >/dev/null
 
   [[ $(execute_sync '
 const button = [...document.querySelectorAll(".library-data-actions button")]
@@ -725,21 +1076,16 @@ const event = new MouseEvent("contextmenu", {bubbles: true, cancelable: true, bu
 return !button.dispatchEvent(event);') == true ]] || die 'could not dispatch a library context menu event'
   context=$(wait_for_script \
     'const menu = document.querySelector(".library-book-menu"); const rect = menu?.getBoundingClientRect(); return { open: Boolean(menu), labels: [...(menu?.querySelectorAll("button") || [])].map((button) => button.textContent.trim()), inViewport: Boolean(rect && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight) };' \
-    '.open == true and .labels == ["打开","选择","更换封面","移出书架","删除本地数据"] and .inViewport == true' \
+    '.open == true and .labels == ["打开","选择","收藏","编辑分类","更换封面","移出书架","删除本地数据"] and .inViewport == true' \
     'library context menu did not become ready')
   [[ $(execute_sync 'document.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true})); return !document.querySelector(".library-book-menu");') == true ]] ||
     die 'could not close the library context menu'
-  [[ $(execute_async '
-const done = arguments[arguments.length - 1];
-const button = document.querySelector(".library-book-open");
-if (!button) return done(false);
-const rect = button.getBoundingClientRect();
-const event = (type) => new PointerEvent(type, {bubbles: true, cancelable: true, pointerId: 91, pointerType: "touch", button: 0, clientX: rect.left + 20, clientY: rect.top + 20});
-button.dispatchEvent(event("pointerdown"));
-setTimeout(() => {
-  button.dispatchEvent(event("pointerup"));
-  done(true);
-}, 560);') == true ]] || die 'could not long-press a library book'
+  long_press_shelf_book '.library-book-open'
+  wait_for_script \
+    'const menu = document.querySelector(".library-book-menu"); return {open: Boolean(menu), labels: [...(menu?.querySelectorAll("[role=menuitem]") || [])].map((button) => button.textContent.trim())};' \
+    '.open == true and .labels == ["打开","选择","收藏","编辑分类","更换封面","移出书架","删除本地数据"]' \
+    'long press did not open the same library book menu as right click' >/dev/null
+  click_book_menu_item '选择'
   selection=$(wait_for_script \
     'const buttons = [...document.querySelectorAll(".library-selection-bar button")]; const rects = buttons.map((button) => button.getBoundingClientRect()); return { count: buttons.length, selected: document.querySelectorAll(".library-book-open[aria-pressed=true]").length, labels: buttons.map((button) => button.textContent.trim()), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, clipped: buttons.some((button) => button.scrollWidth > button.clientWidth || button.scrollHeight > button.clientHeight), inViewport: rects.every((rect) => rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight), separated: rects.every((rect, index) => index == 0 || rects[index - 1].right <= rect.left + 1) };' \
     '.count == 3 and .selected == 1 and .labels == ["封面","移出","删除"] and .overflow == false and .clipped == false and .inViewport == true and .separated == true' \
@@ -840,10 +1186,127 @@ return Boolean(button);') == true ]] || die 'could not open a reading memory res
   open_library "$expected_books"
 }
 
+verify_authoring_cycle() {
+  local marker marker_json reply_marker reply_marker_json root_id_json reply href probe point selection ready saved composer_evidence composer_ready viewport_evidence='[]'
+  local width jump search root_id jump_element jump_element_id book_key progress_key progress_key_json progress_key_args public_id_json memory_section_json book_key_json
+  # WebKitWebDriver on X11 sends letter keys without preserving uppercase.
+  # These synthetic markers only need to be unique; compare saved text exactly.
+  marker="atha-linux-reader-cycle-${BASHPID}-${RANDOM}"
+  reply_marker="${marker}-reply"
+  marker_json=$(jq -nr --arg value "$marker" '$value | @json')
+  reply_marker_json=$(jq -nr --arg value "$reply_marker" '$value | @json')
+  book_key=${public_id:0:16}
+  progress_key="atha.reader.progress.${book_key}.v1"
+  progress_key_json=$(jq -nr --arg value "$progress_key" '$value | @json')
+  public_id_json=$(jq -nr --arg value "$public_id" '$value | @json')
+  memory_section_json=$(jq -nr --arg value "$memory_section" '$value | @json')
+  book_key_json=$(jq -nr --arg value "$book_key" '$value | @json')
+  printf '%s\n' "$marker" "$reply_marker" >>"$privacy_file"
+  reply=$(jq -nr --arg marker "$reply_marker" '$marker + " " + ("长内容片段。" * 320)')
+  (( ${#reply} <= 8000 )) || die 'authoring reply exceeds the composer limit'
+
+  say 'verifying trusted-selection authoring, memory search, and source return'
+  open_library "$expected_books"
+  set_window_size 360 760
+  open_book public
+  enable_diagnostics
+  href=$(jq -er --arg section "$memory_section" '.sections[] | select(.id == $section) | .href' "$public_manifest") ||
+    die 'public authoring section is missing'
+  open_gesture_section "$href" false >/dev/null
+  probe=$(wait_for_script \
+    'return globalThis.__athaReaderDiagnostics?.selectionProbe() || null;' \
+    '(.startX | type == "number") and (.startY | type == "number") and (.endX | type == "number") and (.endY | type == "number")' \
+    'public text selection geometry did not become ready')
+  point=$(jq -c '{x: .startX, y: .startY, endX, endY}' <<<"$probe")
+  perform_pointer_action "$point" drag || die 'trusted mouse selection failed'
+  selection=$(wait_for_script \
+    'const actions = document.querySelector("#selection-actions"); return { visible: Boolean(actions && !actions.hidden) };' \
+    '.visible == true' \
+    'trusted mouse drag did not select public text')
+  webdriver_click_element '#note-selection' || die 'could not open the selected-text note composer'
+  ready=$(wait_for_script \
+    'const overlay = document.querySelector("#message-conversation"); const editor = overlay?.querySelector("[role=textbox]"); return { open: Boolean(overlay && !overlay.hidden), editor: Boolean(editor), context: Boolean(document.querySelector("#message-composer-context")), error: document.documentElement.dataset.error || null };' \
+    '.open == true and .editor == true and .context == true and .error == null' \
+    'selected-text note composer did not mount')
+  webdriver_send_keys '#message-conversation [role="textbox"]' "$marker" || die 'could not type the public note marker'
+  wait_for_script \
+    "const editor = document.querySelector('#message-composer [role=textbox]'); return { correct: editor?.textContent === $marker_json, enabled: Boolean(document.querySelector('.message-send-button:not(:disabled)')) };" \
+    '.correct == true and .enabled == true' 'the selected-text composer did not receive the note marker' >/dev/null
+  webdriver_click_element '#message-composer .message-send-button' || die 'could not save the selected-text note'
+  saved=$(wait_for_script \
+    "const bodies = [...document.querySelectorAll('#message-conversation-list .message-card-body')]; const root = bodies.find((body) => body.textContent.includes($marker_json)); return { saved: Boolean(root), count: bodies.length, replyContext: Boolean(document.querySelector('#message-composer [role=textbox]')), error: document.documentElement.dataset.error || null };" \
+    '.saved == true and .count == 1 and .replyContext == true and .error == null' \
+    'public note did not save through the conversation composer')
+  root_id=$(execute_sync \
+    "const card = [...document.querySelectorAll('#message-conversation-list .message-card')].find((item) => item.dataset.root === 'true' && item.querySelector('.message-card-body')?.textContent.includes($marker_json)); return card?.dataset.messageId || null;" |
+    jq -er '.') ||
+    die 'could not identify the saved note for privacy-safe evidence'
+  [[ $root_id != null && -n $root_id ]] || die 'saved public note has no root message'
+  root_id_json=$(jq -nr --arg value "$root_id" '$value | @json')
+
+  webdriver_send_keys '#message-conversation [role="textbox"]' "$reply" || die 'could not type the long public reply'
+  for width in 360; do
+    composer_evidence=$(wait_for_script \
+      'const button = document.querySelector("#message-composer .message-send-button"); const rect = button?.getBoundingClientRect(); const list = document.querySelector("#message-conversation-list"); const body = [...document.querySelectorAll(".message-card-body")].find((item) => item.textContent.length > 1000); return { width: innerWidth, sendVisible: Boolean(rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight), sendEnabled: Boolean(button && !button.disabled), longBody: Boolean(body), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, listScrollable: Boolean(list && list.scrollHeight > list.clientHeight) };' \
+      '.width >= 358 and .width <= 362 and .sendVisible == true and .sendEnabled == true and .overflow == false' \
+      'narrow conversation composer is not reachable')
+  done
+  webdriver_click_element '#message-composer .message-send-button' || die 'could not send the long public reply'
+  wait_for_script \
+    "const bodies = [...document.querySelectorAll('#message-conversation-list .message-card-body')]; const reply = bodies.find((body) => body.textContent.includes($reply_marker_json)); return { saved: Boolean(reply), count: bodies.length, length: reply?.textContent.length || 0, error: document.documentElement.dataset.error || null };" \
+    '.saved == true and .count == 2 and .length > 1500 and .length < 8000 and .error == null' \
+    'long public reply did not save' >/dev/null
+  webdriver_click_element '#message-conversation-close' || die 'could not close the authoring conversation'
+  wait_for_script \
+    'return { closed: document.querySelector("#message-conversation")?.hidden === true, focused: document.activeElement === document.querySelector(".reader"), error: document.documentElement.dataset.error || null };' \
+    '.closed == true and .focused == true and .error == null' \
+    'closing the authoring conversation did not restore reader focus' >/dev/null
+
+  for width in 360 1000 1600; do
+    open_library "$expected_books"
+    if [[ $width == 1000 ]]; then set_window_size "$width" 760; fi
+    if [[ $width == 1600 ]]; then set_window_size "$width" 900; fi
+    execute_sync 'const button = [...document.querySelectorAll(".library-sections button")].find((item) => item.textContent.trim() === "阅读记忆"); button?.click(); return Boolean(button);' >/dev/null ||
+      die 'could not open memory search for the new public note'
+    webdriver_send_keys '.memory-search-form input' "$marker" || die 'could not enter the private memory query'
+    webdriver_click_element '.memory-search-form button[type="submit"]' || die 'could not submit the public memory search'
+    search=$(wait_for_script \
+      "const rows = [...document.querySelectorAll('.memory-result')]; const books = rows.every((row) => row.querySelector('h3')?.textContent === 'Atha FB2 Gate'); const quote = rows.every((row) => row.querySelector('blockquote')?.textContent.includes('第二节正文')); const root = rows.some((row) => row.querySelector('.memory-result-text')?.textContent.includes($marker_json)); const reply = rows.some((row) => row.querySelector('.memory-result-text')?.textContent.includes($reply_marker_json)); return { count: rows.length, books, quote, root, reply, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };" \
+      '.count == 2 and .books == true and .quote == true and .root == true and .reply == true and .overflow == false' \
+      'memory search did not find both new public messages')
+    progress_key_args=$(jq -cn --arg key "$progress_key" '[$key]')
+    [[ $(execute_sync 'const key = arguments[0]; localStorage.removeItem(key); return localStorage.getItem(key) === null;' "$progress_key_args") == true ]] ||
+      die 'could not clear the isolated public-book progress before memory jump'
+    jump_element=$(execute_sync 'const button = [...document.querySelectorAll(".memory-result")].find((row) => row.querySelector(".memory-result-text")?.textContent.includes(arguments[0]))?.querySelector(".memory-jump") || null; button?.scrollIntoView({block: "center", inline: "nearest"}); return button;' "$(jq -cn --arg marker "$reply_marker" '[$marker]')") ||
+      die 'could not locate the reply memory jump control'
+    jump_element_id=$(jq -er '.["element-6066-11e4-a52e-4f735466cecf"]' <<<"$jump_element") ||
+      die 'reply memory jump control is unavailable'
+    webdriver_click_element_ref "$jump_element_id" || die 'could not jump back to the public source'
+    jump=$(wait_for_script \
+      "const source = document.querySelector('#message-conversation-source')?.textContent || ''; const rows = [...document.querySelectorAll('#message-conversation-list .message-card-body')]; const reply = rows.find((body) => body.textContent.includes($reply_marker_json)); const rootPresent = [...document.querySelectorAll('#message-conversation-list .message-card')].some((card) => card.dataset.messageId === $root_id_json); const list = document.querySelector('#message-conversation-list'); const send = document.querySelector('#message-composer .message-send-button'); const rect = send?.getBoundingClientRect(); let progress = null; let progressLocator = null; try { progress = JSON.parse(localStorage.getItem($progress_key_json) || 'null'); progressLocator = JSON.parse(progress?.locator || 'null'); } catch {} if (list) list.scrollTop = list.scrollHeight; return { navigation: document.documentElement.dataset.readingMemoryNavigation || null, routeState: new URL(location.href).searchParams.get('state') || null, readerReady: document.documentElement.hasAttribute('data-reader-ready'), sameEdition: progress?.schema === 1 && progress?.contentVersion === $public_id_json && progressLocator?.contentVersion === $public_id_json, sameSection: progressLocator?.start?.section === $memory_section_json, sourceQuote: source.includes('第二节正文'), rootPresent, reply: Boolean(reply), longReply: (reply?.textContent.length || 0) > 1500, scrollable: Boolean(list && list.scrollHeight > list.clientHeight), scrolled: Boolean(list && list.scrollTop > 0), sendVisible: Boolean(rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight), viewport: innerWidth, error: document.documentElement.dataset.error || null };" \
+      ".navigation == \"ok\" and .routeState == $book_key_json and .readerReady == true and .sameEdition == true and .sameSection == true and .sourceQuote == true and .rootPresent == true and .reply == true and .longReply == true and .scrollable == true and .scrolled == true and .sendVisible == true and .error == null" \
+      'memory jump did not return to the saved source and scrollable conversation')
+    webdriver_send_keys '#message-conversation [role="textbox"]' "${marker}-draft" || die 'could not test the returned composer'
+    composer_ready=$(wait_for_script \
+      'const button = document.querySelector("#message-composer .message-send-button"); const rect = button?.getBoundingClientRect(); return { visible: Boolean(rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight), enabled: Boolean(button && !button.disabled) };' \
+      '.visible == true and .enabled == true' \
+      'returned conversation composer could not reach send')
+    viewport_evidence=$(jq -cn --arg bookKey "$book_key" --argjson prior "$viewport_evidence" --argjson jump "$jump" --argjson search "$search" --argjson composer "$composer_ready" \
+      '$prior + [{width: $jump.viewport, searchHits: $search.count, sourceQuote: $jump.sourceQuote, sameEdition: $jump.sameEdition, sameSection: $jump.sameSection, rootPresent: $jump.rootPresent, routeStateValidated: ($jump.routeState == $bookKey and $jump.readerReady == true), locatorNavigationValidated: ($jump.navigation == "ok"), longReply: $jump.longReply, scrollable: $jump.scrollable, scrolled: $jump.scrolled, sendVisible: $composer.visible, sendEnabled: $composer.enabled}]')
+    webdriver_click_element '#message-conversation-close' || die 'could not close the returned conversation'
+    wait_for_script \
+      'return { closed: document.querySelector("#message-conversation")?.hidden === true, focused: document.activeElement === document.querySelector(".reader") };' \
+      '.closed == true and .focused == true' \
+      'closing the returned conversation did not restore reader focus' >/dev/null
+  done
+  authoring_cycle_evidence=$(jq -cn --argjson composer "$composer_evidence" --argjson viewports "$viewport_evidence" \
+    '{trustedMouseSelection: true, noteSaved: true, replySent: true, reopened: true, searchHits: 2, jumpToSource: true, composer: {width: $composer.width, sendVisible: $composer.sendVisible, sendEnabled: $composer.sendEnabled}, sameEdition: all($viewports[]; .sameEdition == true), sameSection: all($viewports[]; .sameSection == true), sameRoot: all($viewports[]; .rootPresent == true), routeStateValidated: all($viewports[]; .routeStateValidated == true), locatorNavigationValidated: all($viewports[]; .locatorNavigationValidated == true), focusRestored: true, viewports: $viewports}')
+}
+
 verify_desktop_workspace() {
   local baseline resized restored workspace search notes directory keyboard medium narrow tool tool_switch
   local notes_two notes_return notes_wide notes_wide_return medium_notes medium_thread portrait_notes portrait_thread portrait_return terminology
-  local baseline_anchor resized_anchor restored_anchor workspace_anchor tool_switch_anchor
+  local baseline_anchor resized_anchor restored_anchor workspace_anchor tool_switch_anchor search_point
 
   baseline=$(wait_for_script \
     'const frame = document.querySelector(".reader-frame"); const reader = document.querySelector(".reader"); const page = document.querySelector(".page"); const controls = document.querySelector(".reader-controls"); const frameRect = frame?.getBoundingClientRect(); const readerRect = reader?.getBoundingClientRect(); const pageRect = page?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; const controlsStyle = controls ? getComputedStyle(controls) : null; return { desktop: document.documentElement.hasAttribute("data-desktop-workspace"), active: document.documentElement.dataset.workspacePanel || null, openPanels: document.querySelectorAll(".reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]").length, stable: document.documentElement.dataset.viewportStable === expected, full: Boolean(frameRect && readerRect && Math.abs(frameRect.left) <= 1 && Math.abs(frameRect.width - innerWidth) <= 2 && Math.abs(readerRect.left - frameRect.left) <= 1 && Math.abs(readerRect.width - frameRect.width) <= 1), centered: Boolean(pageRect && readerRect && Math.abs((pageRect.left - readerRect.left) - (readerRect.right - pageRect.right)) <= 2), pageWidth: pageRect?.width || 0, pageMargin: reader ? parseFloat(getComputedStyle(reader).getPropertyValue("--page-left-margin")) / devicePixelRatio : 0, controlsHidden: controlsStyle?.visibility === "hidden", overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
@@ -917,11 +1380,11 @@ return Boolean(input);') == true ]] || die 'could not submit desktop book search
     'const state = globalThis.__athaReaderDiagnostics?.snapshot().search; return { status: state?.status || null, count: state?.count || 0, options: document.querySelectorAll("#search-results option").length, active: document.documentElement.dataset.workspacePanel || null };' \
     '.status == "complete" and .count > 0 and .options > 0 and .active == "search"' \
     'desktop book search did not return results')
-  [[ $(execute_sync '
-const results = document.querySelector("#search-results");
-results.selectedIndex = 0;
-document.querySelector("#go-search-result")?.click();
-return results.options.length > 0;') == true ]] || die 'could not open a desktop search result'
+  search_point=$(execute_sync '
+const rect = document.querySelector("#search-result-list button")?.getBoundingClientRect();
+return rect ? {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2} : null;') ||
+    die 'could not locate a desktop search result'
+  perform_pointer_action "$search_point" tap || die 'could not open a desktop search result'
   wait_for_script \
     'const search = globalThis.__athaReaderDiagnostics?.snapshot().search; return { visible: Boolean(search?.lastJump?.visible), error: document.documentElement.dataset.error || null };' \
     '.visible == true and .error == null' \
@@ -945,17 +1408,16 @@ return true;') == true ]] || die 'could not open a desktop message conversation'
     '.open == true and .title == "对话" and .scopes == ["当前", "本章", "本书"] and .scopeLabel == "对话范围" and .closeLabel == "返回笔记" and .source == "第二节正文" and .sourceLabel == "原文" and .sourceHeaderVisible == false and .cards == 3 and .rootReplyPreviews == 0 and .nestedReplyLabel == "回复" and .rightAligned == true and .active == "notes" and .openPanels == 1 and .selected == 1 and (.notes.left | fabs) <= 1 and ((.notes.right - 320) | fabs) <= 2 and (.notes.top | fabs) <= 1 and ((.notes.bottom - .viewport.height) | fabs) <= 2 and ((.thread.left - .notes.right) | fabs) <= 2 and ((.thread.right - .viewport.width) | fabs) <= 2 and (.thread.top | fabs) <= 1 and ((.thread.bottom - .viewport.height) | fabs) <= 2 and ((.composerBottom - .thread.bottom) | fabs) <= 2 and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewport.width - 320)) | fabs) <= 2 and .locator != null and .error == null' \
     'desktop B+C message workspace did not become ready')
   [[ $(execute_sync '
-globalThis.__athaOriginalConfirm = globalThis.confirm;
-globalThis.__athaDeleteConfirmCalls = 0;
-globalThis.confirm = () => { globalThis.__athaDeleteConfirmCalls += 1; return false; };
 document.querySelector(".message-card [data-message-action=delete]")?.click();
 return true;') == true ]] || die 'could not probe message deletion cancellation'
   wait_for_script \
-    'return {calls: globalThis.__athaDeleteConfirmCalls || 0, cards: document.querySelectorAll(".message-card").length, items: document.querySelectorAll(".annotation-item").length};' \
-    '.calls == 1 and .cards == 3 and .items == 1' \
+    'return { open: Boolean(document.querySelector("[data-atha-confirm-dialog] [data-atha-confirm-cancel]")) };' \
+    '.open == true' 'message deletion confirmation did not appear' >/dev/null
+  webdriver_click_element '[data-atha-confirm-cancel]' || die 'could not cancel message deletion'
+  wait_for_script \
+    'return {dialog: Boolean(document.querySelector("[data-atha-confirm-dialog]")), cards: document.querySelectorAll(".message-card").length, items: document.querySelectorAll(".annotation-item").length};' \
+    '.dialog == false and .cards == 3 and .items == 1' \
     'canceling message deletion changed the conversation' >/dev/null
-  execute_sync 'globalThis.confirm = globalThis.__athaOriginalConfirm; delete globalThis.__athaOriginalConfirm; return true;' >/dev/null ||
-    die 'could not restore the platform confirmation function'
   execute_sync 'document.querySelector("[data-message-scope=chapter]")?.click(); return true;' >/dev/null ||
     die 'could not open the chapter conversation scope'
   terminology=$(wait_for_script \
@@ -989,13 +1451,13 @@ return true;') == true ]] || die 'could not probe message deletion cancellation'
     die 'could not widen the active notes workspace'
   wait_for_script \
     'const reader = document.querySelector(".reader"); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, frame: frame ? {left: frame.left, right: frame.right} : null, error: document.documentElement.dataset.error || null };' \
-    '.active == "notes" and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2 and .error == null' \
+    '.viewportWidth >= 1598 and .viewportWidth <= 1602 and .active == "notes" and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2 and .error == null' \
     'wide A+B notes workspace did not stabilize' >/dev/null
   execute_sync 'document.querySelector(".annotation-item[data-selected=true] .annotation-item-main")?.click(); return true;' >/dev/null ||
     die 'could not reopen the selected wide message conversation'
   notes_wide=$(wait_for_script \
     'const overlay = document.querySelector("#message-conversation"); const notes = document.querySelector(".notes-panel")?.getBoundingClientRect(); const thread = overlay?.getBoundingClientRect(); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, open: Boolean(overlay && !overlay.hidden), active: document.documentElement.dataset.workspacePanel || null, selected: document.querySelectorAll(".annotation-item[data-selected=true]").length, stable: document.documentElement.dataset.viewportStable === expected, notes: notes ? {left: notes.left, right: notes.right} : null, thread: thread ? {left: thread.left, right: thread.right, width: thread.width} : null, frame: frame ? {left: frame.left, right: frame.right, width: frame.width} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
-    '.open == true and .active == "notes" and .selected == 1 and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - .notes.left) | fabs) <= 2 and ((.notes.right - .thread.left) | fabs) <= 2 and .frame.width >= 600 and .thread.width >= 440 and .thread.width <= 520 and ((.thread.right - .viewportWidth) | fabs) <= 2 and .locator != null and .error == null' \
+    '.viewportWidth >= 1598 and .viewportWidth <= 1602 and .open == true and .active == "notes" and .selected == 1 and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - .notes.left) | fabs) <= 2 and ((.notes.right - .thread.left) | fabs) <= 2 and .frame.width >= 600 and .thread.width >= 440 and .thread.width <= 520 and ((.thread.right - .viewportWidth) | fabs) <= 2 and .locator != null and .error == null' \
     'wide A+B+C message workspace did not become ready')
   [[ $(jq -r '.locator' <<<"$notes_wide") == "$(jq -r '.locator' <<<"$notes_return")" ]] ||
     die 'opening the wide thread changed the current locator'
@@ -1004,7 +1466,7 @@ return true;') == true ]] || die 'could not probe message deletion cancellation'
     die 'could not close the wide message conversation'
   notes_wide_return=$(wait_for_script \
     'const overlay = document.querySelector("#message-conversation"); const reader = document.querySelector(".reader"); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, open: Boolean(overlay && !overlay.hidden), active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, focused: document.activeElement === document.querySelector(".annotation-item[data-selected=true] .annotation-item-main"), frame: frame ? {left: frame.left, right: frame.right} : null, locator: globalThis.__athaReaderDiagnostics?.snapshot().navigation.current || null, error: document.documentElement.dataset.error || null };' \
-    '.open == false and .active == "notes" and .stable == true and .focused == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2 and .locator != null and .error == null' \
+    '.viewportWidth >= 1598 and .viewportWidth <= 1602 and .open == false and .active == "notes" and .stable == true and .focused == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2 and .locator != null and .error == null' \
     'closing the wide thread did not restore A+B')
   [[ $(jq -r '.locator' <<<"$notes_wide_return") == "$(jq -r '.locator' <<<"$notes_wide")" ]] ||
     die 'closing the wide thread changed the current locator'
@@ -1013,7 +1475,7 @@ return true;') == true ]] || die 'could not probe message deletion cancellation'
     die 'could not restore the active notes workspace width'
   wait_for_script \
     'const reader = document.querySelector(".reader"); const frame = document.querySelector(".reader-frame")?.getBoundingClientRect(); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return { viewportWidth: innerWidth, active: document.documentElement.dataset.workspacePanel || null, stable: document.documentElement.dataset.viewportStable === expected, frame: frame ? {left: frame.left, right: frame.right} : null };' \
-    '.active == "notes" and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2' \
+    '.viewportWidth >= 1278 and .viewportWidth <= 1282 and .active == "notes" and .stable == true and (.frame.left | fabs) <= 2 and ((.frame.right - (.viewportWidth - 320)) | fabs) <= 2' \
     'restored A+B notes workspace did not stabilize' >/dev/null
 
   execute_sync 'document.querySelector(".reader-tool.directory > summary")?.click(); return true;' >/dev/null ||
@@ -1121,7 +1583,7 @@ document.documentElement.setAttribute('data-reader-tools', '');
 document.querySelector('.reader-tool.$tool > summary')?.click();
 return true;" >/dev/null || die "could not open the narrow $tool tool"
     wait_for_script \
-      "const details = document.querySelector('.reader-tool.$tool'); const rect = details?.querySelector('.tool-panel')?.getBoundingClientRect(); const fullscreen = '$tool' !== 'search'; return { open: Boolean(details?.open), only: document.querySelectorAll('.reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]').length === 1, layout: Boolean(rect && Math.abs(rect.left) <= 1 && Math.abs(rect.width - innerWidth) <= 2 && (fullscreen ? Math.abs(rect.top) <= 1 && Math.abs(rect.bottom - innerHeight) <= 2 : rect.top > 0 && rect.bottom <= innerHeight - 47)), overflow: Boolean(rect && details.querySelector('.tool-panel').scrollWidth > rect.width + 1) };" \
+      "const details = document.querySelector('.reader-tool.$tool'); const rect = details?.querySelector('.tool-panel')?.getBoundingClientRect(); return { open: Boolean(details?.open), only: document.querySelectorAll('.reader-tool.directory[open], .reader-tool.search[open], .reader-tool.notes[open]').length === 1, layout: Boolean(rect && Math.abs(rect.left) <= 1 && Math.abs(rect.width - innerWidth) <= 2 && rect.top > 0 && Math.abs(rect.bottom - innerHeight) <= 2 && Math.abs(rect.height - visualViewport.height * 0.82) <= 2), overflow: Boolean(rect && details.querySelector('.tool-panel').scrollWidth > rect.width + 1) };" \
       '.open == true and .only == true and .layout == true and .overflow == false' \
       "narrow $tool tool no longer uses the mobile layout" >/dev/null
     execute_sync "document.querySelector('.reader-tool.$tool').open = false; document.documentElement.removeAttribute('data-reader-tools'); return true;" >/dev/null ||
@@ -1203,6 +1665,16 @@ return document.documentElement.hasAttribute("data-reader-tools");') == false ]]
 verify_reader_redesign() {
   local width height result saved point selector before bookmark expected
   saved=$(execute_sync 'return localStorage.getItem("atha.reader.application.v1");')
+  execute_sync '
+const mode = document.querySelector("#reading-mode");
+document.querySelector("#preferences-status").textContent = "";
+mode.value = "paged";
+mode.dispatchEvent(new Event("change", {bubbles: true}));
+return true;' >/dev/null
+  wait_for_script \
+    'return {mode: document.querySelector(".reader").dataset.readingMode, applied: document.querySelector("#preferences-status").textContent};' \
+    '.mode == "paged" and .applied == "已应用"' \
+    'paged controls did not become ready after the scroll-mode check' >/dev/null
   for width in 360 1000 1600; do
     height=760
     ((width != 1600)) || height=900
@@ -1310,6 +1782,10 @@ verify_reader_interface_navigation() {
   media=$(execute_async '
 const done = arguments[arguments.length - 1];
 Promise.resolve(globalThis.__athaReaderDiagnostics?.mediaPoint("ordinary"))
+  .then(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return globalThis.__athaReaderDiagnostics?.mediaPoint("ordinary");
+  })
   .then((value) => done({ok: Boolean(value), value}))
   .catch(() => done({ok: false}));') || die 'could not locate the public reader image'
   jq -e '.ok == true and (.value.x | type == "number") and (.value.y | type == "number")' \
@@ -1364,20 +1840,23 @@ return rect ? {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2} : n
   jq -e '.open == true' <<<"$preview" >/dev/null || die 'clicking the preview image closed it'
 
   backdrop_point=$(execute_sync '
-const rect = document.querySelector("#content-dialog-viewport")?.getBoundingClientRect();
-return rect ? {x: rect.left + 8, y: rect.bottom - 8} : null;') ||
+const viewport = document.querySelector("#content-dialog-viewport");
+const rect = viewport?.getBoundingClientRect();
+if (!rect) return null;
+const x = rect.left + 8, y = rect.top + viewport.clientHeight / 2;
+return document.elementFromPoint(x, y) === viewport ? {x, y} : null;') ||
     die 'could not locate the image backdrop'
+  [[ $backdrop_point != null ]] || die 'image backdrop is covered at its inner padding'
   perform_pointer_action "$backdrop_point" tap || die 'could not click the image backdrop'
   preview=$(wait_for_script \
     'return globalThis.__athaReaderDiagnostics.previewState();' \
     '.open == false and .focusRestored == true' \
-    'image backdrop did not close the preview')
+    'image backdrop did not close the preview') || die 'image preview navigation failed'
 
-  webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
-    die 'could not prepare the portrait interface viewport'
+  set_window_size 600 760
   wait_for_script \
-    'const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return {desktop: document.documentElement.hasAttribute("data-desktop-workspace"), stable: document.documentElement.dataset.viewportStable === expected};' \
-    '.desktop == false and .stable == true' \
+    'const reader = document.querySelector(".reader"); const expected = reader ? `${reader.clientWidth}x${reader.clientHeight}` : null; return {width: innerWidth, height: innerHeight, desktop: document.documentElement.hasAttribute("data-desktop-workspace"), stable: document.documentElement.dataset.viewportStable === expected};' \
+    '.width >= 598 and .width <= 602 and .height >= 696 and .height <= 762 and .desktop == false and .stable == true' \
     'portrait interface viewport did not stabilize' >/dev/null
 
   [[ $(execute_sync '
@@ -1601,6 +2080,10 @@ JS
 
 perform_pointer_action() {
   local point=$1 action=$2 action_id payload result=0
+  wait_for_script \
+    'return { visibility: document.visibilityState };' \
+    '.visibility == "visible"' \
+    'Linux GUI target is not visible for trusted pointer input' >/dev/null
   action_id="atha-pointer-${BASHPID}-${RANDOM}"
   if [[ $action == tap ]]; then
     payload=$(jq -cn --arg id "$action_id" --argjson point "$point" '{
@@ -1634,8 +2117,39 @@ perform_pointer_action() {
     }')
   fi
   webdriver_value POST "/session/$session_id/actions" "$payload" >/dev/null || result=$?
-  webdriver_value DELETE "/session/$session_id/actions" >/dev/null 2>&1 || true
+  if ((result != 0)); then
+    pointer_action_failure_diagnostic "$action" "$result"
+    ((result != 28)) || pointer_action_timed_out=1
+  else
+    webdriver_value DELETE "/session/$session_id/actions" >/dev/null 2>&1 || true
+  fi
   return "$result"
+}
+
+pointer_action_failure_diagnostic() {
+  local action=$1 exit_code=$2 payload response probe='{"probeResponded":false}'
+  payload=$(jq -cn '{script: "const dialog = document.querySelector(\"#content-dialog\"); return { readyState: document.readyState, visibility: document.visibilityState, dialogOpen: Boolean(dialog?.open), mediaPreview: Boolean(dialog?.classList.contains(\"media-preview\")), readerReady: document.documentElement.hasAttribute(\"data-reader-ready\"), runtimeErrorCount: Array.isArray(globalThis.__athaReaderRuntimeErrors) ? globalThis.__athaReaderRuntimeErrors.length : null };", args: []}')
+  if [[ -n $session_id ]] && response=$(curl --silent --show-error --max-time 2 \
+    --request POST --header 'Accept: application/json' --header 'Content-Type: application/json' \
+    --data "$payload" "$base_url/session/$session_id/execute/sync" 2>/dev/null); then
+    probe=$(jq -c '
+      if (.value | type == "object") and (.value.error? == null) then
+        .value as $value |
+        {
+          probeResponded: true,
+          readyState: (if ["loading", "interactive", "complete"] | index($value.readyState) then $value.readyState else "unknown" end),
+          visibility: (if ["visible", "hidden", "prerender"] | index($value.visibility) then $value.visibility else "unknown" end),
+          dialogOpen: ($value.dialogOpen == true),
+          mediaPreview: ($value.mediaPreview == true),
+          readerReady: ($value.readerReady == true),
+          runtimeErrorCount: (if ($value.runtimeErrorCount | type) == "number" and $value.runtimeErrorCount >= 0 and $value.runtimeErrorCount <= 100000 then ($value.runtimeErrorCount | floor) else null end)
+        }
+      else {probeResponded: false} end
+    ' <<<"$response" 2>/dev/null) || probe='{"probeResponded":false}'
+  fi
+  jq -cn --arg unit "$unit" --arg backend "$gdk_backend" --arg action "$action" \
+    --argjson exitCode "$exit_code" --argjson probe "$probe" \
+    '{event: "webdriver-actions-failed", unit: $unit, backend: $backend, action: $action, exitCode: $exitCode, probe: $probe}' >&2
 }
 
 run_gesture_gate() {
@@ -1836,7 +2350,7 @@ add_record_privacy_tokens() {
 }
 
 check_app_log_privacy() {
-  local logs_root=$library_root/logs log_count=0 log
+  local logs_root=${1:-$library_root}/logs log_count=0 log
   awk 'length >= 8' "$privacy_file" | sort -u >"$privacy_file.filtered"
   while IFS= read -r -d '' log; do
     log_count=$((log_count + 1))
@@ -1846,6 +2360,9 @@ check_app_log_privacy() {
   done < <(find "$logs_root" -maxdepth 1 -type f -print0 2>/dev/null)
   ((log_count > 0)) || die 'AppLog privacy check found no log output'
 }
+
+say 'checking touch interaction ownership'
+mise exec -- node --test reader/web/interaction.test.mjs >&2
 
 if [[ -n $external_application ]]; then
   application=$(resolve_input_file "$external_application") || die 'candidate application does not exist'
@@ -1946,34 +2463,6 @@ if ((association_launch)); then
   session_application=$association_wrapper
 fi
 
-driver=${ATHA_TAURI_DRIVER:-}
-if [[ -n $driver ]]; then
-  [[ -x $driver ]] || die 'ATHA_TAURI_DRIVER is not executable'
-  driver=$(realpath -e -- "$driver")
-elif command -v tauri-driver >/dev/null; then
-  driver=$(command -v tauri-driver)
-elif [[ -x $repo_root/.tmp/tauri-driver/bin/tauri-driver ]]; then
-  driver=$repo_root/.tmp/tauri-driver/bin/tauri-driver
-else
-  die 'tauri-driver is required'
-fi
-
-user_environment=$(systemctl --user show-environment) || die 'systemd user manager is unavailable'
-grep -q '^XDG_RUNTIME_DIR=' <<<"$user_environment" || die 'systemd user manager lacks XDG_RUNTIME_DIR'
-grep -q '^DBUS_SESSION_BUS_ADDRESS=' <<<"$user_environment" ||
-  die 'systemd user manager lacks DBUS_SESSION_BUS_ADDRESS'
-gdk_backend=${ATHA_GDK_BACKEND:-}
-if [[ -n $gdk_backend ]]; then
-  [[ $gdk_backend == wayland || $gdk_backend == x11 ]] || die 'ATHA_GDK_BACKEND must be wayland or x11'
-  [[ $gdk_backend == wayland ]] && display_variable=WAYLAND_DISPLAY || display_variable=DISPLAY
-  grep -q "^$display_variable=" <<<"$user_environment" || die "$gdk_backend display is unavailable"
-elif grep -q '^WAYLAND_DISPLAY=' <<<"$user_environment"; then
-  gdk_backend=wayland
-elif grep -q '^DISPLAY=' <<<"$user_environment"; then
-  gdk_backend=x11
-else
-  die 'systemd user manager has no graphical display'
-fi
 say 'starting isolated tauri-driver session'
 driver_ready=0
 for ((launch_attempt = 1; launch_attempt <= 3; launch_attempt += 1)); do
@@ -1986,6 +2475,7 @@ for ((launch_attempt = 1; launch_attempt <= 3; launch_attempt += 1)); do
   if systemd-run --user --quiet --collect --unit="$unit" --working-directory="$repo_root" \
     --setenv="XDG_DATA_HOME=$data_home" --setenv="GDK_BACKEND=$gdk_backend" \
     --setenv=ATHA_READER_GUI_GATE=1 \
+    "${graphics_environment[@]}" \
     "$driver" --port "$driver_port" --native-port "$native_port"; then
     unit_started=1
     for ((attempt = 0; attempt < 100; attempt += 1)); do
@@ -2016,7 +2506,7 @@ webdriver_value POST "/session/$session_id/window/rect" '{"width":800,"height":6
   die 'could not initialize the trusted-input window'
 wait_for_script \
   'return { visibility: document.visibilityState, width: innerWidth, height: innerHeight };' \
-  '.width > 0 and .height > 0' \
+  '.visibility == "visible" and .width > 0 and .height > 0' \
   'Linux GUI target did not expose a usable viewport' >/dev/null
 
 association_evidence=null
@@ -2070,15 +2560,6 @@ wait_for_script \
   ".ready == \"complete\" and .cards == $expected_books" \
   'initial library did not become ready' >/dev/null
 
-memory_statistics=$(jq -cn --arg id "$public_id" '{
-  schema: 1,
-  days: [{date: "2026-08-13", durationMs: 90000}],
-  books: [{contentVersion: $id, durationMs: 90000, lastReadDate: "2026-08-13"}]
-}')
-memory_statistics_args=$(jq -cn --arg value "$memory_statistics" '[$value]')
-[[ $(execute_sync '
-localStorage.setItem("atha.reader.statistics.v1", arguments[0]);
-return true;' "$memory_statistics_args") == true ]] || die 'could not seed reading memory statistics'
 
 say 'verifying native drop entry and the shared library result set'
 library_entry_evidence=null
@@ -2088,12 +2569,14 @@ say 'running public verify, boundary, and trusted gesture diagnostics'
 open_book public
 enable_diagnostics
 open_gesture_section "$public_boundary_entry" >/dev/null
-interface_navigation=$(verify_reader_interface_navigation)
+interface_navigation_file=$run_root/interface-navigation.json
+verify_reader_interface_navigation >"$interface_navigation_file"
+interface_navigation=$(<"$interface_navigation_file")
+open_gesture_section "$public_boundary_entry" >/dev/null
 pending_formula_queue=$(pending_formula_queue_probe)
 public_boundary=$(previous_boundary_probe)
 open_gesture_section "$public_boundary_entry" >/dev/null
-webdriver_value POST "/session/$session_id/window/rect" '{"width":600,"height":760}' >/dev/null ||
-  die 'could not prepare the trusted gesture viewport'
+set_window_size 600 760
 run_gesture_gate public
 verify_reader_runtime_errors
 
@@ -2131,7 +2614,21 @@ for width in 360 1000 1280; do
   verify_library_layout "$width" "$height"
 done
 
+say 'verifying native shelf organization, scoped search, and reader return'
+verify_continuous_shelf
+
 say 'verifying local-data management and reading memory at mobile and desktop widths'
+# Real-book gesture runs may add a second recent book. Reset only this isolated fixture.
+memory_statistics=$(jq -cn --arg id "$public_id" '{
+  schema: 1,
+  days: [{date: "2026-08-13", durationMs: 90000}],
+  books: [{contentVersion: $id, durationMs: 90000, lastReadDate: "2026-08-13"}]
+}')
+memory_statistics_args=$(jq -cn --arg value "$memory_statistics" '[$value]')
+[[ $(execute_sync '
+localStorage.setItem("atha.reader.statistics.v1", arguments[0]);
+return true;' "$memory_statistics_args") == true ]] || die 'could not seed reading memory statistics'
+
 for width in 360 1000; do
   set_window_size "$width" 760
   verify_library_settings
@@ -2162,6 +2659,45 @@ verify_desktop_workspace
 verify_reader_redesign
 verify_reader_runtime_errors
 
+# The reading-memory seed already owns the exact public text anchor used by the
+# authoring probe. Run authoring against the same book files with a fresh
+# Messages store so this gate creates a new root rather than editing that seed.
+webdriver_request DELETE "/session/$session_id" >/dev/null || die 'could not close the baseline Tauri session'
+session_id=
+systemctl --user stop "$unit.service" >/dev/null || die 'could not stop the baseline tauri-driver'
+unit_started=0
+systemctl --user reset-failed "$unit.service" >/dev/null 2>&1 || true
+check_app_log_privacy "$library_root"
+
+baseline_library_root=$library_root
+run_root_real=$(realpath -- "$run_root") || die 'could not resolve the isolated run root'
+baseline_library_root_real=$(realpath -- "$baseline_library_root") || die 'could not resolve the baseline fixture root'
+[[ $baseline_library_root_real == "$run_root_real"/* ]] || die 'baseline fixture root escaped the isolated run root'
+data_home=$run_root/authoring-data
+library_root=$data_home/com.atha.reader
+mkdir -p -- "$library_root"
+authoring_library_root_real=$(realpath -- "$library_root") || die 'could not resolve the authoring fixture root'
+[[ $authoring_library_root_real == "$run_root_real"/* ]] || die 'authoring fixture root escaped the isolated run root'
+for fixture_dir in Library ImportedBooks SourceBooks; do
+  [[ -d $baseline_library_root/$fixture_dir ]] || {
+    [[ $fixture_dir == SourceBooks ]] || die "baseline fixture is missing $fixture_dir"
+    continue
+  }
+  [[ ! -e $library_root/$fixture_dir ]] || die 'authoring fixture destination is not empty'
+  if find "$baseline_library_root/$fixture_dir" -type l -print -quit | grep -q .; then
+    die 'baseline fixture contains a symlink that cannot be copied into authoring data'
+  fi
+  cp -a -- "$baseline_library_root/$fixture_dir" "$library_root/"
+done
+[[ ! -e $library_root/Messages ]] || die 'authoring fixture unexpectedly contains message data'
+session_application=$application
+current_book_kind=
+diagnostics_enabled=0
+gesture_active=0
+say 'starting isolated authoring session with a fresh message store'
+start_authoring_session
+verify_authoring_cycle
+
 webdriver_request DELETE "/session/$session_id" >/dev/null || die 'could not close the Tauri session'
 session_id=
 if ((association_launch)); then
@@ -2175,12 +2711,16 @@ check_app_log_privacy
 
 jq -n \
   --arg browserVersion "$browser_version" \
+  --arg backend "$gdk_backend" --arg compositing "$compositing_mode" \
+  --arg painting "$painting_mode" \
   --argjson books "$expected_books" \
   --argjson libraryEntry "$library_entry_evidence" \
+  --argjson continuousShelf "$continuous_shelf_evidence" \
   --argjson fileAssociation "$association_evidence" \
   --argjson interfaceNavigation "$interface_navigation" \
   --argjson pendingFormulaQueue "$pending_formula_queue" \
   --argjson desktopWorkspace "$desktop_workspace_evidence" \
+  --argjson authoringCycle "$authoring_cycle_evidence" \
   --argjson publicBoundary "$public_boundary" \
   --argjson formulaShape "$formula_shape" \
   --argjson formulaBoundary "$formula_boundary" \
@@ -2188,13 +2728,17 @@ jq -n \
   --argjson gestures "$gesture_evidence" \
   '{
     evidence: "Linux Tauri GUI",
-    webview: ("WebKitGTK " + $browserVersion),
+    webview: "WebKitGTK",
+    driverBrowserVersion: $browserVersion,
+    graphics: {backend: $backend, compositing: $compositing, painting: $painting},
     books: $books,
     libraryEntry: $libraryEntry,
+    continuousShelf: $continuousShelf,
     fileAssociation: $fileAssociation,
     interfaceNavigation: $interfaceNavigation,
     verifyDiagnostics: true,
     desktopWorkspace: $desktopWorkspace,
+    authoringCycle: $authoringCycle,
     pendingFormulaQueue: $pendingFormulaQueue,
     publicBoundary: $publicBoundary,
     formulaShape: $formulaShape,

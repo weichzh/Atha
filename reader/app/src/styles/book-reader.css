@@ -1,0 +1,218 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.book {
+  box-sizing: border-box;
+  width: var(--reader-col-w, 100%);
+  height: 100%;
+  margin: 0;
+  color: var(--book-fg);
+  font-family: var(--book-font);
+  line-height: var(--book-line-height);
+  column-width: var(--reader-col-w, 640px);
+  column-gap: var(--reader-column-gap, 48px);
+  column-fill: auto;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hanging-punctuation: allow-end;
+  -webkit-font-smoothing: antialiased;
+}
+
+:host([data-reading-mode="scroll"]) .book {
+  width: 100%;
+  height: auto;
+  column-width: auto;
+  column-count: auto;
+  padding: var(--reader-pad-y, 48px) 0 calc(var(--reader-pad-y, 48px) + 72px);
+}
+
+.book h1,
+.book h2,
+.book h3,
+.book h4 {
+  font-weight: 600;
+  line-height: 1.32;
+  letter-spacing: -0.01em;
+  break-after: avoid;
+  margin: 1.25em 0 0.65em;
+}
+
+.book h1 {
+  font-size: 1.52em;
+  margin-top: 0.2em;
+}
+
+.book h2 {
+  font-size: 1.24em;
+}
+
+.book h3 {
+  font-size: 1.08em;
+}
+
+.book p {
+  margin: 0 0 var(--book-paragraph-spacing, 0.9em);
+  text-align: justify;
+  text-indent: var(--book-paragraph-indent, 0);
+}
+
+:host([data-paragraph-indent="two"]) .book p {
+  --book-paragraph-indent: 2em;
+}
+
+:host([data-paragraph-spacing="compact"]) .book p {
+  --book-paragraph-spacing: 0.52em;
+}
+
+:host([data-paragraph-spacing="comfortable"]) .book p {
+  --book-paragraph-spacing: 1.35em;
+}
+
+.book blockquote {
+  position: relative;
+  margin: 1.3em 0;
+  padding: 0.9em 1.25em;
+  border-radius: 12px;
+  background: var(--book-quote-bg);
+  color: var(--book-fg);
+  break-inside: avoid;
+}
+
+.book blockquote p {
+  text-indent: 0;
+  margin-bottom: 0.5em;
+}
+
+.book blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.book a {
+  color: var(--book-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:where(.book img),
+:where(.book svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+:where(.book svg) {
+  cursor: pointer;
+}
+
+:where(.book img.math-display) {
+  display: block;
+  margin: var(--atha-display-formula-margin, 1em) auto;
+}
+
+.atha-structured-overflow {
+  overflow-x: auto;
+  margin: 1.35em 0;
+  border-radius: 12px;
+  background: var(--book-code-bg);
+  break-inside: avoid;
+}
+
+.atha-table-frame {
+  padding: 0.8em 1em;
+  background: var(--book-quote-bg);
+}
+
+.book table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88em;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.book caption {
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 0.65em;
+  color: var(--book-muted);
+}
+
+.book th,
+.book td {
+  padding: 0.55em 0.75em;
+  text-align: left;
+}
+
+.book thead th {
+  font-weight: 600;
+  background: var(--book-table-stripe);
+}
+
+.book tbody tr:nth-child(even) {
+  background: var(--book-table-stripe);
+}
+
+.book pre {
+  margin: 0;
+  padding: 1em 1.15em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.84em;
+  line-height: 1.55;
+  white-space: pre;
+  cursor: pointer;
+}
+
+.book.atha-cbz-section {
+  column-width: auto;
+  column-count: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.book main.atha-cbz-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+:where(.book main.atha-cbz-page img) {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.atha-image-error,
+.atha-cbz-page-error {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75em 1em;
+  border-radius: 10px;
+  background: var(--book-quote-bg);
+  color: var(--book-muted);
+  font-size: 0.85em;
+}
+
+/* Custom Highlight API styling inside the closed ShadowRoot */
+::highlight(atha-highlights) {
+  background-color: var(--book-highlight);
+}
+
+::highlight(atha-annotations) {
+  background-color: var(--book-note-highlight);
+  text-decoration: underline wavy var(--book-note-underline);
+  text-underline-offset: 3px;
+}
+
+::highlight(atha-active-annotation) {
+  background-color: var(--book-active-highlight);
+}
+
+::highlight(atha-search) {
+  background-color: var(--book-search-highlight);
+}

@@ -19,6 +19,8 @@ export function createReaderState({
   preferences,
   locator,
   assert,
+  recordShelfReading = false,
+  wallNow = () => Date.now(),
 }) {
   if (!["atha.reader", "atha.reader.probe"].includes(keyPrefix)) {
     throw new Error("invalid-state-key");
@@ -46,6 +48,9 @@ export function createReaderState({
   let restored = false;
   let scheduled = false;
   let pendingProgress = null;
+  let readingMoment = null;
+  let readingCompleted = false;
+  let writtenReading = null;
   let lastFallback = null;
   let bound = false;
 
@@ -177,21 +182,86 @@ export function createReaderState({
   function flushProgress() {
     scheduled = false;
     if (!pendingProgress) return true;
-    const value = pendingProgress;
+    const { progress, reading } = pendingProgress;
     pendingProgress = null;
-    return write(keys.progress, value, "progress");
+    if (!write(keys.progress, progress, "progress")) return false;
+    if (reading) {
+      const serialized = JSON.stringify(reading);
+      if (serialized !== writtenReading) {
+        try {
+          target.setItem(`atha.reader.reading.${progress.contentVersion}.v1`, serialized);
+          writtenReading = serialized;
+        } catch {
+          available = false;
+          lastFallback = "state-write";
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
-  function scheduleProgress() {
+  function scheduleProgress(advancesReading = false, reachedEnd = false, observedAt = null, refreshScroll = false) {
     if (restoring || session.snapshot().state !== "layout-stable") return;
-    pendingProgress = {
+    const book = session.describe();
+    const progress = {
       schema: READER_STATE_SCHEMA,
-      contentVersion: session.describe().contentVersion,
-      locator: locator.serialize(session.describe(), navigation.current()),
+      contentVersion: book.contentVersion,
+      locator: locator.serialize(book, navigation.current()),
+    };
+    if (advancesReading && readingMoment) {
+      const lastReadAt = observedAt ?? wallNow();
+      if (observedAt === null || lastReadAt >= readingMoment.lastReadAt) {
+        readingMoment = { lastReadAt, lastReadDate: localDateKey(lastReadAt) };
+      }
+    }
+    const percent = readingMoment ? navigation.currentPercent(refreshScroll) : null;
+    if (advancesReading && reachedEnd && percent === 100) readingCompleted = true;
+    pendingProgress = {
+      progress,
+      reading: percent === null ? null : {
+        schema: READER_STATE_SCHEMA,
+        locator: progress.locator,
+        percent,
+        completed: readingCompleted,
+        ...readingMoment,
+      },
     };
     if (scheduled) return;
     scheduled = true;
     queueMicrotask(flushProgress);
+  }
+
+  function activateShelfReading() {
+    if (!recordShelfReading || !durable || keyPrefix !== "atha.reader" || !restored || readingMoment) {
+      return;
+    }
+    // Only the edition loaded from the bookshelf may update its facts. Other hosts
+    // use path-derived state keys, which keep their original Locator-only behavior.
+    const { contentVersion } = session.describe();
+    if (!/^[a-f0-9]{64}$/.test(contentVersion) || bookKey !== contentVersion.slice(0, 16)) {
+      return;
+    }
+    try {
+      const key = `atha.reader.reading.${contentVersion}.v1`;
+      readingCompleted = parseStoredReadingFact(target.getItem(key), contentVersion, locator.inspect)?.completed === true;
+    } catch {
+      available = false;
+      lastFallback = "state-read";
+    }
+    const lastReadAt = wallNow();
+    readingMoment = { lastReadAt, lastReadDate: localDateKey(lastReadAt) };
+    scheduleProgress();
+  }
+
+  function flushOnExit() {
+    // Scroll settling is asynchronous; capture the visible position even when
+    // its idle callback has not yet run.
+    if (readingMoment && pagination.isScrolled()) {
+      const movedAt = pagination.takeReadingScroll();
+      scheduleProgress(movedAt !== null, movedAt !== null, movedAt, true);
+    }
+    return flushProgress();
   }
 
   function currentBookmark(value) {
@@ -248,10 +318,8 @@ export function createReaderState({
     return Object.freeze({ ok: true, locator: bookmark.locator });
   }
 
-  async function restore() {
-    restoring = true;
+  function restoreApplication() {
     const application = applicationRecord();
-    const book = bookRecord();
     let applicationPreferences = defaults.application;
     try {
       if (application) {
@@ -262,6 +330,13 @@ export function createReaderState({
       lastFallback = "state-corrupt";
       discard(keys.application);
     }
+    return applicationPreferences;
+  }
+
+  async function restore() {
+    restoring = true;
+    const applicationPreferences = restoreApplication();
+    const book = bookRecord();
     let bookPreferences = defaults.book;
     bookmarks = book?.bookmarks || [];
     try {
@@ -293,9 +368,9 @@ export function createReaderState({
   function bind() {
     if (bound) return;
     bound = true;
-    window.addEventListener("pagehide", flushProgress);
+    window.addEventListener("pagehide", flushOnExit);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flushProgress();
+      if (document.visibilityState === "hidden") flushOnExit();
     });
   }
 
@@ -383,9 +458,14 @@ export function createReaderState({
     });
   }
 
+  // Theme restoration must not wait for book loading and annotation IPC.
+  preferences.restore({ application: restoreApplication(), book: defaults.book });
+
   return Object.freeze({
+    activateShelfReading,
     addBookmark,
     bind,
+    flushOnExit,
     flushProgress,
     removeBookmark,
     resolveBookmark,
@@ -402,6 +482,38 @@ function exactObject(value, expected) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const keys = Object.keys(value).sort();
   return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
+}
+
+/**
+ * @param {string | null} raw
+ * @param {string} contentVersion
+ * @param {(serialized: string) => { contentVersion: string | null, end?: unknown } | null} inspect
+ * @returns {{ schema: 1, locator: string, percent: number, completed: boolean, lastReadAt: number, lastReadDate: string } | null}
+ */
+export function parseStoredReadingFact(raw, contentVersion, inspect) {
+  if (!raw || raw.length > 4_096) return null;
+  try {
+    const value = JSON.parse(raw);
+    const hasCompletion = value && Object.hasOwn(value, "completed");
+    const keys = ["lastReadAt", "lastReadDate", "locator", "percent", "schema"];
+    if (hasCompletion) keys.unshift("completed");
+    if (
+      !exactObject(value, keys) ||
+      value.schema !== 1 ||
+      (hasCompletion && typeof value.completed !== "boolean") ||
+      typeof value.locator !== "string" ||
+      !Number.isInteger(value.percent) ||
+      value.percent < 0 || value.percent > 100 ||
+      !Number.isSafeInteger(value.lastReadAt) ||
+      value.lastReadAt < 0 || value.lastReadAt > 253_402_300_799_999 ||
+      !validLocalDate(value.lastReadDate)
+    ) return null;
+    const locator = inspect(value.locator);
+    if (!locator || locator.end || locator.contentVersion !== contentVersion) return null;
+    return { ...value, completed: value.completed === true };
+  } catch {
+    return null;
+  }
 }
 
 function localDateKey(milliseconds) {
@@ -425,11 +537,11 @@ function inStatisticsDayWindow(value, at) {
 function validLocalDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
+  const date = new Date(Date.UTC(year, month - 1, day));
   return (
-    date.getFullYear() === year &&
-    date.getMonth() === month - 1 &&
-    date.getDate() === day
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
   );
 }
 

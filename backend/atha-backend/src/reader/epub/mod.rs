@@ -19,6 +19,7 @@ use quick_xml::{
 use serde::{Deserialize, Serialize};
 
 use crate::reader::archive::{ArchiveError, MAX_SOURCE_BYTES};
+use crate::reader::classification::{self, SourceClassification};
 
 pub const READER_MANIFEST: &str = ".atha-reader.json";
 
@@ -127,12 +128,14 @@ pub fn import_epub(
     }
     fs::create_dir(&staging).map_err(|_| ImportError::WriteFailed)?;
 
-    let result = build_import(source_file, &source, &staging, &content_version)
-        .and_then(|()| publish(&staging, &target, &content_version));
+    let result =
+        build_import(source_file, &source, &staging, &content_version).and_then(|classification| {
+            publish(&staging, &target, &content_version).map(|()| classification)
+        });
     if result.is_err() {
         let _ = fs::remove_dir_all(&staging);
     }
-    result?;
+    let _ = classification::write_cache(cache_root, &content_version, result?);
     imported_book(target, content_version)
 }
 
@@ -154,12 +157,27 @@ fn fingerprinted_source(source: &Path) -> Result<(PathBuf, String, File), Import
     Ok((source, content_version, source_file))
 }
 
+pub(super) fn read_source_classification(
+    source: &Path,
+    expected_id: &str,
+) -> Result<SourceClassification, ImportError> {
+    let (_, id, file) = fingerprinted_source(source)?;
+    if id != expected_id {
+        return Err(ImportError::SourceChanged);
+    }
+    let mut epub = archive::open(file)?;
+    let index = archive::inspect(&mut epub)?;
+    let container = archive::read(&mut epub, &index, "META-INF/container.xml")?;
+    let package_path = package::parse_container(&container)?;
+    package::parse_classification(&archive::read(&mut epub, &index, &package_path)?)
+}
+
 fn build_import(
     source_file: File,
     source_path: &Path,
     staging: &Path,
     content_version: &str,
-) -> Result<(), ImportError> {
+) -> Result<SourceClassification, ImportError> {
     let mut epub = archive::open(source_file)?;
     let index = archive::inspect(&mut epub)?;
     let container = archive::read(&mut epub, &index, "META-INF/container.xml")?;
@@ -209,7 +227,7 @@ fn build_import(
     if archive::hash_file(source_path)? != content_version {
         return Err(ImportError::SourceChanged);
     }
-    Ok(())
+    Ok(package::parse_classification(&package_xml).unwrap_or_default())
 }
 
 pub(super) fn complete_cache(path: &Path, content_version: &str) -> bool {

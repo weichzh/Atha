@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     archive::{self, ArchiveError},
+    classification::{self, MAX_LABEL_BYTES, MAX_LABELS, SourceClassification, add_label},
     epub::READER_MANIFEST,
 };
 
@@ -94,12 +95,29 @@ struct ComicInfo {
     title: Option<String>,
     writer: Option<String>,
     cover_index: Option<usize>,
+    classification: SourceClassification,
 }
 
 #[derive(Clone, Copy)]
 enum ComicInfoField {
     Title,
     Writer,
+    Series,
+    Genre,
+    Tags,
+}
+
+impl ComicInfoField {
+    fn classification(self) -> bool {
+        !matches!(self, Self::Title | Self::Writer)
+    }
+
+    fn text_limit(self) -> usize {
+        match self {
+            Self::Genre | Self::Tags => MAX_LABEL_BYTES * MAX_LABELS,
+            _ => MAX_COMIC_INFO_TEXT_BYTES,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -182,12 +200,14 @@ pub fn import_cbz(
         fs::remove_dir_all(&staging).map_err(|_| ImportError::WriteFailed)?;
     }
     fs::create_dir(&staging).map_err(|_| ImportError::WriteFailed)?;
-    let result = build_import(source_file, &source, &staging, &content_version)
-        .and_then(|()| publish(&staging, &target, &content_version));
+    let result =
+        build_import(source_file, &source, &staging, &content_version).and_then(|classification| {
+            publish(&staging, &target, &content_version).map(|()| classification)
+        });
     if result.is_err() {
         let _ = fs::remove_dir_all(&staging);
     }
-    result?;
+    let _ = classification::write_cache(cache_root, &content_version, result?);
     imported_book(target, content_version)
 }
 
@@ -209,12 +229,31 @@ fn fingerprinted_source(source: &Path) -> Result<(PathBuf, String, File), Import
     Ok((source, content_version, source_file))
 }
 
+pub(super) fn read_source_classification(
+    source: &Path,
+    expected_id: &str,
+) -> Result<SourceClassification, ImportError> {
+    let (_, id, file) = fingerprinted_source(source)?;
+    if id != expected_id {
+        return Err(ImportError::SourceChanged);
+    }
+    let mut archive = archive::open_fingerprinted(file)?;
+    let index = archive::inspect(&mut archive)?;
+    let page_count = index
+        .paths()
+        .filter(|path| !ignored(path) && page_kind(path).is_some())
+        .count();
+    Ok(read_comic_info(&mut archive, &index, page_count, &mut 0)?
+        .unwrap_or_default()
+        .classification)
+}
+
 fn build_import(
     source_file: File,
     source_path: &Path,
     staging: &Path,
     content_version: &str,
-) -> Result<(), ImportError> {
+) -> Result<SourceClassification, ImportError> {
     let mut archive = archive::open_fingerprinted(source_file)?;
     let index = archive::inspect(&mut archive)?;
     if index.contains("mimetype") || index.contains("META-INF/container.xml") {
@@ -300,7 +339,7 @@ fn build_import(
     if archive::hash_file(source_path)? != content_version {
         return Err(ImportError::SourceChanged);
     }
-    Ok(())
+    Ok(comic_info.classification)
 }
 
 fn read_comic_info(
@@ -359,12 +398,13 @@ fn read_comic_info(
 
 fn parse_comic_info(xml: &[u8]) -> Result<ComicInfo, ()> {
     let mut reader = NsReader::from_reader(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().expand_empty_elements = true;
     let mut depth = 0_usize;
     let mut root_seen = false;
     let mut root_closed = false;
     let mut pages_depth = None;
-    let mut field = None::<(ComicInfoField, usize, String)>;
+    let mut field = None::<(ComicInfoField, Option<String>)>;
+    let mut seen_classification = [false; 3];
     let mut info = ComicInfo::default();
     loop {
         let event = reader.read_event().map_err(|_| ())?;
@@ -387,44 +427,61 @@ fn parse_comic_info(xml: &[u8]) -> Result<ComicInfo, ()> {
                         return Err(());
                     }
                     pages_depth = Some(depth);
-                } else if depth == 2 && matches!(name.as_ref(), b"Title" | b"Writer") {
-                    let kind = if name.as_ref() == b"Title" {
-                        ComicInfoField::Title
-                    } else {
-                        ComicInfoField::Writer
+                } else if depth == 2 {
+                    let kind = match name.as_ref() {
+                        b"Title" if info.title.is_none() => ComicInfoField::Title,
+                        b"Writer" if info.writer.is_none() => ComicInfoField::Writer,
+                        b"Title" | b"Writer" => return Err(()),
+                        b"Series" => ComicInfoField::Series,
+                        b"Genre" => ComicInfoField::Genre,
+                        b"Tags" => ComicInfoField::Tags,
+                        _ => continue,
                     };
-                    if field.is_some()
-                        || matches!(kind, ComicInfoField::Title) && info.title.is_some()
-                        || matches!(kind, ComicInfoField::Writer) && info.writer.is_some()
+                    let entries = match kind {
+                        ComicInfoField::Series => Some((&mut info.classification.series, 0)),
+                        ComicInfoField::Genre => Some((&mut info.classification.subjects, 1)),
+                        ComicInfoField::Tags => Some((&mut info.classification.tags, 2)),
+                        _ => None,
+                    };
+                    if let Some((labels, index)) = entries
+                        && std::mem::replace(&mut seen_classification[index], true)
                     {
-                        return Err(());
+                        labels.clear();
+                        field = None;
+                    } else {
+                        field = Some((kind, Some(String::new())));
                     }
-                    field = Some((kind, depth, String::new()));
                 } else if pages_depth == Some(depth.saturating_sub(1)) && name.as_ref() == b"Page" {
                     set_front_cover(&reader, &event, &mut info.cover_index)?;
-                } else if field.is_some() {
-                    return Err(());
-                }
-            }
-            Event::Empty(event) => {
-                let name = event.local_name();
-                if pages_depth == Some(depth) && name.as_ref() == b"Page" {
-                    set_front_cover(&reader, &event, &mut info.cover_index)?;
-                } else if depth == 0 || field.is_some() {
-                    return Err(());
+                } else if let Some((kind, value)) = &mut field {
+                    if !kind.classification() {
+                        return Err(());
+                    }
+                    *value = None;
                 }
             }
             Event::End(event) => {
-                if field
-                    .as_ref()
-                    .is_some_and(|(_, field_depth, _)| *field_depth == depth)
+                if depth == 2
+                    && let Some((kind, Some(value))) = field.take()
                 {
-                    let (kind, _, value) = field.take().ok_or(())?;
                     let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
                     if !value.is_empty() {
                         match kind {
                             ComicInfoField::Title => info.title = Some(value),
                             ComicInfoField::Writer => info.writer = Some(value),
+                            ComicInfoField::Series => {
+                                add_label(&mut info.classification.series, &value)
+                            }
+                            ComicInfoField::Genre => {
+                                for label in value.split(',') {
+                                    add_label(&mut info.classification.subjects, label);
+                                }
+                            }
+                            ComicInfoField::Tags => {
+                                for label in value.split(',') {
+                                    add_label(&mut info.classification.tags, label);
+                                }
+                            }
                         }
                     }
                 }
@@ -442,27 +499,54 @@ fn parse_comic_info(xml: &[u8]) -> Result<ComicInfo, ()> {
             Event::Text(text) if field.is_some() => {
                 let decoded = text.decode().map_err(|_| ())?;
                 let value = quick_xml::escape::unescape(&decoded).map_err(|_| ())?;
-                let target = &mut field.as_mut().ok_or(())?.2;
-                if target.len().saturating_add(value.len()) > MAX_COMIC_INFO_TEXT_BYTES {
-                    return Err(());
-                }
-                target.push_str(&value);
+                let field = field.as_mut().ok_or(())?;
+                let value = if field.0.classification() {
+                    value.as_ref()
+                } else {
+                    value.trim_matches([' ', '\r', '\n', '\t'])
+                };
+                append_comic_text(field, value)?;
             }
             Event::CData(text) if field.is_some() => {
                 let value = text.decode().map_err(|_| ())?;
-                let target = &mut field.as_mut().ok_or(())?.2;
-                if target.len().saturating_add(value.len()) > MAX_COMIC_INFO_TEXT_BYTES {
-                    return Err(());
-                }
-                target.push_str(&value);
+                append_comic_text(field.as_mut().ok_or(())?, &value)?;
             }
-            Event::DocType(_) | Event::GeneralRef(_) => return Err(()),
+            Event::GeneralRef(reference) => {
+                let field = field
+                    .as_mut()
+                    .filter(|(kind, _)| kind.classification())
+                    .ok_or(())?;
+                if let Some(value) = reference.resolve_char_ref().map_err(|_| ())? {
+                    append_comic_text(field, value.encode_utf8(&mut [0; 4]))?;
+                } else {
+                    let entity = reference.decode().map_err(|_| ())?;
+                    append_comic_text(
+                        field,
+                        quick_xml::escape::resolve_xml_entity(&entity).ok_or(())?,
+                    )?;
+                }
+            }
+            Event::DocType(_) => return Err(()),
             Event::Eof if depth == 0 && root_seen && root_closed && field.is_none() => break,
             Event::Eof => return Err(()),
             _ => {}
         }
     }
     Ok(info)
+}
+
+fn append_comic_text(field: &mut (ComicInfoField, Option<String>), value: &str) -> Result<(), ()> {
+    if let Some(target) = &mut field.1 {
+        if target.len().saturating_add(value.len()) > field.0.text_limit() {
+            if !field.0.classification() {
+                return Err(());
+            }
+            field.1 = None;
+        } else {
+            target.push_str(value);
+        }
+    }
+    Ok(())
 }
 
 fn set_front_cover(

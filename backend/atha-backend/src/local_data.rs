@@ -21,11 +21,21 @@ use crate::{
     messages::MessageStore,
     reader::{
         dictionary::LocalDictionaries,
-        library::{BOOK_EXTENSIONS, LibraryError, LocalLibrary},
+        library::{
+            BOOK_EXTENSIONS, BOOK_ORGANIZATION_DIR, LibraryError, LocalLibrary,
+            MAX_ORGANIZATION_BYTES,
+        },
     },
 };
 
 const DATA_SCHEMA: u32 = 1;
+const DATA_COMPONENTS: [&str; 5] = [
+    "Library",
+    "SourceBooks",
+    "Dictionaries",
+    "ImportedBooks",
+    BOOK_ORGANIZATION_DIR,
+];
 const MANIFEST_ENTRY: &str = "manifest.json";
 const BROWSER_STATE_ENTRY: &str = "BrowserState.json";
 const MESSAGE_BACKUP_ENTRY: &str = "Messages.atha-backup";
@@ -299,9 +309,11 @@ impl LocalData {
         }
         let browser_state = read_browser_state(&stage.join(BROWSER_STATE_ENTRY))?;
         validate_stage(&stage, messages)?;
+        create_real_directory(&self.root.join(BOOK_ORGANIZATION_DIR))
+            .map_err(|_| LocalDataError::RestoreFailed)?;
         let result = (|| {
             write_recovery_marker(&self.root.join(PUBLISH_FILE), &journal)?;
-            for name in ["Library", "SourceBooks", "Dictionaries", "ImportedBooks"] {
+            for name in DATA_COMPONENTS {
                 swap_directory(
                     &self.root.join(name),
                     &stage.join(name),
@@ -435,7 +447,7 @@ impl LocalData {
         if self.root.join(PUBLISH_FILE).exists()
             || self.root.join(COMMIT_FILE).exists()
             || self.root.join(ROLLBACK_FILE).exists()
-            || ["Library", "SourceBooks", "Dictionaries", "ImportedBooks"]
+            || DATA_COMPONENTS
                 .iter()
                 .any(|name| self.rollback_path(token).join(name).exists())
         {
@@ -477,6 +489,10 @@ impl LocalData {
     }
 
     pub fn deletion_guard(&self) -> Result<LocalDataOperationGuard, LocalDataError> {
+        self.exclusive_operation_guard()
+    }
+
+    pub fn exclusive_operation_guard(&self) -> Result<LocalDataOperationGuard, LocalDataError> {
         let file = self.lock()?;
         if self.recovery_files_exist() || self.deletion_intents_exist()? {
             return Err(LocalDataError::Busy);
@@ -499,9 +515,13 @@ impl LocalData {
     ) -> Result<StorageUsage, LocalDataError> {
         browser_state.validate()?;
         let _lock = self.operation_guard()?;
-        let books_bytes = directory_bytes(&self.root.join("Library"))?
-            .checked_add(directory_bytes(&self.root.join("SourceBooks"))?)
-            .ok_or(LocalDataError::UnsafeData)?;
+        let books_bytes = ["Library", "SourceBooks", BOOK_ORGANIZATION_DIR]
+            .into_iter()
+            .try_fold(0u64, |total, component| {
+                total
+                    .checked_add(directory_bytes(&self.root.join(component))?)
+                    .ok_or(LocalDataError::UnsafeData)
+            })?;
         let cache_bytes = directory_bytes(&self.root.join("ImportedBooks"))?;
         let messages_bytes = directory_bytes(&self.root.join("Messages"))?;
         let dictionaries_bytes = directory_bytes(&self.root.join("Dictionaries"))?;
@@ -582,7 +602,7 @@ impl LocalData {
         messages: &MessageStore,
     ) -> Result<(), LocalDataError> {
         let rollback = self.rollback_path(&journal.token);
-        for name in ["Library", "SourceBooks", "Dictionaries", "ImportedBooks"] {
+        for name in DATA_COMPONENTS {
             let previous = rollback.join(name);
             match fs::symlink_metadata(&previous) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -615,7 +635,7 @@ impl LocalData {
         journal: &RestoreJournal,
         messages: &MessageStore,
     ) -> Result<(), LocalDataError> {
-        if ["Library", "SourceBooks", "Dictionaries", "ImportedBooks"]
+        if DATA_COMPONENTS
             .iter()
             .any(|name| self.rollback_path(&journal.token).join(name).exists())
             || self.root.join(PUBLISH_FILE).is_file()
@@ -753,6 +773,8 @@ fn validate_stage(stage: &Path, messages: &MessageStore) -> Result<BrowserState,
     library
         .validate_durable_state()
         .map_err(|_| LocalDataError::InvalidBackup)?;
+    create_real_directory(&stage.join(BOOK_ORGANIZATION_DIR))
+        .map_err(|_| LocalDataError::InvalidBackup)?;
     let dictionaries = LocalDictionaries::open(stage).map_err(|_| LocalDataError::InvalidBackup)?;
     dictionaries
         .validate_durable_state()
@@ -867,6 +889,11 @@ fn validate_manifest(manifest: &DataManifest) -> Result<DataManifest, LocalDataE
         if file.byte_length == 0
             || !is_hash(&file.content_hash)
             || !allowed_entry(&file.path)
+            || (file
+                .path
+                .split_once('/')
+                .is_some_and(|(directory, _)| directory == BOOK_ORGANIZATION_DIR)
+                && file.byte_length > MAX_ORGANIZATION_BYTES)
             || previous.is_some_and(|path: &str| path >= file.path.as_str())
         {
             return Err(LocalDataError::InvalidBackup);
@@ -1102,6 +1129,9 @@ fn allowed_entry(path: &str) -> bool {
             .strip_suffix(".json")
             .or_else(|| record.strip_suffix(".cover"))
             .is_some_and(valid_content_id),
+        [BOOK_ORGANIZATION_DIR, record] => {
+            record.strip_suffix(".json").is_some_and(valid_content_id)
+        }
         ["SourceBooks", source] => source
             .rsplit_once('.')
             .is_some_and(|(id, extension)| valid_content_id(id) && valid_book_extension(extension)),
@@ -1154,6 +1184,9 @@ fn valid_browser_key(key: &str) -> bool {
     ) {
         return true;
     }
+    if browser_reading_version(key).is_some() {
+        return true;
+    }
     ["book", "progress", "annotations"].into_iter().any(|kind| {
         key.strip_prefix(&format!("atha.reader.{kind}."))
             .and_then(|value| value.strip_suffix(".v1"))
@@ -1161,7 +1194,17 @@ fn valid_browser_key(key: &str) -> bool {
     })
 }
 
+fn browser_reading_version(key: &str) -> Option<&str> {
+    key.strip_prefix("atha.reader.reading.")?
+        .strip_suffix(".v1")
+        .filter(|version| valid_content_id(version))
+}
+
 fn valid_browser_value(key: &str, raw: &str) -> bool {
+    let reading_version = browser_reading_version(key);
+    if reading_version.is_some() && raw.len() > 4096 {
+        return false;
+    }
     let Ok(value) = serde_json::from_str::<Value>(raw) else {
         return false;
     };
@@ -1191,6 +1234,8 @@ fn valid_browser_value(key: &str, raw: &str) -> bool {
                 .and_then(Value::as_str)
                 .is_some_and(valid_content_id)
             && object.get("locator").is_some_and(Value::is_string)
+    } else if let Some(version) = reading_version {
+        valid_browser_reading_fact(object, version)
     } else if key.starts_with("atha.reader.annotations.") {
         exact_json_keys(object, &["items", "schema"])
             && object.get("items").is_some_and(|items| {
@@ -1212,6 +1257,100 @@ fn valid_browser_value(key: &str, raw: &str) -> bool {
     } else {
         false
     }
+}
+
+fn valid_browser_reading_fact(object: &serde_json::Map<String, Value>, version: &str) -> bool {
+    let bounded_u64 = |value: Option<&Value>, max| {
+        value
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value <= max)
+    };
+    let valid_keys = if let Some(completed) = object.get("completed") {
+        completed.is_boolean()
+            && exact_json_keys(
+                object,
+                &[
+                    "schema",
+                    "locator",
+                    "percent",
+                    "lastReadAt",
+                    "lastReadDate",
+                    "completed",
+                ],
+            )
+    } else {
+        exact_json_keys(
+            object,
+            &["schema", "locator", "percent", "lastReadAt", "lastReadDate"],
+        )
+    };
+    if !valid_keys
+        || !bounded_u64(object.get("percent"), 100)
+        || !bounded_u64(object.get("lastReadAt"), 253_402_300_799_999)
+        || !object
+            .get("lastReadDate")
+            .and_then(Value::as_str)
+            .is_some_and(valid_reading_date)
+    {
+        return false;
+    }
+    let Some(locator) = object
+        .get("locator")
+        .and_then(Value::as_str)
+        .filter(|serialized| serialized.len() <= 2048)
+        .and_then(|serialized| {
+            serde_json::from_str::<serde_json::Map<String, Value>>(serialized).ok()
+        })
+    else {
+        return false;
+    };
+    if !exact_json_keys(&locator, &["schema", "contentVersion", "start"])
+        || locator.get("schema").and_then(Value::as_u64) != Some(1)
+        || locator.get("contentVersion").and_then(Value::as_str) != Some(version)
+    {
+        return false;
+    }
+    let Some(point) = locator.get("start").and_then(Value::as_object) else {
+        return false;
+    };
+    exact_json_keys(point, &["section", "offset"])
+        && point
+            .get("section")
+            .and_then(Value::as_str)
+            .is_some_and(|section| {
+                let allowed = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+                (1..=64).contains(&section.len())
+                    && section.bytes().next().is_some_and(allowed)
+                    && section
+                        .bytes()
+                        .all(|byte| allowed(byte) || b"._-".contains(&byte))
+            })
+        && bounded_u64(point.get("offset"), i32::MAX as u64)
+}
+
+fn valid_reading_date(date: &str) -> bool {
+    let bytes = date.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let year = date[..4].parse::<u16>().unwrap_or_default();
+    let month = date[5..7].parse::<usize>().unwrap_or_default();
+    let day = date[8..].parse::<u8>().unwrap_or_default();
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 => 28 + u8::from(leap),
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return false,
+    };
+    year >= 100 && (1..=days).contains(&day)
 }
 
 fn exact_json_keys(object: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {

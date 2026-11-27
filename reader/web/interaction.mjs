@@ -4,6 +4,7 @@ const SWIPE_DISTANCE = 48;
 const CLICK_DRIFT = 8;
 const AXIS_ADVANTAGE = 1.5;
 const CLICK_SUPPRESSION_MS = 500;
+const TOUCH_HOLD_MS = 500;
 
 function createWheelDetector() {
   let total = 0;
@@ -60,6 +61,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   };
   let pointer = null;
   let touch = null;
+  let cancelledTouch = null;
   let suppressedClick = null;
   let inputSequence = 0;
   const insideEvents = new WeakSet();
@@ -161,6 +163,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
 
   function cancelPointer(pointerState = pointer) {
     pointer = null;
+    if (pointerState?.holdTimer) clearTimeout(pointerState.holdTimer);
     if (pointerState?.cancelTimer) clearTimeout(pointerState.cancelTimer);
     if (pointerState?.scrollFrame) cancelAnimationFrame(pointerState.scrollFrame);
     pagination.cancelSwipe();
@@ -175,8 +178,45 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     };
   }
 
+  function protectSelection() {
+    if ((!pointer && !touch) || !hasSelection()) return;
+    if (touch) touch.selection = true;
+    if (!pointer || pointer.owner === "selection") return;
+    pointer.owner = "selection";
+    if (pointer.holdTimer) clearTimeout(pointer.holdTimer);
+    if (pointer.scrollFrame) {
+      cancelAnimationFrame(pointer.scrollFrame);
+      pointer.scrollFrame = 0;
+    }
+    pagination.cancelSwipe();
+    counts.selectionProtected += 1;
+  }
+
+  function protectHold() {
+    if (
+      pointer?.type === "touch" &&
+      !scrollMode() &&
+      !pointer.owner &&
+      pointer.maxDistance <= CLICK_DRIFT &&
+      performance.now() - pointer.startedAt >= TOUCH_HOLD_MS
+    ) {
+      // A hold is reserved even when the WebView has not produced a Range.
+      pointer.owner = "hold";
+      pagination.cancelSwipe();
+    }
+  }
+
+  function conversationOverlayTarget(event) {
+    return event.composedPath().some(
+      (node) =>
+        node instanceof Element &&
+        node.id === "message-conversation" &&
+        !content.book.contains(node),
+    );
+  }
+
   function onKeydown(event) {
-    const control = protectedTarget(event);
+    const control = protectedTarget(event) || conversationOverlayTarget(event);
     if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || control) {
       if (control) counts.controlProtected += 1;
       return;
@@ -192,6 +232,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
         run(1, "keyboard");
       } else if (backward || forward) {
         event.preventDefault();
+        if (event.isTrusted) pagination.noteReadingScroll();
         const distance = ["ArrowUp", "ArrowDown"].includes(event.key)
           ? 64 * (backward ? -1 : 1)
           : reader.clientHeight * 0.9 * (backward ? -1 : 1);
@@ -224,6 +265,8 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       } else if (event.deltaY > 0 && reader.scrollTop + reader.clientHeight >= reader.scrollHeight - 1) {
         event.preventDefault();
         run(1, "wheel");
+      } else if (event.isTrusted && event.deltaY) {
+        pagination.noteReadingScroll();
       }
       return;
     }
@@ -247,6 +290,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       return;
     }
     cancelPointer();
+    cancelledTouch = null;
     suppressedClick = null;
     const control = scrollMode() ? protectedTarget(event) : hardProtectedTarget(event);
     if (control) counts.contentProtected += 1;
@@ -260,9 +304,9 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     ) {
       return;
     }
-    if (hasSelection()) {
+    const selected = hasSelection();
+    if (selected) {
       counts.selectionProtected += 1;
-      return;
     }
     const media = matchingPath(event, "img[role='button']");
     const structured = matchingPath(event, "table, pre");
@@ -281,7 +325,9 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       type: event.pointerType || "touch",
       x: event.clientX,
       y: event.clientY,
-      owner: null,
+      startedAt: performance.now(),
+      maxDistance: 0,
+      owner: selected ? "selection" : null,
       media,
       table,
       overflow,
@@ -291,17 +337,39 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       deltaX: 0,
       scrollFrame: 0,
       cancelTimer: 0,
+      holdTimer: 0,
+      wasCancelled: false,
       touchFallback: false,
     };
+    if (pointer.type === "touch" && !selected && !scrollMode()) {
+      const current = pointer;
+      pointer.holdTimer = setTimeout(() => {
+        if (pointer === current) protectHold();
+      }, TOUCH_HOLD_MS);
+    }
   }
 
   function onPointerMove(event) {
     if (!pointer || pointer.id !== event.pointerId || scrollMode()) return;
+    protectSelection();
+    protectHold();
+    if (pointer.owner === "selection") return;
     const deltaX = event.clientX - pointer.x;
     const deltaY = event.clientY - pointer.y;
+    pointer.maxDistance = Math.max(pointer.maxDistance, Math.hypot(deltaX, deltaY));
     pointer.deltaX = deltaX;
     const horizontal = Math.abs(deltaX);
     const vertical = Math.abs(deltaY);
+    if (pointer.owner === "hold") {
+      // Reserving a hold prevents page turns, not scrolling inside a code block.
+      if (
+        !pointer.overflow ||
+        horizontal <= CLICK_DRIFT ||
+        horizontal <= vertical * AXIS_ADVANTAGE ||
+        !canScrollOverflow(pointer.overflow, deltaX)
+      ) return;
+      pointer.owner = "overflow";
+    }
     if (!pointer.owner && Math.max(horizontal, vertical) > CLICK_DRIFT) {
       if (vertical > horizontal * AXIS_ADVANTAGE) pointer.owner = "vertical";
       else if (horizontal > vertical * AXIS_ADVANTAGE && pointer.dragEnabled) {
@@ -320,10 +388,26 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   }
 
   function onPointerUp(event) {
+    if (cancelledTouch?.id === event.pointerId) {
+      suppressCompatibilityClick(event, true);
+      cancelledTouch = null;
+    }
+    if (!pointer || pointer.id !== event.pointerId) return;
+    protectSelection();
+    protectHold();
     const start = pointer;
-    if (!start || start.id !== event.pointerId) return;
     pointer = null;
+    if (start.holdTimer) clearTimeout(start.holdTimer);
     if (start.cancelTimer) clearTimeout(start.cancelTimer);
+    if (
+      start.owner === "selection" ||
+      start.owner === "hold" ||
+      (start.wasCancelled && start.owner !== "page" && start.owner !== "overflow")
+    ) {
+      pagination.cancelSwipe();
+      suppressCompatibilityClick(event, true);
+      return;
+    }
     if (hardProtectedTarget(event)) {
       cancelPointer(start);
       return;
@@ -356,7 +440,10 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       suppressCompatibilityClick(event);
       return;
     }
-    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT) {
+    if (
+      start.maxDistance > CLICK_DRIFT ||
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_DRIFT
+    ) {
       suppressCompatibilityClick(event);
       return;
     }
@@ -372,6 +459,18 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   }
 
   function onCompatibilityEventCapture(event) {
+    if (cancelledTouch && !pointer) {
+      // Some WebViews omit the final touchend. Consume the trailing click once.
+      suppressCompatibilityClick(event, true);
+      cancelledTouch = null;
+    }
+    protectSelection();
+    protectHold();
+    if (pointer?.owner === "selection" || pointer?.owner === "hold") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (
       !suppressedClick ||
       performance.now() > suppressedClick.until ||
@@ -395,11 +494,18 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       id: point.identifier,
       x: point.clientX,
       y: point.clientY,
+      startedAt: performance.now(),
       selection: hasSelection(),
     };
   }
 
   function onTouchEnd(event) {
+    protectSelection();
+    if (cancelledTouch && event.touches.length === 0) {
+      const point = event.changedTouches[0];
+      suppressCompatibilityClick(point || { clientX: cancelledTouch.x, clientY: cancelledTouch.y }, true);
+      cancelledTouch = null;
+    }
     const orphan = pointer;
     if (orphan?.type === "touch" && event.touches.length === 0 && event.changedTouches.length === 1) {
       const point = [...event.changedTouches][0];
@@ -423,10 +529,19 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       reader.scrollTop + reader.clientHeight >= reader.scrollHeight - 1,
     );
     if (direction) run(direction, "touch");
-    else if (Math.hypot(point.clientX - start.x, point.clientY - start.y) <= CLICK_DRIFT) onCenter();
+    else if (
+      performance.now() - start.startedAt < TOUCH_HOLD_MS &&
+      Math.hypot(point.clientX - start.x, point.clientY - start.y) <= CLICK_DRIFT
+    ) onCenter();
   }
 
   function onTouchMove(event) {
+    if (event.isTrusted && touch && event.touches.length === 1 && !touch.selection && !hasSelection()) {
+      const point = event.touches[0];
+      if (point.identifier === touch.id && Math.abs(point.clientY - touch.y) > CLICK_DRIFT) {
+        pagination.noteReadingScroll();
+      }
+    }
     if (!pointer?.touchFallback || event.touches.length !== 1) return;
     if (pointer.cancelTimer) {
       clearTimeout(pointer.cancelTimer);
@@ -448,6 +563,12 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       cancelPointer(start);
       return;
     }
+    protectSelection();
+    protectHold();
+    start.wasCancelled = true;
+    // The 250ms drag cleanup below is not proof that the finger was released.
+    cancelledTouch = start;
+    suppressCompatibilityClick(event, true);
     start.touchFallback = true;
     start.cancelTimer = setTimeout(() => {
       if (pointer === start && start.touchFallback) cancelPointer(start);
@@ -464,9 +585,14 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     };
     const cancelTouch = () => {
       touch = null;
+      if (cancelledTouch) {
+        suppressCompatibilityClick({ clientX: cancelledTouch.x, clientY: cancelledTouch.y }, true);
+        cancelledTouch = null;
+      }
       if (pointer?.type === "touch") cancelPointer();
     };
     content.book.addEventListener("keydown", inside(onKeydown));
+    document.addEventListener("selectionchange", protectSelection);
     document.addEventListener("keydown", outside(onKeydown));
     content.book.addEventListener("wheel", inside(onWheel), { passive: false });
     reader.addEventListener("wheel", outside(onWheel), { passive: false });

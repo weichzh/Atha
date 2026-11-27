@@ -176,11 +176,11 @@ export function createContentActions({
   }
 
   function selectionLength() {
-    return content.book.getRootNode().getSelection?.().toString().length || 0;
+    return content.selectionRange()?.toString().length || 0;
   }
 
   function clearSelection() {
-    content.book.getRootNode().getSelection?.().removeAllRanges();
+    content.clearSelection();
     return selectionLength();
   }
 
@@ -253,18 +253,16 @@ export function createContentActions({
         node.data.trim().length >= 2 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
     });
     const text = walker.nextNode();
-    const selection = content.book.getRootNode().getSelection?.();
-    assert(text && selection, "sample-boundary");
+    assert(text, "sample-boundary");
     const range = document.createRange();
     range.setStart(text, 0);
     range.setEnd(text, 2);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    const selectedText = selection.toString();
+    assert(content.setSelectionRange(range), "sample-boundary");
+    const selectedText = content.selectionRange().toString();
     const copy = new ClipboardEvent("copy", { bubbles: true, cancelable: true });
     content.book.dispatchEvent(copy);
-    assert(!copy.defaultPrevented && selection.toString() === selectedText, "sample-boundary");
-    selection.removeAllRanges();
+    assert(!copy.defaultPrevented && content.selectionRange()?.toString() === selectedText, "sample-boundary");
+    content.clearSelection();
 
     const target = [...content.book.querySelectorAll("h1, h2, h3, p, li, pre")].at(-1);
     assert(target, "sample-boundary");

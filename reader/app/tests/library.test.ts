@@ -5,12 +5,15 @@ import test from "node:test";
 
 import {
   captureLocalDataState,
+  coverGlyph,
+  coverTone,
   applyBookLocalStateDeletion,
   deleteBooksSerially,
   filterLibraryBooks,
   groupLibraryBooksByProgress,
   openFailureMessage,
   readAppTheme,
+  readReaderAppearance,
   readRecentBooks,
   resetReaderApplicationPreferences,
   readStartedBookIds,
@@ -30,10 +33,25 @@ const books: LibraryBook[] = [
   { id: ids[2], title: "Middle", authors: [], hasCover: false, hasCustomCover: false, importedAt: 10, prepared: false },
 ];
 
+test("startup appearance validates reader records without writing or using app appearance", () => {
+  const preferences = { theme: "paper", brightness: 80, fontSize: 19, fontFamily: "book", density: "standard" };
+  const reader = JSON.stringify({ schema: 1, preferences });
+  const keys: string[] = [];
+  const storage = { getItem: (key: string) => { keys.push(key); return reader; } };
+  assert.deepEqual(readReaderAppearance(storage), { theme: "paper", brightness: 80 });
+  assert.deepEqual(readReaderAppearance(storage, true), { theme: "paper", brightness: 80 });
+  assert.deepEqual(keys, ["atha.reader.application.v1", "atha.reader.probe.application.v1"]);
+  for (const raw of ["{", "x".repeat(524_289), JSON.stringify({ schema: 2, preferences }),
+    JSON.stringify({ schema: 1, preferences: { ...preferences, fontSize: 0 } })]) {
+    assert.deepEqual(readReaderAppearance({ getItem: () => raw }), { theme: "system", brightness: 100 });
+  }
+  assert.deepEqual(readReaderAppearance(null), { theme: "system", brightness: 100 });
+  assert.deepEqual(readReaderAppearance({ getItem: () => { throw new Error("denied"); } }), { theme: "system", brightness: 100 });
+});
+
 test("feature styles consume the shared theme palette", () => {
   const featureStyles = [
-    new URL("../src/library.css", import.meta.url),
-    new URL("../src/shell.css", import.meta.url),
+    new URL("../src/styles/app.css", import.meta.url),
     new URL("../../atha-reader.css", import.meta.url),
   ];
   const colorDeclaration = /:\s*[^;{]*(?:#[0-9a-f]{3,8}\b|rgba?\()/i;
@@ -43,11 +61,22 @@ test("feature styles consume the shared theme palette", () => {
       .flatMap((line, index) => colorDeclaration.test(line) ? [`${path.pathname}:${index + 1}`] : []),
   );
   assert.deepEqual(hardcoded, []);
+  const appTokens = readFileSync(new URL("../src/styles/tokens.css", import.meta.url), "utf8");
+  assert.match(appTokens, /--bg-canvas:/);
+  assert.match(appTokens, /--ink-primary:/);
+  assert.match(appTokens, /--accent:/);
+  assert.match(appTokens, /:root\[data-app-theme="dark"\]\s*\{/);
+  assert.doesNotMatch(appTokens, /@media\s*\(prefers-color-scheme:/);
   const palette = readFileSync(new URL("../../theme.css", import.meta.url), "utf8");
+  assert.match(palette, /--color-ink:/);
   assert.match(palette, /--library-bg:/);
   assert.match(palette, /--ui-canvas:/);
-  assert.match(palette, /:root\[data-app-tone="light"\]\s*{/);
-  assert.match(palette, /:root\[data-theme-tone="dark"\]\s*{/);
+  assert.match(palette, /--ui-preview-ink:\s*#f4efe8\s*;/);
+  // Light ink on paper is the default; both app and reader dark tones share one block.
+  assert.match(palette, /:root\[data-app-tone="dark"\],\s*:root\[data-theme-tone="dark"\]\s*{/);
+  for (const [, declarations] of palette.matchAll(/:root\[data-(?:app|theme)-tone="dark"\]\s*\{([^}]*)\}/g)) {
+    assert.doesNotMatch(declarations, /--ui-preview-ink\s*:/);
+  }
   assert.doesNotMatch(palette, /@media\s*\(prefers-color-scheme:/);
 });
 
@@ -697,3 +726,17 @@ class TestStorage {
     this.values.delete(key);
   }
 }
+
+test("generated covers use a stable glyph and tone", () => {
+  assert.equal(coverGlyph("山间来信"), "山");
+  assert.equal(coverGlyph("《雨后》"), "雨");
+  assert.equal(coverGlyph("  reading without spaces"), "R");
+  assert.equal(coverGlyph("……"), "书");
+  assert.equal(coverGlyph(""), "书");
+  assert.equal(coverGlyph("E\u0301te\u0301"), "É");
+  assert.equal(coverGlyph("ßtraße"), "ß");
+  assert.equal(coverGlyph("हिन्दी"), "हि");
+  const id = "1".padStart(64, "0");
+  assert.equal(coverTone(id), coverTone(id));
+  assert.ok([0, 1, 2, 3].includes(coverTone(id)));
+});

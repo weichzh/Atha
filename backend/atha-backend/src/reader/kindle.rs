@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     MAX_MANIFEST_SECTIONS, MAX_MANIFEST_TOC_ITEMS,
+    classification::{self, SourceClassification, add_label},
     epub::READER_MANIFEST,
     resources::MAX_RESOURCE_BYTES,
     source::{self, SourceError},
@@ -255,6 +256,10 @@ pub fn import_kindle(
             .filter_map(|value| bounded_metadata(value))
             .take(MAX_AUTHORS)
             .collect::<Vec<_>>();
+        let mut classification = SourceClassification::default();
+        for subject in &metadata.subjects {
+            add_label(&mut classification.subjects, subject);
+        }
         write_json(
             &staging.join(BOOK_METADATA),
             &BookMetadata {
@@ -285,12 +290,13 @@ pub fn import_kindle(
         drop(book);
         fs::remove_file(&snapshot).map_err(|_| ImportError::WriteFailed)?;
         publish(&staging, &target, &content_version)?;
-        Ok(stats)
+        Ok((stats, classification))
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&staging);
     }
-    let stats = result?;
+    let (stats, classification) = result?;
+    let _ = classification::write_cache(cache_root, &content_version, classification);
     log::info!(
         target: "atha::reader",
         "operation=import format=kindle outcome=success input_bytes={} sections={} toc_items={} resources={} load_ms={} parse_ms={} render_write_ms={} total_ms={}",

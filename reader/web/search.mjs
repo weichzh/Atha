@@ -3,7 +3,27 @@ const MAX_RESULTS = 2000;
 const MAX_SECTION_LENGTH = 16 * 1024 * 1024;
 const HIDDEN_SENTINEL = "\0";
 
-export function createSearch({ session, navigation, pagination, locator, controls, assert, emit }) {
+export function buildSearchExcerpt(text, start, end, beforeRadius = 32, afterRadius = 48) {
+  const segments = [
+    text.slice(Math.max(0, start - beforeRadius), start),
+    text.slice(start, end),
+    text.slice(end, end + afterRadius),
+  ];
+  let previous = "";
+  for (let index = 0; index < segments.length; index += 1) {
+    // Collapse whitespace across segment boundaries without losing the match offsets.
+    let segment = segments[index].replace(/[\s\0]+/gu, " ");
+    if (!previous || previous.endsWith(" ")) segment = segment.trimStart();
+    segments[index] = segment;
+    if (segment) previous = segment;
+  }
+  const last = segments.findLastIndex(Boolean);
+  if (last >= 0) segments[last] = segments[last].trimEnd();
+  const [before, match, after] = segments;
+  return Object.freeze({ before, match, after, text: before + match + after });
+}
+
+export function createSearch({ session, navigation, pagination, locator, controls, assert, emit, onNavigate }) {
   let active = null;
   let results = [];
   let status = "idle";
@@ -11,6 +31,8 @@ export function createSearch({ session, navigation, pagination, locator, control
   let truncated = false;
   let lastError = null;
   let lastJump = null;
+  const field = controls.form.querySelector(".reader-search-field");
+  const submitButton = controls.form.querySelector('button[type="submit"]');
 
   function sectionLabel(description, section, offset = 0, fragments = new Map()) {
     let best = null;
@@ -100,14 +122,6 @@ export function createSearch({ session, navigation, pagination, locator, control
     return sectionData(source).text;
   }
 
-  function excerpt(text, start, end) {
-    return text
-      .slice(Math.max(0, start - 32), Math.min(text.length, end + 48))
-      .replaceAll(HIDDEN_SENTINEL, " ")
-      .replace(/\s+/gu, " ")
-      .trim();
-  }
-
   function sync() {
     controls.results.replaceChildren(
       ...results.map((result) => {
@@ -118,13 +132,42 @@ export function createSearch({ session, navigation, pagination, locator, control
       }),
     );
     controls.go.disabled = results.length === 0;
-    controls.cancel.disabled = status !== "searching";
+    controls.resultList?.replaceChildren(...results.map((result) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.resultId = result.id;
+      const chapter = document.createElement("span");
+      chapter.className = "search-result-chapter";
+      chapter.textContent = result.sectionLabel;
+      const excerpt = document.createElement("span");
+      const { before, match, after } = result.excerptSegments;
+      const mark = document.createElement("mark");
+      mark.className = "search-result-match";
+      mark.textContent = match;
+      excerpt.append(document.createTextNode(before), mark, document.createTextNode(after));
+      button.append(chapter, excerpt);
+      return button;
+    }));
+    const searching = status === "searching";
+    if (field) field.dataset.searching = String(searching);
+    if (searching) {
+      controls.cancel.hidden = false;
+      controls.cancel.disabled = false;
+      if (document.activeElement === submitButton) controls.cancel.focus({ preventScroll: true });
+      // A hidden submit button must remain enabled for implicit Enter submission.
+      if (field && submitButton) submitButton.hidden = true;
+    } else {
+      if (field && submitButton) submitButton.hidden = false;
+      if (document.activeElement === controls.cancel) controls.query?.focus({ preventScroll: true });
+      controls.cancel.hidden = true;
+      controls.cancel.disabled = true;
+    }
     controls.status.dataset.error = String(status === "error");
     controls.status.textContent = {
       idle: "",
       searching: "正在搜索…",
       canceled: "已取消",
-      complete: truncated ? `找到 ${results.length} 条，已达上限` : `找到 ${results.length} 条`,
+      complete: results.length === 0 ? "没有找到匹配内容" : truncated ? `找到 ${results.length} 条，已达上限` : `找到 ${results.length} 条`,
       error: lastError || "搜索失败",
     }[status];
   }
@@ -172,12 +215,14 @@ export function createSearch({ session, navigation, pagination, locator, control
           if (controller.signal.aborted) throw new DOMException("aborted", "AbortError");
           const start = match.index;
           const end = start + match[0].length;
+          const excerptSegments = buildSearchExcerpt(text, start, end);
           results.push(
             Object.freeze({
               id: String(results.length),
               section: section.id,
               sectionLabel: sectionLabel(description, section, start, fragments),
-              excerpt: excerpt(text, start, end),
+              excerpt: excerptSegments.text,
+              excerptSegments,
               locator: locator.serialize(
                 description,
                 locator.range(
@@ -240,6 +285,7 @@ export function createSearch({ session, navigation, pagination, locator, control
       sync();
       return false;
     }
+    onNavigate();
     return true;
   }
 
@@ -251,6 +297,12 @@ export function createSearch({ session, navigation, pagination, locator, control
     controls.cancel.addEventListener("click", cancel);
     controls.go.addEventListener("click", () => void go());
     controls.results.addEventListener("dblclick", () => void go());
+    controls.resultList?.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-result-id]");
+      if (!button) return;
+      controls.results.value = button.dataset.resultId;
+      void go();
+    });
     sync();
   }
 

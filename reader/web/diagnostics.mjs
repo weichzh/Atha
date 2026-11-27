@@ -83,6 +83,42 @@ export function createDiagnostics({
     return content.book.querySelector("h1, h2, h3")?.textContent.trim() || null;
   }
 
+  function selectionRangeState() {
+    const book = content.book;
+    const root = book.getRootNode();
+    const describe = (range) => range ? {
+      collapsed: range.startContainer === range.endContainer && range.startOffset === range.endOffset,
+      startInBook: book.contains(range.startContainer),
+      endInBook: book.contains(range.endContainer),
+      startInBookRoot: range.startContainer.getRootNode() === root,
+      endInBookRoot: range.endContainer.getRootNode() === root,
+    } : null;
+    try {
+      const shadowSelection = root.getSelection?.();
+      const windowSelection = window.getSelection?.();
+      const state = {
+        shadowAccessor: typeof root.getSelection === "function",
+        shadowRangeCount: shadowSelection?.rangeCount ?? null,
+        shadowRange: describe(shadowSelection?.rangeCount === 1 ? shadowSelection.getRangeAt(0) : null),
+        windowRangeCount: windowSelection?.rangeCount ?? null,
+        windowRange: describe(windowSelection?.rangeCount === 1 ? windowSelection.getRangeAt(0) : null),
+        composedAccessor: typeof windowSelection?.getComposedRanges === "function",
+      };
+      try {
+        const composed = windowSelection?.getComposedRanges?.({ shadowRoots: [root] });
+        return {
+          ...state,
+          composedRangeCount: composed?.length ?? null,
+          composedRange: describe(composed?.length === 1 ? composed[0] : null),
+        };
+      } catch {
+        return { ...state, composedUnavailable: true };
+      }
+    } catch {
+      return { unavailable: true };
+    }
+  }
+
   async function securityProbe() {
     const probeUrl = params.get("probe");
     assert(probeUrl, "network-block");
@@ -365,8 +401,8 @@ export function createDiagnostics({
     );
     assert(content.book.dataset.fontFamily === "serif", "sample-boundary");
     const compactStyle = getComputedStyle(content.book);
-    assert(compactStyle.backgroundColor === "rgb(26, 33, 30)", "sample-boundary");
-    assert(compactStyle.color === "rgb(232, 236, 232)", "sample-boundary");
+    assert(compactStyle.backgroundColor === "rgb(28, 27, 25)", "sample-boundary");
+    assert(compactStyle.color === "rgb(228, 223, 214)", "sample-boundary");
     assert(compactStyle.fontFamily.includes("Georgia"), "sample-boundary");
     assert(
       Math.abs(
@@ -391,8 +427,8 @@ export function createDiagnostics({
     assert(document.documentElement.dataset.theme === "light", "sample-boundary");
     assert(content.book.dataset.fontFamily === "sans", "sample-boundary");
     const comfortableStyle = getComputedStyle(content.book);
-    assert(comfortableStyle.backgroundColor === "rgb(255, 255, 255)", "sample-boundary");
-    assert(comfortableStyle.color === "rgb(40, 43, 41)", "sample-boundary");
+    assert(comfortableStyle.backgroundColor === "rgb(253, 252, 249)", "sample-boundary");
+    assert(comfortableStyle.color === "rgb(35, 33, 30)", "sample-boundary");
     assert(comfortableStyle.fontFamily.includes("Microsoft YaHei"), "sample-boundary");
     assert(
       Math.abs(
@@ -957,12 +993,10 @@ export function createDiagnostics({
     });
     const text = walker.nextNode();
     assert(text, "sample-boundary");
-    const selection = content.book.getRootNode().getSelection?.();
-    assert(selection, "sample-boundary");
     const range = document.createRange();
     range.setStart(text, 0);
     range.setEnd(text, 2);
-    selection.removeAllRanges();
+    content.clearSelection();
 
     const link = document.createElement("a");
     link.href = "#interaction-probe";
@@ -1007,7 +1041,7 @@ export function createDiagnostics({
       pagination.snapshot().page === 0 && interaction.snapshot().multiTouchProtected === 1,
       "sample-boundary",
     );
-    selection.addRange(range);
+    assert(content.setSelectionRange(range), "sample-boundary");
     const selectionCount = interaction.snapshot().selectionProtected;
     pointer("pointerdown", { pointerId: 3, button: 0, clientX: right, clientY: rect.top + 120 });
     pointer("pointerup", { pointerId: 3, button: 0, clientX: right, clientY: rect.top + 120 });
@@ -1017,7 +1051,43 @@ export function createDiagnostics({
         interaction.snapshot().selectionProtected === selectionCount + 1,
       "sample-boundary",
     );
-    selection.removeAllRanges();
+    content.clearSelection();
+
+    // Exercise native WebView Range storage with synthetic pointer sequences;
+    // this is not a natural finger/long-press recognizer acceptance test.
+    const heldTouch = {
+      pointerId: 19,
+      pointerType: "touch",
+      button: 0,
+      clientX: right,
+      clientY: rect.top + 120,
+    };
+    const touchBeforeHold = interaction.snapshot().touch;
+    pointer("pointerdown", heldTouch);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    pointer("pointermove", { ...heldTouch, clientX: right - 15 }, window);
+    assert(!reader.hasAttribute("data-swipe-dragging"), "touch-hold-preview");
+    pointer("pointerup", { ...heldTouch, clientX: right - 15 });
+    await navigation.idle();
+    assert(
+      pagination.snapshot().page === 0 && interaction.snapshot().touch === touchBeforeHold,
+      "touch-hold-release",
+    );
+
+    pointer("pointerdown", { ...heldTouch, pointerId: 20 });
+    assert(content.setSelectionRange(range), "touch-selection-range");
+    document.dispatchEvent(new Event("selectionchange"));
+    assert(content.selectionRange(), "touch-selection-range");
+    content.clearSelection();
+    document.dispatchEvent(new Event("selectionchange"));
+    pointer("pointermove", { ...heldTouch, pointerId: 20, clientX: right - 60 }, window);
+    assert(!reader.hasAttribute("data-swipe-dragging"), "touch-selection-preview");
+    pointer("pointerup", { ...heldTouch, pointerId: 20, clientX: right - 60 });
+    await navigation.idle();
+    assert(
+      pagination.snapshot().page === 0 && interaction.snapshot().touch === touchBeforeHold,
+      "touch-selection-release",
+    );
 
     if (session.snapshot().sections > 1) {
       await session.open(0);
@@ -1094,7 +1164,9 @@ export function createDiagnostics({
       mouseVerified: counts.mouse === 2,
       touchVerified: counts.touch === 3,
       touchCenterVerified: true,
-      selectionVerified: counts.selectionProtected === 1,
+      selectionVerified: counts.selectionProtected >= selectionCount + 1,
+      touchHoldVerified: true,
+      selectionLatchVerified: true,
       controlsVerified: counts.controlProtected === 1,
       linksVerified: counts.contentProtected === 1,
       multiTouchVerified: counts.multiTouchProtected === 1,
@@ -1275,6 +1347,7 @@ export function createDiagnostics({
         ...contentActions.snapshot(),
         ...structuredActions.snapshot(),
         selectionLength: contentActions.selectionLength(),
+        selectionRangeState: selectionRangeState(),
       },
       resources: content.resourceSnapshot(),
       readerState: { ...readerState.snapshot(), ...stateEvidence },

@@ -1,27 +1,88 @@
-import { invoke } from "@tauri-apps/api/core";
+import "./styles/tokens.css";
+import "./styles/app.css";
 import { mount } from "svelte";
-
 import App from "./App.svelte";
-import "./library.css";
-import { messageClient } from "./messages";
-import "./shell.css";
-import { isReaderRoute } from "./route";
+import { hasReaderLaunchParams, installDemoFetchBridge, isTauriRuntime } from "./lib/data/runtime.ts";
+import { readAppTheme, readReaderAppearance } from "./library.ts";
+import { messageClient } from "./messages.ts";
 
-const target = document.querySelector<HTMLElement>("#app");
-if (!target) throw new Error("missing-app-root");
+const libraryReturnKey = "atha.reader.library-return-origin";
 
-mount(App, { target });
-
-if (window.__TAURI_INTERNALS__) {
-  let pending = Promise.resolve();
-  window.athaReaderIpc = {
-    postMessage(message) {
-      pending = pending.then(() => invoke<void>("reader_event", { message })).catch(() =>
-        console.error("Atha reader telemetry failed"),
-      );
-    },
-  };
-  window.athaMessages = messageClient;
+function appHostOrigin(loc: Pick<Location, "protocol" | "host">): string {
+  return `${loc.protocol}//${loc.host}`;
 }
 
-if (isReaderRoute()) await import("virtual:atha-reader-runtime");
+export function isExactAppLibraryRoot(url: Pick<URL, "pathname" | "search" | "hash" | "href">): boolean {
+  const normalized = new URL("/", url.href).href;
+  const bareOrigin = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  return (
+    (url.pathname === "/" || url.pathname === "") &&
+    !url.search &&
+    !url.hash &&
+    (url.href === normalized || url.href === bareOrigin)
+  );
+}
+
+function consumeLibraryReturn(): boolean {
+  try {
+    const origin = sessionStorage.getItem(libraryReturnKey);
+    sessionStorage.removeItem(libraryReturnKey);
+    return origin === appHostOrigin(location);
+  } catch {
+    return false;
+  }
+}
+
+function trackLibraryDeparture() {
+  try {
+    sessionStorage.removeItem(libraryReturnKey);
+  } catch {
+    return;
+  }
+  window.addEventListener("pagehide", () => {
+    try {
+      if (isExactAppLibraryRoot(location)) sessionStorage.setItem(libraryReturnKey, appHostOrigin(location));
+      else sessionStorage.removeItem(libraryReturnKey);
+    } catch {
+      // Fallback handled in exit handler when sessionStorage is unavailable.
+    }
+  });
+}
+
+if (isTauriRuntime()) {
+  window.athaMessages = messageClient;
+} else {
+  installDemoFetchBridge();
+}
+
+const root = document.documentElement;
+const readerRoute = hasReaderLaunchParams();
+const hasLibraryReturn = readerRoute && consumeLibraryReturn();
+if (!readerRoute) trackLibraryDeparture();
+
+const params = new URLSearchParams(location.search);
+const appearance = readerRoute
+  ? readReaderAppearance(params.has("verify") && !params.has("persist") ? null : undefined, params.has("state-probe"))
+  : { theme: readAppTheme(), brightness: 100 };
+const tone =
+  appearance.theme === "dark" ||
+  (appearance.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+    ? "dark"
+    : "light";
+
+if (readerRoute) {
+  root.dataset.theme = appearance.theme;
+  root.dataset.themeTone = tone;
+  root.dataset.appTheme = tone;
+  root.style.setProperty("--reader-brightness", String(appearance.brightness / 100));
+} else {
+  root.dataset.appTheme = tone;
+  root.dataset.appTone = tone;
+}
+
+const app = mount(App, {
+  target: document.getElementById("app")!,
+  props: { hasLibraryReturn },
+});
+
+export default app;

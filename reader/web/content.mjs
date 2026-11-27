@@ -44,6 +44,77 @@ export function cloneSelectedRange(book, selection) {
   return range.cloneRange();
 }
 
+export function createBookSelection(book, root) {
+  const document = book.ownerDocument;
+  const inBook = (node) => Boolean(node && book.contains(node) && node.getRootNode() === root);
+  const scopedRange = (range, allowCollapsed) => {
+    if (!range || (!allowCollapsed && range.collapsed) ||
+      !inBook(range.startContainer) || !inBook(range.endContainer) ||
+      !book.contains(range.commonAncestorContainer)) return null;
+    return range.cloneRange();
+  };
+
+  function resolve(allowCollapsed = false) {
+    try {
+      const shadowSelection = root.getSelection?.();
+      if (shadowSelection && shadowSelection.rangeCount !== 0) {
+        if (shadowSelection.rangeCount !== 1) return null;
+        const range = scopedRange(shadowSelection.getRangeAt(0), allowCollapsed);
+        return range ? { selection: shadowSelection, range } : null;
+      }
+      const selection = document.defaultView?.getSelection?.();
+      if (!selection || selection.rangeCount !== 1) return null;
+      const direct = scopedRange(selection.getRangeAt(0), allowCollapsed);
+      if (direct) return { selection, range: direct };
+      const ranges = selection.getComposedRanges?.({ shadowRoots: [root] });
+      if (ranges?.length !== 1) return null;
+      const source = ranges[0];
+      if (!inBook(source.startContainer) || !inBook(source.endContainer) ||
+        !Number.isInteger(source.startOffset) || source.startOffset < 0 ||
+        !Number.isInteger(source.endOffset) || source.endOffset < 0) return null;
+      const range = document.createRange();
+      range.setStart(source.startContainer, source.startOffset);
+      range.setEnd(source.endContainer, source.endOffset);
+      if (range.startContainer !== source.startContainer || range.startOffset !== source.startOffset ||
+        range.endContainer !== source.endContainer || range.endOffset !== source.endOffset) return null;
+      const scoped = scopedRange(range, allowCollapsed);
+      return scoped ? { selection, range: scoped } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return Object.freeze({
+    range: () => resolve()?.range ?? null,
+    clear: () => {
+      const current = resolve(true);
+      if (!current) return false;
+      current.selection.removeAllRanges();
+      return true;
+    },
+    set: (range) => {
+      try {
+        const target = scopedRange(range, false);
+        if (!target) return false;
+        const current = resolve(true);
+        const shadowSelection = root.getSelection?.();
+        const windowSelection = document.defaultView?.getSelection?.();
+        if (!current && (shadowSelection?.rangeCount || windowSelection?.rangeCount)) return false;
+        const selection = current?.selection ?? shadowSelection ?? windowSelection;
+        if (!selection) return false;
+        selection.removeAllRanges();
+        selection.addRange(target);
+        const restored = resolve()?.range;
+        return Boolean(restored &&
+          restored.startContainer === target.startContainer && restored.startOffset === target.startOffset &&
+          restored.endContainer === target.endContainer && restored.endOffset === target.endOffset);
+      } catch {
+        return false;
+      }
+    },
+  });
+}
+
 export function createContent({ host, reader, themeStyleSource, readerStyleSource, onLateLayout }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const nativeImageStyle = document.createElement("style");
@@ -54,6 +125,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   book.className = "book";
   nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
   shadow.append(nativeImageStyle, bookStyle, readerStyle, userStyle, book);
+  const bookSelection = createBookSelection(book, shadow);
 
   let bookUrl;
   let declaredResources;
@@ -1796,7 +1868,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   }
 
   function selectionRange() {
-    return cloneSelectedRange(book, shadow.getSelection?.());
+    return bookSelection.range();
   }
 
   async function captureRange(range, presentation) {
@@ -1876,6 +1948,8 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     renderCached,
     resourceSnapshot,
     selectionRange,
+    clearSelection: bookSelection.clear,
+    setSelectionRange: bookSelection.set,
     describeLink,
     setStyles,
     styleSnapshot,

@@ -1,7 +1,7 @@
 //! Content-addressed local library over imported reader roots.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     error::Error,
     fmt, fs,
     fs::{File, OpenOptions},
@@ -18,6 +18,7 @@ use crate::{create_real_directory, is_reparse_point};
 
 use super::{
     cbz,
+    classification::{self, SourceClassification},
     epub::{self, ImportError, READER_MANIFEST, import_epub},
     fb2, kindle,
     resources::{BookRoot, MAX_RESOURCE_BYTES, Resource, ResourceError},
@@ -39,7 +40,8 @@ const CUSTOM_COVER_STAGING_PREFIX: &str = ".cover.staging-";
 const MAX_COVER_SIDE: usize = 8_192;
 const MAX_COVER_PIXELS: usize = 20_000_000;
 static NEXT_COVER_TEMPORARY: AtomicU64 = AtomicU64::new(0);
-
+pub use super::classification::BookOrganization;
+pub(crate) use super::classification::{BOOK_ORGANIZATION_DIR, MAX_ORGANIZATION_BYTES};
 pub const MAX_CUSTOM_COVER_BYTES: u64 = MAX_RESOURCE_BYTES;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -52,6 +54,10 @@ pub struct LibraryBook {
     pub has_custom_cover: bool,
     pub imported_at: u64,
     pub prepared: bool,
+    pub favorite: bool,
+    pub tags: Vec<String>,
+    pub subjects: Vec<String>,
+    pub series: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -71,6 +77,7 @@ pub struct LocalLibrary {
     records: PathBuf,
     imports: PathBuf,
     sources: PathBuf,
+    organization: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -84,6 +91,17 @@ struct StoredBook {
     imported_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StoredOrganization {
+    schema: u8,
+    id: String,
+    imported_at: u64,
+    organization: BookOrganization,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_classification: Option<SourceClassification>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +136,7 @@ pub enum LibraryError {
     MissingSource,
     MissingCover,
     InvalidCover,
+    InvalidOrganization,
     ReadFailed,
     WriteFailed,
     UnsupportedSource,
@@ -135,6 +154,7 @@ impl LocalLibrary {
         let records = root.join("Library");
         let imports = root.join("ImportedBooks");
         let sources = root.join("SourceBooks");
+        let organization = root.join(BOOK_ORGANIZATION_DIR);
         create_real_directory(root).map_err(|_| LibraryError::InvalidRoot)?;
         create_real_directory(&records).map_err(|_| LibraryError::InvalidRoot)?;
         create_real_directory(&imports).map_err(|_| LibraryError::InvalidRoot)?;
@@ -143,6 +163,7 @@ impl LocalLibrary {
             records,
             imports,
             sources,
+            organization,
         };
         library.recover_custom_covers()?;
         library.recover_deletions()?;
@@ -303,7 +324,7 @@ impl LocalLibrary {
                 }
                 let mut rebuilt = None;
                 let mut last_error = None;
-                for source_path in source_paths {
+                for source_path in &source_paths {
                     let source = self.sources.join(source_path);
                     let Ok(extension) = source_extension(&source) else {
                         continue;
@@ -332,10 +353,43 @@ impl LocalLibrary {
                 })?
             }
         };
+        self.enrich_cached_classification(&record.id, &source_paths);
         Ok(OpenedBook {
             book: self.public_book(&record),
             root,
         })
+    }
+
+    pub fn update_book_organization(
+        &self,
+        id: &str,
+        organization: BookOrganization,
+    ) -> Result<LibraryBook, LibraryError> {
+        let path = self.record_path(id)?;
+        self.ensure_roots()?;
+        let record = read_record(&path)?;
+        let update = organization
+            .normalized()
+            .map_err(|()| LibraryError::InvalidOrganization)?;
+        if update != BookOrganization::default() {
+            let mut data = self
+                .read_organization(&record)?
+                .unwrap_or_else(|| StoredOrganization::from_book(&record));
+            let previous = data.organization.clone();
+            data.organization.update(update);
+            if data.organization != previous {
+                create_real_directory(&self.organization).map_err(|_| LibraryError::WriteFailed)?;
+                classification::write_json(&self.organization_path(id), &data)
+                    .map_err(|_| LibraryError::WriteFailed)?;
+                sync_directory(&self.organization)?;
+                sync_directory(
+                    self.organization
+                        .parent()
+                        .ok_or(LibraryError::InvalidRoot)?,
+                )?;
+            }
+        }
+        Ok(self.public_book(&record))
     }
 
     pub fn cover(&self, id: &str) -> Result<Resource, LibraryError> {
@@ -415,6 +469,7 @@ impl LocalLibrary {
         }
         fs::remove_file(path).map_err(|_| LibraryError::WriteFailed)?;
         sync_directory(&self.records)?;
+        self.remove_organization(id)?;
         remove_path_if_exists(&self.custom_cover_path(id)?)?;
         remove_path_if_exists(&self.custom_cover_previous_path(id)?)?;
         sync_directory(&self.records)
@@ -486,9 +541,12 @@ impl LocalLibrary {
     ) -> Result<(), LibraryError> {
         let target_records = target_root.as_ref().join("Library");
         let target_sources = target_root.as_ref().join("SourceBooks");
+        let target_organization = target_root.as_ref().join(BOOK_ORGANIZATION_DIR);
         fs::create_dir(&target_records).map_err(|_| LibraryError::WriteFailed)?;
         fs::create_dir(&target_sources).map_err(|_| LibraryError::WriteFailed)?;
+        fs::create_dir(&target_organization).map_err(|_| LibraryError::WriteFailed)?;
         let (mut records, sources, covers) = self.durable_state()?;
+        let mut organizations = self.durable_organizations(&records, false)?;
         let source_ids = sources
             .iter()
             .filter_map(|(_, name)| name.split_once('.').map(|(id, _)| id))
@@ -500,9 +558,11 @@ impl LocalLibrary {
             return Err(LibraryError::MissingSource);
         }
         for record in &mut records {
-            if let Some(imported) =
-                read_imported_metadata(&self.imports.join(&record.id), &record.id)
-            {
+            let root = self.imports.join(&record.id);
+            let mut organization = organizations
+                .remove(&record.id)
+                .unwrap_or_else(|| StoredOrganization::from_book(record));
+            if let Some(imported) = read_imported_metadata(&root, &record.id) {
                 if let Some(title) = imported
                     .title
                     .as_deref()
@@ -522,8 +582,24 @@ impl LocalLibrary {
                     record.authors = authors;
                 }
                 record.cover_path = imported.cover_path;
+                if prepared_cache(&root, record)
+                    && let Some(classification) =
+                        classification::read_cache(&self.imports, &record.id)
+                    && !classification.is_empty()
+                {
+                    organization.source_classification = Some(classification);
+                }
             }
             write_record(&target_records.join(format!("{}.json", record.id)), record)?;
+            if organization.organization != BookOrganization::default()
+                || organization.source_classification.is_some()
+            {
+                classification::write_json(
+                    &target_organization.join(format!("{}.json", record.id)),
+                    &organization,
+                )
+                .map_err(|_| LibraryError::WriteFailed)?;
+            }
         }
         for (source, name) in sources {
             fs::copy(source, target_sources.join(name)).map_err(|_| LibraryError::WriteFailed)?;
@@ -536,6 +612,7 @@ impl LocalLibrary {
 
     pub(crate) fn validate_durable_state(&self) -> Result<(), LibraryError> {
         let (records, sources, _) = self.durable_state()?;
+        self.durable_organizations(&records, true)?;
         let source_ids = sources
             .iter()
             .filter_map(|(_, name)| name.split_once('.').map(|(id, _)| id))
@@ -590,9 +667,11 @@ impl LocalLibrary {
     fn public_book(&self, record: &StoredBook) -> LibraryBook {
         let root = self.imports.join(&record.id);
         let imported = read_imported_metadata(&root, &record.id);
-        let prepared = imported.is_some()
-            && root.join(READER_MANIFEST).is_file()
-            && has_import_marker(&root, &record.id);
+        let prepared = imported.is_some() && prepared_cache(&root, record);
+        let imported_classification = prepared
+            .then(|| classification::read_cache(&self.imports, &record.id))
+            .flatten();
+        let organization = self.read_organization(record).ok().flatten();
         record.public(
             imported.as_ref(),
             prepared,
@@ -601,7 +680,45 @@ impl LocalLibrary {
                     .records
                     .join(format!("{}{}", record.id, CUSTOM_COVER_SUFFIX)),
             ),
+            imported_classification,
+            organization,
         )
+    }
+
+    fn enrich_cached_classification(&self, id: &str, sources: &[String]) {
+        if !sources.iter().any(|source| {
+            Path::new(source)
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| matches!(extension, "epub" | "cbz" | "fb2" | "fbz"))
+        }) {
+            return;
+        }
+        if classification::read_cache(&self.imports, id).is_some() {
+            return;
+        }
+        let _lock = super::lock_import();
+        if classification::read_cache(&self.imports, id).is_some() {
+            return;
+        }
+        let classification = sources.iter().find_map(|name| {
+            let path = self.sources.join(name);
+            if !fs::symlink_metadata(&path)
+                .is_ok_and(|entry| entry.file_type().is_file() && !is_reparse_point(&entry))
+            {
+                return None;
+            }
+            match source_extension(&path).ok()? {
+                "epub" => epub::read_source_classification(&path, id).ok(),
+                "cbz" => cbz::read_source_classification(&path, id).ok(),
+                "fb2" | "fbz" => fb2::read_source_classification(&path, id).ok(),
+                _ => None,
+            }
+        });
+        if let Some(classification) = classification {
+            // Optional cache enrichment must not make a previously readable book fail to open.
+            let _ = classification::write_cache(&self.imports, id, classification);
+        }
     }
 
     fn source_paths(&self, record: &StoredBook) -> Vec<String> {
@@ -705,12 +822,14 @@ impl LocalLibrary {
     fn remove_book_files(&self, id: &str) -> Result<(), LibraryError> {
         self.ensure_roots()?;
         remove_path_if_exists(&self.imports.join(id))?;
+        remove_adjunct(&classification::cache_path(&self.imports, id))?;
         for path in self.source_paths_for_id(id) {
             remove_path_if_exists(&path)?;
         }
         remove_path_if_exists(&self.custom_cover_path(id)?)?;
         remove_path_if_exists(&self.custom_cover_previous_path(id)?)?;
         remove_path_if_exists(&self.record_path(id)?)?;
+        self.remove_organization(id)?;
         sync_directory(&self.imports)?;
         sync_directory(&self.sources)?;
         sync_directory(&self.records)
@@ -794,6 +913,77 @@ impl LocalLibrary {
         Ok((records, sources, covers))
     }
 
+    fn organization_path(&self, id: &str) -> PathBuf {
+        self.organization.join(format!("{id}.json"))
+    }
+
+    fn has_organization_directory(&self) -> Result<bool, LibraryError> {
+        match fs::symlink_metadata(&self.organization) {
+            Ok(entry) if entry.file_type().is_dir() && !is_reparse_point(&entry) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            _ => Err(LibraryError::CorruptRecord),
+        }
+    }
+
+    fn read_organization(
+        &self,
+        book: &StoredBook,
+    ) -> Result<Option<StoredOrganization>, LibraryError> {
+        if !self.has_organization_directory()? {
+            return Ok(None);
+        }
+        Ok(
+            read_stored_organization(&self.organization_path(&book.id), &book.id)?
+                .filter(|data| data.imported_at == book.imported_at),
+        )
+    }
+
+    fn remove_organization(&self, id: &str) -> Result<(), LibraryError> {
+        if self.has_organization_directory()? {
+            remove_adjunct(&self.organization_path(id))?;
+            sync_directory(&self.organization)?;
+        }
+        Ok(())
+    }
+
+    fn durable_organizations(
+        &self,
+        records: &[StoredBook],
+        reject_stale: bool,
+    ) -> Result<HashMap<String, StoredOrganization>, LibraryError> {
+        let mut result = HashMap::new();
+        if !self.has_organization_directory()? {
+            return Ok(result);
+        }
+        let generations = records
+            .iter()
+            .map(|book| (book.id.as_str(), book.imported_at))
+            .collect::<HashMap<_, _>>();
+        for entry in fs::read_dir(&self.organization).map_err(|_| LibraryError::ReadFailed)? {
+            let entry = entry.map_err(|_| LibraryError::ReadFailed)?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or(LibraryError::CorruptRecord)?;
+            if classification::is_temporary_file(name) {
+                continue;
+            }
+            let id = name
+                .strip_suffix(".json")
+                .filter(|id| valid_id(id))
+                .ok_or(LibraryError::CorruptRecord)?;
+            if !reject_stale && !generations.contains_key(id) {
+                continue;
+            }
+            let data =
+                read_stored_organization(&entry.path(), id)?.ok_or(LibraryError::CorruptRecord)?;
+            if generations.get(id) == Some(&data.imported_at) {
+                result.insert(id.to_owned(), data);
+            } else if reject_stale {
+                return Err(LibraryError::CorruptRecord);
+            }
+        }
+        Ok(result)
+    }
+
     fn ensure_roots(&self) -> Result<(), LibraryError> {
         let root = self.records.parent().ok_or(LibraryError::InvalidRoot)?;
         if [root, &self.records, &self.imports, &self.sources]
@@ -807,12 +997,26 @@ impl LocalLibrary {
     }
 }
 
+impl StoredOrganization {
+    fn from_book(book: &StoredBook) -> Self {
+        Self {
+            schema: 1,
+            id: book.id.clone(),
+            imported_at: book.imported_at,
+            organization: BookOrganization::default(),
+            source_classification: None,
+        }
+    }
+}
+
 impl StoredBook {
     fn public(
         &self,
         imported: Option<&ImportedMetadata>,
         prepared: bool,
         has_custom_cover: bool,
+        source: Option<SourceClassification>,
+        stored: Option<StoredOrganization>,
     ) -> LibraryBook {
         let imported_title = imported
             .and_then(|metadata| metadata.title.as_deref())
@@ -827,6 +1031,10 @@ impl StoredBook {
                 .take(MAX_AUTHORS)
                 .collect::<Vec<_>>()
         });
+        let (organization, stored_source) = stored
+            .map(|data| (data.organization, data.source_classification))
+            .unwrap_or_default();
+        let source = source.or(stored_source).unwrap_or_default();
         LibraryBook {
             id: self.id.clone(),
             title: imported_title.unwrap_or_else(|| self.title.clone()),
@@ -842,6 +1050,10 @@ impl StoredBook {
             has_custom_cover,
             imported_at: self.imported_at,
             prepared,
+            favorite: organization.favorite.unwrap_or(false),
+            tags: organization.tags.unwrap_or(source.tags),
+            subjects: organization.subjects.unwrap_or(source.subjects),
+            series: organization.series.unwrap_or(source.series),
         }
     }
 }
@@ -856,6 +1068,7 @@ impl LibraryError {
             Self::MissingSource => "missing-library-source",
             Self::MissingCover => "missing-library-cover",
             Self::InvalidCover => "invalid-library-cover",
+            Self::InvalidOrganization => "invalid-library-organization",
             Self::ReadFailed => "library-read-failed",
             Self::WriteFailed => "library-write-failed",
             Self::UnsupportedSource => "invalid-library-source",
@@ -1108,6 +1321,45 @@ fn open_root(path: &Path) -> Result<BookRoot, LibraryError> {
     Ok(root)
 }
 
+fn prepared_cache(root: &Path, record: &StoredBook) -> bool {
+    root.join(READER_MANIFEST).is_file() && has_import_marker(root, record)
+}
+
+fn read_stored_organization(
+    path: &Path,
+    id: &str,
+) -> Result<Option<StoredOrganization>, LibraryError> {
+    let data: Option<StoredOrganization> = classification::read_json(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidData {
+            LibraryError::CorruptRecord
+        } else {
+            LibraryError::ReadFailed
+        }
+    })?;
+    if data.as_ref().is_some_and(|data| {
+        data.schema != 1
+            || data.id != id
+            || data.imported_at == 0
+            || !data.organization.is_valid()
+            || data
+                .source_classification
+                .as_ref()
+                .is_some_and(|source| !source.is_valid())
+    }) {
+        return Err(LibraryError::CorruptRecord);
+    }
+    Ok(data)
+}
+
+fn remove_adjunct(path: &Path) -> Result<(), LibraryError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() => Err(LibraryError::WriteFailed),
+        Ok(_) => fs::remove_file(path).map_err(|_| LibraryError::WriteFailed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(LibraryError::WriteFailed),
+    }
+}
+
 fn read_imported_metadata(path: &Path, id: &str) -> Option<ImportedMetadata> {
     if !real_directory(path) {
         return None;
@@ -1139,12 +1391,31 @@ fn read_imported_metadata(path: &Path, id: &str) -> Option<ImportedMetadata> {
     Some(metadata)
 }
 
-fn has_import_marker(path: &Path, id: &str) -> bool {
-    epub::has_cache_marker(path, id)
-        || cbz::has_cache_marker(path, id)
-        || fb2::has_cache_marker(path, id)
-        || kindle::has_cache_marker(path, id)
-        || text::has_cache_marker(path, id)
+fn has_import_marker(path: &Path, record: &StoredBook) -> bool {
+    type MarkerCheck = fn(&Path, &str) -> bool;
+    const CHECKS: [(&[&str], MarkerCheck); 5] = [
+        (&["epub"], epub::has_cache_marker),
+        (&["cbz"], cbz::has_cache_marker),
+        (&["fb2", "fbz"], fb2::has_cache_marker),
+        (&["mobi", "azw", "azw3"], kindle::has_cache_marker),
+        (&["md", "markdown", "txt"], text::has_cache_marker),
+    ];
+    // The record hints at the probe order, not the cache format or source availability.
+    // Old records may have no source path; a hint that does not match must not hide a marker.
+    let preferred = record
+        .source_path
+        .as_deref()
+        .and_then(|name| name.rsplit_once('.'))
+        .and_then(|(_, extension)| {
+            CHECKS
+                .iter()
+                .position(|(extensions, _)| extensions.contains(&extension))
+        });
+    preferred.is_some_and(|i| CHECKS[i].1(path, &record.id))
+        || CHECKS
+            .iter()
+            .enumerate()
+            .any(|(i, (_, check))| Some(i) != preferred && check(path, &record.id))
 }
 
 fn read_record(path: &Path) -> Result<StoredBook, LibraryError> {
