@@ -351,15 +351,88 @@ async function run() {
     await page.waitForSelector(".memory-shell");
     await page.waitForTimeout(350);
     await assertNoHorizontalOverflow(page, "memory-light-1440");
-    await page.screenshot({
-      path: path.join(screenshotDir, "06-memory-light-1440.png"),
-      animations: "disabled",
-    });
 
     // Test Reading Memory search
     await page.getByRole("searchbox", { name: "搜索笔记与回复" }).fill("快照");
     await page.waitForTimeout(350);
     assert.ok((await page.locator(".hit-row").count()) >= 1, "Reading Memory search should find seeded hits");
+
+    // A real reply saved in the reader is visible on return without retyping the query.
+    await page.getByRole("button", { name: "跳回原书" }).first().click();
+    await waitForReaderEntry(page);
+    await page.waitForSelector(".pane-c");
+    const latestReply = "新回复：快照读完不必重搜";
+    await page.locator(".pane-c .ProseMirror").fill(latestReply);
+    await page.locator(".pane-c .send-btn").click();
+    await page.locator(".pane-c .message-node").getByText(latestReply, { exact: true }).waitFor();
+    const back = page.locator("#reader-back");
+    if (!await back.isVisible()) {
+      await page.locator(".reader-shell").focus();
+      await page.keyboard.press("h");
+    }
+    await back.click();
+    await page.locator(".memory-shell").getByText(latestReply, { exact: true }).waitFor();
+    const memorySearch = page.getByRole("searchbox", { name: "搜索笔记与回复" });
+    assert.equal(await memorySearch.inputValue(), "快照");
+    await page.screenshot({
+      path: path.join(screenshotDir, "06-memory-light-1440.png"),
+      animations: "disabled",
+    });
+
+    // Native responses can finish in a different order than the user issued queries.
+    await page.evaluate(() => {
+      const pending = new Map();
+      globalThis.testMemoryPending = term => pending.has(term);
+      globalThis.finishTestMemory = (term, failed = false) => {
+        const result = pending.get(term);
+        pending.delete(term);
+        if (failed) result.reject(new Error("unavailable"));
+        else result.resolve([{
+          messageId: term, rootMessageId: term, conversationId: term, editionId: "test-edition",
+          title: "合成测试", authors: [], section: "ch1", canonicalLocator: "{}",
+          selectedText: term, text: `结果：${term}`, updatedAt: 0,
+        }]);
+      };
+      globalThis.__TAURI_INTERNALS__ = {
+        invoke(command, args) {
+          if (command !== "reading_memory_search") return Promise.resolve(null);
+          return new Promise((resolve, reject) => pending.set(args.query, { resolve, reject }));
+        },
+      };
+    });
+    await memorySearch.fill("较早请求");
+    await page.waitForFunction(() => globalThis.testMemoryPending("较早请求"));
+    await memorySearch.fill("较新请求");
+    await page.waitForFunction(() => globalThis.testMemoryPending("较新请求"));
+    await page.evaluate(() => globalThis.finishTestMemory("较新请求"));
+    await page.getByText("结果：较新请求").waitFor();
+    await page.evaluate(() => globalThis.finishTestMemory("较早请求"));
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    assert.equal(await page.getByText("结果：较早请求").count(), 0);
+    assert.equal(await page.getByText("结果：较新请求").count(), 1);
+
+    await memorySearch.fill("失败请求");
+    await page.waitForFunction(() => globalThis.testMemoryPending("失败请求"));
+    await page.evaluate(() => globalThis.finishTestMemory("失败请求", true));
+    await page.getByText("暂时无法读取阅读记忆。").waitFor();
+    await page.getByRole("button", { name: "重试" }).click();
+    await page.waitForFunction(() => globalThis.testMemoryPending("失败请求"));
+    await page.evaluate(() => globalThis.finishTestMemory("失败请求"));
+    await page.getByText("结果：失败请求").waitFor();
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await page.waitForFunction(() => globalThis.testMemoryPending("失败请求"));
+    await page.evaluate(() => {
+      globalThis.finishTestMemory("失败请求");
+      delete globalThis.__TAURI_INTERNALS__;
+      delete globalThis.testMemoryPending;
+      delete globalThis.finishTestMemory;
+    });
+    await memorySearch.fill("快照");
+    await page.locator(".memory-shell").getByText(latestReply, { exact: true }).waitFor();
 
     // Restore an archived inline image from bytes, not from the current book or a remote URL.
     await page.evaluate(() => {
