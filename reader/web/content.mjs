@@ -809,13 +809,16 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   function imageLayoutSignature(images) {
     const values = [book.scrollWidth, book.scrollHeight];
     const elements = new Set(images.flatMap((image) => [image, image.parentElement]).filter(Boolean));
+    const origin = book.getBoundingClientRect();
+    const viewport = reader.getBoundingClientRect();
+    const scale = reader.clientWidth > 0 && viewport.width > 0 ? viewport.width / reader.clientWidth : 1;
     for (const element of elements) {
       const rect = element.getBoundingClientRect();
       values.push(
-        rect.left.toFixed(2),
-        rect.top.toFixed(2),
-        rect.right.toFixed(2),
-        rect.bottom.toFixed(2),
+        ((rect.left - origin.left) / scale).toFixed(2),
+        ((rect.top - origin.top) / scale).toFixed(2),
+        ((rect.right - origin.left) / scale).toFixed(2),
+        ((rect.bottom - origin.top) / scale).toFixed(2),
       );
     }
     return values.join(":");

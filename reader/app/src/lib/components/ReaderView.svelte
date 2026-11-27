@@ -22,6 +22,8 @@
     listOfflineDictionaries,
     lookupOfflineWord,
   } from "../data/library-adapter.ts";
+  import { registerBackHandler, type BackSource } from "../data/back-stack.ts";
+  import type { OpeningPaperMeasure } from "../data/open-transition.ts";
   import { resolveEffectiveTheme } from "../engine/preferences.ts";
   import { ReaderEngine } from "../engine/reader-engine.svelte.ts";
   import type { LightboxPayload } from "../types.ts";
@@ -37,9 +39,12 @@
     manifestPath: string;
     initialJump?: ReadingMemoryTarget | null;
     onBackToShelf: () => void;
+    entryBlocked: boolean;
+    openingTheme: "light" | "paper" | "dark";
+    onScreenState: (state: "ready" | "error", measure?: OpeningPaperMeasure) => void;
   }
 
-  let { book, manifestPath, initialJump = null, onBackToShelf }: Props = $props();
+  let { book, manifestPath, initialJump = null, onBackToShelf, entryBlocked, openingTheme, onScreenState }: Props = $props();
 
   let frameEl = $state<HTMLDivElement | null>(null);
   let readerEl = $state<HTMLDivElement | null>(null);
@@ -115,7 +120,8 @@
     },
   });
 
-  const resolvedTheme = $derived(resolveEffectiveTheme(engine.preferences.effective.theme));
+  const resolvedTheme = $derived(engine.firstScreenReady ? resolveEffectiveTheme(engine.preferences.effective.theme) : openingTheme);
+  let readerShell: HTMLElement;
 
   const isCompact = $derived(viewportWidth < 800 || viewportHeight > viewportWidth);
   const isMediumLandscape = $derived(!isCompact && viewportWidth < 1440);
@@ -127,6 +133,29 @@
   );
 
   const displayPercent = $derived(scrubbingValue ?? engine.percent ?? 0);
+
+  $effect(() => {
+    const screen = engine.error ? "error" : engine.firstScreenReady ? "ready" : null;
+    if (screen) untrack(() => onScreenState(screen, screen === "ready" ? measureOpeningPaper() : undefined));
+  });
+
+  function measureOpeningPaper(): OpeningPaperMeasure | undefined {
+    if (!entryBlocked || !frameEl || !readerEl || !pageEl) return;
+    const frame = frameEl.getBoundingClientRect();
+    const page = pageEl.getBoundingClientRect();
+    const deviceScale = readerEl.getBoundingClientRect().width / readerEl.offsetWidth;
+    const padding = getComputedStyle(readerEl);
+    // The paper is the reading column and its own margins, not the whole desktop window.
+    const left = Math.max(frame.left, page.left - parseFloat(padding.paddingLeft) * deviceScale);
+    const right = Math.min(frame.right, page.right + parseFloat(padding.paddingRight) * deviceScale);
+    if (right > left) return { left, width: right - left };
+  }
+
+  $effect(() => {
+    if (entryBlocked || (!engine.firstScreenReady && !engine.error)) return;
+    // Don't steal focus if the reader already moved into an interactive control.
+    if (document.activeElement === document.body) readerShell?.focus({ preventScroll: true });
+  });
 
   // Re-measure A whenever C1 panes alter A's width
   let prevWorkspaceSig = "";
@@ -144,6 +173,7 @@
   });
 
   onMount(() => {
+    const unregisterBack = registerBackHandler(handleBackAction);
     const onResize = () => {
       viewportWidth = window.innerWidth;
       viewportHeight = window.innerHeight;
@@ -175,6 +205,7 @@
     })();
 
     return () => {
+      unregisterBack();
       if (window.__athaFlushOnExit) {
         delete window.__athaFlushOnExit;
       }
@@ -267,38 +298,44 @@
     chromeOpen = false;
   }
 
-  function handleGlobalKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      if (event.defaultPrevented || Date.now() - lastOverlayClosedAt < 120) {
-        return;
+  function handleBackAction(source: BackSource): boolean {
+    if (entryBlocked) return false;
+    if (Date.now() - lastOverlayClosedAt < 120) return true;
+    if (lightboxPayload) {
+      lightboxPayload = null;
+    } else if (pendingDeleteRootId) {
+      pendingDeleteRootId = null;
+    } else if (settingsOpen) {
+      settingsOpen = false;
+      lastOverlayClosedAt = Date.now();
+    } else if (directoryOpen) {
+      directoryOpen = false;
+      lastOverlayClosedAt = Date.now();
+    } else if (dictOpen) {
+      dictOpen = false;
+    } else if (engine.selection) {
+      engine.clearSelection();
+    } else if (notesMode !== "closed") {
+      if (notesMode === "thread" && isCompact) {
+        notesMode = "list";
+        pendingDraft = null;
+      } else {
+        notesMode = "closed";
+        focusThread = false;
+        pendingDraft = null;
       }
-      if (lightboxPayload) {
-        lightboxPayload = null;
-      } else if (dictOpen) {
-        dictOpen = false;
-      } else if (settingsOpen) {
-        settingsOpen = false;
-        lastOverlayClosedAt = Date.now();
-      } else if (directoryOpen) {
-        directoryOpen = false;
-        lastOverlayClosedAt = Date.now();
-      } else if (engine.selection) {
-        engine.clearSelection();
-      } else if (notesMode !== "closed") {
-        if (notesMode === "thread" && isCompact) {
-          notesMode = "list";
-          pendingDraft = null;
-        } else {
-          notesMode = "closed";
-          focusThread = false;
-          pendingDraft = null;
-        }
-      } else if (chromeOpen) {
-        chromeOpen = false;
-      }
-      return;
+    } else if (chromeOpen) {
+      chromeOpen = false;
+    } else if (source === "back" || (!engine.firstScreenReady && !engine.error)) {
+      onBackToShelf();
+    } else {
+      return false;
     }
+    return true;
+  }
 
+  function handleGlobalKeydown(event: KeyboardEvent) {
+    if (entryBlocked || !engine.firstScreenReady || event.defaultPrevented) return;
     const target = event.target as Element | null;
     const isEditing = Boolean(
       target?.closest("input, textarea, select, [contenteditable], .ProseMirror, .cm-editor"),
@@ -324,12 +361,19 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<main class="reader-shell" aria-label="分页阅读器" aria-busy={engine.loading ? "true" : "false"}>
-<div class="reader-startup" hidden={!engine.loading} aria-hidden={engine.loading ? "false" : "true"}></div>
+<main
+  class="reader-shell"
+  bind:this={readerShell}
+  tabindex="-1"
+  aria-label="分页阅读器"
+  aria-busy={!engine.firstScreenReady && !engine.error ? "true" : "false"}
+>
 <div
   class="reader-root"
   data-reader-theme={resolvedTheme}
   data-app-theme={resolvedTheme === "dark" ? "dark" : "light"}
+  data-opening-theme={resolvedTheme}
+  data-screen-ready={engine.firstScreenReady}
 >
   <div class="reader-workspace-layout">
     <!-- Region A: Reading Surface -->
@@ -343,12 +387,6 @@
       </div>
 
       <div class="kernel-bridge" bind:this={bridgeEl} hidden aria-hidden="true"></div>
-
-      {#if engine.loading}
-        <div class="loading-scrim" transition:fade={{ duration: 150 }}>
-          <div class="loading-pill glass-island">正在排版《{engine.bookTitle || book.title}》…</div>
-        </div>
-      {/if}
 
       {#if engine.error}
         <div class="error-overlay" role="alert">
@@ -816,7 +854,7 @@
     height: 100vh;
     height: 100dvh;
     overflow: hidden;
-    background: var(--bg-canvas);
+    background: var(--opening-canvas);
     color: var(--ink-primary);
   }
 
@@ -860,22 +898,6 @@
 
   .region-a.hidden-a {
     display: none;
-  }
-
-  .loading-scrim {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
-
-  .loading-pill {
-    padding: 12px 22px;
-    border-radius: var(--radius-pill);
-    font-size: 13.5px;
-    font-weight: 500;
   }
 
   .error-overlay {

@@ -10,7 +10,8 @@ description: 现代极简书房无框线前端的代码位置、结构、尺寸�
 
 | 文件                                                                                                        | 负责内容                                                                                                |
 | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `reader/app/src/main.ts`、`App.svelte`、`route.ts`                                                          | 应用/阅读路由判定、首屏外观预置、`history.back()` 同文档返回与全局导航装配                              |
+| `reader/app/src/main.ts`、`App.svelte`、`lib/data/back-stack.ts`                                            | 阅读入口、首屏外观预置、Android/Web 同文档开书、键盘与原生返回分发                                      |
+| `reader/app/src/lib/components/BookOpeningCover.svelte`、`lib/data/open-transition.ts`                      | 取可见封面、沿书脊翻开、等比放大真实正文；不改变排版与书内位置                                          |
 | `reader/app/src/lib/components/NavRail.svelte`                                                              | 悬浮玻璃左侧导航轨（>= 900 px）与底部胶囊导航栏（< 900 px）                                             |
 | `reader/app/src/lib/components/LibraryView.svelte`、`BookCover.svelte`                                      | 无框线极简书架、继续阅读条带、快捷分类胶囊、网格/列表视图、崩溃恢复、拖放导入与桌面悬浮单书菜单         |
 | `reader/app/src/lib/components/MemoryView.svelte`、`SnapshotPreview.svelte`                                 | 跨书阅读记忆中心：全文检索、最近阅读投影、安全跳回原书与历史快照预览                                    |
@@ -37,7 +38,6 @@ tauri://localhost/（或未带阅读参数的浏览器预览）
 
 tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换为 reader 视图）
 └─ ReaderView（main.reader-shell[aria-busy]）
-   ├─ .reader-startup[hidden][aria-hidden]
    ├─ .reader-workspace-layout
    │  ├─ section.region-a（正文画布）
    │  │  ├─ .reader-frame > .reader > .page > .reader-content-host
@@ -49,7 +49,7 @@ tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换�
 
 `.reader-controls` 仅位于 `.region-a` 内（`position: absolute; inset: 0`）并与正文同层受工作区分栏约束，不参与 `.reader` 内部设备像素分页。所有书籍 DOM 解析、安全剥离、CSS Shadow/Scoped 注入和翻页动画仍由 `reader/web/*.mjs` 执行；`ReaderEngine` 通过状态订阅将章节标题、页码百分比、书签、选区和高亮同步给 Svelte 视图。
 
-`main.ts` 同步预置 `data-app-theme` / `data-theme` / `--reader-brightness`；进入阅读页时记下精确书架根凭据并在 `pagehide` 与 `#reader-back` 时配合 `window.__athaFlushOnExit()` 通过 `history.back()` 返回，避免 BFCache 重刷丢位置；同时暴露 `window.athaMessages` 供内核与测试读取版本上下文。
+`main.ts` 预置主题与阅读亮度。Android 和浏览器预览从书架同文档进入阅读：首屏恢复后才翻开封面，页与字在原有布局外统一缩放。无可用封面或减少动态时，保持来路至首屏就绪。返回在正文还挂载时保存进度，再恢复书架滚动和触发焦点。桌面原生打开仍跨文档，具有精确书架来源凭据时走 `history.back()`，否则回到应用根。原生文件打开也沿用这一返回契约。
 
 ## 尺寸与缩放
 

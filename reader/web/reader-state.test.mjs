@@ -20,6 +20,7 @@ function memoryStorage(seed = {}) {
 
 function readingSession(storage, version, {
   keyPrefix = "atha.reader", recordShelfReading = true, bookKey = version.slice(0, 16), singleSection = false,
+  restoreLocator,
 } = {}) {
   let offset = 0;
   let lastPage = false;
@@ -39,6 +40,7 @@ function readingSession(storage, version, {
       currentPercent: (flushScroll) =>
         readingPercent(lastPage ? 1 : 0, book.sections.length, 0, lastPage || flushScroll ? 1 : pageCount),
       goTo: (value) => {
+        if (restoreLocator) return restoreLocator(value);
         const point = locator.parse(book, value).start;
         offset = point.offset;
         lastPage = point.section === "end";
@@ -67,6 +69,39 @@ function readingSession(storage, version, {
     },
   };
 }
+
+test("取消恢复后续章节保留保存的 Locator；真正无效的 Locator 仍清除", async () => {
+  const storage = memoryStorage();
+  const started = readingSession(storage, CONTENT_VERSION);
+  await started.state.restore();
+  started.state.activateShelfReading();
+  started.move(18, true);
+  started.state.scheduleProgress();
+  started.state.flushProgress();
+  const saved = storage.getItem(started.progressKey);
+  assert.equal(JSON.parse(JSON.parse(saved).locator).start.section, "end");
+
+  let canceled = false;
+  let finishNavigation;
+  let reachedNavigation;
+  const startedNavigation = new Promise((resolve) => { reachedNavigation = resolve; });
+  const reopening = readingSession(storage, CONTENT_VERSION, {
+    restoreLocator: () => new Promise((resolve) => {
+      finishNavigation = resolve;
+      reachedNavigation();
+    }),
+  });
+  const pending = reopening.state.restore(() => canceled);
+  await startedNavigation;
+  canceled = true;
+  finishNavigation(false);
+  await pending;
+  assert.equal(storage.getItem(started.progressKey), saved);
+
+  const invalid = readingSession(storage, CONTENT_VERSION, { restoreLocator: () => false });
+  await invalid.state.restore();
+  assert.equal(storage.getItem(started.progressKey), null);
+});
 
 test("真实打开更新同日顺序，恢复定位和重新排版不生成阅读时间", async () => {
   const first = CONTENT_VERSION;

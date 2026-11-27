@@ -56,6 +56,13 @@ async function assertNoHorizontalOverflow(page, label) {
   assert.equal(overflow, false, `Horizontal overflow detected at: ${label}`);
 }
 
+async function waitForReaderEntry(page) {
+  await page.waitForFunction(() =>
+    document.querySelector(".reader-root")?.dataset.screenReady === "true" &&
+    !document.querySelector(".opening-cover, .opening-back")
+  );
+}
+
 async function run() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -138,9 +145,7 @@ async function run() {
 
     // Open primary demo book
     await page.locator('[data-shelf-area="catalog"]').first().click();
-    await page.waitForSelector(".reader-frame");
-    await page.waitForFunction(() => !document.querySelector(".loading-scrim"), null, { timeout: 15000 });
-    await page.waitForTimeout(450);
+    await waitForReaderEntry(page);
 
     // 4. Pure Reader (1440x900)
     assert.equal(await page.locator(".top-island").count(), 0, "Reader should start distraction-free");
@@ -416,11 +421,36 @@ async function run() {
       animations: "disabled",
     });
 
-    // Open primary book on mobile -> reset reader theme to paper -> test B -> C -> B
-    await page.locator('[data-shelf-area="catalog"]').first().click();
-    await page.waitForSelector(".reader-frame");
-    await page.waitForFunction(() => !document.querySelector(".loading-scrim"), null, { timeout: 15000 });
-    await page.waitForTimeout(300);
+    // A canceled turn leaves the same book focused. The next turn reveals paper at cover scale.
+    const mobileBook = page.locator('.book-open-trigger').first();
+    await mobileBook.click();
+    await page.waitForSelector(".opening-cover .cover-art");
+    await page.getByRole("button", { name: "返回书架", exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector(".opening-cover, .reader-route"));
+    assert.ok(await mobileBook.evaluate((el) => el === document.activeElement));
+    await mobileBook.click();
+    assert.equal(await page.locator("body").getByText(/正在(打开|开启|排版)/).count(), 0);
+    const reveal = await page.waitForFunction(() => {
+      const camera = document.querySelector("[data-opening-camera]");
+      const cover = document.querySelector(".cover-plane");
+      if (!camera || !cover) return;
+      const bounds = cover.getBoundingClientRect();
+      const transform = new DOMMatrixReadOnly(getComputedStyle(camera).transform);
+      const basis = Number(camera.closest(".reader-route").style.getPropertyValue("--paper-from-scale"));
+      if (Math.abs(transform.a - basis) > 0.001) return;
+      return {
+        scale: basis,
+        paperClip: getComputedStyle(camera.closest(".reader-route")).clipPath,
+        spineOffset: Math.abs(transform.e - bounds.left),
+        topOffset: Math.abs(transform.f - bounds.top),
+      };
+    });
+    const stage = await reveal.jsonValue();
+    assert.ok(stage.scale > 0 && stage.scale < 1, "paper should start smaller than the viewport");
+    assert.match(stage.paperClip, /^inset\(/);
+    assert.ok(stage.spineOffset < 1 && stage.topOffset < 1, "paper and cover share their origin at 390px");
+    await waitForReaderEntry(page);
+    // Reset reader theme to paper, then exercise B -> C -> B.
 
     await page.keyboard.press("h");
     await page.waitForSelector(".top-island");

@@ -602,12 +602,16 @@ export function readStorageUsage(browserState: BrowserState): Promise<StorageUsa
   return invoke<StorageUsage>("local_data_storage_usage", { browserState });
 }
 
+export function prepareBookLaunch(id: string): Promise<ReaderLaunch> {
+  return invoke<ReaderLaunch>("open_library_book", { id });
+}
+
 export async function openBook(id: string): Promise<void> {
-  const launch = await invoke<ReaderLaunch>("open_library_book", { id });
+  const launch = await prepareBookLaunch(id);
   location.assign(launch.href);
 }
 
-export async function openReadingMemoryHit(hit: ReadingMemoryJump): Promise<void> {
+export async function prepareReadingMemoryLaunch(hit: ReadingMemoryJump): Promise<string> {
   if (
     !/^[a-f0-9]{64}$/.test(hit.editionId) ||
     ![hit.messageId, hit.rootMessageId, hit.conversationId].every((id) =>
@@ -624,7 +628,12 @@ export async function openReadingMemoryHit(hit: ReadingMemoryJump): Promise<void
     "memory-message": hit.messageId,
     "memory-root": hit.rootMessageId,
   });
-  location.assign(`${launch.href}&${memory}`);
+  return `${launch.href}&${memory}`;
+}
+
+export async function openReadingMemoryHit(hit: ReadingMemoryJump): Promise<void> {
+  const href = await prepareReadingMemoryLaunch(hit);
+  location.assign(href);
 }
 
 export function removeBook(id: string): Promise<LibraryBook[]> {

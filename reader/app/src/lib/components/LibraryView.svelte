@@ -67,7 +67,6 @@
   import {
     deleteLibraryBookData,
     importLibraryBooks,
-    launchReaderForBook,
     listLibraryBooks,
     removeLibraryBook,
     resetLibraryBookCover,
@@ -78,11 +77,12 @@
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
   interface Props {
-    onOpenReader: (book: LibraryBook, manifestPath: string) => void;
+    active: boolean;
+    onOpenReader: (book: LibraryBook, origin: ShelfOrigin, trigger?: HTMLElement) => Promise<void>;
     onBooksUpdated?: (books: LibraryBook[]) => void;
   }
 
-  let { onOpenReader, onBooksUpdated }: Props = $props();
+  let { active, onOpenReader, onBooksUpdated }: Props = $props();
 
   let books = $state<LibraryBook[]>([]);
   let loading = $state(true);
@@ -159,6 +159,10 @@
       layout,
       position: pos,
     });
+  }
+
+  export function rememberOpenOrigin(origin: ShelfOrigin) {
+    persistSession(origin);
   }
 
   async function restoreSessionAndFocus() {
@@ -317,16 +321,51 @@
     }
   });
 
+  function findOpenTrigger(origin: ShelfOrigin, trigger?: HTMLElement): HTMLElement | null {
+    if (trigger?.isConnected && trigger.getClientRects().length && !trigger.closest("[inert]")) return trigger;
+    const id = CSS.escape(origin.id);
+    const find = (selector: string) => [...(pageEl?.querySelectorAll<HTMLElement>(selector) ?? [])]
+      .find((el) => el.getClientRects().length && !el.closest("[inert]"));
+    return find(`[data-shelf-area="${origin.area}"][data-book-id="${id}"]`)
+      ?? find(`[data-shelf-open="${id}"]`) ?? null;
+  }
+
+  export function restoreOpenFocus(origin: ShelfOrigin, trigger?: HTMLElement) {
+    findOpenTrigger(origin, trigger)?.focus({ preventScroll: true });
+  }
+
+  /** Refresh progress after return, preserving the originating row if the sort reorders it. */
+  export async function refreshSilent(origin?: ShelfOrigin) {
+    try {
+      const loaded = await listLibraryBooks();
+      const target = origin && active ? findOpenTrigger(origin) : null;
+      const offset = target?.getBoundingClientRect().top;
+      const focusWasOnTarget = document.activeElement === target;
+      const scrollY = window.scrollY;
+      books = loaded;
+      onBooksUpdated?.(books);
+      if (origin && origin.area === "catalog" && offset !== undefined && focusWasOnTarget) {
+        await tick();
+        if (!active || window.scrollY !== scrollY) return;
+        const next = findOpenTrigger(origin);
+        if (next && (document.activeElement === target || document.activeElement === document.body)) {
+          window.scrollBy({ top: next.getBoundingClientRect().top - offset, behavior: "instant" as ScrollBehavior });
+          next.focus({ preventScroll: true });
+        }
+      }
+    } catch {
+      // Keep cached books intact on background refresh failure
+    }
+  }
+
   async function handleOpenBook(entry: ShelfEntry, area: "catalog" | "recent", triggerEl?: HTMLElement) {
-    persistSession({
+    const origin: ShelfOrigin = {
       id: entry.book.id,
       area,
       offset: triggerEl ? triggerEl.getBoundingClientRect().top : 0,
-    });
+    };
     try {
-      await launchReaderForBook(entry.book.id, (_id, manifestPath) => {
-        onOpenReader(entry.book, manifestPath);
-      });
+      await onOpenReader(entry.book, origin, triggerEl);
     } catch (err) {
       notify(openFailureMessage(err));
     }

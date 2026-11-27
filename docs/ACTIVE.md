@@ -2,7 +2,7 @@
 
 本页指向当前工作的入口。
 
-- `change`：开书动效的阅读器前置 → `docs/changes/reader-opening-foundation.md`
+- `change`：开书动效的独立候选 → `docs/changes/book-opening.md`
 
 - `now`：UI 重设计候选交接，等待用户复核书架与阅读主界面。
 - `change`：UI 重设计 → `docs/changes/ui-redesign.md`

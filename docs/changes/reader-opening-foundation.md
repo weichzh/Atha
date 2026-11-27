@@ -10,7 +10,7 @@ implemented
 
 ## Problem
 
-GitHub 主线的阅读入口仍使用旧 ReaderCanvas。已通过手机试读的开书动效依赖新版 ReaderView、书架的受控打开与位置恢复。先交付前置可让审查与验证区分阅读器基线和动效。
+原主线阅读入口使用旧 ReaderCanvas。已通过手机试读的开书动效依赖新版 ReaderView、书架的受控打开与位置恢复。先交付前置，让审查与验证区分阅读器基线和动效。
 
 ## Scope
 
@@ -30,7 +30,7 @@ present
 - [x] 应用入口、书架与 ReaderView 构建可用，原有打开、恢复与返回不回归。
 - [x] 原生桌面文件入口和静态阅读宿主保留；未纳入其他在途改动。
 - [x] 仓库快检各项、Chromium 和隔离 Linux 原生开书验证通过。
-- [ ] 独立审查后由前置 PR 合入。
+- [x] 代码与安全复审通过；前置 PR 合入 `main`（`326e7e7`）。
 
 ## Files And Steps
 
@@ -59,7 +59,7 @@ Node 137 项全过；Rust workspace 测试通过；Svelte 零错误和警告、V
 
 ## Review
 
-[PR #4](https://github.com/weichzh/Atha/pull/4) 的独立审查对初始候选提出五项阅读行为回归。补齐原文选区冻结、根笔记一次性保存富文本、异步回复不清除新输入、按保存的原文锚点跳转，以及历史快照按捕获的字节还原图片。复审按更新后的提交确认。
+[PR #4](https://github.com/weichzh/Atha/pull/4) 的独立审查提出五项阅读行为回归：原文选区冻结、根笔记一次性保存富文本、异步回复不清除新输入、按保存的原文锚点跳转，以及历史快照按捕获的字节还原图片。修复后，代码和安全复审均覆盖 `2f42221`，无未解决意见。
 
 ## Evidence And Residual Risks
 

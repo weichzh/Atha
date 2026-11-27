@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowCompat
@@ -45,12 +46,37 @@ private class SystemBarsBridge(private val activity: MainActivity) {
 }
 
 class MainActivity : TauriActivity() {
+  private var attachedWebView: WebView? = null
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+
+    val backCallback = object : OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        val webView = attachedWebView
+        if (webView == null) {
+          isEnabled = false
+          onBackPressedDispatcher.onBackPressed()
+          isEnabled = true
+          return
+        }
+        webView.evaluateJavascript(
+          "(function(){ try { return Boolean(globalThis.__athaHandleBack && globalThis.__athaHandleBack()); } catch (e) { return false; } })()",
+        ) { raw ->
+          if (raw != "true") {
+            isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+            isEnabled = true
+          }
+        }
+      }
+    }
+    onBackPressedDispatcher.addCallback(this, backCallback)
   }
 
   override fun onWebViewCreate(webView: WebView) {
+    attachedWebView = webView
     val systemBars = SystemBarsBridge(this)
     ViewCompat.setOnApplyWindowInsetsListener(webView) { _, insets ->
       // Edge-to-edge leaves IME avoidance to the host, not the WebView page.

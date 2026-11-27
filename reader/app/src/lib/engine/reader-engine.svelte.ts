@@ -216,6 +216,7 @@ const ALLOWED_TELEMETRY_ERRORS = new Set([
 
 export class ReaderEngine {
   ready = $state(false);
+  firstScreenReady = $state(false);
   initialJumpLocated = $state(false);
   loading = $state(true);
   error = $state<string | null>(null);
@@ -405,6 +406,8 @@ export class ReaderEngine {
     };
   }
 
+  private mountReaderEl: HTMLElement | null = null;
+
   async mount(elements: {
     frame: HTMLElement;
     reader: HTMLElement;
@@ -426,6 +429,7 @@ export class ReaderEngine {
     };
 
     const { frame, reader, page, host, bridgeRoot, manifestPath, initialJump } = elements;
+    this.mountReaderEl = reader;
 
     // Build hidden bridge elements required by pure kernel modules
     const makeEl = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}) => {
@@ -587,9 +591,11 @@ export class ReaderEngine {
         return this.readerState.savePreferences(scope);
       },
       onStable: (active: boolean, reachedEnd: boolean, movedAt: number | null) => {
-        (this.readerState?.scheduleProgress as
-          | ((a: boolean, b: boolean, c: number | null) => void)
-          | undefined)?.(active, reachedEnd, movedAt);
+        if (this.firstScreenReady) {
+          (this.readerState?.scheduleProgress as
+            | ((a: boolean, b: boolean, c: number | null) => void)
+            | undefined)?.(active, reachedEnd, movedAt);
+        }
         this.syncSnapshots();
       },
       assert,
@@ -742,6 +748,7 @@ export class ReaderEngine {
 
     try {
       await this.content.initialize();
+      if (this.disposed) return;
       this.pagination.initialize();
       this.prefController.reset("application");
       this.prefController.reset("book");
@@ -767,12 +774,20 @@ export class ReaderEngine {
       this.captureDomBindings(() => this.statistics!.bind());
       this.searchEngine.bind();
 
-      await this.readerState.restore();
-      this.readerState.activateShelfReading();
-      this.statistics.setStable(true);
+      await this.readerState.restore(() => this.disposed);
+      if (this.disposed) return;
+      if (!initialJump) {
+        this.readerState.activateShelfReading();
+        this.statistics.setStable(true);
+        this.syncSnapshots();
+        this.firstScreenReady = true;
+      }
       await this.bookmarksEngine.bind();
+      if (this.disposed) return;
       await this.messageStore.restore();
+      if (this.disposed) return;
       await this.refreshMessages();
+      if (this.disposed) return;
 
       if (initialJump) {
         const root = initialJump.editionId === this.contentVersion
@@ -781,6 +796,9 @@ export class ReaderEngine {
               candidate.conversationId === initialJump.conversationId)
           : null;
         this.initialJumpLocated = Boolean(root && await this.navigation.goTo(root.sourceAnchor.canonicalLocator));
+        if (this.disposed) return;
+        this.readerState.activateShelfReading();
+        this.statistics.setStable(true);
         if (!this.initialJumpLocated) this.showToast("未找到原文位置，可返回阅读记忆查看历史快照");
       }
 
@@ -789,6 +807,7 @@ export class ReaderEngine {
 
       this.syncHighlights();
       this.syncSnapshots();
+      this.firstScreenReady = true;
       this.ready = true;
       this.loading = false;
       document.documentElement.dataset.status = "pass";
@@ -796,6 +815,7 @@ export class ReaderEngine {
       document.documentElement.setAttribute("data-reader-ready", "");
       this.emitTelemetry(`ready|${Math.min(10_000, Math.max(1, this.pages))}|0|0|0`);
     } catch (err) {
+      if (this.disposed) return;
       const rawCode = err instanceof Error ? err.message : "book-load";
       const safeCode = ALLOWED_TELEMETRY_ERRORS.has(rawCode) ? rawCode : "book-load";
       this.error = rawCode;
@@ -1179,7 +1199,8 @@ export class ReaderEngine {
   flushOnExit() {
     if (this.disposed) return;
     try {
-      this.readerState?.flushOnExit();
+      if (this.firstScreenReady && this.mountReaderEl?.isConnected) this.readerState?.flushOnExit();
+      else this.readerState?.flushProgress();
       this.statistics?.flush();
     } catch {
       // Storage failure must not block exiting
@@ -1191,7 +1212,8 @@ export class ReaderEngine {
     this.disposed = true;
     if (this.toastTimer) clearTimeout(this.toastTimer);
     try {
-      this.readerState?.flushOnExit();
+      // The leaving route already sampled its live viewport.
+      this.readerState?.flushProgress();
       this.statistics?.flush();
       this.session?.close();
     } catch {

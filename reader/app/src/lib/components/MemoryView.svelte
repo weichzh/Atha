@@ -8,22 +8,25 @@
   import type { ReadingMemoryHit, SourceCaptureView } from "../../messages.ts";
   import { readShelfReading } from "../../shelf-reading.ts";
   import { indexShelf, recentShelf } from "../../shelf-browse.ts";
-  import { launchReadingMemoryHit, listLibraryBooks } from "../data/library-adapter.ts";
+  import { openFailureMessage } from "../../library.ts";
+  import { listLibraryBooks } from "../data/library-adapter.ts";
   import { getReadingMemoryClient } from "../data/message-adapter.ts";
   import BookCover from "./BookCover.svelte";
   import SnapshotPreview from "./SnapshotPreview.svelte";
 
   interface Props {
-    onOpenReaderJump: (book: LibraryBook, manifestPath: string, jump: ReadingMemoryJump) => void;
+    launchBlocked: boolean;
+    onOpenReaderJump: (book: LibraryBook, jump: ReadingMemoryJump) => Promise<void>;
   }
 
-  let { onOpenReaderJump }: Props = $props();
+  let { launchBlocked, onOpenReaderJump }: Props = $props();
 
   let query = $state("");
   let hits = $state<ReadingMemoryHit[]>([]);
   let books = $state<LibraryBook[]>([]);
   let loading = $state(true);
 
+  let jumpError = $state("");
   let snapshotModalOpen = $state(false);
   let snapshotLoading = $state(false);
   let activeHit = $state<ReadingMemoryHit | null>(null);
@@ -60,18 +63,18 @@
   async function handleJumpToBook(hit: ReadingMemoryHit) {
     const book = bookMap.get(hit.editionId);
     if (!book) return;
-    await launchReadingMemoryHit(
-      {
+    jumpError = "";
+    try {
+      await onOpenReaderJump(book, {
         messageId: hit.messageId,
         rootMessageId: hit.rootMessageId,
         conversationId: hit.conversationId,
         editionId: hit.editionId,
         canonicalLocator: hit.canonicalLocator,
-      },
-      (_id, manifestPath, jump) => {
-        onOpenReaderJump(book, manifestPath, jump);
-      },
-    );
+      });
+    } catch (error) {
+      jumpError = openFailureMessage(error);
+    }
   }
 
   async function openSnapshotModal(hit: ReadingMemoryHit) {
@@ -123,6 +126,7 @@
       {/if}
     </div>
   </header>
+  {#if jumpError}<p role="alert">{jumpError}</p>{/if}
 
   {#if recentBooks.length > 0 && !query.trim()}
     <section class="memory-recent" aria-label="最近阅读">
@@ -188,7 +192,8 @@
                 <span>历史快照</span>
               </button>
               {#if bookInShelf}
-                <button type="button" class="pill-btn jump-btn" onclick={() => handleJumpToBook(hit)}>
+                <button type="button" class="pill-btn jump-btn" aria-disabled={launchBlocked}
+                  onclick={() => { if (!launchBlocked) void handleJumpToBook(hit); }}>
                   <span>跳回原书</span>
                   <ArrowUpRight size={14} />
                 </button>
