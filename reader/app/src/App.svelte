@@ -410,7 +410,11 @@
         onBooksUpdated={(list) => (bookCount = list.length)}
       />
     {:else if activeTab === "memory"}
-      <MemoryView launchBlocked={readerLaunchInFlight} onOpenReaderJump={openMemoryBook} />
+      <MemoryView
+        active={activeRoute === "memory"}
+        launchBlocked={readerLaunchInFlight}
+        onOpenReaderJump={openMemoryBook}
+      />
     {:else}
       <AppSettingsView />
     {/if}

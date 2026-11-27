@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ArrowUpRight, History, Search, Sparkles, X } from "@lucide/svelte";
   import { Dialog } from "bits-ui";
-  import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import type { LibraryBook, ReadingMemoryJump } from "../../library.ts";
@@ -15,16 +15,19 @@
   import SnapshotPreview from "./SnapshotPreview.svelte";
 
   interface Props {
+    active: boolean;
     launchBlocked: boolean;
     onOpenReaderJump: (book: LibraryBook, jump: ReadingMemoryJump) => Promise<void>;
   }
 
-  let { launchBlocked, onOpenReaderJump }: Props = $props();
+  let { active, launchBlocked, onOpenReaderJump }: Props = $props();
 
   let query = $state("");
   let hits = $state<ReadingMemoryHit[]>([]);
   let books = $state<LibraryBook[]>([]);
   let loading = $state(true);
+  let resultQuery = $state<string | null>(null);
+  let loadError = $state(false);
 
   let jumpError = $state("");
   let snapshotModalOpen = $state(false);
@@ -36,28 +39,61 @@
   const recentBooks = $derived(recentShelf(indexShelf(books, readingMap)));
   const bookMap = $derived(new Map(books.map((b) => [b.id, b])));
 
-  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  let requestRevision = 0;
+  let shelfRequest: Promise<LibraryBook[]> | null = null;
 
-  async function runSearch(term: string) {
-    loading = true;
+  async function refresh(term: string, revision: number) {
+    const shelf = shelfRequest ??= listLibraryBooks();
     try {
-      hits = await getReadingMemoryClient().search(term);
+      const [nextBooks, nextHits] = await Promise.all([shelf, getReadingMemoryClient().search(term)]);
+      if (revision !== requestRevision) return;
+      books = nextBooks;
+      hits = nextHits;
+      resultQuery = term;
+    } catch {
+      if (revision !== requestRevision) return;
+      shelfRequest = null;
+      loadError = true;
     } finally {
-      loading = false;
+      if (revision === requestRevision) loading = false;
     }
   }
 
-  onMount(async () => {
-    books = await listLibraryBooks();
-    await runSearch("");
+  function reload() {
+    clearTimeout(searchTimer);
+    const revision = ++requestRevision;
+    shelfRequest = null;
+    loadError = false;
+    loading = true;
+    void refresh(untrack(() => query), revision);
+  }
+
+  function invalidate() {
+    clearTimeout(searchTimer);
+    requestRevision += 1;
+  }
+
+  $effect(() => {
+    if (!active) return;
+    reload();
+    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) reload(); };
+    window.addEventListener("pagehide", invalidate);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("pagehide", invalidate);
+      window.removeEventListener("pageshow", onPageShow);
+      invalidate();
+    };
   });
 
   function handleSearchInput(value: string) {
     query = value;
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      void runSearch(value);
-    }, 150);
+    clearTimeout(searchTimer);
+    const revision = ++requestRevision;
+    loadError = false;
+    loading = true;
+    searchTimer = setTimeout(() => void refresh(value, revision), 150);
   }
 
   async function handleJumpToBook(hit: ReadingMemoryHit) {
@@ -152,13 +188,20 @@
     </section>
   {/if}
 
-  <section class="memory-hits" aria-label="记忆检索结果">
+  <section class="memory-hits" aria-label="记忆检索结果" aria-busy={loading}>
     <div class="section-head">
       <h2>{query.trim() ? "搜索笔记与回复" : "全部记忆片段"}</h2>
-      <span class="section-count tabular">{hits.length} 条</span>
+      {#if !loadError && resultQuery === query}
+        <span class="section-count tabular">{hits.length} 条</span>
+      {/if}
     </div>
 
-    {#if loading}
+    {#if loadError}
+      <div class="empty-memory">
+        <p role="status">暂时无法读取阅读记忆。</p>
+        <button type="button" class="pill-btn" onclick={reload}>重试</button>
+      </div>
+    {:else if loading && resultQuery !== query}
       <div class="empty-memory">正在翻检跨书阅读记忆…</div>
     {:else if hits.length === 0}
       <div class="empty-memory">
