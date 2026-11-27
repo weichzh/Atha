@@ -117,6 +117,8 @@ struct ManifestSection {
 struct TocItem {
     label: String,
     href: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -158,11 +160,13 @@ struct AuthorParts {
 
 struct TocCandidate {
     section_depth: usize,
+    toc_level: u8,
     title_depth: Option<usize>,
     key: SegmentKey,
     anchor: Option<String>,
     label: String,
     emitted: bool,
+    listed: bool,
 }
 
 #[derive(Default)]
@@ -575,13 +579,17 @@ fn discover_start(
             cursor.open_void_depth = Some(cursor.depth);
         }
         if name == "section" {
+            let parent_count = cursor.toc.iter().filter(|item| item.listed).count();
+            let toc_level = (parent_count + 1).min(6) as u8;
             cursor.toc.push(TocCandidate {
                 section_depth: cursor.depth,
+                toc_level,
                 title_depth: None,
                 key,
                 anchor: attribute(reader, event, "id")?,
                 label: String::new(),
                 emitted: false,
+                listed: false,
             });
             if cursor.toc.len() > MAX_XML_DEPTH {
                 return Err(ImportError::InvalidXml);
@@ -688,10 +696,15 @@ fn discover_end(name: &[u8], cursor: &mut XmlCursor, plan: &mut Plan) -> Result<
                 .unwrap_or_else(|| plan.segment(candidate.key).href.clone());
             candidate.emitted = true;
             if plan.toc_hrefs.insert(href.clone()) {
+                candidate.listed = true;
                 if plan.toc.len() >= MAX_MANIFEST_TOC_ITEMS {
                     return Err(ImportError::TooManyTocItems);
                 }
-                plan.toc.push(TocItem { label, href });
+                plan.toc.push(TocItem {
+                    label,
+                    href,
+                    level: (candidate.toc_level > 1).then_some(candidate.toc_level),
+                });
             }
         }
     }

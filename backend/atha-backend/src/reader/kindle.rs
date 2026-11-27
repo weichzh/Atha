@@ -109,6 +109,8 @@ struct ManifestSection {
 struct ManifestTocItem {
     label: String,
     href: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<u8>,
 }
 
 struct Preflight {
@@ -663,12 +665,13 @@ fn write_book(
     }
     guides.verify(staging)?;
     let mut toc = Vec::new();
-    flatten_toc(book.toc(), &source_map, &mut HashSet::new(), &mut toc)?;
+    flatten_toc(book.toc(), &source_map, &mut HashSet::new(), 1, &mut toc)?;
     if toc.is_empty() {
         for (index, section) in sections.iter().enumerate() {
             toc.push(ManifestTocItem {
                 label: format!("章节 {}", index + 1),
                 href: section.href.clone(),
+                level: None,
             });
         }
     }
@@ -971,6 +974,7 @@ fn flatten_toc(
     entries: &[TocEntry],
     source_map: &HashMap<String, String>,
     seen: &mut HashSet<String>,
+    depth: u8,
     output: &mut Vec<ManifestTocItem>,
 ) -> Result<(), ImportError> {
     for entry in entries {
@@ -988,10 +992,21 @@ fn flatten_toc(
         if href.encode_utf16().count() > 768 {
             return Err(ImportError::InvalidReference);
         }
-        if seen.insert(href.clone()) {
-            output.push(ManifestTocItem { label, href });
+        let listed = seen.insert(href.clone());
+        if listed {
+            output.push(ManifestTocItem {
+                label,
+                href,
+                level: (depth > 1).then(|| depth.min(6)),
+            });
         }
-        flatten_toc(&entry.children, source_map, seen, output)?;
+        flatten_toc(
+            &entry.children,
+            source_map,
+            seen,
+            depth.saturating_add(u8::from(listed)),
+            output,
+        )?;
     }
     Ok(())
 }
@@ -1329,6 +1344,35 @@ mod tests {
     }
 
     #[test]
+    fn toc_keeps_depth_without_turning_duplicate_targets_into_extra_parents() {
+        fn entry(href: &str, children: Vec<TocEntry>) -> TocEntry {
+            TocEntry {
+                title: href.to_owned(),
+                href: href.to_owned(),
+                children,
+                play_order: None,
+                target: None,
+            }
+        }
+        let root = entry(
+            "one.xhtml",
+            vec![entry("one.xhtml", vec![entry("two.xhtml", vec![])])],
+        );
+        let mut toc = Vec::new();
+        let source_map = HashMap::from([
+            ("one.xhtml".into(), "part.xhtml".into()),
+            ("two.xhtml".into(), "chapter.xhtml".into()),
+        ]);
+        flatten_toc(&[root], &source_map, &mut HashSet::new(), 1, &mut toc).unwrap();
+        assert_eq!(
+            toc.iter()
+                .map(|item| (item.href.as_str(), item.level))
+                .collect::<Vec<_>>(),
+            [("part.xhtml", None), ("chapter.xhtml", Some(2))]
+        );
+    }
+
+    #[test]
     fn toc_requires_a_section_path() {
         let entry = TocEntry {
             title: "Fragment only".to_owned(),
@@ -1342,6 +1386,7 @@ mod tests {
                 &[entry],
                 &HashMap::new(),
                 &mut HashSet::new(),
+                1,
                 &mut Vec::new()
             ),
             Err(ImportError::InvalidReference)

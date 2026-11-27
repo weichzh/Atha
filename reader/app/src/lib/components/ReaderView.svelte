@@ -30,6 +30,7 @@
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import DictionaryCard from "./DictionaryCard.svelte";
   import NotesWorkspace from "./NotesWorkspace.svelte";
+  import ReaderDirectoryToc from "./ReaderDirectoryToc.svelte";
   import ReaderSettingsDialog from "./ReaderSettingsDialog.svelte";
   import SelectionPill from "./SelectionPill.svelte";
   import StructuredLightbox from "./StructuredLightbox.svelte";
@@ -651,6 +652,7 @@
             <div
               {...props}
               class="atha-dialog-content wide directory-dialog"
+              aria-label="目录、书签与全书搜索"
               transition:scale={{ start: 0.96, duration: 190, easing: cubicOut }}
               onpointerdown={(e) => e.stopPropagation()}
             >
@@ -698,25 +700,18 @@
               </div>
 
               {#if directoryTab === "toc"}
-                <div class="dir-list">
-                  {#if engine.toc.length === 0}
-                    <div class="dir-empty">本书未提供章节目录。</div>
-                  {:else}
-                    {#each engine.toc as item, idx (item.href)}
-                      <button
-                        type="button"
-                        class="dir-row"
-                        class:active={engine.tocIndex === idx}
-                        onclick={() => {
-                          void engine.goToToc(idx);
-                          directoryOpen = false;
-                        }}
-                      >
-                        <span>{item.label}</span>
-                      </button>
-                    {/each}
-                  {/if}
-                </div>
+                {#if engine.toc.length === 0}
+                  <div class="dir-empty">本书未提供章节目录。</div>
+                {:else}
+                  <ReaderDirectoryToc
+                    entries={engine.toc}
+                    activeIndex={engine.tocIndex}
+                    onSelect={(index) => {
+                      void engine.goToToc(index);
+                      directoryOpen = false;
+                    }}
+                  />
+                {/if}
               {:else if directoryTab === "bookmarks"}
                 <div class="dir-list">
                   <div class="bm-toolbar">
@@ -1146,25 +1141,6 @@
     gap: 4px;
     max-height: 52vh;
     overflow-y: auto;
-  }
-
-  .dir-row {
-    width: 100%;
-    text-align: left;
-    padding: 11px 14px;
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    color: var(--ink-primary);
-  }
-
-  .dir-row:hover {
-    background: var(--bg-well);
-  }
-
-  .dir-row.active {
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-weight: 600;
   }
 
   .bm-toolbar {

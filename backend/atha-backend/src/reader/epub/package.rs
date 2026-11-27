@@ -85,6 +85,8 @@ struct Section {
 struct TocItem {
     label: String,
     href: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<u8>,
 }
 
 pub(super) struct ImportPlan {
@@ -1122,6 +1124,8 @@ fn parse_navigation(
     let mut body_count = 0_u8;
     let mut toc_depth = None;
     let mut toc_count = 0_u8;
+    // A nested list belongs only to an enclosing list item with a usable jump.
+    let mut items: Vec<(usize, bool)> = Vec::new();
     let mut link: Option<(usize, String, String)> = None;
     let mut result = Vec::new();
     let mut hrefs = HashSet::new();
@@ -1153,6 +1157,8 @@ fn parse_navigation(
                     }
                     toc_count += 1;
                     toc_depth = Some(depth);
+                } else if xhtml && name.as_ref() == b"li" && toc_depth.is_some() {
+                    items.push((depth, false));
                 } else if xhtml
                     && name.as_ref() == b"a"
                     && toc_depth.is_some()
@@ -1203,10 +1209,22 @@ fn parse_navigation(
                     if result.len() >= MAX_TOC_ITEMS {
                         return Err(ImportError::TooManyTocItems);
                     }
-                    result.push(TocItem { label, href });
+                    let parents = items.iter().rev().skip(1).filter(|item| item.1).count();
+                    let level = (parents > 0).then(|| (parents + 1).min(6) as u8);
+                    result.push(TocItem { label, href, level });
+                    if let Some((_, listed)) = items.last_mut() {
+                        *listed = true;
+                    }
+                }
+                if xhtml
+                    && name.as_ref() == b"li"
+                    && items.last().is_some_and(|item| item.0 == depth)
+                {
+                    items.pop();
                 }
                 if xhtml && name.as_ref() == b"nav" && toc_depth == Some(depth) {
                     toc_depth = None;
+                    items.clear();
                 }
                 if xhtml && name.as_ref() == b"body" && body_depth == Some(depth) {
                     body_depth = None;
@@ -1396,10 +1414,14 @@ fn parse_ncx(
                         None => {}
                     }
                     let slot = result.len();
-                    result.push(TocItem {
-                        label: String::new(),
-                        href: String::new(),
-                    });
+                    result.push((
+                        points.len(),
+                        TocItem {
+                            label: String::new(),
+                            href: String::new(),
+                            level: None,
+                        },
+                    ));
                     points.push(NcxPoint {
                         depth,
                         slot,
@@ -1573,7 +1595,11 @@ fn parse_ncx(
                     }
                     let href =
                         fragment.map_or_else(|| path.clone(), |value| format!("{path}#{value}"));
-                    result[point.slot] = TocItem { label, href };
+                    result[point.slot].1 = TocItem {
+                        label,
+                        href,
+                        level: None,
+                    };
                 } else if ncx && name.as_ref() == b"navMap" {
                     if nav_map_depth != Some(depth) || !points.is_empty() {
                         return Err(ImportError::InvalidXml);
@@ -1605,7 +1631,25 @@ fn parse_ncx(
             _ => {}
         }
     }
-    result.retain(|item| hrefs.insert(item.href.clone()));
+    let mut listed_depths = Vec::new();
+    let result: Vec<_> = result
+        .into_iter()
+        .filter_map(|(depth, mut item)| {
+            while listed_depths
+                .last()
+                .is_some_and(|ancestor| *ancestor >= depth)
+            {
+                listed_depths.pop();
+            }
+            if !hrefs.insert(item.href.clone()) {
+                return None;
+            }
+            item.level =
+                (!listed_depths.is_empty()).then(|| (listed_depths.len() + 1).min(6) as u8);
+            listed_depths.push(depth);
+            Some(item)
+        })
+        .collect();
     if !ncx_seen || nav_map_count != 1 || result.is_empty() {
         return Err(ImportError::UnsupportedEpub);
     }

@@ -126,6 +126,8 @@ struct Section {
 struct TocItem {
     label: String,
     href: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<u8>,
 }
 
 struct MarkdownBuildStats {
@@ -696,6 +698,7 @@ impl<'a> TxtProjection<'a> {
                 self.toc.push(TocItem {
                     label,
                     href: format!("{}#{fragment}", section.href),
+                    level: None,
                 });
                 self.split_allowed = false;
                 return Ok(());
@@ -754,7 +757,11 @@ impl<'a> TxtProjection<'a> {
             if self.toc.len() >= MAX_MANIFEST_TOC_ITEMS {
                 return Err(ImportError::TooManyTxtSections);
             }
-            self.toc.push(TocItem { label, href });
+            self.toc.push(TocItem {
+                label,
+                href,
+                level: None,
+            });
         }
         self.current = Some(writer);
         Ok(())
@@ -1111,6 +1118,14 @@ fn render_markdown_section(
                         if captured_level == HeadingLevel::H1 && first_h1.is_none() {
                             first_h1 = Some(label.clone());
                         }
+                        let toc_level = match captured_level {
+                            HeadingLevel::H1 => None,
+                            HeadingLevel::H2 => Some(2),
+                            HeadingLevel::H3 => Some(3),
+                            HeadingLevel::H4 => Some(4),
+                            HeadingLevel::H5 => Some(5),
+                            HeadingLevel::H6 => Some(6),
+                        };
                         toc.push(TocItem {
                             label,
                             href: if captured_level == HeadingLevel::H1 {
@@ -1118,6 +1133,7 @@ fn render_markdown_section(
                             } else {
                                 format!("{href}#{anchor}")
                             },
+                            level: toc_level,
                         });
                     }
                 }

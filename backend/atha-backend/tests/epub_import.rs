@@ -46,6 +46,7 @@ const EXIF_ORIENTATION_6: &[u8] = &[
 #[derive(Clone, Copy)]
 enum EpubVariant {
     Valid,
+    NestedNavigation,
     UnsizedImage,
     StyledUnsizedImage,
     OrientedImage,
@@ -382,7 +383,7 @@ fn imports_epub2_ncx_into_existing_reader_contract() {
         manifest["toc"],
         serde_json::json!([
             { "label": "Part One", "href": "OEBPS/text/one.xhtml" },
-            { "label": "Nested Two", "href": "OEBPS/text/two.xhtml#start" }
+            { "label": "Nested Two", "href": "OEBPS/text/two.xhtml#start", "level": 2 }
         ])
     );
     assert_eq!(imported.title.as_deref(), Some("Example EPUB2"));
@@ -408,6 +409,24 @@ fn imports_epub2_ncx_into_existing_reader_contract() {
 }
 
 #[test]
+fn epub3_child_keeps_only_a_real_parent_link_as_its_ancestor() {
+    let root = TestRoot::new();
+    let source = root.0.join("toc.epub");
+    write_epub(&source, EpubVariant::NestedNavigation);
+    let imported = import_epub(&source, root.0.join("cache")).expect("import EPUB3 nav");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(imported.root.join(READER_MANIFEST)).unwrap()).unwrap();
+    assert_eq!(
+        manifest["toc"],
+        serde_json::json!([
+            { "label": "Part One", "href": "OEBPS/text/one.xhtml" },
+            { "label": "Nested Two", "href": "OEBPS/text/two.xhtml#start", "level": 2 },
+            { "label": "Unlinked parent child", "href": "OEBPS/text/two.xhtml" }
+        ])
+    );
+}
+
+#[test]
 fn imports_epub3_with_legacy_or_missing_navigation() {
     let root = TestRoot::new();
 
@@ -424,7 +443,7 @@ fn imports_epub3_with_legacy_or_missing_navigation() {
         manifest["toc"],
         serde_json::json!([
             { "label": "Part One", "href": "OEBPS/text/one.xhtml" },
-            { "label": "Nested Two", "href": "OEBPS/text/two.xhtml#start" }
+            { "label": "Nested Two", "href": "OEBPS/text/two.xhtml#start", "level": 2 }
         ])
     );
     let book = BookRoot::new(&imported.root).expect("open imported root");
@@ -1474,6 +1493,11 @@ fn write_epub(path: &Path, variant: EpubVariant) {
         epub2_navigation_case(variant)
     } else if epub2 || matches!(variant, EpubVariant::Epub3NcxFallback) {
         br#"<?xml version="1.0"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:00000000-0000-0000-0000-000000000002"/><meta name="dtb:depth" content="2"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>Example EPUB2</text></docTitle><navMap><navInfo><text>Navigation information</text></navInfo><navLabel><text>Table of Contents</text></navLabel><navPoint id="one" playOrder="1"><navLabel xml:lang="en"><text> Part One </text></navLabel><navLabel xml:lang="zh"><text>Ignored alternate</text></navLabel><content src="text/one.xhtml"/><navPoint id="two" playOrder="2"><navLabel><text>Nested Two</text></navLabel><content src="text/two.xhtml#start"/></navPoint></navPoint></navMap></ncx>"#.to_vec()
+    } else if matches!(variant, EpubVariant::NestedNavigation) {
+        br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol>
+        <li><a href="text/one.xhtml">Part One</a><ol><li><a href="text/two.xhtml#start">Nested Two</a></li></ol></li>
+        <li><span>Heading without link</span><ol><li><a href="text/two.xhtml">Unlinked parent child</a></li></ol></li>
+        </ol></nav></body></html>"#.to_vec()
     } else if matches!(variant, EpubVariant::NavigationDepthOverflow) {
         format!(
             r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/one.xhtml">One</a></li></ol></nav>{}</body></html>"#,

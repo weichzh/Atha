@@ -149,6 +149,27 @@ fn imports_existing_architecture_markdown_without_a_generated_book_fixture() {
 }
 
 #[test]
+fn markdown_headings_keep_depth_and_existing_targets() {
+    let root = TestRoot::new();
+    let source = root.0.join("toc.md");
+    fs::write(
+        &source,
+        "# Part\n\n## Chapter\n\n#### Section\n\nWords.\n\n# Next\n\nEnd.\n",
+    )
+    .unwrap();
+    let library = LocalLibrary::open(root.0.join("library")).unwrap();
+    let imported = library.import(&source).unwrap();
+    let manifest = read_manifest(&library, &imported.id);
+    let toc = manifest["toc"].as_array().unwrap();
+    assert_eq!(toc.len(), 4);
+    assert!(toc[0].get("level").is_none());
+    assert_eq!(toc[1]["level"], 2);
+    assert_eq!(toc[2]["level"], 4);
+    assert!(toc[2]["href"].as_str().unwrap().contains('#'));
+    assert!(toc[3].get("level").is_none());
+}
+
+#[test]
 fn markdown_projects_active_content_to_inert_readable_text() {
     let root = TestRoot::new();
     let source = root.0.join("unsafe.md");

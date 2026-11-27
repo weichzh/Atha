@@ -66,6 +66,7 @@ tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换�
 
 ## 交互连接与当前状态
 
+- 目录：`ReaderDirectoryToc.svelte` 从 manifest 层级显示可折叠章节。标题跳转，箭头只折叠；重新打开时展现当前章节路径，旧缓存仍用平面目录。
 - 书架冷启动：初始挂载执行崩溃恢复、`resumeBookDataDeletions()`、`listLibraryBooks()`，并消费一次性 `takeStartupImport()`；非持久化 `pageshow` 不再取消初始加载，BFCache 持久化 `pageshow` 仅执行轻量刷新与 `restoreSessionAndFocus()`；
 - 阅读内核：保留 `PageDown`/方向键/触摸/滚轮/选区查词/标注高亮/消息修订/历史快照跳回；`ReaderEngine` 在打开完成后先基于真实 64 位 `contentVersion` 初始化阅读统计并在标记 `data-reader-ready` 前 `flushProgress()`，再向 Tauri 发送 `ready|<pages>|0|0|0` 或白名单 `error|<code>|<stage>`；
 - `reader/atha-reader.html` 无框架兜底模板及 `reader/web/app.mjs` 仍完整保留供独立打开校验，不依赖 Svelte 壳。
