@@ -29,7 +29,7 @@ present
 
 - [x] 对读取、展开、字典缓存、KF8 重组、记录与章节投影施加可验证的限额。
 - [x] 合成 MOBI / KF8 通过登记、开书、章节与资源读取，三种后缀同身份；越界和不支持内容仍以既有规则拒绝。
-- [ ] 通过独立审查并合入。真实样本与跨端验收仍由 [Issue #2](https://github.com/weichzh/Atha/issues/2) 跟进。
+- [x] [PR #7](https://github.com/weichzh/Atha/pull/7) 已合入 `8b30352`；真实样本与跨端验收仍由 [Issue #2](https://github.com/weichzh/Atha/issues/2) 跟进。
 
 ## Files And Steps
 
@@ -54,7 +54,7 @@ Kindle 相关独立 Rust 单元和合成 importer 测试、共享词典解码回
 
 ## Review
 
-既有原实现审查与本次公开候选的审查分开；候选摘要与复核见 GitHub PR。
+代码与安全复审覆盖 `77ce1fe`。库单测的快照初始化失败在主线和候选对照运行中未复现。新版书架基线上复验合成 MOBI/KF8、EXTH 分类、资源拒绝和共享词典解码通过。
 
 ## Evidence And Residual Risks
 

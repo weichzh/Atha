@@ -26,6 +26,7 @@ none
 - [x] 桌面和移动端入口使用同一图案；16 px 网站图标仍可识别。
 - [x] Android 前景独立于底色，使用系统裁形，圆形模式不裁掉主体；常规、圆形和主题图标齐全。
 - [x] 保留矢量源与重生成入口，检查图标格式、引用及实际本地打包结果。
+- [x] [PR #6](https://github.com/weichzh/Atha/pull/6) 已合入 `86f3ee6`。
 
 ## Files And Steps
 
@@ -54,8 +55,10 @@ Linux AppImage、Android ARM64 APK 与 Web 构建通过。Android 前景和单�
 
 独立审查未发现引用断链。根据审查补齐 NSIS 安装器的 ICO；生成脚本为可派生部分使用显式 SVG 标识，在临时目录生成完整资源后才复制到目标位置。
 
+交付候选 `a697ae4` 通过代码与安全复审。与开书动效合并前复验 Svelte、Vite、桌面品牌标记和三个 Web 图标引用。
+
 ## Evidence And Residual Risks
 
 拆分候选重新生成素材，桌面 PNG / ICO 与 Android 输出同原候选一致，macOS ICNS 各尺寸的解码像素一致；核对 Android 三层资源、桌面安装器引用、Web 构建与图标尺寸。Svelte 和 Vite 通过。原生 AppImage / APK 证据来自原图标工作区。
 
-图标对照图、资源核验与素材压缩包位于 `artifacts/local/launch-icon-IHwLfh/`。素材可直接复用，不需从 APK 或 AppImage 提取。
+图标对照图和核验回执保留在本机。版本控制中的素材可直接复用，不需从 APK 或 AppImage 提取。
