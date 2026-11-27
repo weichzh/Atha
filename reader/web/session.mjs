@@ -238,13 +238,28 @@ export function createReadingSession({ params, content, render, onState, assert,
     onState(state);
   }
 
-  async function restore(book, index, token) {
-    const section = book.sections[index];
-    const prepared = await content.prepareSection(
+  function prepareBookSection(book, section) {
+    return content.prepareSection(
       section.url,
       book.strictResources ? book.resources : null,
       book.strictResources ? "section-load" : "book-load",
     );
+  }
+
+  async function previewSectionBody(href) {
+    if (state !== "layout-stable") return null;
+    const section = manifest?.sections.find((entry) => entry.url.href === href);
+    if (!section) return null;
+    const token = lifecycle;
+    const sourceIndex = currentIndex;
+    const prepared = await prepareBookSection(manifest, section);
+    return token === lifecycle && state === "layout-stable" && currentIndex === sourceIndex
+      ? prepared.body
+      : null;
+  }
+
+  async function restore(book, index, token) {
+    const prepared = await prepareBookSection(book, book.sections[index]);
     if (token !== lifecycle) return false;
     content.activateSection(prepared);
     document.documentElement.dataset.sectionPosition = `${index + 1} / ${book.sections.length}`;
@@ -269,12 +284,7 @@ export function createReadingSession({ params, content, render, onState, assert,
       if (!Number.isInteger(index) || index < 0 || index >= book.sections.length) {
         throw new Error("section-index");
       }
-      const section = book.sections[index];
-      const prepared = await content.prepareSection(
-        section.url,
-        book.strictResources ? book.resources : null,
-        book.strictResources ? "section-load" : "book-load",
-      );
+      const prepared = await prepareBookSection(book, book.sections[index]);
       if (token !== lifecycle) return false;
       content.activateSection(prepared);
       activated = true;
@@ -352,5 +362,5 @@ export function createReadingSession({ params, content, render, onState, assert,
     });
   }
 
-  return Object.freeze({ close, describe, open, snapshot });
+  return Object.freeze({ close, describe, open, previewSectionBody, snapshot });
 }

@@ -19,6 +19,7 @@ import { getMessageClient } from "../data/message-adapter.ts";
 import { installDemoFetchBridge, isTauriRuntime } from "../data/runtime.ts";
 import type {
   ActiveSelectionState,
+  FootnotePreview,
   PreferencesSnapshot,
   ReaderBookmarkItem,
   RootNoteItem,
@@ -165,7 +166,7 @@ function hasActiveModalOverlay(event?: Event): boolean {
   if (typeof document === "undefined") return false;
   if (
     document.querySelector(
-      '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .atha-lightbox',
+      'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .atha-lightbox',
     )
   ) {
     return true;
@@ -255,6 +256,10 @@ export class ReaderEngine {
   });
   selection = $state<ActiveSelectionState | null>(null);
   statusToast = $state<string | null>(null);
+  activeFootnote = $state.raw<FootnotePreview | null>(null);
+  footnotePending = $state(false);
+
+  private footnoteRevision = 0;
 
   private disposed = false;
   private cleanups: (() => void)[] = [];
@@ -553,6 +558,7 @@ export class ReaderEngine {
       },
       onState: (nextState: string) => {
         this.sessionState = nextState;
+        if (nextState === "opening" && this.footnotePending) this.dismissFootnote();
         if (nextState === "content-loaded") {
           this.telemetryStage = "content-loaded";
         } else if (nextState === "layout-stable") {
@@ -716,6 +722,11 @@ export class ReaderEngine {
       if (anchor) {
         event.preventDefault();
         const info = this.content.describeLink(anchor.getAttribute("href") || "");
+        if (info.kind === "internal" && this.isFootnoteReference(anchor, new URL(info.href).hash)) {
+          void this.previewFootnote(anchor, info.href, info.sameSection);
+          return;
+        }
+        if (this.footnotePending) this.dismissFootnote();
         if (info.kind === "internal") {
           void this.navigation.goToHref(info.href).then(() => this.syncSnapshots());
         } else {
@@ -1048,6 +1059,75 @@ export class ReaderEngine {
     }
     this.showToast("标注保存失败");
     return null;
+  }
+
+  dismissFootnote() {
+    this.footnoteRevision += 1;
+    this.footnotePending = false;
+    this.activeFootnote = null;
+  }
+
+  async jumpToActiveFootnote() {
+    const current = this.activeFootnote;
+    this.dismissFootnote();
+    if (this.disposed || !current) return;
+    await this.navigation.goToHref(current.href);
+    this.syncSnapshots();
+  }
+
+  private isFootnoteReference(anchor: HTMLAnchorElement, hash: string): boolean {
+    const semanticType = anchor.getAttributeNS("http://www.idpf.org/2007/ops", "type")
+      ?? anchor.getAttribute("epub:type") ?? anchor.getAttribute("type") ?? "";
+    if (semanticType.split(/\s+/).includes("noteref") ||
+      (anchor.getAttribute("role") ?? "").split(/\s+/).includes("doc-noteref") ||
+      anchor.matches(".noteref, .footnote-ref, .fnref")) return true;
+
+    // Recognize conventional note fragments without treating ordinary numeric links as notes.
+    return /^#(?:fn|footnote|endnote|rearnote)(?:[-_.]|\d|$)/i.test(hash)
+      && /^(?:\[\d+\]|\(\d+\)|注\s*\d+|[*※]+|\d{1,3})$/.test(anchor.textContent.trim());
+  }
+
+  private async previewFootnote(anchor: HTMLAnchorElement, href: string, sameSection: boolean) {
+    const ticket = ++this.footnoteRevision;
+    this.footnotePending = true;
+    const sourcePage = this.pagination.snapshot().page;
+    let body: ParentNode | null = null;
+    let fragment = "";
+    try {
+      const target = new URL(href);
+      fragment = decodeURIComponent(target.hash.slice(1));
+      target.hash = "";
+      if (fragment) {
+        body = sameSection ? this.content.book : await this.session.previewSectionBody(target.href);
+      }
+    } catch {
+      // Unavailable/invalid note targets never turn a page or activate a section.
+    }
+    if (this.disposed || ticket !== this.footnoteRevision) return;
+    this.footnotePending = false;
+    if (!anchor.isConnected || this.pagination.snapshot().page !== sourcePage || hasActiveModalOverlay()) return;
+    const target = fragment ? body?.querySelector(`#${CSS.escape(fragment)}`) : null;
+    if (!target) {
+      this.showToast("未找到可预览的脚注");
+      return;
+    }
+    this.activeFootnote = {
+      label: anchor.textContent.trim(),
+      text: this.footnoteText(target),
+      href,
+      anchorRect: anchor.getBoundingClientRect(),
+    };
+  }
+
+  private footnoteText(target: Element): string {
+    const content = target.cloneNode(true) as Element;
+    for (const node of content.querySelectorAll("script, style, svg, img, [role~='doc-backlink']")) node.remove();
+    for (const link of content.querySelectorAll("a")) {
+      if (/^[↩↑^↖回返\s]*$/u.test(link.textContent) ||
+        (link.getAttribute("epub:type") ?? "").split(/\s+/).includes("backlink")) link.remove();
+    }
+    for (const block of content.querySelectorAll("p, li, br")) block.after("\n");
+    return content.textContent.trim();
   }
 
   async reselectHighlight(rootId: string): Promise<boolean> {

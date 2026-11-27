@@ -87,6 +87,13 @@ export interface SearchHit {
   locator: string;
 }
 
+export interface FootnotePreview {
+  label: string;
+  text: string;
+  href: string;
+  anchorRect: Pick<DOMRect, "left" | "right" | "top" | "bottom">;
+}
+
 export interface TocEntry {
   label: string;
   href: string;
