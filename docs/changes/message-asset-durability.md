@@ -29,7 +29,7 @@ present
 
 - [x] 新资产和复用资产的目录同步在数据库提交前；报错沿用既有错误边界。
 - [x] 创建、重选、失败重试、备份恢复和无资源对照的故障测试通过。
-- [ ] 单独通过审查并合入，对应 [Issue #2](https://github.com/weichzh/Atha/issues/2) 的真实书库和硬件验收继续独立跟进。
+- [x] [PR #5](https://github.com/weichzh/Atha/pull/5) 已合入 `ec7ae8d`；真实书库和硬件验收继续在 [Issue #2](https://github.com/weichzh/Atha/issues/2) 跟进。
 
 ## Files And Steps
 
@@ -49,7 +49,7 @@ Unix 定向耐久性故障测试、消息读写和备份恢复测试、工作流
 
 ## Review
 
-本地实现曾独立审查。交付候选审查随 PR 进行。
+代码与安全复审均覆盖交付候选 `e6529f2`。
 
 ## Evidence And Residual Risks
 
