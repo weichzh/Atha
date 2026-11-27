@@ -8,7 +8,32 @@ use super::{
 
 impl MessageStore {
     pub fn create_root(&self, draft: RootMessageDraft) -> Result<CreatedRoot, MessageError> {
+        self.create_root_with_content(draft, None)
+    }
+
+    pub fn create_root_with_content(
+        &self,
+        draft: RootMessageDraft,
+        rich_text: Option<&RichTextInput>,
+    ) -> Result<CreatedRoot, MessageError> {
         validate_root(&draft)?;
+        let (kind, text) = draft
+            .text
+            .as_deref()
+            .map_or(("source-only", ""), |value| ("text", value));
+        // Preserve the original plain-text projection, including its whitespace.
+        let (text, content_json) = if let Some(rich) = rich_text {
+            if kind != "text" {
+                return Err(MessageError::InvalidInput);
+            }
+            let content = rich_message_content(rich)?;
+            (content.plain_text, content.content_json)
+        } else {
+            (
+                text.to_owned(),
+                serde_json::json!({ "schema": 1, "kind": kind, "text": text }).to_string(),
+            )
+        };
         let edition_id = decode_hex::<32>(&draft.edition.content_version)?;
         let content_hash = decode_hex::<32>(&draft.anchor.content_hash)?;
         let now = now_millis()?;
@@ -76,15 +101,10 @@ impl MessageStore {
                 params![message_id, conversation_id, now],
             )
             .map_err(|_| MessageError::Database)?;
-        let (kind, text) = draft
-            .text
-            .as_deref()
-            .map_or(("source-only", ""), |value| ("text", value));
-        let content_json = serde_json::json!({ "schema": 1, "kind": kind, "text": text });
         transaction
             .execute(
                 "INSERT INTO message_revision (id, message_id, schema_version, kind, content_json, plain_text, created_at_ms) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6)",
-                params![revision_id, message_id, kind, content_json.to_string(), text, now],
+                params![revision_id, message_id, kind, content_json, text, now],
             )
             .map_err(|_| MessageError::Database)?;
         transaction

@@ -1,0 +1,64 @@
+/* Theme variables applied inside the book closed Shadow DOM and Snapshot previews */
+.book {
+  --book-bg: transparent;
+  --book-fg: #1A1916;
+  --book-muted: #5C5850;
+  --book-accent: #A8442C;
+  --book-quote-bg: rgba(28, 25, 21, 0.035);
+  --book-code-bg: rgba(28, 25, 21, 0.045);
+  --book-table-stripe: rgba(28, 25, 21, 0.03);
+  --book-highlight: rgba(217, 155, 67, 0.26);
+  --book-note-highlight: rgba(168, 68, 44, 0.16);
+  --book-note-underline: rgba(168, 68, 44, 0.56);
+  --book-active-highlight: rgba(168, 68, 44, 0.30);
+  --book-search-highlight: rgba(56, 130, 196, 0.28);
+  --book-font: 'Palatino Linotype', 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
+  --book-line-height: 1.78;
+}
+
+.book[data-theme="light"] {
+  --book-fg: #1A1916;
+  --book-muted: #5C5850;
+  --book-accent: #A8442C;
+  --book-quote-bg: rgba(28, 25, 21, 0.035);
+  --book-code-bg: rgba(28, 25, 21, 0.045);
+  --book-table-stripe: rgba(28, 25, 21, 0.03);
+}
+
+.book[data-theme="paper"] {
+  --book-fg: #26211A;
+  --book-muted: #5E5549;
+  --book-accent: #A8442C;
+  --book-quote-bg: rgba(94, 85, 73, 0.06);
+  --book-code-bg: rgba(94, 85, 73, 0.075);
+}
+
+.book[data-theme="dark"] {
+  --book-fg: #E8E3D9;
+  --book-muted: #A69F93;
+  --book-accent: #D9775F;
+  --book-quote-bg: rgba(255, 252, 246, 0.05);
+  --book-code-bg: rgba(255, 252, 246, 0.07);
+  --book-table-stripe: rgba(255, 252, 246, 0.04);
+  --book-highlight: rgba(232, 175, 84, 0.24);
+  --book-note-highlight: rgba(217, 119, 95, 0.24);
+  --book-note-underline: rgba(217, 119, 95, 0.72);
+  --book-active-highlight: rgba(217, 119, 95, 0.38);
+  --book-search-highlight: rgba(92, 165, 224, 0.32);
+}
+
+.book[data-font-family="serif"] {
+  --book-font: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'Times New Roman', serif;
+}
+
+.book[data-font-family="sans"] {
+  --book-font: 'PingFang SC', 'Noto Sans SC', 'SF Pro Text', system-ui, -apple-system, sans-serif;
+}
+
+.book[data-density="compact"] {
+  --book-line-height: 1.56;
+}
+
+.book[data-density="comfortable"] {
+  --book-line-height: 1.98;
+}

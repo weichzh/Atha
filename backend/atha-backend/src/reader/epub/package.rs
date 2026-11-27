@@ -8,6 +8,9 @@ use quick_xml::{
 use serde::Serialize;
 
 use super::{ImportError, MAX_ENTRIES, MAX_SECTIONS, MAX_TOC_ITEMS, archive};
+use crate::reader::classification::{
+    MAX_LABELS, SourceClassification, add_label, append_source_label_text, normalize_label,
+};
 
 const CONTAINER_NS: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:container";
 const OPF_NS: &[u8] = b"http://www.idpf.org/2007/opf";
@@ -105,6 +108,154 @@ impl ImportPlan {
 enum MetadataField {
     Title,
     Creator,
+}
+
+enum ClassificationField {
+    Subject,
+    Collection(String),
+    CollectionType(String),
+}
+
+pub(super) fn parse_classification(xml: &[u8]) -> Result<SourceClassification, ImportError> {
+    let mut reader = NsReader::from_reader(xml);
+    reader.config_mut().expand_empty_elements = true;
+    let mut depth = 0;
+    let mut in_metadata = false;
+    let mut epub3 = false;
+    let mut classification = SourceClassification::default();
+    let mut calibre_series = Vec::new();
+    let mut collections = Vec::new();
+    let mut types = Vec::new();
+    let mut field = None::<(ClassificationField, Option<String>)>;
+    loop {
+        let decoder = reader.decoder();
+        let (namespace, event) = reader
+            .read_resolved_event()
+            .map_err(|_| ImportError::InvalidXml)?;
+        match event {
+            Event::Start(event) => {
+                depth = next_xml_depth(depth)?;
+                let name = event.local_name();
+                if depth == 1 {
+                    require_namespace(&namespace, OPF_NS)?;
+                    if name.as_ref() != b"package" {
+                        return Err(ImportError::InvalidXml);
+                    }
+                    epub3 = attribute(decoder, &event, b"version")?.as_deref() == Some("3.0");
+                } else if depth == 2 && name.as_ref() == b"metadata" {
+                    require_namespace(&namespace, OPF_NS)?;
+                    in_metadata = true;
+                } else if depth == 3 && in_metadata {
+                    let next = match (name.as_ref(), namespace) {
+                        (b"subject", ResolveResult::Bound(ns)) if ns.as_ref() == DC_NS => {
+                            Some(ClassificationField::Subject)
+                        }
+                        (b"meta", ResolveResult::Bound(ns)) if ns.as_ref() == OPF_NS => {
+                            if attribute(decoder, &event, b"name")
+                                .ok()
+                                .flatten()
+                                .as_deref()
+                                == Some("calibre:series")
+                                && let Ok(Some(value)) = attribute(decoder, &event, b"content")
+                            {
+                                add_label(&mut calibre_series, &value);
+                            }
+                            if epub3 {
+                                collection_field(decoder, &event)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    field = next.map(|next| (next, Some(String::new())));
+                } else if let Some((_, value)) = &mut field {
+                    *value = None;
+                }
+            }
+            Event::Text(text) => {
+                if let Some((_, value)) = &mut field {
+                    append_source_label_text(value, text.decode().ok().as_deref());
+                }
+            }
+            Event::CData(text) => {
+                if let Some((_, value)) = &mut field {
+                    append_source_label_text(value, text.decode().ok().as_deref());
+                }
+            }
+            Event::GeneralRef(reference) => {
+                if let Some((_, value)) = &mut field {
+                    append_source_label_text(value, xml_reference(&reference).ok().as_deref());
+                }
+            }
+            Event::End(_) => {
+                if depth == 3
+                    && let Some((kind, Some(raw))) = field.take()
+                {
+                    match kind {
+                        ClassificationField::Subject => {
+                            add_label(&mut classification.subjects, &raw)
+                        }
+                        ClassificationField::Collection(id)
+                            if collections.len() < MAX_LABELS * 4 =>
+                        {
+                            collections.push((id, normalize_label(&raw).ok().flatten()));
+                        }
+                        ClassificationField::CollectionType(id) if types.len() < MAX_LABELS * 4 => {
+                            types.push((id, raw.trim() == "series"));
+                        }
+                        _ => {}
+                    }
+                }
+                if depth == 2 && in_metadata {
+                    break;
+                }
+                depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
+            }
+            Event::DocType(_) => return Err(ImportError::InvalidXml),
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    for (id, label) in &collections {
+        let mut refinements = types.iter().filter(|(target, _)| target == id);
+        if let Some(label) = label
+            && refinements.next().is_some_and(|(_, series)| *series)
+            && refinements.next().is_none()
+            && collections
+                .iter()
+                .filter(|(target, _)| target == id)
+                .count()
+                == 1
+        {
+            add_label(&mut classification.series, label);
+        }
+    }
+    if classification.series.is_empty() && calibre_series.len() == 1 {
+        classification.series = calibre_series;
+    }
+    Ok(classification)
+}
+
+fn collection_field(decoder: Decoder, event: &BytesStart<'_>) -> Option<ClassificationField> {
+    let local_id = |id: &str| {
+        !id.is_empty()
+            && id.len() <= 128
+            && !id.chars().any(|ch| ch.is_whitespace() || ch.is_control())
+    };
+    let refines = attribute(decoder, event, b"refines").ok()?;
+    match attribute(decoder, event, b"property").ok()?.as_deref()? {
+        "belongs-to-collection" if refines.is_none() => {
+            let id = attribute(decoder, event, b"id").ok()??;
+            local_id(&id).then_some(ClassificationField::Collection(id))
+        }
+        "collection-type" if attribute(decoder, event, b"scheme").ok()?.is_none() => {
+            let target = refines?;
+            let id = target.strip_prefix('#')?;
+            local_id(id).then(|| ClassificationField::CollectionType(id.to_owned()))
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn parse_container(xml: &[u8]) -> Result<String, ImportError> {

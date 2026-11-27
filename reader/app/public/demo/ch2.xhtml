@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-CN">
+  <head>
+    <title>第二章 · 纸页上的时间层（Palimpsest）</title>
+    <link rel="stylesheet" href="book.css" />
+  </head>
+  <body>
+    <p class="chapter-kicker">CHAPTER II · PALIMPSEST &amp; SNAPSHOT</p>
+    <h1 id="sec-2">第二章 · 纸页上的时间层（Palimpsest）</h1>
+
+    <p>A <em>palimpsest</em> is a manuscript page from which an earlier text has been scraped or washed off so that the parchment could be reused, yet faint traces of the older writing remain legible beneath the newer ink.</p>
+
+    <p>数字书籍并非一成不变的石头。同一部译作可能会迎来修订，同一本教材会更新排版样式，读者自己也会随着心情调整字号、字体或用户样式模块。如果笔记只记录了一个脆弱的屏幕坐标，一旦书源重导或版式改换，多年前写下的那句“这里排版真妙”或“这段推论有误”就会瞬间失去凭依。</p>
+
+    <h2 id="sec-2-1">第二节 · 锚点与快照的双重契约</h2>
+
+    <p>为此，稳固的阅读记忆必须同时保存两样东西：第一样是指向现行书籍位置的导航锚点（SourceAnchor），帮助读者一键跳回今天的正文上下文；第二样则是截取当时选区 HTML、生效样式与本地资源的历史快照（SourceSnapshot）。</p>
+
+    <blockquote>
+      <p>“历史的归历史，现场的归现场。即使原书已被从本地设备移除，当年那段文字在暖米纸色下的模样依然被封存在只读影子文档之中。”</p>
+    </blockquote>
+
+    <p>下面是一个简明对比表，展示日常标注与消息式对话模型在持久化结构上的差异：</p>
+
+    <table>
+      <caption>表 2-1：锚点、快照与消息修订的职责边界</caption>
+      <thead>
+        <tr>
+          <th>数据对象</th>
+          <th>核心职责</th>
+          <th>可变性</th>
+          <th>跨版本表现</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SourceAnchor</td>
+          <td>章节偏移与前后文校验</td>
+          <td>支持唯一重锚</td>
+          <td>跳回当前书内真实位置</td>
+        </tr>
+        <tr>
+          <td>SourceSnapshot</td>
+          <td>冻结 HTML、CSS 与呈现参数</td>
+          <td>不可变存档</td>
+          <td>原书缺失仍完整回放</td>
+        </tr>
+        <tr>
+          <td>MessageRevision</td>
+          <td>受限富文本 JSON 与纯文本投影</td>
+          <td>仅追加新修订</td>
+          <td>保留每次润色历史</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>当我们审视这一架构时，会发现所有看似分散的功能——高亮、笔记列表、章节回看、跨书阅读记忆与历史快照——其实都源自同一份消息事实的不同投影。</p>
+
+    <pre><code>// Locator 结构示例（schema v1）
+{
+  "schema": 1,
+  "contentVersion": "a1b2c3d4...eeff",
+  "start": { "section": "ch2", "offset": 184 },
+  "end":   { "section": "ch2", "offset": 246 }
+}</code></pre>
+
+    <p>这种单一事实源的设计不仅简化了心智负担，也让每一次导出、搜索与备份都具备可核对的诚实语义。</p>
+  </body>
+</html>

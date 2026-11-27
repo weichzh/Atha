@@ -22,6 +22,14 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-log = "2"
 
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+dirs = "6"
+tauri-plugin-single-instance = "=2.4.5"
+tokio = { version = "1", features = ["sync", "time"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+sha2 = "0.11"
+
 [target.'cfg(windows)'.dependencies]
 atha-reader-host = { path = "../../atha-reader-host" }
 

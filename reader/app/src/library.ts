@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { parseStoredReadingFact } from "../../web/reader-state.mjs";
 import { validateUserStylesheet } from "../../web/user-stylesheet.mjs";
 
 export interface LibraryBook {
@@ -9,6 +10,17 @@ export interface LibraryBook {
   hasCustomCover: boolean;
   importedAt: number;
   prepared: boolean;
+  favorite?: boolean;
+  tags?: string[];
+  subjects?: string[];
+  series?: string[];
+}
+
+export interface BookOrganization {
+  favorite: boolean;
+  tags: string[];
+  subjects: string[];
+  series: string[];
 }
 
 export interface ImportFailure {
@@ -66,11 +78,14 @@ export interface RecentReading {
   lastReadDate: string;
 }
 
-export interface ReadingMemoryJump {
+export interface ReadingMemoryTarget {
   messageId: string;
   rootMessageId: string;
   conversationId: string;
   editionId: string;
+}
+
+export interface ReadingMemoryJump extends ReadingMemoryTarget {
   canonicalLocator: string;
 }
 
@@ -142,6 +157,22 @@ export function writeAppTheme(theme: AppTheme, storage?: StorageWriter | null): 
   const target = storage ?? (typeof window === "undefined" ? null : window.localStorage);
   if (!target) throw new Error("browser-storage-unavailable");
   target.setItem(APP_APPEARANCE_KEY, JSON.stringify({ schema: 1, theme }));
+}
+
+export function readReaderAppearance(
+  storage?: StorageReader | null,
+  probe = false,
+): { theme: string; brightness: number } {
+  const fallback = { theme: "system", brightness: 100 };
+  try {
+    const target = storage === undefined ? globalThis.localStorage : storage;
+    const raw = target?.getItem(`atha.reader.${probe ? "probe." : ""}application.v1`);
+    if (!raw || !validStorageRecord("atha.reader.application.v1", raw)) return fallback;
+    const { theme, brightness = 100 } = JSON.parse(raw).preferences;
+    return { theme, brightness };
+  } catch {
+    return fallback;
+  }
 }
 
 export function resetReaderApplicationPreferences(
@@ -233,22 +264,27 @@ function validLocator(serialized: unknown, contentVersion: string): boolean {
   return parseLocator(serialized)?.contentVersion === contentVersion;
 }
 
-function validProgress(raw: string | null, contentVersion: string): boolean {
-  if (raw === null || raw.length > MAX_STATE_LENGTH) return false;
+export function readProgressLocator(raw: string | null, contentVersion: string): string | null {
+  if (raw === null || raw.length > MAX_STATE_LENGTH) return null;
   try {
     const value: unknown = JSON.parse(raw);
-    return Boolean(
-      value &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        exactKeys(value, ["contentVersion", "locator", "schema"]) &&
-        Reflect.get(value, "schema") === 1 &&
-        Reflect.get(value, "contentVersion") === contentVersion &&
-        validLocator(Reflect.get(value, "locator"), contentVersion),
-    );
+    if (!isRecord(value) ||
+      !exactKeys(value, ["contentVersion", "locator", "schema"]) ||
+      value.schema !== 1 ||
+      value.contentVersion !== contentVersion ||
+      typeof value.locator !== "string" ||
+      !validLocator(value.locator, contentVersion)
+    ) return null;
+    return value.locator;
   } catch {
-    return false;
+    return null;
   }
+}
+
+const READING_FACT_KEY = /^atha\.reader\.reading\.([a-f0-9]{64})\.v1$/;
+
+export function parseReadingFact(raw: string | null, contentVersion: string) {
+  return parseStoredReadingFact(raw, contentVersion, parseLocator);
 }
 
 export function filterLibraryBooks(
@@ -287,7 +323,7 @@ export function readStartedBookIds(
     for (const book of books) {
       if (!/^[a-f0-9]{64}$/.test(book.id)) continue;
       const key = `atha.reader.progress.${book.id.slice(0, 16)}.v1`;
-      if (validProgress(target.getItem(key), book.id)) result.add(book.id);
+      if (readProgressLocator(target.getItem(key), book.id)) result.add(book.id);
     }
     return result;
   } catch {
@@ -411,6 +447,7 @@ export function withoutBookLocalState(state: BrowserState, id: string): BrowserS
   const records: BrowserStateRecord[] = [];
   for (const record of state.records) {
     const kind = productionStorageKind(record.key);
+    if (kind === "reading" && READING_FACT_KEY.exec(record.key)?.[1] === id) continue;
     const bookKey = record.key.split(".")[3];
     if (!bookKeys.has(bookKey)) {
       records.push({ ...record });
@@ -472,7 +509,7 @@ export function applyBookLocalStateDeletion(
     target.setItem(record.key, nextByKey.get(record.key)!);
   }
   const removed = state.records.filter((record) => !nextByKey.has(record.key));
-  for (const kind of ["book", "progress"]) {
+  for (const kind of ["book", "progress", "reading"]) {
     for (const record of removed) {
       if (productionStorageKind(record.key) === kind) target.removeItem(record.key);
     }
@@ -507,6 +544,13 @@ export function setBookCover(id: string): Promise<LibraryBook[] | null> {
 
 export function resetBookCover(id: string): Promise<LibraryBook[]> {
   return invoke<LibraryBook[]>("reset_library_book_cover", { id });
+}
+
+export function updateBookOrganization(
+  id: string,
+  organization: Partial<BookOrganization>,
+): Promise<LibraryBook[]> {
+  return invoke<LibraryBook[]>("update_library_book_organization", { id, organization });
 }
 
 export async function takeStartupImport(): Promise<StartupImport | null> {
@@ -575,6 +619,7 @@ export async function openReadingMemoryHit(hit: ReadingMemoryJump): Promise<void
   }
   const launch = await invoke<ReaderLaunch>("open_library_book", { id: hit.editionId });
   const memory = new URLSearchParams({
+    version: hit.editionId,
     "memory-conversation": hit.conversationId,
     "memory-message": hit.messageId,
     "memory-root": hit.rootMessageId,
@@ -671,6 +716,7 @@ function productionStorageKind(key: string): string | null {
   if (key === "atha.reader.application.v1") return "application";
   if (key === "atha.reader.statistics.v1") return "statistics";
   if (key === "atha.reader.dictionary.preferences.v1") return "dictionary";
+  if (READING_FACT_KEY.test(key)) return "reading";
   const match = /^atha\.reader\.(book|progress|annotations)\.([a-f0-9]{16})\.v1$/.exec(key);
   return match?.[1] ?? null;
 }
@@ -857,6 +903,7 @@ function validSourceAnchor(value: unknown): boolean {
 
 function validStorageRecord(key: string, raw: string): boolean {
   const kind = productionStorageKind(key);
+  if (kind === "reading") return parseReadingFact(raw, READING_FACT_KEY.exec(key)![1]) !== null;
   if (
     raw.length === 0 ||
     kind === null ||
@@ -897,7 +944,7 @@ function validStorageRecord(key: string, raw: string): boolean {
     const contentVersion = Reflect.get(value, "contentVersion");
     return (
       typeof contentVersion === "string" &&
-      validProgress(raw, contentVersion)
+      readProgressLocator(raw, contentVersion) !== null
     );
   }
   const items = Reflect.get(value, "items");
@@ -951,12 +998,30 @@ function validStatistics(value: object): boolean {
 function validLocalDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+// Generated covers show one seal-like glyph instead of repeating the title printed below.
+export function coverGlyph(title: string): string {
+  const text = title.normalize("NFC").replace(/^[\s\p{P}\p{S}]+/u, "");
+  const first = typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)[Symbol.iterator]().next().value?.segment ?? ""
+    : Array.from(text)[0] ?? "";
+  if (!/^[\p{L}\p{N}]/u.test(first)) return "书";
+  const upper = first.toLocaleUpperCase();
+  return Array.from(upper).length === Array.from(first).length ? upper : first;
+}
+
+// Stable per book, so sorting or filtering never repaints a cover.
+export function coverTone(id: string, tones = 4): number {
+  let hash = 0;
+  for (const char of id) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  return hash % tones;
 }
 
 export function coverUrl(id: string, revision = 0): string {

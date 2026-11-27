@@ -899,7 +899,16 @@ fn imports_epub_and_rejects_unsafe_or_unsupported_sources() {
         import_epub(&oversized, &cache),
         Err(ImportError::SourceTooLarge)
     );
-    assert_eq!(fs::read_dir(cache).expect("read cache").count(), 1);
+    assert_eq!(fs::read_dir(&cache).expect("read cache").count(), 2);
+    assert!(cache.join(&imported.content_version).is_dir());
+    assert!(
+        cache
+            .join(format!(
+                ".atha-classification-{}.json",
+                imported.content_version
+            ))
+            .is_file()
+    );
 
     let changed_source = root.0.join("changed.epub");
     write_epub(&changed_source, EpubVariant::Changed);
@@ -1105,7 +1114,7 @@ fn concurrent_first_opens_publish_one_complete_cache() {
             assert!(opened.root.read("/OEBPS/styles/book.css").is_ok());
         }
     });
-    let cache_entries = fs::read_dir(root.0.join("data/ImportedBooks"))
+    let mut cache_entries = fs::read_dir(root.0.join("data/ImportedBooks"))
         .expect("read completed cache")
         .map(|entry| {
             entry
@@ -1115,7 +1124,14 @@ fn concurrent_first_opens_publish_one_complete_cache() {
                 .expect("ASCII cache name")
         })
         .collect::<Vec<_>>();
-    assert_eq!(cache_entries, [staged.id]);
+    cache_entries.sort();
+    assert_eq!(
+        cache_entries,
+        [
+            format!(".atha-classification-{}.json", staged.id),
+            staged.id
+        ]
+    );
 }
 
 #[test]

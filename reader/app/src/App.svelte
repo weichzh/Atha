@@ -1,36 +1,199 @@
 <script lang="ts">
-  import readerStyleHref from "../../atha-reader.css?url";
-  import themeStyleHref from "../../theme.css?url";
+  import { onMount } from "svelte";
+  import type { LibraryBook, ReadingMemoryTarget } from "./library.ts";
+  import AppSettingsView from "./lib/components/AppSettingsView.svelte";
+  import LibraryView from "./lib/components/LibraryView.svelte";
+  import MemoryView from "./lib/components/MemoryView.svelte";
+  import NavRail from "./lib/components/NavRail.svelte";
+  import { DEMO_BOOKS, DEMO_PRIMARY_BOOK_ID } from "./lib/data/demo-seed.ts";
+  import {
+    applyAppThemeToDocument,
+    getAppTheme,
+    listLibraryBooks,
+  } from "./lib/data/library-adapter.ts";
+  import { hasReaderLaunchParams, installDemoFetchBridge, isTauriRuntime } from "./lib/data/runtime.ts";
+  import type { AppRoute } from "./lib/types.ts";
 
-  import ContentDialog from "./components/ContentDialog.svelte";
-  import LibraryView from "./components/LibraryView.svelte";
-  import ReaderCanvas from "./components/ReaderCanvas.svelte";
-  import ReaderChrome from "./components/ReaderChrome.svelte";
-  import { isReaderRoute } from "./route";
+  interface Props {
+    hasLibraryReturn?: boolean;
+  }
 
-  const readerRoute = isReaderRoute();
+  let { hasLibraryReturn = false }: Props = $props();
+
+  const initialReaderLaunch = hasReaderLaunchParams();
+  const initialParams = initialReaderLaunch ? new URLSearchParams(window.location.search) : null;
+  const tauriOnReader = isTauriRuntime() && initialReaderLaunch;
+
+  function parseInitialJump(params: URLSearchParams | null, editionId: string): ReadingMemoryTarget | null {
+    if (!params) return null;
+    const memConv = params.get("memory-conversation");
+    const memMsg = params.get("memory-message");
+    const memRoot = params.get("memory-root");
+    if (!memConv || !memMsg || !memRoot) return null;
+    return {
+      conversationId: memConv,
+      messageId: memMsg,
+      rootMessageId: memRoot,
+      editionId,
+
+    };
+  }
+
+  let activeRoute = $state<AppRoute>(tauriOnReader ? "reader" : "library");
+  let activeTab = $state<Exclude<AppRoute, "reader">>("library");
+  let bookCount = $state(isTauriRuntime() ? 0 : DEMO_BOOKS.length);
+
+  const initialVersion =
+    initialParams?.get("version") ||
+    initialParams?.get("state") ||
+    (isTauriRuntime() ? "" : DEMO_PRIMARY_BOOK_ID);
+
+  let readerBook = $state<LibraryBook>({
+    ...DEMO_BOOKS[0],
+    id: initialVersion,
+    title: isTauriRuntime() ? "正在打开…" : DEMO_BOOKS[0].title,
+  });
+  let readerManifestPath = $state(
+    initialParams?.get("manifest") || (isTauriRuntime() ? "" : "demo/manifest.json"),
+  );
+  let readerJump = $state<ReadingMemoryTarget | null>(
+    parseInitialJump(initialParams, initialVersion),
+  );
+
+  onMount(() => {
+    if (!isTauriRuntime()) {
+      installDemoFetchBridge();
+    }
+    if (!initialReaderLaunch) {
+      applyAppThemeToDocument(getAppTheme());
+    }
+
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const onSystemChange = () => {
+      if (!hasReaderLaunchParams() && getAppTheme() === "system") {
+        applyAppThemeToDocument("system");
+      }
+    };
+    mq?.addEventListener("change", onSystemChange);
+
+    if (initialReaderLaunch && !isTauriRuntime()) {
+      const manifest = initialParams?.get("manifest") || "demo/manifest.json";
+      const version = initialParams?.get("version") || DEMO_PRIMARY_BOOK_ID;
+      void listLibraryBooks().then((list) => {
+        bookCount = list.length;
+        readerBook = list.find((b) => b.id === version) ?? {
+          ...DEMO_BOOKS[0],
+          id: version,
+        };
+        readerManifestPath = manifest;
+        readerJump = parseInitialJump(initialParams, version);
+        activeRoute = "reader";
+      });
+    } else if (!initialReaderLaunch && !isTauriRuntime()) {
+      void listLibraryBooks().then((list) => {
+        bookCount = list.length;
+      });
+    }
+
+    return () => {
+      mq?.removeEventListener("change", onSystemChange);
+    };
+  });
+
+  function cameFromAppLibraryRoot(): boolean {
+    if (history.length <= 1) return false;
+    if (!document.referrer) return true;
+    try {
+      const ref = new URL(document.referrer);
+      return (
+        ref.protocol === location.protocol &&
+        ref.host === location.host &&
+        (ref.pathname === "/" || ref.pathname === "") &&
+        !ref.search &&
+        !ref.hash
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function switchTab(tab: Exclude<AppRoute, "reader">) {
+    activeTab = tab;
+    activeRoute = tab;
+  }
+
+  function openReader(book: LibraryBook, manifestPath: string, jump: ReadingMemoryTarget | null = null) {
+    readerBook = book;
+    readerManifestPath = manifestPath;
+    readerJump = jump;
+    activeRoute = "reader";
+  }
+
+  function handleBackToShelf() {
+    try {
+      window.__athaFlushOnExit?.();
+    } catch {
+      // A storage flush error must not block exiting the reader view.
+    }
+    applyAppThemeToDocument(getAppTheme());
+    if (hasReaderLaunchParams()) {
+      if (hasLibraryReturn && cameFromAppLibraryRoot()) {
+        history.back();
+        return;
+      }
+      location.replace(new URL("/", location.href).href);
+      return;
+    }
+    readerJump = null;
+    activeTab = "library";
+    activeRoute = "library";
+  }
 </script>
 
-<svelte:head>
-  <link id="reader-theme-source" rel="stylesheet" href={themeStyleHref} />
-  {#if readerRoute}
-    <link id="reader-style-source" rel="stylesheet" href={readerStyleHref} />
-  {/if}
-</svelte:head>
-
-{#if readerRoute}
-  <main class="reader-shell" aria-label="分页阅读器" aria-busy="true">
-    <div class="reader-startup" role="status">
-      <span class="reader-startup-dot" aria-hidden="true"></span>
-      <span class="reader-startup-dot" aria-hidden="true"></span>
-      <span class="reader-startup-dot" aria-hidden="true"></span>
-      <span class="visually-hidden">正在恢复阅读位置…</span>
-    </div>
-    <ReaderChrome />
-    <ReaderCanvas />
-    <p id="error" class="error" role="alert" hidden>无法安全打开这份内容。</p>
-    <ContentDialog />
-  </main>
+{#if activeRoute === "reader"}
+  {#await import("./lib/components/ReaderView.svelte")}
+    <div class="reader-boot">正在开启书页…</div>
+  {:then { default: ReaderView }}
+    <ReaderView
+      book={readerBook}
+      manifestPath={readerManifestPath}
+      initialJump={readerJump}
+      onBackToShelf={handleBackToShelf}
+    />
+  {/await}
 {:else}
-  <LibraryView />
+  <div class="app-frame">
+    <NavRail {activeTab} {bookCount} onSelect={switchTab} />
+
+    {#if activeTab === "library"}
+      <LibraryView
+        onOpenReader={(book, manifest) => openReader(book, manifest, null)}
+        onBooksUpdated={(list) => (bookCount = list.length)}
+      />
+    {:else if activeTab === "memory"}
+      <MemoryView
+        onOpenReaderJump={(book, manifest, jump) => openReader(book, manifest, jump)}
+      />
+    {:else}
+      <AppSettingsView />
+    {/if}
+  </div>
 {/if}
+
+<style>
+  .app-frame {
+    min-height: 100vh;
+    background: var(--bg-canvas);
+    color: var(--ink-primary);
+  }
+
+  .reader-boot {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-canvas);
+    color: var(--ink-muted);
+    font-size: 14px;
+  }
+</style>

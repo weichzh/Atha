@@ -1,177 +1,80 @@
 ---
-description: 移动竖屏阅读界面的代码位置、结构、尺寸和手工调整入口。
+description: 现代极简书房无框线前端的代码位置、结构、尺寸和手工调整入口。
 ---
 
-# 移动阅读界面代码地图
+# 阅读界面代码地图
 
-本文只说明界面代码放在哪里、当前结构怎样工作，以及手工调整时应改哪些选择器。阅读数据、EPUB、Locator、搜索、标注和持久化语义仍以 `architecture/READER-CORE.md` 为准。
+本文只说明当前产品前端界面代码放在哪里、结构怎样工作，以及手工调整时应改哪些组件与样式变量。阅读数据、EPUB、Locator、搜索、标注和持久化语义仍以 `architecture/READER-CORE.md` 为准；无框架静态兜底模板 `reader/atha-reader.html` 仍沿用 `reader/web/app.mjs` 独立组合方式。
 
 ## 文件位置
 
-| 文件 | 负责内容 |
-| --- | --- |
-| `reader/app/src/App.svelte` | 产品阅读页根结构；组合书页、控制层和内容 dialog |
-| `reader/app/src/components/LibraryView.svelte`、`reader/app/src/library.css` | 书架、应用设置、共享资料库导航与阅读记忆视觉；960 px 起使用侧边导航，窄屏使用底部导航 |
-| `reader/app/src/components/ReaderCanvas.svelte` | 自适应书页、章节和进度 DOM |
-| `reader/app/src/components/ReaderChrome.svelte` | 顶部栏、底部栏、选区动作条、兼容笔记 dialog 与对话浮层的组合 |
-| `reader/app/src/components/ContentDialog.svelte` | 图片、公式和表格的全屏查看层，以及双指 / 滚轮、按钮、键盘缩放和复位控制 |
-| `reader/app/src/components/ConversationOverlay.svelte` | Atha 默认对话界面、修订/关系 dialog 与历史快照 dialog 的 DOM |
-| `reader/app/src/components/MessageComposer.svelte` | 自增高/全屏消息输入、两层工具栏和可视/Markdown 输入模式 |
-| `reader/app/src/message-editor.ts`、`message-markdown.ts` | 受限 Tiptap 扩展、链接规则及按需加载的 Markdown 双向转换 |
-| `reader/app/src/components/chrome/` | 顶部返回 / 书签和底部目录 / 搜索 / 笔记 / 进度 / 设置五图标 |
-| `reader/app/src/components/panels/` | 目录、搜索、笔记、进度和偏好面板 |
-| `reader/app/src/components/panels/PreferencesPanel.svelte` | 首页字号与主题、两列分类入口、分层排版设置、两种阅读方式与 CSS 模块入口 |
-| `reader/app/src/components/CssEditor.svelte` | CSS 模块页可见时按需加载的 CodeMirror 6 渐进增强；隐藏 textarea 保持唯一状态入口 |
-| `reader/app/src/components/panels/DictionaryPanel.svelte`、`reader/app/src/dictionary.ts` | 桌面词典浮层、移动端 75% 高底部抽屉、来源 / 字号设置、选区精确查词与安全富文本词条 |
-| `reader/web/style-module-package.mjs` | schema 1 CSS 模块包的无网络 codec；未来数据源只能经此复用字段、大小、重复 ID 与 CSS 安全校验 |
-| `reader/theme.css`、`reader/app/src/shell.css` | 应用 / 阅读共享颜色 token、运行时明暗 tone，以及顶部和底部覆盖层、面板与图标布局 |
-| `reader/atha-reader.css` | 自适应书页、固定内部边距、系统缩放和书籍内容样式 |
-| `reader/web/app.mjs` | 组合模块；开关工具层；目录投影；设置下钻；返回按钮 |
-| `reader/web/interaction.mjs` | 左右模式的键盘、滚轮、页区和横向触摸；上下模式的原生滚动、边界跨章和中间点击工具层 |
-| `reader/web/content-actions.mjs`、`reader/web/structured-actions.mjs` | 图片 / 公式与安全表格投影的激活、查看、焦点返回和诊断检查 |
-| `reader/web/bookmarks.mjs` | 右上角书签切换、目录中的书签列表和书签跳转 |
-| `reader/web/message-store.mjs` | 正式根 Message 到标注 / 笔记索引的适配，包括最近未删除回应投影，以及旧 localStorage 记录迁移 |
-| `reader/web/conversations.mjs` | 对话浮层、当前 / 本章 / 本书范围、时间 / 书序投影、回复、引用、编辑、删除、修订、关系、历史快照、跳回和本书消息导出 |
-| `reader/web/navigation.mjs` | 章节标题、目录选择、全书近似进度和进度拖动 |
-| `reader/web/reader-state.mjs` | 应用 / 本书偏好、书签、进度与有界本地阅读统计；统计只消费页面生命周期和既有导航稳定状态 |
-| `reader/web/pagination.mjs` | 视口设备像素换算、分页、尺寸变化、进度和公式尺寸；几何 cut 只供诊断与 verify-sample / benchmark 门使用，不作为普通阅读的全局失败条件 |
-| `reader/assets/bookmark-24-regular.svg` | 右上角书签图标，来自 Microsoft Fluent System Icons；固定来源与 MIT 文本见根 `THIRD_PARTY_NOTICES.md` |
-| `reader/app/src-tauri/src/lib.rs` | Tauri 窗口、受控书籍协议、导航限制和遥测 command |
-| `reader/atha-reader-host/src/windows/launch.rs` | 两个 host 共用的 Windows 窗口尺寸、CLI 与阅读 URL |
-| `reader/app/vite.config.ts` | production 壳构建和既有 reader module 拼接顺序 |
-| `scripts/check-reader-samples.ps1` | 四本书、明暗主题、真实 WebView2 与阅读状态回归 |
+| 文件                                                                                                        | 负责内容                                                                                                |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `reader/app/src/main.ts`、`App.svelte`、`route.ts`                                                          | 应用/阅读路由判定、首屏外观预置、`history.back()` 同文档返回与全局导航装配                              |
+| `reader/app/src/lib/components/NavRail.svelte`                                                              | 悬浮玻璃左侧导航轨（>= 900 px）与底部胶囊导航栏（< 900 px）                                             |
+| `reader/app/src/lib/components/LibraryView.svelte`、`BookCover.svelte`                                      | 无框线极简书架、继续阅读条带、快捷分类胶囊、网格/列表视图、崩溃恢复、拖放导入与桌面悬浮单书菜单         |
+| `reader/app/src/lib/components/MemoryView.svelte`、`SnapshotPreview.svelte`                                 | 跨书阅读记忆中心：全文检索、最近阅读投影、安全跳回原书与历史快照预览                                    |
+| `reader/app/src/lib/components/AppSettingsView.svelte`、`ConfirmDialog.svelte`                              | 应用外观、全书阅读默认重置、离线词典管理与完整 `.atha-data` 备份/恢复/存储分类统计                      |
+| `reader/app/src/lib/components/ReaderView.svelte`                                                           | 极简沉浸分页阅读器、悬浮上下玻璃工具岛、`directory` 目录/书签/搜索工作区与快捷键响应                    |
+| `reader/app/src/lib/components/NotesWorkspace.svelte`、`MessageComposer.svelte`、`MessageActionMenu.svelte` | 竖屏两页/横屏 `A+B` / `A+B+C` 笔记对话工作区、按需 Tiptap/Markdown 输入器与 `@floating-ui/dom` 消息菜单 |
+| `reader/app/src/lib/components/ReaderSettingsDialog.svelte`、`CssModulesPanel.svelte`                       | 全书默认、本书覆盖与 32 模块 CSS 管理/CodeMirror 实时编辑弹窗                                           |
+| `reader/app/src/lib/components/SelectionPill.svelte`、`DictionaryCard.svelte`、`StructuredLightbox.svelte`  | 正文选区悬浮动作胶囊、离线查词浮卡与图片/公式/表格/代码安全灯箱查看器                                   |
+| `reader/app/src/lib/engine/reader-engine.svelte.ts`、`preferences.ts`、`kernel-globals.ts`                  | `ReaderEngine` 状态机与 `reader/web/*.mjs` 内核最小 DOM 桥接、阅读偏好同步与遥测上报                    |
+| `reader/app/src/lib/data/{runtime.ts,library-adapter.ts,message-adapter.ts,demo-seed.ts}`                   | Tauri 原生 IPC 与浏览器预览演示数据的双模式适配器                                                       |
+| `reader/app/src/styles/{tokens.css,app.css,book-theme.css,book-reader.css}`                                 | 暖纸墨色调语义 token、无框线应用壳样式与书内安全排版样式                                                |
+| `reader/web/*.mjs`、`reader/web/style-module-package.mjs`                                                   | 书页内容校验、Locator、分页、交互、会话、导航、书签、搜索、统计、消息适配与样式包 codec                 |
+| `reader/app/src-tauri/src/{lib.rs,desktop_open.rs,library_commands.rs,telemetry.rs,protocol.rs}`            | Tauri 组合根、单实例文件关联热打开、书架 IPC、遥测白名单与受控书本/封面协议                             |
 
 ## DOM 结构
 
-Svelte 组件渲染后保持既有 DOM id 与 class，主要层次如下：
+当前产品壳在 `main.ts` 挂载 `App.svelte`：
 
 ```text
-.reader-shell
-├─ .reader-startup
-├─ .reader-frame
-│  └─ .reader
-│     ├─ #page / #book-host
-│     ├─ #chapter-label
-│     └─ #position
-├─ .reader-controls
-│  ├─ .top-toolbar
-│  │  ├─ #reader-back
-│  │  ├─ .reader-context / 当前章节与页码
-│  │  └─ .top-toolbar-actions
-│  │     └─ #add-bookmark
-│  └─ .toolbar
-│     ├─ .directory
-│     ├─ .search
-│     ├─ .notes
-│     ├─ .progress
-│     └─ .preferences
-├─ #selection-actions
-├─ #annotation-note-dialog
-├─ #message-conversation
-├─ #message-history-dialog
-└─ #message-snapshot-dialog
+tauri://localhost/（或未带阅读参数的浏览器预览）
+├─ NavRail（桌面左侧悬浮玻璃轨 / 窄屏底部胶囊）
+└─ LibraryView（main.library-shell[aria-busy]）| MemoryView | AppSettingsView
+   └─ .shelf-catalog [data-shelf-open]（C4 同文档返回焦点与位置锚点）
+
+tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换为 reader 视图）
+└─ ReaderView（main.reader-shell[aria-busy]）
+   ├─ .reader-startup[hidden][aria-hidden]
+   ├─ .reader-workspace-layout
+   │  ├─ section.region-a（正文画布）
+   │  │  ├─ .reader-frame > .reader > .page > .reader-content-host
+   │  │  ├─ .reader-controls（#reader-back、.top-island、.bottom-island）
+   │  │  └─ .kernel-bridge（隐藏最小契约节点供 reader/web/*.mjs 读取）
+   │  ├─ NotesWorkspace（800–1439 px 为 A+B/B+C，>= 1440 px 支持 A+B+C 与专注对话）
+   │  └─ SelectionPill / DictionaryCard / ReaderSettingsDialog / StructuredLightbox / #error-back
 ```
 
-顶部和底部工具不在 `.reader` 内。根元素出现 `data-reader-tools` 时，`.reader-controls` 才可见；工具层覆盖书页，不把 XHTML 或分页热状态移进组件树。五个面板使用同名原生 `<details name="reader-panel">`，因此只能打开一个。目录保留隐藏的 `#toc` 作为 Navigation 与书签的单一数据源，`app.mjs` 只把其中的 option 投影为 `#directory-list` 按钮；没有第二份目录状态。笔记是例外的响应式投影：竖屏的列表与当前线程使用同一悬浮窗口边界；横屏至少 800 px 时从左到右组合正文 `A`、列表 `B` 与线程 `C`，工作区变化后由同一 Locator 重排正文。可见名称固定为笔记入口、纯原文“标注”、当前“对话”和对话内“消息”，不把内部 MessageStore 名称投影给用户。
+`.reader-controls` 仅位于 `.region-a` 内（`position: absolute; inset: 0`）并与正文同层受工作区分栏约束，不参与 `.reader` 内部设备像素分页。所有书籍 DOM 解析、安全剥离、CSS Shadow/Scoped 注入和翻页动画仍由 `reader/web/*.mjs` 执行；`ReaderEngine` 通过状态订阅将章节标题、页码百分比、书签、选区和高亮同步给 Svelte 视图。
 
-`.reader-startup` 从阅读路由首次挂载起用不透明书页底色覆盖书内内容；`app.mjs` 恢复上次 Locator 并绑定交互后设置根级 `data-reader-ready`，加载层才淡出。失败路径同样撤下加载层并显示错误，三点动画与淡出在 `prefers-reduced-motion` 下停用。
+`main.ts` 同步预置 `data-app-theme` / `data-theme` / `--reader-brightness`；进入阅读页时记下精确书架根凭据并在 `pagehide` 与 `#reader-back` 时配合 `window.__athaFlushOnExit()` 通过 `history.back()` 返回，避免 BFCache 重刷丢位置；同时暴露 `window.athaMessages` 供内核与测试读取版本上下文。
 
 ## 尺寸与缩放
 
-- `.reader` 填满当前 WebView；`pagination.mjs` 把内部宽高设置为视口 CSS 像素乘 `devicePixelRatio`，再用 `1 / devicePixelRatio` 设置 `--page-scale`。
-- 字号滑块保存 16–40 逻辑 CSS px，默认 19；正文实际字号为 `逻辑字号 × devicePixelRatio` 个内部设备像素。PCT-AL10 的 DPR 3 因此对应 48–120 设备像素，默认 57。
-- 普通图片在单页可用宽高内等比缩放；v5 本地图片以原生 HTML 宽高和书源 CSS 之前的有界 `contain-intrinsic-size` 规则稳定解码前盒，书源与用户 CSS 继续覆盖，不等待资源完成后再揭示正文。内嵌表格忽略书源最小列宽，以固定布局、紧凑字号和省略号生成整页宽预览；超出单页高度的部分直接裁掉。代码块仍在 `.atha-structured-overflow` 内原生滚动。
-- 例如 4K 屏幕采用 200% 系统缩放且视口为 390 × 840 CSS 像素时，内部书页为 780 × 1680 设备像素；同一窗口放大后会按新的设备像素宽高重新分页。
-- `.top-toolbar` 与 `.toolbar` 固定为 48 CSS px；`.tool-panel` 和普通表单控件同样不跟随 `--page-scale`，而是遵循系统 CSS 像素和系统缩放。
-- 上下正文安全区最小为 144 设备像素；840 CSS px 高、DPR 2 且无额外安全区时，正文为 y=72–768，工具栏为 y=0–48 与 y=780–828，因此工具条只进入页眉页脚。底栏宽度不超过 400 CSS px，左右至少 12 px，桌面侧栏打开时恢复既有 320 px 侧栏底部几何。
-- 尺寸变化等待 120ms 后进入 Navigation 串行队列，使用变化前 Locator 重排和恢复；正式回归覆盖 `390 840 2`、`780 1680 1` 与 `960 720 1`。
+- `.reader` 与内部 `--page-scale` 逻辑保持不变：`pagination.mjs` 将视口 CSS px 乘 `devicePixelRatio` 写入内部画布并按 `1 / devicePixelRatio` 反向缩放；
+- 字号 16–40 视觉 CSS px，左右边距在 24 / 32 / 48 视觉 CSS px 间选择并限制单栏正文约 760 CSS px；上下安全区保持 144 设备像素；
+- 书架采用响应式网格/清单与 `contain` 优化；封面缺失时以稳定哈希色调 + 首字印章生成封面。
 
 ## 手工调整入口
 
-应用壳视觉在 `reader/app/src/shell.css` 中调整；书页内容只在 `reader/atha-reader.css` 中调整：
+- **颜色与动效 Token**：`reader/app/src/styles/tokens.css` 与 `book-theme.css`；`library.test.ts` 检查 `app.css` 等功能样式保持零硬编码颜色字面量；
+- **应用壳与阅读外围 UI**：`reader/app/src/styles/app.css` 及对应组件 scoped `<style>`；
+- **书内正文排版**：`reader/app/src/styles/book-reader.css`（及静态模板回退 `reader/atha-reader.css`）；
+- **交互原语**：统一使用 `bits-ui@2.22.0`（Dialog / AlertDialog / Popover / Select / Slider / Switch）与 `@floating-ui/dom@1.8.0`、按需加载 Tiptap 与 CodeMirror 6，不引入 Tailwind CSS。
 
-生产 UI 使用白色 / 石墨灰和松绿色强调，颜色仍只由 `reader/theme.css` 提供。书架的 `.library-sidebar`、`.library-content`、`.library-tools` 分离导航、书籍内容与操作；标题和导入同排，搜索独立于排序与视图切换。真实封面等比完整显示，缺失封面使用书名排版回退，不修改书籍资源。桌面阅读记忆把搜索结果作为主列，最近阅读作为右列，窄屏按原 DOM 顺序堆叠。
+## 交互连接与当前状态
 
-应用主题使用三种图标色样，仍只写应用外观；阅读设置菜单分别标识阅读默认与当前书籍。笔记索引为两行原文、两行最近回应和时间；对话使用左侧原文细线与右侧浅色回应，引用为消息内细线预览，不新增卡片层。桌面对话宽度为 `clamp(400px, 29vw, 480px)`；断点与 Locator 恢复仍由既有工作区逻辑控制。
+- 书架冷启动：初始挂载执行崩溃恢复、`resumeBookDataDeletions()`、`listLibraryBooks()`，并消费一次性 `takeStartupImport()`；非持久化 `pageshow` 不再取消初始加载，BFCache 持久化 `pageshow` 仅执行轻量刷新与 `restoreSessionAndFocus()`；
+- 阅读内核：保留 `PageDown`/方向键/触摸/滚轮/选区查词/标注高亮/消息修订/历史快照跳回；`ReaderEngine` 在打开完成后先基于真实 64 位 `contentVersion` 初始化阅读统计并在标记 `data-reader-ready` 前 `flushProgress()`，再向 Tauri 发送 `ready|<pages>|0|0|0` 或白名单 `error|<code>|<stage>`；
+- `reader/atha-reader.html` 无框架兜底模板及 `reader/web/app.mjs` 仍完整保留供独立打开校验，不依赖 Svelte 壳。
 
-阅读正文保持无框版面与书源字体。顶栏的当前章节和本节页码由 `navigation.mjs` 的同一 `syncControls` 在初次打开与后续导航同步；沉浸态使用原章节页眉和居中页码。阅读设置首页直接显示原 `#font-size` 和四个阅读主题色样，下方为两列分类；字体页只选字体，亮度独立下钻，不新建偏好状态。
+## 验证与截图证据
 
-| 想调整的部分 | 选择器或变量 |
-| --- | --- |
-| 书页边距 | `reader/atha-reader.css` 的 `--page-top-margin`、`--page-right-margin`、`--page-bottom-margin`、`--page-left-margin`；上下固定，左右由本书 `#page-margin` 在 24 / 32 / 48 视觉 CSS px 间选择，再按 DPR 换算为内部设备像素 |
-| 顶部栏 | `.top-toolbar`、`.top-toolbar-actions` |
-| 底部栏 | `.toolbar`、`.icon-button`、`.fluent-icon` |
-| 所有弹出面板 | `.tool-panel` |
-| 目录和书签 | `.directory-panel`、`.directory-list`、`.directory-item`；隐藏数据源为 `#toc` 与 `option[data-bookmark-id]` |
-| 搜索 | `.search-panel`、`.reader-search-field`、`.reader-primary-command` |
-| 选区动作与笔记 | `.selection-actions` 四图标动作栏、`#annotation-note-dialog`、`.notes-panel`、`.annotation-filters`、`.annotation-list`、`.annotation-item` |
-| 词典 | `.dictionary-backdrop`、`.dictionary-panel`、`.dictionary-content`、`.dictionary-source`、`.dictionary-result` |
-| 对话 | `.message-conversation`、`.message-view-controls`、`.message-segmented`、`.message-source-turn`、`.message-source-context`、`.message-feed-source`、`.message-card`、`.message-reference-preview`、`.message-composer`、`.message-detail-dialog` |
-| 消息输入 | `.message-editor`、`.message-editor-toolbar-primary`、`.message-editor-toolbar-secondary`、`.message-editor-mode-switch`、`.message-editor-markdown` |
-| 对话主题 | `.message-conversation[data-message-theme="atha"]` 内的 `--message-*` 语义令牌；当前只存在 Atha 默认主题 |
-| 进度与统计 | `.progress-panel`、`.reading-statistics`、`.progress-scrubber`、`.progress-book`、`.progress-position` |
-| 阅读设置 | `.preferences-backdrop`、`.preferences-panel`、`.settings-list`、`.settings-view`、`.reading-mode-cards`、`.module-settings`、`.css-editor-*` |
-| 主题 | `reader/theme.css` 中唯一颜色 token、`data-theme="light|paper|dark"` 选择及运行时 `data-*-tone`；功能 CSS 只消费语义变量 |
-
-图标按钮的可点击尺寸由 `.icon-button` 控制。底部顺序由 `BottomToolbar.svelte` 决定；`.toolbar` 固定为五等分，阅读设置只在底栏出现。不要把工具栏移进 `.reader`，否则系统缩放会改变控件尺寸，或工具层会参与书页布局。
-
-## 交互连接
-
-- `app.mjs` 的 `toggleReaderTools()` 先撤销待处理的选区动作，再切换 `data-reader-tools`；隐藏时同时关闭已打开面板。全屏目录和笔记页的返回按钮使用同一关闭入口；根级 `contextmenu` 监听统一禁止 WebView 默认右键菜单。
-- `#reading-mode` 只接受 `paged` 和 `scroll`。左右模式按左 35%、中间 30% 和右 35% 处理页区点击，单指横向拖动实时移动正文并在 300ms 内收束；上下模式把纵向手势交给 `.reader` 原生滚动，到顶部 / 底部后再以前后意图跨 section。
-- 表格中心单击打开安全投影后的全屏查看层；左右区域点按和表格上的横向拖动继续翻页，不再由内嵌表格截获。图片、公式与表格查看层参考 Readest 的暗色全屏结构，右侧固定关闭、放大、缩小和复位按钮，顶部显示 50%–400% 缩放值；双指按中心点连续缩放，桌面滚轮按指针位置连续缩放，单指和放大后继续原生滚动。普通图片还可点击图片外黑色区域直接关闭并把焦点还给阅读页；图片、缩放控件、表格和其他预览不会触发该捷径。代码块仍以双击或键盘打开普通预览。
-- 华为 WebView 114 对 adb 和部分真实触摸会给出空 `pointerType`，`interaction.mjs` 将其归一为 touch；原生 `pan-y` 取消 pointer 时使用仍会到达的 `touchend` 处理章节边界。正文与 reader 的 touch 监听复用 inside / outside 去重，闭合 Shadow DOM 内的链接、表格、代码、dialog 和选择不会被外层事件误判。
-- `#add-bookmark` 是唯一书签切换入口。`bookmarks.mjs` 在当前位置添加或取消书签，并把已有书签作为 `#toc` 中对应章节后的 `option[data-bookmark-id]`；投影目录中的章节或书签完成跳转后自动关闭目录。
-- `#brightness` 在拖动时预览根元素的 `--reader-brightness`，松开后写入应用偏好；亮度滤镜只作用于 `.reader`，不改变系统控件亮度。
-- `#font-size` 是原生 range，input burst 每帧只预览一次，change 后才通过原 Locator 提交重排；`#density` 使用 1.55 / 1.8 / 2.05 无单位行距。`#page-margin` 按书选择 24 / 32 / 48 视觉 CSS px 左右边距，再按 DPR 写入内部画布；`#paragraph-indent` 以顶格 / 2em 卡片切换，`#paragraph-spacing` 生成受控可视 CSS。上下 144 设备像素安全区固定不变，旧应用记录中的四个自由边距字段仍会被忽略。
-- CSS 模块页直接复用每书偏好：最多 32 个模块，支持搜索、分组、排序、批量启停和 schema 1 JSON 导入导出；独立 codec 统一解析、序列化、字段、大小、重复 ID 与 CSSOM 校验，不包含网络或 provider registry。新模块单个 32 KiB、启用组合 64 KiB，超限旧 CSS 只作为停用恢复副本保留。CodeMirror 在页面首次可见时按需加载，100 ms 显示 lint，180 ms 后通过同一 textarea 触发预览；输入草稿绑定原模块，任一验证、重排或持久化失败均恢复上次有效状态、渲染与 Locator。
-- `#progress-range` 使用 0–1 连续值映射全书 section 和本节页，避免整数刻度在多章节书籍中丢失当前页，也不预布局其他 section；章节、百分比和本节页数都由 Navigation 的既有稳定状态更新。
-- 进度面板在章节、进度摘要和拖动条下方投影今日、近 7 天、本书与连续阅读。桌面为四列，600 px 及以下为 2 × 2；指标使用分隔线而非嵌套卡片。面板不超过 520 px，浮于紧凑工具条上方；统计在工具层打开时暂停，关闭后由同一阅读状态接口恢复。
-- 原生正文选区在 `pointerup`、键盘选择或稳定后的 `selectionchange` 投影紧凑四图标 `#selection-actions`；`content.selectionRange()` 以真实 `Range.collapsed` 与正文归属为准，避开华为 WebView 114 对闭合 Shadow DOM 的 `Selection.isCollapsed` 误报。复制只触发浏览器 copy，标注和笔记在 Tauri 产品中写入同一根 Message。点击 CSS Highlight 覆盖的已有标注会恢复其选区；“重选”后再次拖选并保存会追加 SourceAnchor/SourceSnapshot，笔记动作追加修订，删除写入墓碑。`#annotations` 支持章节和全文筛选；每行按原文、最近回应和最近活动时间显示，纯标注显示“还没有回应”，点击后保留列表与当前行并打开线程。编辑和删除不再常驻列表行，删除由选择动作或消息菜单进入并先请求平台确认。
-- 选区“查词”复用同一待处理 Range，只向上下文词典面板发送受限查询；阅读顶栏不再常驻词典按钮。桌面保持锚定浮层，640 px 及以下按 RD-24 / RD-25 使用 75% 高底部抽屉、遮罩、固定词头与独立滚动区，点击遮罩或关闭按钮回到原阅读位置，并尊重 reduced-motion。当前词典、导入、移除和独立于正文的 85%–175% 六档释义字号在应用设置中管理；schema 1 本地设置只保存当前词典 ID 与允许字号，损坏、已移除来源或存储不可用时回退。可见词头下以应用内建样式呈现后端白名单允许的音标、词性、段落、义项、例句、列表、引用、表格、ruby 与上下标；来源 class、ID、内联样式、地址、脚本、资源和 CSS 均不进入 DOM，不加载网络或富 MDD 内容。
-- `#annotation-note-dialog` 与 `#message-conversation` 共用 `VisualViewport` 的高度、顶部和中心；软键盘出现时，标注笔记的输入 / 保存操作及普通、全屏、展开消息输入器都保持在可视区，并把当前输入滚到最近位置。竖屏列表与线程在书页上共用 12 px 外边距的悬浮窗口，按 `B → C → B` 切换；横屏 800–1439 px 在 `A+B` 与 `B+C` 间切换，至少 1440 px 的线程态从左到右显示 `A+B+C`。标题栏不提供收起、导出或共享。顶部可切换当前、本章和本书：当前范围以带“原文”标签的流内块作为起点，根笔记和后续回复都是右侧读者消息；纯标注不重复生成空消息。回复根消息不重复原文预览，回复其他消息显示“回复”，额外引用显示“引用”；预览只读取直接目标自身的正文，不递归展开。桌面悬停时消息动作渐进出现，触摸设备保持可用；编辑、删除、修订、关系、历史快照与跳回等低频动作进入更多菜单，删除先请求平台确认。引用预览可跳到当前对话目标并短暂高亮。本章和本书是只读聚合记录，可按创建时间或根 Message Locator 的书内位置排列，点击“打开”后进入对应当前对话再写入。输入器固定在内容区底部。笔记列表以可见返回按钮关闭笔记窗口，导出本书消息只放在右上角更多菜单。
-- `.message-editor` 随内容增高，到达紧凑上限后出现全屏按钮。全屏编辑顶部使用两层工具栏：第一层切换可视/Markdown 输入并保留撤销、重做与返回紧凑输入，第二层显示标题、粗体、斜体、列表、引用和安全链接。Markdown 转换按需加载，切回可视模式或发送前必须通过同一正文 schema；不支持的格式保留原文并显示错误，不静默丢失。
-- 设置入口位于阅读底栏，使用原生 `<details>`、backdrop、Escape、焦点返回和 CSS transition；600 px 以下为自适应高度底部抽屉，子页按内容收缩并以 72dvh 为上限，`prefers-reduced-motion` 下关闭进入、返回和翻页收束动画。
-- `#reader-back` 优先使用浏览器历史；没有历史时请求关闭当前阅读窗口。
-
-## 当前有意暂缓
-
-- TTS 暂缓，当前不提供界面入口、播放逻辑或持久化字段；
-- 标注颜色、样式、notebook 与同步没有阅读界面入口；
-- 不提供可持久化的自由分栏、拖拽宽度或布局设置；当前三个投影由方向、可用宽度和是否打开线程决定；
-- 当前使用 Lucide Svelte 图标、原生表单控件和按需加载的 Tiptap 消息编辑器；尚未引入通用 UI 组件库或动效框架。
-- 当前只实现 Atha 默认聊天主题；微信、Telegram、QQ 风格模拟、主题选择和用户自定义界面等待消息主循环验收后单独设计。
-- 对话字号和密度已使用较紧凑默认值；类似 Telegram 的界面字号、密度与主题设置等待当前布局稳定后再增加，不预留持久化字段。
-- 阅读统计暂不提供趋势图、目标、导出、账户或同步，也不为这些方向预留页面和 schema。
-
-## 截图证据
-
-本机最新截图位于 `artifacts/local/screenshots/`：
-
-- `reader-shell-01-reading.png`；
-- `reader-shell-02-tools.png`；
-- `reader-shell-03-directory.png`；
-- `reader-shell-04-progress.png`；
-- `reader-shell-05-settings-menu.png`。
-- `message-scope-mark-430x820.png`；
-- `message-scope-chapter-430x820.png`。
-- `atha-reading-statistics-linux.png`；
-- `atha-reading-statistics-linux-mobile.png`。
-
-微信读书源图与实现的同图对照位于 `artifacts/local/audits/reader-shell-usability/`。根目录 `design-qa.md` 记录尺寸归一、交互证据和修复历史；最终没有 P0、P1 或 P2 问题。
-
-笔记响应式结构的 Linux Tauri 截图和 DOM 几何位于忽略目录 `artifacts/local/audits/atha-notes-responsive-panes-20260901/`：覆盖 360 px 竖屏列表 / 线程 / 返回、1280 px `A+B` / `B+C` 和 1600 px 从左到右的 `A+B+C`。这些是真实 Linux 壳的自动化证据，不替代 Windows、PCT-AL10 自然触摸、真实输入法或屏幕阅读器验收。
-
-上一轮方案二笔记视觉语言的 Linux Tauri 截图、1600 px 与 360 px 同图对照、DOM 几何和 `design-qa.md` 位于忽略目录 `artifacts/local/audits/conversation-visual-language-20260904/`；该轮结论不自动覆盖后续重设计。
-
-2026-09-05 阅读主界面续做的最终 Linux Tauri 公共 fixture 截图位于 `artifacts/local/reader-linux-ui/atha-reader-linux-1819364-27142-1/`，包含三视口主阅读、进度与设置首页；完整默认采样 gate 和最终微调后的低采样全脚本回归通过，新增真实鼠标前后翻页、进度拖动、书签切换与还原。书架及阅读预览截图与设计参照位于 `artifacts/local/ui-redesign-20260905/`。`reader/app/tests/ui-redesign.test.mjs` 接受 Vite 书库和 production preview 阅读器两个 origin，准备与命令见当前 change；书库使用 mock IPC，阅读预览使用真实运行时与独立测试 XHTML，均不替代原生数据链路。以上不替代 Windows、PCT-AL10 自然触摸、真实输入法或屏幕阅读器验收。
-
-Readest 原图、逐图观察和本次 Linux 统计实现副本位于忽略目录 `fixtures/local/readest/`；统计设计复核使用 WR-05 与 RD-03，不以文字报告替代原图。
-
-本次表格缩略图、表格全屏查看、图片全屏查看与 200% 放大原图位于忽略目录 `artifacts/local/audits/content-viewer-headless/`，并附 `SHA256SUMS`；这是 Chromium production build 的本地视觉证据，不替代 PCT-AL10 实机触摸。
-
-PCT-AL10 上 Atha 最终原生选区与词典抽屉原图、说明和 SHA-256 位于 `artifacts/local/audits/offline-dictionary-pct/`；动作栏与抽屉设计复核使用 RD-22、RD-24、RD-25 与 RD-27。阅读设置菜单、字号、布局、阅读方式和纵向滚动原图位于 `artifacts/local/audits/reader-controls-pct/`；设置层级参考本地 RD-* 原图，字号、缩进与滚动行为以同机真实交互复核。
-
-词典富文本与设置的当前真机证据位于忽略目录 `artifacts/local/audits/dictionary-pct-revalidation-20260813/`。PCT-AL10 覆盖安装同签名 arm64 release 本地测试候选后，书架和词典仍在；ADB 自动化确认底栏为目录、搜索、笔记、进度四项，选区查词呈现安全语义结构，设置页无明显遮挡并列出 85%–175% 六档字号，150% 在进程重启后保持，最终恢复 100%。该目录含私有内容，只能用于本地复核；ADB input 不等同于自然手指触摸。
-
-本轮阅读交互候选的 PCT-AL10 安装证据位于忽略目录 `artifacts/local/audits/pct-reader-install-20260818T045537Z-2835081/`，候选 SHA-256 为 `f2f2edf210fdec7c80254ea2a98545506133dc1265882351d36696208e60df29`。同签名、非降级、未清数据的覆盖安装成功，候选哈希、版本与证书一致，首次安装时间保持，主进程运行且 `MainActivity` 获得焦点；这只证明安装与启动，不代替查看器自然双指、书架长按和真实输入法避让的人工验收。
+- **2026-11-26 新版无框线前端正式切换（`docs/changes/borderless-reader-frontend.md`）**：
+  - 本地快速门：`bash scripts/check-fast.sh` 通过（145/145 Node 测试、`svelte-check` 0 errors/0 warnings、Cargo workspace 测试、`vite build`、CSP 无内联脚本检查）；
+  - Chromium Playwright：`node reader/app/tests/reader-app.browser.mjs` 通过，11 张全端截图存 `artifacts/local/audits/borderless-reader-20261126/`；
+  - 隔离 Xvfb Linux Tauri release 真壳：256 本合成书架 `bench-library-shelf.py native --samples 2` 四轮均 `books: 256`、`history_same_document: true`（`startup_usable_observed_ms` 684.35–713.34 ms、`return_usable_observed_ms` 170–185 ms），`check-tauri-hot-open.py` 全项通过（`tauri_hot_open=passed`），收据存 `artifacts/local/audits/borderless-reader-20261126/{native-replay.log,hot-open/}`。
+  - 待补：前景 GNOME Wayland 会话下的 `scripts/check-reader-linux.sh` 需更新旧选择器以对齐新 DOM；Windows WebView2、Android PCT-AL10 真机、自然手指触摸与真实输入法尚待实机验收。
+- 旧版各轮专项截图与真机历史收据保留于 `artifacts/local/audits/` 与 Git 历史。

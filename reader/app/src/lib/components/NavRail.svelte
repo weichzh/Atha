@@ -1,0 +1,205 @@
+<script lang="ts">
+  import { BookOpen, Library, Settings, Sparkles } from "@lucide/svelte";
+  import type { AppRoute } from "../types.ts";
+
+  interface Props {
+    activeTab: Exclude<AppRoute, "reader">;
+    onSelect: (tab: Exclude<AppRoute, "reader">) => void;
+    bookCount?: number;
+  }
+
+  let { activeTab, onSelect, bookCount = 0 }: Props = $props();
+
+  const items: { id: Exclude<AppRoute, "reader">; label: string; icon: typeof Library }[] = [
+    { id: "library", label: "书架", icon: Library },
+    { id: "memory", label: "阅读记忆", icon: Sparkles },
+    { id: "settings", label: "设置", icon: Settings },
+  ];
+</script>
+
+<nav class="nav-shell" aria-label="主导航">
+  <div class="nav-brand">
+    <div class="brand-seal" aria-hidden="true">
+      <BookOpen size={18} strokeWidth={1.8} />
+    </div>
+    <div class="brand-text">
+      <span class="brand-name">Atha</span>
+      <span class="brand-sub tabular">{bookCount} 册藏书</span>
+    </div>
+  </div>
+
+  <div class="nav-items" role="tablist" aria-label="视图切换">
+    {#each items as item (item.id)}
+      {@const Icon = item.icon}
+      {@const active = activeTab === item.id}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        class="nav-item"
+        class:active
+        onclick={() => onSelect(item.id)}
+      >
+        {#if active}
+          <span class="active-indicator" aria-hidden="true"></span>
+        {/if}
+        <span class="nav-icon">
+          <Icon size={18} strokeWidth={active ? 2.1 : 1.75} />
+        </span>
+        <span class="nav-label">{item.label}</span>
+      </button>
+    {/each}
+  </div>
+</nav>
+
+<style>
+  .nav-shell {
+    position: fixed;
+    left: 20px;
+    top: 24px;
+    bottom: 24px;
+    width: 196px;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 14px;
+    border-radius: var(--radius-xl);
+    background: var(--bg-glass);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    box-shadow: var(--shadow-island);
+  }
+
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 4px 10px 24px;
+  }
+
+  .brand-seal {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    flex: none;
+  }
+
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .brand-name {
+    font-family: var(--font-serif);
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--ink-primary);
+  }
+
+  .brand-sub {
+    font-size: 11.5px;
+    color: var(--ink-muted);
+    margin-top: 2px;
+  }
+
+  .nav-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: var(--radius-md);
+    color: var(--ink-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    transition: color 180ms var(--ease-smooth), background-color 180ms var(--ease-smooth);
+    text-align: left;
+  }
+
+  .nav-item:hover:not(.active) {
+    background: var(--bg-well);
+    color: var(--ink-primary);
+  }
+
+  .nav-item.active {
+    color: var(--ink-primary);
+    font-weight: 600;
+  }
+
+  .active-indicator {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-md);
+    background: var(--bg-pill-active);
+    box-shadow: var(--shadow-xs);
+    z-index: 0;
+  }
+
+  .nav-icon,
+  .nav-label {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .nav-item.active .nav-icon {
+    color: var(--accent);
+  }
+
+  @media (max-width: 899px) {
+    .nav-shell {
+      left: 50%;
+      top: auto;
+      bottom: max(14px, env(safe-area-inset-bottom));
+      translate: -50% 0;
+      width: min(calc(100vw - 28px), 348px);
+      height: auto;
+      flex-direction: row;
+      padding: 6px;
+      border-radius: var(--radius-pill);
+      background: var(--bg-glass-strong);
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+    }
+
+    .nav-brand {
+      display: none;
+    }
+
+    .nav-items {
+      flex-direction: row;
+      width: 100%;
+      gap: 4px;
+    }
+
+    .nav-item {
+      flex: 1;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 10px;
+      min-height: 44px;
+      border-radius: var(--radius-pill);
+      font-size: 13px;
+    }
+
+    .active-indicator {
+      border-radius: var(--radius-pill);
+    }
+  }
+</style>

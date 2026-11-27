@@ -18,7 +18,7 @@ GPL-3.0-or-later 全文见 `LICENSES/GPL-3.0-or-later.txt`。
 
 ## CodeMirror 6
 
-- 直接依赖：`codemirror 6.0.2`、`@codemirror/lang-css 6.3.1`、`@codemirror/language 6.12.4`、`@codemirror/lint 6.9.7`。
+- 直接依赖：`codemirror 6.0.2`、`@codemirror/lang-css 6.3.1`、`@codemirror/language 6.12.4`、`@codemirror/lint 6.9.7`、`@lezer/highlight 1.2.3`。
 - 锁定的配套包：`@codemirror/autocomplete 6.20.3`、`@codemirror/commands 6.10.4`、`@codemirror/search 6.7.1`、`@codemirror/state 6.7.1`、`@codemirror/view 6.43.8`，以及 `@lezer` parser packages。
 - 上游：<https://codemirror.net/>；许可证：MIT；本地修改：无，Atha 只在 CSS 模块页按需组合公开扩展 API。
 
@@ -84,12 +84,22 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## Tauri 桌面单实例
+
+- `tauri-plugin-single-instance 2.4.5`：MIT OR Apache-2.0；上游：<https://crates.io/crates/tauri-plugin-single-instance/2.4.5>；本地修改：无，只在 Windows 和 Linux 启用，不启用 deep-link。许可全文见 [MIT](LICENSES/tauri-plugin-single-instance-MIT.txt) 和 [Apache-2.0](LICENSES/Apache-2.0.txt)。
+- Linux D-Bus transport 由插件依赖的 `zbus 5.19.0` 提供，采用 [MIT 许可](LICENSES/zbus-MIT.txt)；上游：<https://crates.io/crates/zbus/5.19.0>。
+
 ## Gradle Wrapper 8.14.3
 
 - 本地文件：`reader/app/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar`
 - 上游源码：[`gradle/gradle` v8.14.3 wrapper-main](https://github.com/gradle/gradle/tree/v8.14.3/platforms/core-runtime/wrapper-main)
 - 许可证：Apache-2.0；全文见 `LICENSES/Apache-2.0.txt`
 - 本地修改：无；由 Tauri Android 工程生成器写入
+
+## UI 原语与浮层定位
+
+- `bits-ui 2.22.0`：MIT；Copyright (c) 2023 Hunter Johnston；上游：<https://github.com/huntabyte/bits-ui>；本地修改：无，Atha 在 Svelte 5 应用组件中使用其无头控件（AlertDialog、Slider、Select、Switch）并提供语义样式。
+- `@floating-ui/dom 1.8.0`：MIT；Copyright (c) 2021-present Floating UI contributors；上游：<https://github.com/floating-ui/floating-ui>；本地修改：无，用于选区工具条与单书菜单定位。
 
 ## Microsoft Fluent System Icons
 

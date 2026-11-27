@@ -123,10 +123,13 @@ pub(crate) fn pending_local_data_restore(
     runtime: State<'_, ReaderRuntime>,
 ) -> Result<Option<PendingLocalDataRestore>, String> {
     require_library_window(&window)?;
-    runtime
+    let result = runtime
         .local_data
         .pending_restore()
-        .map_err(|error| error.code().to_owned())
+        .map_err(|error| error.code().to_owned());
+    #[cfg(any(windows, target_os = "linux"))]
+    crate::desktop_open::observe_shelf_startup(&window, |_| matches!(result, Ok(None)));
+    result
 }
 
 #[tauri::command]
@@ -191,17 +194,9 @@ pub(crate) async fn local_data_storage_usage(
 
 fn reset_reader(runtime: &ReaderRuntime) -> Result<(), String> {
     *runtime
-        .current_book
+        .reader
         .write()
-        .map_err(|_| "reader-state".to_owned())? = None;
-    *runtime
-        .current_edition
-        .write()
-        .map_err(|_| "reader-state".to_owned())? = None;
-    *runtime
-        .diagnostics
-        .lock()
-        .map_err(|_| "reader-state".to_owned())? = None;
+        .map_err(|_| "reader-state".to_owned())? = crate::ReaderSession::default();
     Ok(())
 }
 

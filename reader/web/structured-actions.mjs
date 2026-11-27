@@ -470,19 +470,17 @@ export function createStructuredActions({
           })
           .nextNode()
       : null;
-    const selection = content.book.getRootNode().getSelection?.();
-    if (selectable && text && selection && text.length > 0) {
+    if (selectable && text && text.length > 0) {
       const start = text.data.search(/\S/);
       const range = document.createRange();
       range.setStart(text, start);
       range.setEnd(text, start + 1);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      assert(selection.toString(), "sample-boundary");
+      assert(content.setSelectionRange(range), "sample-boundary");
+      assert(content.selectionRange()?.toString(), "sample-boundary");
       const count = counts.table + counts.code;
       selectable.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
       assert(!dialog.open && counts.table + counts.code === count, "sample-boundary");
-      selection.removeAllRanges();
+      content.clearSelection();
     }
 
     const structuredLink = content.book.querySelector("table a[href], pre a[href]");

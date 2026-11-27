@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     MAX_MANIFEST_SECTIONS, MAX_MANIFEST_TOC_ITEMS,
     archive::{self, ArchiveError},
+    classification::{self, SourceClassification, add_label, append_source_label_text},
     epub::READER_MANIFEST,
     resources::MAX_RESOURCE_BYTES,
     source::{self, SourceDigest, SourceError},
@@ -294,6 +295,11 @@ pub fn import_fb2(
         let _ = fs::remove_dir_all(&staging);
     }
     let stats = result?;
+    let _ = classification::write_cache(
+        cache_root,
+        &content_version,
+        parse_classification(&xml).unwrap_or_default(),
+    );
     log::info!(
         target: "atha::reader",
         "operation=import format={} outcome=success input_bytes={} sections={} toc_items={} resources={} load_ms={} parse_ms={} render_write_ms={} total_ms={}",
@@ -316,6 +322,77 @@ pub(super) fn source_identity(source: impl AsRef<Path>) -> Result<String, Import
         return Err(ImportError::InvalidSource);
     }
     load_source(&source).map(|(content_version, _, _)| content_version)
+}
+
+pub(super) fn read_source_classification(
+    source: &Path,
+    expected_id: &str,
+) -> Result<SourceClassification, ImportError> {
+    let (id, xml, _) = load_source(source)?;
+    if id != expected_id {
+        return Err(ImportError::SourceChanged);
+    }
+    parse_classification(&xml)
+}
+
+fn parse_classification(xml: &[u8]) -> Result<SourceClassification, ImportError> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().expand_empty_elements = true;
+    let mut depth: usize = 0;
+    let mut description = false;
+    let mut title_info = false;
+    let mut genre = None;
+    let mut classification = SourceClassification::default();
+    for _ in 0..MAX_XML_ELEMENTS {
+        match reader.read_event().map_err(|_| ImportError::InvalidXml)? {
+            Event::Start(event) => {
+                depth += 1;
+                if depth > MAX_XML_DEPTH {
+                    return Err(ImportError::InvalidXml);
+                }
+                match (depth, event.local_name().as_ref()) {
+                    (1, b"FictionBook") => {}
+                    (1, _) => return Err(ImportError::InvalidXml),
+                    (2, b"description") => description = true,
+                    (2, b"body") => break,
+                    (3, b"title-info") if description => title_info = true,
+                    (4, b"genre") if title_info => genre = Some(String::new()),
+                    (4, b"sequence") if title_info => {
+                        if let Ok(Some(label)) = attribute(&reader, &event, "name") {
+                            add_label(&mut classification.series, &label);
+                        }
+                    }
+                    (5, _) => genre = None,
+                    _ => {}
+                }
+            }
+            Event::Text(text) if depth == 4 => {
+                append_source_label_text(&mut genre, text.decode().ok().as_deref());
+            }
+            Event::CData(text) if depth == 4 => {
+                append_source_label_text(&mut genre, text.decode().ok().as_deref());
+            }
+            Event::GeneralRef(value) if depth == 4 => {
+                append_source_label_text(&mut genre, xml_reference(&value).ok().as_deref());
+            }
+            Event::End(_) => {
+                if depth == 4 {
+                    if let Some(genre) = genre.take() {
+                        add_label(&mut classification.subjects, &genre);
+                    }
+                } else if depth == 3 {
+                    title_info = false;
+                } else if depth == 2 && description {
+                    break;
+                }
+                depth = depth.checked_sub(1).ok_or(ImportError::InvalidXml)?;
+            }
+            Event::DocType(_) | Event::PI(_) => return Err(ImportError::InvalidXml),
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(classification)
 }
 
 fn load_source(source_path: &Path) -> Result<(String, Vec<u8>, &'static str), ImportError> {

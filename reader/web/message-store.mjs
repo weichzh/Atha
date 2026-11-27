@@ -19,6 +19,7 @@ export function createMessageStore({
   let lastError = null;
   let writes = 0;
   let edition;
+  let latestRootsRead;
 
   const currentEdition = async () => {
     edition ||= await client.edition(session.describe().contentVersion);
@@ -49,10 +50,33 @@ export function createMessageStore({
     });
   }
 
-  async function reload() {
-    items = (await client.roots(session.describe().contentVersion)).map(freezeItem);
-    lastError = null;
-    return items;
+  function reload() {
+    const request = Promise.resolve()
+      .then(async () => (await client.roots(session.describe().contentVersion)).map(freezeItem))
+      .then((loaded) => {
+        if (request !== latestRootsRead) return latestRootsRead;
+        items = loaded;
+        lastError = null;
+        return items;
+      }, (error) => {
+        if (request !== latestRootsRead) return latestRootsRead;
+        throw error;
+      });
+    latestRootsRead = request;
+    return request;
+  }
+
+  async function writeConversation(write) {
+    const committedResult = await write();
+    try {
+      await reload();
+    } catch (cause) {
+      const error = new Error("message-roots-refresh", { cause });
+      error.code = "message-roots-refresh";
+      error.committedResult = committedResult;
+      throw error;
+    }
+    return committedResult;
   }
 
   async function migrateLegacy() {
@@ -99,7 +123,14 @@ export function createMessageStore({
     return content.captureRange(range, preferences.snapshot().effective);
   }
 
-  async function add(sourceAnchor, noteValue, range) {
+  /**
+   * @param {any} sourceAnchor
+   * @param {string} noteValue
+   * @param {Range | null} range
+   * @param {any} [capturedSnapshot]
+   * @param {any} [richText]
+   */
+  async function add(sourceAnchor, noteValue, range, capturedSnapshot = null, richText = null) {
     try {
       const created = await client.createRoot({
         edition: await currentEdition(),
@@ -107,11 +138,16 @@ export function createMessageStore({
           ...sourceAnchor,
           section: locator.inspect(sourceAnchor.canonicalLocator).start.section,
         },
-        snapshot: await capture(range),
+        snapshot: capturedSnapshot ?? (await capture(range)),
         text: String(noteValue).trim() || null,
-      });
+      }, richText);
       writes += 1;
-      await reload();
+      try {
+        await reload();
+      } catch {
+        // A committed root must never become a retryable create on a failed read.
+        lastError = "message-roots-refresh";
+      }
       return Object.freeze({
         ok: true,
         id: created.messageId,
@@ -237,17 +273,9 @@ export function createMessageStore({
     compareSources,
     export: client.export,
     relationships: client.relationships,
-    reply: client.reply,
-    revise: async (...arguments_) => {
-      const result = await client.revise(...arguments_);
-      await reload();
-      return result;
-    },
-    deleteMessage: async (...arguments_) => {
-      const result = await client.remove(...arguments_);
-      await reload();
-      return result;
-    },
+    reply: (...arguments_) => writeConversation(() => client.reply(...arguments_)),
+    revise: (...arguments_) => writeConversation(() => client.revise(...arguments_)),
+    deleteMessage: (...arguments_) => writeConversation(() => client.remove(...arguments_)),
     revisions: client.revisions,
     search: client.search,
     sourceCaptures: client.sourceCaptures,

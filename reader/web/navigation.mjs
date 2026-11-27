@@ -23,6 +23,17 @@ function encodeProgress(sectionIndex, sectionCount, pageIndex, pageCount) {
   return (sectionIndex + (pageIndex + 1) / pageCount) / sectionCount;
 }
 
+export function readingPercent(sectionIndex, sectionCount, pageIndex, pageCount) {
+  if (
+    ![sectionIndex, sectionCount, pageIndex, pageCount].every(Number.isInteger) ||
+    sectionIndex < 0 || sectionIndex >= sectionCount ||
+    pageIndex < 0 || pageIndex >= pageCount
+  ) return null;
+  if (sectionIndex + 1 === sectionCount && pageIndex + 1 === pageCount) return 100;
+  const ratio = encodeProgress(sectionIndex, sectionCount, pageIndex, pageCount);
+  return Math.min(99, Math.round(ratio * 100));
+}
+
 function decodeProgress(value, maximum, sectionCount) {
   const ratio = Math.max(0, Math.min(1, Number(value) / Number(maximum)));
   const absolute = ratio * sectionCount;
@@ -63,9 +74,18 @@ export function createNavigation({
   let lastFallback = null;
   let pending = Promise.resolve();
 
-  function run(action) {
-    const result = pending.then(action).then((value) => {
-      onStable();
+  function run(action, readingAction = null) {
+    const result = pending.then(async () => {
+      const wasAtEnd = readingAction === "navigate" && currentPercent() === 100;
+      const value = await action();
+      const atEnd = readingAction !== null && currentPercent() === 100;
+      // In a single-page book, opening alone is not a completion event.
+      // An explicit forward turn at the end confirms it without inventing a page.
+      const movedAt = readingAction === "scroll" ? value.movedAt : null;
+      const active = readingAction === "scroll" ? movedAt !== null
+        : readingAction !== null && (value === true || (readingAction === "forward" && atEnd));
+      const reachedEnd = readingAction === "scroll" ? value.reachedEnd : atEnd && !wasAtEnd;
+      onStable(active, active && reachedEnd, movedAt);
       return value;
     });
     pending = result.catch(() => undefined);
@@ -102,13 +122,21 @@ export function createNavigation({
     if (index >= 0) toc.value = String(index);
     const label = book().toc[index]?.label || `第 ${state.currentIndex + 1} 节`;
     const ratio = encodeProgress(state.currentIndex, state.sections, page.page, page.pages);
+    const percent = readingPercent(state.currentIndex, state.sections, page.page, page.pages);
     chapterLabel.textContent = label;
     progressChapter.textContent = label;
-    progressBook.textContent = `全书约 ${Math.round(ratio * 100)}%`;
+    progressBook.textContent = percent === null ? "全书进度未知" : `全书约 ${percent}%`;
     progressPosition.textContent = `第 ${state.currentIndex + 1}/${state.sections} 节 · 本节 ${page.page + 1}/${page.pages} 页`;
     if (toolbarChapter) toolbarChapter.textContent = label;
     if (toolbarProgress) toolbarProgress.textContent = progressPosition.textContent;
     progressRange.value = String(ratio * Number(progressRange.max));
+    progressRange.dispatchEvent(new Event("atha-range-sync"));
+  }
+
+  function currentPercent(refreshScroll = false) {
+    const state = session.snapshot();
+    const page = pagination.snapshot(refreshScroll);
+    return readingPercent(state.currentIndex, state.sections, page.page, page.pages);
   }
 
   async function openSection(index) {
@@ -305,8 +333,11 @@ export function createNavigation({
   }
 
   async function settleScroll() {
+    const movedAt = pagination.takeReadingScroll();
+    const reachedEnd = movedAt !== null && currentPercent(true) === 100;
     await pagination.settleScrolledContent();
     syncControls();
+    return { movedAt, reachedEnd };
   }
 
   function bindControls() {
@@ -321,11 +352,11 @@ export function createNavigation({
     );
     toc.closest("label").hidden = description.toc.length === 0;
     pagination.bindControls({
-      onPrevious: () => run(previousPage),
-      onNext: () => run(nextPage),
+      onPrevious: () => run(previousPage, "navigate"),
+      onNext: () => run(nextPage, "forward"),
       onFontSize: (value) => run(() => setFontSize(value)),
-      onProgress: (value) => run(() => goToProgress(value)),
-      onScroll: () => run(settleScroll),
+      onProgress: (value) => run(() => goToProgress(value), "navigate"),
+      onScroll: () => run(settleScroll, "scroll"),
     });
     preferences.bind({
       onUpdate: (scope, patch) => run(() => setPreferences(scope, patch)),
@@ -334,11 +365,12 @@ export function createNavigation({
     toc.addEventListener("change", () => {
       if (toc.selectedOptions[0]?.dataset.bookmarkId) return;
       const index = Number(toc.value);
-      run(() => goToToc(index)).catch((error) => {
+      run(() => goToToc(index), "navigate").catch((error) => {
         fail(error instanceof Error ? error.message : "section-load");
       });
     });
     fontSizeControl.value = String(pagination.snapshot().fontSize);
+    fontSizeControl.dispatchEvent(new Event("atha-range-sync"));
     syncControls();
   }
 
@@ -410,12 +442,13 @@ export function createNavigation({
   return Object.freeze({
     bindControls,
     current,
-    goTo: (value) => run(() => goTo(value)),
-    goToHref: (value) => run(() => goToHref(value)),
-    goToToc: (index) => run(() => goToToc(index)),
+    currentPercent,
+    goTo: (value) => run(() => goTo(value), "navigate"),
+    goToHref: (value) => run(() => goToHref(value), "navigate"),
+    goToToc: (index) => run(() => goToToc(index), "navigate"),
     idle: () => pending,
-    next: () => run(nextPage),
-    previous: () => run(previousPage),
+    next: () => run(nextPage, "forward"),
+    previous: () => run(previousPage, "navigate"),
     resetPreferences: (scope) => run(() => resetPreferences(scope)),
     resize: (offset, expectedSectionIndex, expectedPageIndex, expectedScrollTop) =>
       run(() =>

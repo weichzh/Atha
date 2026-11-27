@@ -4,6 +4,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 mod archive;
 pub mod cbz;
+mod classification;
 pub mod dictionary;
 pub mod epub;
 pub mod fb2;

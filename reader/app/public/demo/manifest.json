@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "contentVersion": "a1b2c3d4e5f60718293a4b5c6d7e8f9011223344556677889900aabbccddeeff",
+  "sections": [
+    { "id": "ch1", "href": "ch1.xhtml" },
+    { "id": "ch2", "href": "ch2.xhtml" },
+    { "id": "ch3", "href": "ch3.xhtml" }
+  ],
+  "resources": ["book.css"],
+  "toc": [
+    { "label": "第一章 · 边注、潮汐与对话的起源", "href": "ch1.xhtml#sec-1" },
+    { "label": "第一节 · 安静的页边距", "href": "ch1.xhtml#sec-1-1" },
+    { "label": "第二章 · 纸页上的时间层（Palimpsest）", "href": "ch2.xhtml#sec-2" },
+    { "label": "第二节 · 锚点与快照的双重契约", "href": "ch2.xhtml#sec-2-1" },
+    { "label": "第三章 · 留白、尺度与夜间书房", "href": "ch3.xhtml#sec-3" }
+  ]
+}

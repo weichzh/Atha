@@ -13,6 +13,7 @@ commands.allow = [
   "open_library_book",
   "set_library_book_cover",
   "reset_library_book_cover",
+  "update_library_book_organization",
   "remove_library_book",
   "delete_library_book_data",
   "pending_library_book_deletions",

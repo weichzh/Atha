@@ -77,7 +77,8 @@ fn complete_local_data_round_trip_rebuilds_cache_and_confirms_browser_state() {
         .create_root(message_draft(&book.id))
         .expect("create source message");
     let data = LocalData::open(source.path()).expect("open source local data");
-    let browser = browser_state(&book.id);
+    let mut browser = browser_state(&book.id);
+    browser.records.push(reading_fact_record(&book.id));
 
     data.create_backup(&archive, &browser, &library, &dictionaries, &messages)
         .expect("create complete backup");
@@ -681,6 +682,52 @@ fn browser_state_is_bounded_sorted_and_production_only() {
 }
 
 #[test]
+fn browser_reading_facts_require_a_full_edition_and_bounded_readable_position() {
+    let id = "a".repeat(64);
+    let record = reading_fact_record(&id);
+    let valid = |record| {
+        BrowserState {
+            schema: 1,
+            records: vec![record],
+        }
+        .validate()
+    };
+    assert!(valid(record.clone()).is_ok());
+    for (field, invalid) in [
+        ("lastReadAt", serde_json::json!(-1)),
+        ("lastReadDate", serde_json::json!("2026-02-29")),
+        ("percent", serde_json::json!(101)),
+        ("completed", serde_json::json!("true")),
+        (
+            "locator",
+            serde_json::json!(position_locator(&"b".repeat(64))),
+        ),
+    ] {
+        let mut value: Value = serde_json::from_str(&record.value).expect("test value");
+        value[field] = invalid;
+        assert_eq!(
+            valid(BrowserStateRecord {
+                key: record.key.clone(),
+                value: value.to_string()
+            }),
+            Err(LocalDataError::InvalidBrowserState),
+        );
+    }
+    for key in [
+        format!("atha.reader.reading.{}.v1", &id[..16]),
+        format!("atha.reader.probe.reading.{id}.v1"),
+    ] {
+        assert_eq!(
+            valid(BrowserStateRecord {
+                key,
+                value: record.value.clone()
+            }),
+            Err(LocalDataError::InvalidBrowserState),
+        );
+    }
+}
+
+#[test]
 fn near_limit_browser_state_round_trips_compact_rollback_file() {
     let root = TestRoot::new("browser-boundary-source");
     let library = LocalLibrary::open(root.path()).expect("open library");
@@ -862,6 +909,30 @@ fn private_mdict_files(root: &Path) -> (PathBuf, Vec<PathBuf>) {
     (mdx.pop().expect("one MDX"), resources)
 }
 
+fn position_locator(id: &str) -> String {
+    serde_json::json!({
+        "schema": 1,
+        "contentVersion": id,
+        "start": { "section": "chapter-1", "offset": 17 },
+    })
+    .to_string()
+}
+
+fn reading_fact_record(id: &str) -> BrowserStateRecord {
+    BrowserStateRecord {
+        key: format!("atha.reader.reading.{id}.v1"),
+        value: serde_json::json!({
+            "schema": 1,
+            "locator": position_locator(id),
+            "percent": 100,
+            "completed": true,
+            "lastReadAt": 1_767_873_600_000_u64,
+            "lastReadDate": "2026-01-08",
+        })
+        .to_string(),
+    }
+}
+
 fn browser_state(id: &str) -> BrowserState {
     let key = &id[..16];
     BrowserState {
@@ -873,7 +944,11 @@ fn browser_state(id: &str) -> BrowserState {
             },
             BrowserStateRecord {
                 key: format!("atha.reader.progress.{key}.v1"),
-                value: format!(r#"{{"schema":1,"contentVersion":"{id}","locator":"locator"}}"#),
+                value: serde_json::json!({
+                    "schema": 1,
+                    "contentVersion": id,
+                    "locator": position_locator(id),
+                }).to_string(),
             },
         ],
     }

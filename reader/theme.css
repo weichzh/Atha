@@ -1,155 +1,284 @@
+/*
+ * Atha visual system "纸与墨" (docs/changes/ui-visual-system.md).
+ * Semantic tokens first; the --ui-*, --library-* and --page-* names below are
+ * compatibility aliases for existing selectors and must not gain new literals.
+ * Colour literals live only in this file.
+ */
 :root {
-  --reader-accent: #246653;
-  --ui-canvas: #f5f6f5;
-  --ui-surface: #ffffff;
-  --ui-surface-muted: #f5f6f5;
-  --ui-bar-bg: rgb(255 255 255 / 94%);
-  --ui-input-bg: #f5f6f5;
-  --ui-text: #252b29;
-  --ui-muted: #616b66;
-  --ui-border: #dde2df;
-  --ui-shadow: rgb(32 40 36 / 10%);
-  --ui-backdrop: rgb(18 23 21 / 42%);
-  --ui-error: #a32921;
-  --ui-error-bg: #fff0ed;
-  --page-bg: #f8f4e9;
-  --page-text: #2b2a26;
-  --page-muted: rgb(43 42 38 / 52%);
-  --formula-bg: #ffffff;
-  --annotation-bg: rgb(216 173 42 / 42%);
-  --ui-on-accent: #ffffff;
-  --ui-selection-highlight: rgb(242 201 76 / 48%);
-  --ui-preview-overlay: rgb(13 15 14 / 96%);
-  --ui-preview-control: rgb(0 0 0 / 68%);
-  --ui-preview-control-hover: rgb(0 0 0 / 84%);
-  --ui-preview-border: rgb(255 255 255 / 10%);
-  --ui-dialog-shadow: rgb(0 0 0 / 24%);
-  --ui-preview-shadow: rgb(0 0 0 / 28%);
-  --theme-preview-light-text: #252b29;
-  --theme-preview-light-bg: #ffffff;
-  --theme-preview-light-border: rgb(31 35 33 / 14%);
-  --theme-preview-system-text: #e8e9e7;
-  --theme-preview-system-bg: #363a38;
-  --theme-preview-paper-text: #3a3427;
-  --theme-preview-paper-bg: #eee3c7;
-  --theme-preview-dark-text: #f2f2f3;
-  --theme-preview-dark-bg: #222725;
+  /* Type */
+  --font-ui: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+  --font-serif: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun",
+    Georgia, serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono", monospace;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 30px;
+  --leading-tight: 1.3;
+  --leading-ui: 1.5;
+  --leading-prose: 1.75;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
 
-  --library-bg: #191c1b;
-  --library-surface: #222725;
-  --library-surface-raised: #2b302e;
-  --library-text: #f2f2f3;
-  --library-muted: #a4ada8;
-  --library-border: rgb(255 255 255 / 11%);
-  --library-accent: #a1d7bf;
-  --library-header-bg: #191c1b;
-  --library-sidebar: #202422;
-  --library-divider: rgb(255 255 255 / 7%);
-  --library-hover: rgb(255 255 255 / 5%);
-  --library-active: #2c4036;
-  --library-secondary: #c5c5c9;
-  --library-faint: #57575d;
-  --library-cover-bg: #1b1b1e;
-  --library-cover-ink: #f5f5f0;
-  --library-cover-forest: #38564a;
-  --library-cover-clay: #845551;
-  --library-cover-ocean: #425f72;
-  --library-cover-olive: #666a45;
-  --library-cover-icon: #67676e;
-  --library-selection-bg: #1b1b1d;
-  --library-danger: #ef5b61;
-  --library-quote: #d8d8db;
-  --library-copy: #b7b7bc;
-  --library-gold: #d3b867;
-  --library-gold-muted: #b8a86f;
-  --library-link: #65b7ec;
-  --library-error-border: #d15b60;
-  --library-error-bg: rgb(209 91 96 / 8%);
-  --library-error-text: #e7b7b9;
-  --library-drop-bg: rgb(5 5 5 / 88%);
-  --library-drop-text: #f2f2f3;
-  --library-on-accent: #18382b;
-  --library-cover-shadow: rgb(0 0 0 / 16%);
-  --library-selection-mask: rgb(0 0 0 / 50%);
-  --library-selection-icon: rgb(255 255 255 / 78%);
-  --library-menu-shadow: rgb(0 0 0 / 42%);
-  --library-dialog-shadow: rgb(0 0 0 / 58%);
-  --library-dialog-backdrop: rgb(0 0 0 / 68%);
-  --library-work-backdrop: rgb(0 0 0 / 58%);
-  --library-memory-icon: #aaaab0;
-  --library-quote-border: var(--library-accent);
-  --library-jump-border: rgb(24 136 216 / 45%);
-  --library-snapshot-backdrop: rgb(0 0 0 / 72%);
+  /* Space, shape, depth, motion */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --target: 44px;
+  --duration-instant: 90ms;
+  --duration-fast: 150ms;
+  --duration: 220ms;
+  --duration-sheet: 260ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* Colour — light ink on warm paper */
+  --color-canvas: #f5f3ee;
+  --color-surface: #fdfcf9;
+  --color-raised: #ffffff;
+  --color-sunken: #efece5;
+  --color-ink: #1f1d1a;
+  --color-ink-2: #5c574f;
+  --color-ink-3: #8c867c;
+  --color-rule: #e4dfd5;
+  --color-rule-strong: #cfc8bb;
+  --color-accent: #a4442b;
+  --color-accent-soft: #f6e9e3;
+  --color-on-accent: #ffffff;
+  --color-danger: #a8201a;
+  --color-danger-soft: #fbeceb;
+  --color-highlight: rgb(222 166 52 / 34%);
+  --color-search-mark-bg: #f3da9b;
+  --color-search-mark-ink: #1f1d1a;
+  --color-selection: rgb(164 68 43 / 16%);
+  --color-shadow: rgb(43 36 28 / 10%);
+  --color-shadow-strong: rgb(43 36 28 / 18%);
+  --color-backdrop: rgb(28 24 20 / 22%);
+  --shadow-float: 0 1px 2px var(--color-shadow), 0 8px 24px var(--color-shadow);
+  --ui-float-shadow: 0 2px 6px rgb(43 36 28 / 8%), 0 14px 36px rgb(43 36 28 / 14%);
+  --shadow-sheet: 0 -1px 0 var(--color-rule), 0 -12px 32px var(--color-shadow);
+  --shadow-control: 0 1px 2px rgb(43 36 28 / 16%), 0 2px 5px rgb(43 36 28 / 10%);
+  --shadow-popover: 0 4px 12px rgb(43 36 28 / 8%), 0 16px 38px rgb(43 36 28 / 14%);
+  --shadow-dialog: 0 8px 24px rgb(43 36 28 / 12%), 0 24px 64px rgb(43 36 28 / 20%);
+  --surface-glass: rgb(253 252 249 / 86%);
+  --slider-track: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  --slider-range: var(--color-accent);
+  --slider-thumb-bg: var(--color-raised);
+  --slider-thumb-border: var(--color-accent);
+  --toast-bg: #26221e;
+  --toast-ink: #faf6f0;
+  --toast-border: rgb(255 255 255 / 12%);
+  --toast-error-bg: var(--color-danger);
+  --toast-error-ink: #ffffff;
+
+  /* CSS editor syntax — paper shares the light palette */
+  --syntax-keyword: #9a3d24;
+  --syntax-property: #2f5a7a;
+  --syntax-string: #4a6a2a;
+  --syntax-number: #86571a;
+  --syntax-selector: #6b4a86;
+  --syntax-comment: #625d55;
+  --syntax-punctuation: #5c574f;
+
+  /* Reading page */
+  --page-bg: #f3ead9;
+  --page-text: #3a3226;
+  --page-muted: rgb(58 50 38 / 72%);
+
+  /* Fixed swatches (theme picker previews show the page, not the app tone) */
+  --theme-preview-light-text: #23211e;
+  --theme-preview-light-bg: #fdfcf9;
+  --theme-preview-light-border: rgb(31 29 26 / 16%);
+  --theme-preview-system-text: #e4dfd6;
+  --theme-preview-system-bg: #2a2825;
+  --theme-preview-paper-text: #3a3226;
+  --theme-preview-paper-bg: #f0e5cf;
+  --theme-preview-dark-text: #e4dfd6;
+  --theme-preview-dark-bg: #1c1b19;
+
+  /* Media preview is always a dark stage */
+  --ui-preview-ink: #f4efe8;
+  --ui-preview-overlay: rgb(14 13 12 / 96%);
+  --ui-preview-control: rgb(0 0 0 / 64%);
+  --ui-preview-control-hover: rgb(0 0 0 / 82%);
+  --ui-preview-border: rgb(255 255 255 / 12%);
+  --ui-dialog-shadow: rgb(0 0 0 / 22%);
+  --ui-preview-shadow: rgb(0 0 0 / 28%);
+  --library-snapshot-backdrop: rgb(0 0 0 / 64%);
   --library-snapshot-bg: #ffffff;
   --library-snapshot-text: #111111;
+
+  /* Generated covers: muted inks that sit on paper; text uses --library-cover-ink */
+  --library-cover-ink: #fbf8f1;
+  --library-cover-forest: #40584b;
+  --library-cover-clay: #8b5646;
+  --library-cover-ocean: #3f5868;
+  --library-cover-olive: #66643f;
+  --library-cover-shadow: rgb(43 36 28 / 14%);
+  --library-selection-mask: rgb(20 18 16 / 46%);
+  --library-selection-icon: rgb(255 255 255 / 82%);
+  --library-gold: #85661d;
+  --library-gold-muted: #85661d;
 }
 
-:root[data-app-tone="light"] {
-  --library-bg: #ffffff;
-  --library-surface: #ffffff;
-  --library-surface-raised: #ffffff;
-  --library-text: #252b29;
-  --library-muted: #616b66;
-  --library-border: #dde2df;
-  --library-accent: #246653;
-  --library-header-bg: #ffffff;
-  --library-sidebar: #f5f6f5;
-  --library-on-accent: #ffffff;
-  --library-divider: rgb(0 0 0 / 8%);
-  --library-hover: rgb(0 0 0 / 4%);
-  --library-active: #eaf2ed;
-  --library-secondary: #49494f;
-  --library-faint: #9a9aa0;
-  --library-cover-bg: #ededf0;
-  --library-cover-icon: #8a8a90;
-  --library-selection-bg: #ffffff;
-  --library-danger: #c8383f;
-  --library-quote: #36363a;
-  --library-copy: #4f4f55;
-  --library-gold: #79651c;
-  --library-gold-muted: #79651c;
-  --library-link: #246653;
-  --library-error-border: #b52f37;
-  --library-error-bg: rgb(181 47 55 / 8%);
-  --library-error-text: #8c2027;
-  --library-drop-bg: rgb(246 246 248 / 92%);
-  --library-drop-text: #1d1d1f;
-  --library-memory-icon: #66666d;
+/* Warm charcoal. Library sets data-app-tone, the reader sets data-theme-tone. */
+:root[data-app-tone="dark"],
+:root[data-theme-tone="dark"] {
+  --color-canvas: #131210;
+  --color-surface: #1b1a18;
+  --color-raised: #24221f;
+  --color-sunken: #100f0d;
+  --color-ink: #ece7df;
+  --color-ink-2: #aba498;
+  --color-ink-3: #7c766c;
+  --color-rule: #302d29;
+  --color-rule-strong: #45413a;
+  --color-accent: #e79a80;
+  --color-accent-soft: #3a2721;
+  --color-on-accent: #24130d;
+  --color-danger: #ff9b91;
+  --color-danger-soft: #3c201d;
+  --color-highlight: rgb(214 160 64 / 32%);
+  --color-search-mark-bg: #4e3c1b;
+  --color-search-mark-ink: #f7ecd4;
+  --color-selection: rgb(231 154 128 / 22%);
+  --color-shadow: rgb(0 0 0 / 32%);
+  --color-shadow-strong: rgb(0 0 0 / 48%);
+  --color-backdrop: rgb(0 0 0 / 52%);
+  --ui-float-shadow: inset 0 1px 0 rgb(255 248 238 / 6%), 0 2px 8px rgb(0 0 0 / 42%),
+    0 18px 44px rgb(0 0 0 / 56%);
+  --shadow-control: 0 1px 3px rgb(0 0 0 / 48%), 0 2px 6px rgb(0 0 0 / 32%);
+  --shadow-popover: inset 0 1px 0 rgb(255 248 238 / 6%), 0 6px 16px rgb(0 0 0 / 44%),
+    0 20px 48px rgb(0 0 0 / 56%);
+  --shadow-dialog: inset 0 1px 0 rgb(255 248 238 / 7%), 0 12px 32px rgb(0 0 0 / 52%),
+    0 28px 72px rgb(0 0 0 / 64%);
+  --surface-glass: rgb(29 27 24 / 86%);
+  --slider-track: color-mix(in srgb, var(--color-ink) 16%, transparent);
+  --slider-thumb-bg: var(--color-ink);
+  --toast-bg: #2b2824;
+  --toast-ink: #f5efe6;
+  --toast-border: rgb(255 248 238 / 14%);
+  --toast-error-bg: #7a231b;
+  --toast-error-ink: #fff4f2;
+  --syntax-keyword: #e79a80;
+  --syntax-property: #8fb8d8;
+  --syntax-string: #a9c98a;
+  --syntax-number: #ddb373;
+  --syntax-selector: #c4a6dd;
+  --syntax-comment: #9a948a;
+  --syntax-punctuation: #aba498;
+  --page-bg: #1c1b19;
+  --page-text: #e4dfd6;
+  --page-muted: rgb(228 223 214 / 62%);
+  --library-cover-shadow: rgb(0 0 0 / 30%);
+  --library-gold: #d6bb6c;
+  --library-gold-muted: #c2ab6f;
 }
 
 :root[data-theme="light"] {
-  --ui-canvas: #f5f6f5;
-  --ui-surface: #ffffff;
-  --ui-surface-muted: #f5f6f5;
-  --ui-bar-bg: rgb(255 255 255 / 94%);
-  --ui-input-bg: #f5f6f5;
-  --ui-text: #252b29;
-  --ui-muted: #616b66;
-  --ui-border: #dde2df;
-  --page-bg: #ffffff;
-  --page-text: #282b29;
-  --page-muted: rgb(40 43 41 / 50%);
+  --page-bg: #fdfcf9;
+  --page-text: #23211e;
+  --page-muted: rgb(35 33 30 / 64%);
+}
+
+/* The paper reading theme (and system-light, which shares its page) tints the tool surfaces so panels sit on the same sheet. */
+:root[data-theme="paper"],
+:root[data-theme-tone="light"]:not([data-theme]) {
+  --color-canvas: #ebe1cc;
+  --color-surface: #f7efdf;
+  --color-raised: #fbf6eb;
+  --color-sunken: #ede3cf;
+  --color-rule: #ded1b8;
+  --color-rule-strong: #cbbb9c;
+  --color-ink: #2c261d;
+  --color-ink-2: #5f5544;
+  --color-accent-soft: #f0dccf;
+  --color-search-mark-bg: #e8ca82;
+  --color-search-mark-ink: #241e16;
+  --ui-float-shadow: 0 2px 6px rgb(58 46 28 / 10%), 0 14px 36px rgb(58 46 28 / 16%);
+  --surface-glass: rgb(247 239 223 / 88%);
+  --shadow-popover: 0 4px 12px rgb(58 46 28 / 10%), 0 16px 38px rgb(58 46 28 / 16%);
+  --shadow-dialog: 0 8px 24px rgb(58 46 28 / 14%), 0 24px 64px rgb(58 46 28 / 22%);
+}
+
+:root {
+  /* Reader compatibility aliases */
+  --reader-accent: var(--color-accent);
+  --ui-canvas: var(--color-canvas);
+  --ui-surface: var(--color-surface);
+  --ui-surface-muted: var(--color-sunken);
+  --ui-bar-bg: color-mix(in srgb, var(--page-bg) 90%, transparent);
+  --ui-input-bg: var(--color-sunken);
+  --ui-text: var(--color-ink);
+  --ui-muted: var(--color-ink-2);
+  --ui-border: var(--color-rule);
+  --ui-shadow: var(--color-shadow);
+  --ui-backdrop: var(--color-backdrop);
+  --ui-error: var(--color-danger);
+  --ui-error-bg: var(--color-danger-soft);
+  --ui-on-accent: var(--color-on-accent);
+  --ui-selection-highlight: var(--color-highlight);
+  --ui-search-mark-bg: var(--color-search-mark-bg);
+  --ui-search-mark-ink: var(--color-search-mark-ink);
+  --ui-float-bg: var(--color-raised);
+  --ui-float-border: var(--color-rule-strong);
+  --annotation-bg: var(--color-highlight);
   --formula-bg: #ffffff;
+
+  /* Library compatibility aliases */
+  --library-bg: var(--color-surface);
+  --library-surface: var(--color-surface);
+  --library-surface-raised: var(--color-raised);
+  --library-text: var(--color-ink);
+  --library-muted: var(--color-ink-2);
+  --library-border: var(--color-rule);
+  --library-accent: var(--color-accent);
+  --library-header-bg: var(--color-surface);
+  --library-sidebar: var(--color-canvas);
+  --library-divider: var(--color-rule);
+  --library-hover: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  --library-active: var(--color-accent-soft);
+  --library-secondary: var(--color-ink-2);
+  --library-faint: var(--color-ink-3);
+  --library-cover-bg: var(--color-sunken);
+  --library-cover-icon: var(--color-ink-3);
+  --library-selection-bg: var(--color-raised);
+  --library-danger: var(--color-danger);
+  --library-quote: var(--color-ink);
+  --library-copy: var(--color-ink-2);
+  --library-link: var(--color-accent);
+  --library-error-border: var(--color-danger);
+  --library-error-bg: var(--color-danger-soft);
+  --library-error-text: var(--color-danger);
+  --library-drop-bg: color-mix(in srgb, var(--color-canvas) 92%, transparent);
+  --library-drop-text: var(--color-ink);
+  --library-on-accent: var(--color-on-accent);
+  --library-menu-shadow: var(--color-shadow-strong);
+  --library-dialog-shadow: var(--color-shadow-strong);
+  --library-dialog-backdrop: var(--color-backdrop);
+  --library-work-backdrop: var(--color-backdrop);
+  --library-memory-icon: var(--color-ink-2);
+  --library-quote-border: var(--color-accent);
+  --library-jump-border: color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
 :root[data-theme-tone="dark"] {
-  --reader-accent: #a1d7bf;
-  --ui-on-accent: #18382b;
-  --ui-canvas: #191c1b;
-  --ui-surface: #222725;
-  --ui-surface-muted: #2b302e;
-  --ui-bar-bg: rgb(26 32 29 / 94%);
-  --ui-input-bg: #29312e;
-  --ui-text: #edf0ed;
-  --ui-muted: #a0aaa4;
-  --ui-border: #46504a;
-  --ui-shadow: rgb(0 0 0 / 38%);
-  --ui-backdrop: rgb(0 0 0 / 58%);
-  --ui-error: #ffb3ad;
-  --ui-error-bg: #3d2220;
-  --page-bg: #1a211e;
-  --page-text: #e8ece8;
-  --page-muted: rgb(232 236 232 / 54%);
   --formula-bg: transparent;
-  --annotation-bg: rgb(211 167 41 / 42%);
 }
