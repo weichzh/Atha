@@ -130,12 +130,13 @@ pub(crate) async fn message_create_root(
     window: WebviewWindow,
     runtime: State<'_, ReaderRuntime>,
     draft: RootMessageDraft,
+    rich_text: Option<RichTextInput>,
 ) -> Result<CreatedRoot, String> {
     require_reader_window(&window)?;
     let _operation = begin_local_data_operation(&runtime)?;
     runtime
         .messages
-        .create_root(draft)
+        .create_root_with_content(draft, rich_text.as_ref())
         .map_err(message_error("create-root"))
 }
 

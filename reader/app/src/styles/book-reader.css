@@ -1,10 +1,5 @@
-:host {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
 .book {
+  display: block;
   box-sizing: border-box;
   width: var(--reader-col-w, 100%);
   height: 100%;
@@ -21,7 +16,7 @@
   -webkit-font-smoothing: antialiased;
 }
 
-:host([data-reading-mode="scroll"]) .book {
+.book[data-reading-mode="scroll"] {
   width: 100%;
   height: auto;
   column-width: auto;
@@ -59,15 +54,15 @@
   text-indent: var(--book-paragraph-indent, 0);
 }
 
-:host([data-paragraph-indent="two"]) .book p {
+.book[data-paragraph-indent="two"] p {
   --book-paragraph-indent: 2em;
 }
 
-:host([data-paragraph-spacing="compact"]) .book p {
+.book[data-paragraph-spacing="compact"] p {
   --book-paragraph-spacing: 0.52em;
 }
 
-:host([data-paragraph-spacing="comfortable"]) .book p {
+.book[data-paragraph-spacing="comfortable"] p {
   --book-paragraph-spacing: 1.35em;
 }
 

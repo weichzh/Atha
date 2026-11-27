@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { LibraryBook, ReadingMemoryJump } from "./library.ts";
+  import type { LibraryBook, ReadingMemoryTarget } from "./library.ts";
   import AppSettingsView from "./lib/components/AppSettingsView.svelte";
   import LibraryView from "./lib/components/LibraryView.svelte";
   import MemoryView from "./lib/components/MemoryView.svelte";
@@ -24,7 +24,7 @@
   const initialParams = initialReaderLaunch ? new URLSearchParams(window.location.search) : null;
   const tauriOnReader = isTauriRuntime() && initialReaderLaunch;
 
-  function parseInitialJump(params: URLSearchParams | null, editionId: string): ReadingMemoryJump | null {
+  function parseInitialJump(params: URLSearchParams | null, editionId: string): ReadingMemoryTarget | null {
     if (!params) return null;
     const memConv = params.get("memory-conversation");
     const memMsg = params.get("memory-message");
@@ -35,11 +35,7 @@
       messageId: memMsg,
       rootMessageId: memRoot,
       editionId,
-      canonicalLocator: JSON.stringify({
-        schema: 1,
-        contentVersion: editionId,
-        start: { section: "ch1", offset: 0 },
-      }),
+
     };
   }
 
@@ -60,7 +56,7 @@
   let readerManifestPath = $state(
     initialParams?.get("manifest") || (isTauriRuntime() ? "" : "demo/manifest.json"),
   );
-  let readerJump = $state<ReadingMemoryJump | null>(
+  let readerJump = $state<ReadingMemoryTarget | null>(
     parseInitialJump(initialParams, initialVersion),
   );
 
@@ -126,7 +122,7 @@
     activeRoute = tab;
   }
 
-  function openReader(book: LibraryBook, manifestPath: string, jump: ReadingMemoryJump | null = null) {
+  function openReader(book: LibraryBook, manifestPath: string, jump: ReadingMemoryTarget | null = null) {
     readerBook = book;
     readerManifestPath = manifestPath;
     readerJump = jump;

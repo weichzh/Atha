@@ -74,7 +74,7 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
   });
 }
 
-export async function renderSnapshotElement(capture, store) {
+export async function renderSnapshotElement(capture, store, toResourceUrl = resourceDataUrl) {
   const presentation = parseSnapshotPresentation(
     capture.snapshot.presentationJson,
     globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches,
@@ -82,7 +82,7 @@ export async function renderSnapshotElement(capture, store) {
   const resources = new Map();
   for (const resource of capture.snapshot.resources) {
     const data = await store.snapshotResource(capture.source.id, resource.path);
-    resources.set(resource.path, await resourceDataUrl(data));
+    resources.set(resource.path, await toResourceUrl(data));
   }
   const parsed = safeSnapshotFragment(capture.snapshot.fragmentHtml, new Set(resources.keys()));
   for (const image of parsed.querySelectorAll("img[src], image[href]")) {

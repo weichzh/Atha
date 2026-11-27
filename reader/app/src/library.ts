@@ -78,11 +78,14 @@ export interface RecentReading {
   lastReadDate: string;
 }
 
-export interface ReadingMemoryJump {
+export interface ReadingMemoryTarget {
   messageId: string;
   rootMessageId: string;
   conversationId: string;
   editionId: string;
+}
+
+export interface ReadingMemoryJump extends ReadingMemoryTarget {
   canonicalLocator: string;
 }
 
@@ -616,6 +619,7 @@ export async function openReadingMemoryHit(hit: ReadingMemoryJump): Promise<void
   }
   const launch = await invoke<ReaderLaunch>("open_library_book", { id: hit.editionId });
   const memory = new URLSearchParams({
+    version: hit.editionId,
     "memory-conversation": hit.conversationId,
     "memory-message": hit.messageId,
     "memory-root": hit.rootMessageId,

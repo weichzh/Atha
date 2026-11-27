@@ -258,6 +258,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       .filter(
         (rule) =>
           !/@import|(?:url|src|image|image-set)\s*\(/i.test(rule.cssText) &&
+          !/:host(?:-context)?\b|::part\b|::slotted\b|@font-face\b/i.test(rule.cssText) &&
           !rule.cssText.includes("\\"),
       )
       .map((rule) => rule.cssText)

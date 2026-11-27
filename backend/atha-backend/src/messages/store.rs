@@ -131,7 +131,10 @@ impl MessageStore {
                 self.publish_asset(asset_name, expected_hash, bytes)
             }
             Err(_) => Err(MessageError::InvalidRoot),
-        }
+        }?;
+        // A valid existing asset may be an orphan of an earlier failed sync.
+        // Retry the directory barrier before allowing any new database reference.
+        self.sync_assets_directory()
     }
 
     pub(crate) fn restore_asset(
@@ -145,9 +148,27 @@ impl MessageStore {
             .read_asset(asset_name, expected_hash, bytes.len() as u64)
             .is_ok()
         {
-            return Ok(());
+            return self.sync_assets_directory();
         }
-        self.publish_asset(asset_name, expected_hash, bytes)
+        self.publish_asset(asset_name, expected_hash, bytes)?;
+        self.sync_assets_directory()
+    }
+
+    fn sync_assets_directory(&self) -> Result<(), MessageError> {
+        self.ensure_assets_directory()?;
+        #[cfg(unix)]
+        {
+            #[cfg(test)]
+            durability_tests::before_directory_sync(&self.assets)
+                .map_err(|_| MessageError::InvalidRoot)?;
+            // File sync does not persist the directory entry created by rename.
+            fs::File::open(&self.assets)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|_| MessageError::InvalidRoot)?;
+        }
+        // Non-Unix keeps the existing file-sync contract; this does not claim
+        // equivalent directory durability on Windows.
+        Ok(())
     }
 
     fn publish_asset(
@@ -364,3 +385,7 @@ fn is_asset_name(name: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
+
+#[cfg(all(test, unix))]
+#[path = "durability_tests.rs"]
+mod durability_tests;

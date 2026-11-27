@@ -257,7 +257,7 @@
                       </span>
                       <span class="capture-date">{formatTimestamp(capture.createdAt)}</span>
                     </div>
-                    <SnapshotPreview {capture} />
+                    <SnapshotPreview {capture} resourceClient={getReadingMemoryClient()} />
                   </div>
                 {/each}
               </div>

@@ -8,19 +8,19 @@
 
 ## 当前表
 
-| 表 | 责任 |
-| --- | --- |
-| `work`、`edition` | 作品与内容哈希 Edition；同一内容重导复用身份 |
-| `conversation` | Edition 内由根 Message 开始的阅读对话及最近活动时间 |
-| `message` | 稳定身份、顺序、父回复、当前修订、当前原文引用和删除墓碑 |
-| `message_revision` | schema 1 的不可变 source-only 或 text 修订与纯文本投影 |
-| `source_anchor` | 不可变原始 Locator、可唯一重锚的当前 Locator、原文、上下文和哈希 |
-| `source_snapshot` | 创建或重选时的 HTML、reader/book/user CSS 与呈现参数 |
-| `snapshot_resource` | 快照资源的原始相对路径、媒体类型、长度、哈希和资产名 |
-| `message_reference` | Message 之间可正反向查询的有向引用 |
-| `message_search` | 仅当前、未删除修订的 FTS5 trigram 投影 |
-| `legacy_import_state`、`legacy_annotation_import` | localStorage 标注原子、幂等迁移的完成凭据与旧 ID 映射 |
-| `outbox_event` | 与每次事实写入同事务保存的本地待处理事件 |
+| 表                                                | 责任                                                             |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| `work`、`edition`                                 | 作品与内容哈希 Edition；同一内容重导复用身份                     |
+| `conversation`                                    | Edition 内由根 Message 开始的阅读对话及最近活动时间              |
+| `message`                                         | 稳定身份、顺序、父回复、当前修订、当前原文引用和删除墓碑         |
+| `message_revision`                                | schema 1 的不可变 source-only 或 text 修订与纯文本投影           |
+| `source_anchor`                                   | 不可变原始 Locator、可唯一重锚的当前 Locator、原文、上下文和哈希 |
+| `source_snapshot`                                 | 创建或重选时的 HTML、reader/book/user CSS 与呈现参数             |
+| `snapshot_resource`                               | 快照资源的原始相对路径、媒体类型、长度、哈希和资产名             |
+| `message_reference`                               | Message 之间可正反向查询的有向引用                               |
+| `message_search`                                  | 仅当前、未删除修订的 FTS5 trigram 投影                           |
+| `legacy_import_state`、`legacy_annotation_import` | localStorage 标注原子、幂等迁移的完成凭据与旧 ID 映射            |
+| `outbox_event`                                    | 与每次事实写入同事务保存的本地待处理事件                         |
 
 ## 已实现不变量
 
@@ -30,7 +30,7 @@
 - 删除只写 Message 墓碑，不改写或追加正文修订；既有修订、关系、快照和资源仍可查询或导出。
 - 引用目标必须存在、未删除且属于同一 Edition；拒绝未知、跨 Edition、父消息和自身引用。
 - 快照再次校验 Locator 版本、原文哈希、HTML 文本、活动元素/属性、CSS 子资源、Shadow DOM 穿透选择器、presentation schema/长度、资源路径、媒体类型、长度和 SHA-256；未绑定资源和多余资源均拒绝。系统主题在捕获时冻结为实际明暗主题。
-- 每次写入与 Outbox 事件同事务提交；两个资源写入口都先取得 `IMMEDIATE` transaction，再以独占临时文件完整写入、`sync_all` 并 rename 到最终 SHA-256。数据库失败最多留下完整孤儿，重开会清理；截断临时 / 孤儿不会成为可读取事实。
+- 每次写入与 Outbox 事件同事务提交；两个资源写入口都先取得 `IMMEDIATE` transaction，再以独占临时文件完整写入、`sync_all` 并 rename 到最终 SHA-256。Unix 在提交数据库引用前同步资产目录，复用完整孤儿与备份恢复也经过同一屏障；失败保留旧数据库事实。数据库失败最多留下完整孤儿，重开会清理；截断临时 / 孤儿不会成为可读取事实。
 - open 清理只删除 Atha 临时文件和未引用的 64 位小写哈希文件 / symlink，保留已引用资产、未知文件和目录；所有读取、导出、复用与完整性检查共用普通文件、长度、名称和 SHA-256 校验，已引用 symlink 或损坏资产不会被清理或覆盖，读取 / 导出返回 `corrupt-message-data`，`health.integrity` 为 false。
 - open / recovery 持 exclusive maintenance lock，完整备份持 shared lock，完整恢复持 exclusive lock；并发备份可以共存，但启动清理和恢复不会删除另一维护操作的暂存文件或提前发布资产。普通消息写入仍只由 SQLite transaction 协调。
 - FTS 只返回当前未删除修订，可按 Edition 与 section 过滤；对话最近有回复、编辑、重选或删除时，根消息投影随之上浮。
