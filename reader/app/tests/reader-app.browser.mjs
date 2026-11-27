@@ -81,14 +81,30 @@ async function verifyFootnotePreview(browser) {
       <p>书页边注 <a id="note-near" href="#fn-near" role="doc-noteref">[1]</a>
         <a id="note-far" href="ch3.xhtml#fn-far" role="doc-noteref">[2]</a>
         <a id="note-missing" href="unknown.xhtml#fn-missing" role="doc-noteref">[3]</a>
+        <a id="note-marker" href="ch2.xhtml#fn-marker" role="doc-noteref">[4]</a>
+        <a id="note-image" href="ch3.xhtml#fn-image" role="doc-noteref">[5]</a>
         <a id="ordinary-link" href="ch2.xhtml#sec-2">普通链接</a></p>
       <aside id="fn-near"><p>同章注释 <a href="#note-near" role="doc-backlink">↩</a></p></aside>`);
+    const ch2 = (await chapter("ch2.xhtml")).replace("<body>", `<body>
+      <p><a id="fn-marker"></a>这段注释的锚点本身没有文字。</p>`);
     const ch3 = (await chapter("ch3.xhtml")).replace("<body>", `<body>
       <aside id="fn-far"><p>跨章注释：书页投影 &lt;原文&gt;。</p>
-      <p>读完本段仍可留在原处。</p></aside>`);
+      <p>读完本段仍可留在原处。</p></aside>
+      <aside id="fn-image"><img src="note.gif" alt="脚注插图" width="40" height="30" /></aside>
+      <p>插图之后的正文。</p>`);
+    const manifest = JSON.parse(await chapter("manifest.json"));
+    manifest.resources.push("note.gif");
+    await page.route("**/demo/manifest.json", route => route.fulfill({ json: manifest }));
+    await page.route("**/demo/note.gif", route => route.fulfill({
+      status: 200,
+      contentType: "image/gif",
+      body: Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64"),
+    }));
     page.on("request", request => requestedPaths.push(new URL(request.url()).pathname));
     await page.route("**/demo/ch1.xhtml", route =>
       route.fulfill({ status: 200, contentType: "application/xhtml+xml", body: ch1 }));
+    await page.route("**/demo/ch2.xhtml", route =>
+      route.fulfill({ status: 200, contentType: "application/xhtml+xml", body: ch2 }));
     await page.route("**/demo/ch3.xhtml", async route => {
       await release.promise;
       await route.fulfill({ status: 200, contentType: "application/xhtml+xml", body: ch3 });
@@ -171,6 +187,20 @@ async function verifyFootnotePreview(browser) {
     await page.locator("#ordinary-link").tap();
     await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "2 / 3");
     assert.equal(await note.count(), 0);
+
+    // A known target still offers explicit navigation when it has no previewable text.
+    for (const [link, destination] of [["#note-marker", "2 / 3"], ["#note-image", "3 / 3"]]) {
+      await page.goto(`${PREVIEW_URL}?manifest=demo/manifest.json&verify=1`);
+      await page.waitForSelector("html[data-reader-ready]");
+      await page.locator(link).tap();
+      await note.waitFor();
+      assert.match((await note.locator(".footnote-text").textContent()) ?? "", /没有可预览的文字/);
+      assert.equal(await note.locator("img, svg image, a").count(), 0);
+      assert.equal(await position(), "1 / 3");
+      await note.getByRole("button", { name: "跳转原文" }).click();
+      await page.waitForFunction(expected => document.documentElement.dataset.sectionPosition === expected, destination);
+      await note.waitFor({ state: "hidden" });
+    }
   } finally {
     release.resolve();
     await page.close();

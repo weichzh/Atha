@@ -1107,12 +1107,16 @@ export class ReaderEngine {
     this.footnotePending = false;
     if (!anchor.isConnected || this.pagination.snapshot().page !== sourcePage || hasActiveModalOverlay()) return;
     const target = fragment ? body?.querySelector(`#${CSS.escape(fragment)}`) : null;
-    const text = target ? this.footnoteText(target) : "";
-    if (!text) {
+    if (!target) {
       this.showToast("未找到可预览的脚注");
       return;
     }
-    this.activeFootnote = { label: anchor.textContent.trim(), text, href, anchorRect: anchor.getBoundingClientRect() };
+    this.activeFootnote = {
+      label: anchor.textContent.trim(),
+      text: this.footnoteText(target),
+      href,
+      anchorRect: anchor.getBoundingClientRect(),
+    };
   }
 
   private footnoteText(target: Element): string {

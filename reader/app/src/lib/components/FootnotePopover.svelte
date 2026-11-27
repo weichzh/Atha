@@ -85,7 +85,7 @@
       </button>
     </form>
   </header>
-  <p class="footnote-text">{footnote.text}</p>
+  <p class="footnote-text">{footnote.text || "这条脚注没有可预览的文字。可跳转到原文查看。"}</p>
 </dialog>
 
 <style>
