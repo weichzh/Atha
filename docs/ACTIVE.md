@@ -2,6 +2,8 @@
 
 本页指向当前工作的入口。
 
+- `change`：Atha「启门」应用图标 → `docs/changes/launch-icon.md`
+
 - `change`：开书动效的阅读器前置 → `docs/changes/reader-opening-foundation.md`
 
 - `now`：UI 重设计候选交接，等待用户复核书架与阅读主界面。

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { BookOpen, Library, Settings, Sparkles } from "@lucide/svelte";
+  import { Library, Settings, Sparkles } from "@lucide/svelte";
+  import brandIcon from "../../../src-tauri/icons/app-icon.svg?no-inline";
   import type { AppRoute } from "../types.ts";
 
   interface Props {
@@ -19,9 +20,7 @@
 
 <nav class="nav-shell" aria-label="主导航">
   <div class="nav-brand">
-    <div class="brand-seal" aria-hidden="true">
-      <BookOpen size={18} strokeWidth={1.8} />
-    </div>
+    <img class="brand-seal" src={brandIcon} width="34" height="34" alt="" />
     <div class="brand-text">
       <span class="brand-name">Atha</span>
       <span class="brand-sub tabular">{bookCount} 册藏书</span>
@@ -80,12 +79,7 @@
   .brand-seal {
     width: 34px;
     height: 34px;
-    border-radius: 11px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--accent-soft);
-    color: var(--accent);
+    display: block;
     flex: none;
   }
 
