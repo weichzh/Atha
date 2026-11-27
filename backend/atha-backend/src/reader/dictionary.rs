@@ -16,7 +16,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{create_real_directory, is_reparse_point};
 
-use super::source::{SourceDigest, SourceError, hash_file};
+use super::{
+    huffcdic::{
+        Budget, HuffCdicReader, MAX_CACHE_BYTES, MAX_RECORD_OUTPUT as MAX_DECOMPRESSED_TEXT_RECORD,
+        strip_trailing_data,
+    },
+    source::{SourceDigest, SourceError, hash_file},
+};
 
 const DICTIONARY_SCHEMA: u8 = 1;
 const MDICT_IDENTITY_DOMAIN: &[u8] = b"atha/dictionary/mdict-rs-0.1.4-v2\0";
@@ -42,6 +48,7 @@ const MAX_KINDLE_INDEX_RECORDS: usize = 4_096;
 const MAX_KINDLE_INDEX_ENTRIES: usize = 2_000_000;
 const MAX_KINDLE_ENTRIES_PER_RECORD: usize = 10_000;
 const MAX_KINDLE_HUFF_RECORDS: usize = 512;
+const MAX_HUFF_DICTIONARY_ENTRIES: usize = 2_000_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -361,9 +368,17 @@ impl KindleDictionary {
             )?);
         }
         let cdic_refs = cdics.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        let mut huff =
-            HuffCdicReader::new(&huff, &cdic_refs).map_err(|_| DictionaryError::CorruptSource)?;
-        let mut budget = MAX_RAW_DEFINITION_BYTES;
+        let mut huff = HuffCdicReader::new(
+            &huff,
+            &cdic_refs,
+            MAX_HUFF_DICTIONARY_ENTRIES,
+            MAX_CACHE_BYTES,
+        )
+        .map_err(|_| DictionaryError::CorruptSource)?;
+        let mut budget = Budget {
+            output_left: MAX_RAW_DEFINITION_BYTES,
+            codes_left: None,
+        };
         let mut output = Vec::with_capacity(length as usize);
         for record_index in first..=last {
             let compressed = read_record_bytes(&mut self.file, &self.offsets, record_index + 1)?;
@@ -406,8 +421,13 @@ impl KindleDictionary {
             )?);
         }
         let cdic_refs = cdics.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        let mut huff =
-            HuffCdicReader::new(&huff, &cdic_refs).map_err(|_| DictionaryError::CorruptSource)?;
+        let mut huff = HuffCdicReader::new(
+            &huff,
+            &cdic_refs,
+            MAX_HUFF_DICTIONARY_ENTRIES,
+            MAX_CACHE_BYTES,
+        )
+        .map_err(|_| DictionaryError::CorruptSource)?;
         let mut offsets = Vec::with_capacity(self.text_records + 1);
         offsets.push(0_u64);
         let decompressed_limit = self
@@ -416,7 +436,10 @@ impl KindleDictionary {
             .ok_or(DictionaryError::CorruptSource)?;
         for record_index in 1..=self.text_records {
             let compressed = read_record_bytes(&mut self.file, &self.offsets, record_index)?;
-            let mut budget = MAX_DECOMPRESSED_TEXT_RECORD;
+            let mut budget = Budget {
+                output_left: MAX_DECOMPRESSED_TEXT_RECORD,
+                codes_left: None,
+            };
             let length = huff
                 .decompress(
                     strip_trailing_data(&compressed, self.extra_data_flags),
@@ -1599,253 +1622,6 @@ fn map_mdict_error(error: mdict_rs::Error) -> DictionaryError {
     }
 }
 
-// Adapted from boko 0.5.0's bounded GPL-3.0-or-later HUFF/CDIC reader.
-const MAX_HUFF_DEPTH: usize = 32;
-const MAX_HUFF_DICTIONARY_ENTRIES: usize = 2_000_000;
-const MAX_DECOMPRESSED_TEXT_RECORD: usize = 64 * 1024;
-
-#[derive(Clone)]
-enum HuffEntry {
-    Leaf(Vec<u8>),
-    Node(Vec<u8>),
-    Unpacked(Vec<u8>),
-}
-
-struct HuffCdicReader {
-    dict1: Vec<(u8, bool, u32)>,
-    mincode: Vec<u32>,
-    maxcode: Vec<u32>,
-    dictionary: Vec<HuffEntry>,
-}
-
-impl HuffCdicReader {
-    fn new(huff: &[u8], cdics: &[&[u8]]) -> io::Result<Self> {
-        let mut reader = Self {
-            dict1: Vec::with_capacity(256),
-            mincode: Vec::with_capacity(33),
-            maxcode: Vec::with_capacity(33),
-            dictionary: Vec::new(),
-        };
-        reader.load_huff(huff)?;
-        for cdic in cdics {
-            reader.load_cdic(cdic)?;
-        }
-        Ok(reader)
-    }
-
-    fn load_huff(&mut self, huff: &[u8]) -> io::Result<()> {
-        if huff.len() < 24 || huff.get(0..8) != Some(b"HUFF\0\0\0\x18") {
-            return invalid_huff("invalid HUFF header");
-        }
-        let off1 = read_huff_u32(huff, 8)? as usize;
-        let off2 = read_huff_u32(huff, 12)? as usize;
-        if off1.checked_add(256 * 4).is_none_or(|end| end > huff.len())
-            || off2.checked_add(64 * 4).is_none_or(|end| end > huff.len())
-        {
-            return invalid_huff("truncated HUFF table");
-        }
-        for index in 0..256 {
-            let value = read_huff_u32(huff, off1 + index * 4)?;
-            let code_length = (value & 0x1f) as u8;
-            if code_length == 0 {
-                return invalid_huff("zero HUFF code length");
-            }
-            let maxcode = (((value >> 8).wrapping_add(1)) << (32 - code_length)).wrapping_sub(1);
-            self.dict1.push((code_length, value & 0x80 != 0, maxcode));
-        }
-        self.mincode.push(0);
-        self.maxcode.push(0);
-        for index in 0..32 {
-            let code_length = index + 1;
-            let mincode = read_huff_u32(huff, off2 + index * 8)?;
-            let maxcode = read_huff_u32(huff, off2 + index * 8 + 4)?;
-            self.mincode.push(mincode << (32 - code_length));
-            self.maxcode
-                .push((maxcode.wrapping_add(1) << (32 - code_length)).wrapping_sub(1));
-        }
-        Ok(())
-    }
-
-    fn load_cdic(&mut self, cdic: &[u8]) -> io::Result<()> {
-        if cdic.len() < 16 || cdic.get(0..8) != Some(b"CDIC\0\0\0\x10") {
-            return invalid_huff("invalid CDIC header");
-        }
-        let phrases = read_huff_u32(cdic, 8)? as usize;
-        let bits = read_huff_u32(cdic, 12)?;
-        if phrases > MAX_HUFF_DICTIONARY_ENTRIES {
-            return invalid_huff("too many CDIC entries");
-        }
-        let block_capacity = 1_usize.checked_shl(bits).unwrap_or(usize::MAX);
-        let count = block_capacity.min(phrases.saturating_sub(self.dictionary.len()));
-        if self
-            .dictionary
-            .len()
-            .checked_add(count)
-            .is_none_or(|value| value > MAX_HUFF_DICTIONARY_ENTRIES)
-            || count
-                .checked_mul(2)
-                .and_then(|bytes| bytes.checked_add(16))
-                .is_none_or(|end| end > cdic.len())
-        {
-            return invalid_huff("invalid CDIC table");
-        }
-        for index in 0..count {
-            let offset = usize::from(read_huff_u16(cdic, 16 + index * 2)?);
-            let entry = 16_usize
-                .checked_add(offset)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid CDIC offset"))?;
-            let encoded_length = read_huff_u16(cdic, entry)?;
-            let length = usize::from(encoded_length & 0x7fff);
-            let start = entry + 2;
-            let end = start
-                .checked_add(length)
-                .filter(|end| *end <= cdic.len())
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "truncated CDIC entry")
-                })?;
-            let bytes = cdic[start..end].to_vec();
-            self.dictionary.push(if encoded_length & 0x8000 != 0 {
-                HuffEntry::Leaf(bytes)
-            } else {
-                HuffEntry::Node(bytes)
-            });
-        }
-        Ok(())
-    }
-
-    fn decompress(&mut self, data: &[u8], shared_budget: &mut usize) -> io::Result<Vec<u8>> {
-        let allowed = MAX_DECOMPRESSED_TEXT_RECORD.min(*shared_budget);
-        let mut budget = allowed;
-        let mut output = Vec::new();
-        self.unpack_into(data, &mut output, 0, &mut budget)?;
-        *shared_budget -= allowed - budget;
-        Ok(output)
-    }
-
-    fn unpack_into(
-        &mut self,
-        data: &[u8],
-        output: &mut Vec<u8>,
-        depth: usize,
-        budget: &mut usize,
-    ) -> io::Result<()> {
-        if depth > MAX_HUFF_DEPTH {
-            return invalid_huff("nested HUFF entry too deep");
-        }
-        let mut padded = data.to_vec();
-        padded.extend_from_slice(&[0; 8]);
-        let mut bits_remaining = i64::try_from(data.len().saturating_mul(8)).unwrap_or(i64::MAX);
-        let mut position = 0;
-        let mut value = read_huff_u64(&padded, position);
-        let mut shift = 32_i32;
-        while bits_remaining > 0 {
-            if shift <= 0 {
-                position += 4;
-                value = read_huff_u64(&padded, position);
-                shift += 32;
-            }
-            let code = ((value >> shift) & 0xffff_ffff) as u32;
-            let (mut code_length, terminal, mut maxcode) = self.dict1[(code >> 24) as usize];
-            if !terminal {
-                while code_length < 32 && code < self.mincode[code_length as usize] {
-                    code_length += 1;
-                }
-                maxcode = self.maxcode[code_length as usize];
-            }
-            shift -= i32::from(code_length);
-            bits_remaining -= i64::from(code_length);
-            if bits_remaining < 0 {
-                break;
-            }
-            let index = (maxcode.wrapping_sub(code) >> (32 - code_length)) as usize;
-            let entry = self.dictionary.get(index).cloned().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "HUFF index out of bounds")
-            })?;
-            match entry {
-                HuffEntry::Leaf(bytes) | HuffEntry::Unpacked(bytes) => {
-                    take_huff_budget(budget, bytes.len())?;
-                    output.extend_from_slice(&bytes);
-                }
-                HuffEntry::Node(bytes) => {
-                    let mut unpacked = Vec::new();
-                    self.unpack_into(&bytes, &mut unpacked, depth + 1, budget)?;
-                    output.extend_from_slice(&unpacked);
-                    self.dictionary[index] = HuffEntry::Unpacked(unpacked);
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-fn take_huff_budget(budget: &mut usize, bytes: usize) -> io::Result<()> {
-    *budget = budget
-        .checked_sub(bytes)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "HUFF output exceeds limit"))?;
-    Ok(())
-}
-
-fn invalid_huff<T>(message: &'static str) -> io::Result<T> {
-    Err(io::Error::new(io::ErrorKind::InvalidData, message))
-}
-
-fn read_huff_u16(data: &[u8], offset: usize) -> io::Result<u16> {
-    let bytes = data
-        .get(offset..offset + 2)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "truncated HUFF data"))?;
-    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
-}
-
-fn read_huff_u32(data: &[u8], offset: usize) -> io::Result<u32> {
-    let bytes = data
-        .get(offset..offset + 4)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "truncated HUFF data"))?;
-    Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-}
-
-fn read_huff_u64(data: &[u8], offset: usize) -> u64 {
-    data.get(offset..offset + 8).map_or(0, |bytes| {
-        u64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ])
-    })
-}
-
-fn strip_trailing_data(record: &[u8], flags: u16) -> &[u8] {
-    if flags == 0 || record.is_empty() {
-        return record;
-    }
-    let mut end = record.len();
-    let mut shifted = flags >> 1;
-    while shifted != 0 {
-        if shifted & 1 != 0 {
-            let mut size = 0_usize;
-            let mut shift = 0;
-            let mut position = end;
-            while position > 0 {
-                position -= 1;
-                let byte = record[position];
-                size |= usize::from(byte & 0x7f) << shift;
-                shift += 7;
-                if byte & 0x80 != 0 || shift >= 28 {
-                    break;
-                }
-            }
-            if size > 0 && size <= end {
-                end -= size;
-            }
-        }
-        shifted >>= 1;
-    }
-    if flags & 1 != 0 && end > 0 {
-        let overlap = usize::from(record[end - 1] & 3) + 1;
-        if overlap <= end {
-            end -= overlap;
-        }
-    }
-    &record[..end]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1920,7 +1696,10 @@ mod tests {
             index_entry_offsets(b"INDX"),
             Err(DictionaryError::CorruptSource)
         );
-        assert!(HuffCdicReader::new(b"HUFF", &[]).is_err());
+        assert!(
+            HuffCdicReader::new(b"HUFF", &[], MAX_HUFF_DICTIONARY_ENTRIES, MAX_CACHE_BYTES)
+                .is_err()
+        );
     }
 
     #[test]

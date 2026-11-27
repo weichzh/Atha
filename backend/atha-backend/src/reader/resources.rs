@@ -9,7 +9,7 @@ use std::{
 
 pub(super) const MAX_RESOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_READER_SECTIONS: usize = 2_000;
-const MAX_READER_RESOURCES: usize = 10_000;
+pub(super) const MAX_READER_RESOURCES: usize = 10_000;
 
 #[derive(Clone, Debug)]
 pub struct BookRoot {

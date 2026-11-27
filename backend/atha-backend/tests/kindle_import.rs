@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Write,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -10,6 +11,261 @@ use atha_backend::reader::{kindle::import_kindle, library::LocalLibrary};
 const SAFE_XHTML: &[u8] = br##"<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Gate</title><meta charset="utf-8"/></head>
 <body><h1 id="start">PalmDOC gate</h1><p><a href="#end">Continue</a></p><a href="images/missing.png">Broken image link</a><p id="end">Ready.</p></body></html>"##;
+
+#[test]
+fn huff_with_large_nontext_records_opens_through_the_library() {
+    let root = TestRoot::new();
+    let source = root.0.join("bounded.mobi");
+    let alternate = root.0.join("same.azw3");
+    let text = br#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Gate</title></head><body><h1>Bounded HUFF gate</h1><p><img recindex="00001" alt="Gate pixel"/></p><mbp:pagebreak/><h2>Next chapter</h2></body></html>"#;
+    let png = small_png();
+    let (huff, cdic, mut first, mut second) = huff_records(text);
+    // Two independent trailer fields must be stripped once from each record.
+    first.extend_from_slice(&[0, 0x81]);
+    second.extend_from_slice(&[0, 0x81]);
+
+    let mut record_zero = full_record_zero(0x4448, text);
+    record_zero.resize(0xf4, 0);
+    record_zero[8..10].copy_from_slice(&2_u16.to_be_bytes());
+    record_zero[20..24].copy_from_slice(&0xe4_u32.to_be_bytes());
+    record_zero[0x68..0x6c].copy_from_slice(&6_u32.to_be_bytes());
+    record_zero[0x6c..0x70].copy_from_slice(&5_u32.to_be_bytes());
+    record_zero[0x70..0x74].copy_from_slice(&3_u32.to_be_bytes());
+    record_zero[0x74..0x78].copy_from_slice(&2_u32.to_be_bytes());
+    record_zero[0xf2..0xf4].copy_from_slice(&3_u16.to_be_bytes());
+    // A photo-heavy book can have more than 2,000 individually small assets.
+    let mut records: Vec<&[u8]> = vec![&record_zero, &first, &second, &huff, &cdic];
+    records.extend(std::iter::repeat_n(png.as_slice(), 2_001));
+    records.push(b"EOF");
+    let bytes = palm_records(&records);
+    // A large trailing non-text record crosses the old whole-file gate,
+    // while neither the HUFF dictionary nor the compressed body is large.
+    let mut file = fs::File::create(&source).expect("create HUFF fixture");
+    file.write_all(&bytes).expect("write HUFF fixture");
+    file.set_len(5 * 1024 * 1024).expect("pad non-text record");
+    drop(file);
+    fs::copy(&source, &alternate).expect("copy same Kindle bytes");
+
+    let library_path = root.0.join("library");
+    let library = LocalLibrary::open(&library_path).expect("open library");
+    let staged = library
+        .stage_with_title_hint(&source, None)
+        .expect("stage HUFF");
+    assert!(!staged.prepared);
+    let opened = library.open_book(&staged.id).expect("open HUFF");
+    assert!(opened.book.prepared);
+    let section = opened
+        .root
+        .read("/.atha-kindle/section-0001.xhtml")
+        .unwrap();
+    let html = String::from_utf8(section.bytes).unwrap();
+    assert!(html.contains("Bounded HUFF gate"));
+    assert!(html.contains(r#"src="images/image-0001.png""#));
+    assert_eq!(
+        opened
+            .root
+            .read("/.atha-kindle/images/image-0001.png")
+            .unwrap()
+            .bytes,
+        png
+    );
+    let manifest = opened.root.read("/.atha-reader.json").unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest.bytes).unwrap();
+    assert_eq!(manifest["sections"].as_array().unwrap().len(), 2);
+    let next = opened
+        .root
+        .read("/.atha-kindle/section-0002.xhtml")
+        .unwrap();
+    let next = String::from_utf8(next.bytes).unwrap();
+    assert!(next.contains("<title>Gate</title>"));
+    assert!(next.contains("<h2>Next chapter</h2>"));
+    assert_eq!(manifest["resources"].as_array().unwrap().len(), 2_001);
+    assert_eq!(
+        opened
+            .root
+            .read("/.atha-kindle/images/image-2001.png")
+            .unwrap()
+            .bytes,
+        png
+    );
+    assert_eq!(library.import(&alternate).unwrap().id, staged.id);
+    assert_eq!(library.list().unwrap().len(), 1);
+
+    let imported = import_kindle(&source, library_path.join("ImportedBooks")).unwrap();
+    let cache_marker = fs::read_to_string(imported.root.join(".atha-kindle-import")).unwrap();
+    assert_eq!(
+        cache_marker,
+        format!("atha-kindle-import-v1\n{}\n", staged.id)
+    );
+    assert!(!imported.root.join(".source.kindle").exists());
+    assert!(!imported.root.join(".source.unpacked.kindle").exists());
+}
+
+#[test]
+fn huff_ncx_fallback_keeps_chapters_and_fragment_on_both_admission_paths() {
+    let root = TestRoot::new();
+    let text = br#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Guide</title></head><body><h1>First chapter</h1><h2>Indexed chapter</h2></body></html>"#;
+    let position = text.windows(4).position(|bytes| bytes == b"<h2>").unwrap() as u32;
+    let (huff, cdic, first, second) = huff_records(text);
+    let (indx, entries) = single_ncx_position(position);
+    let mut record_zero = full_record_zero(0x4448, text);
+    record_zero.resize(0xf8, 0);
+    record_zero[8..10].copy_from_slice(&2_u16.to_be_bytes());
+    record_zero[20..24].copy_from_slice(&0xe8_u32.to_be_bytes());
+    record_zero[0x68..0x6c].copy_from_slice(&6_u32.to_be_bytes());
+    record_zero[0x6c..0x70].copy_from_slice(&u32::MAX.to_be_bytes());
+    record_zero[0x70..0x74].copy_from_slice(&3_u32.to_be_bytes());
+    record_zero[0x74..0x78].copy_from_slice(&2_u32.to_be_bytes());
+    record_zero[0xf4..0xf8].copy_from_slice(&5_u32.to_be_bytes());
+    let bytes = palm_records(&[
+        &record_zero,
+        &first,
+        &second,
+        &huff,
+        &cdic,
+        &indx,
+        &entries,
+        b"EOF",
+    ]);
+
+    for (name, extended) in [("legacy.mobi", false), ("extended.mobi", true)] {
+        let source = root.0.join(name);
+        let mut file = fs::File::create(&source).unwrap();
+        file.write_all(&bytes).unwrap();
+        if extended {
+            file.set_len(5 * 1024 * 1024).unwrap();
+        }
+        drop(file);
+        let book = import_kindle(source, root.0.join("cache")).unwrap();
+        let doc = fs::read_to_string(book.root.join(".atha-kindle/section-0002.xhtml")).unwrap();
+        assert!(doc.contains("<title>Guide</title>"));
+        assert!(doc.contains("<h2>Indexed chapter</h2>"));
+        assert!(doc.contains(&format!(r#"id="filepos{position}""#)));
+        let manifest = fs::read(book.root.join(".atha-reader.json")).unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        assert_eq!(manifest["sections"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            manifest["toc"][0]["href"],
+            format!(".atha-kindle/section-0002.xhtml#filepos{position}")
+        );
+    }
+}
+
+fn single_ncx_position(position: u32) -> (Vec<u8>, Vec<u8>) {
+    let tags = b"TAGX\0\0\0\x14\0\0\0\x01\x01\x01\x01\0\0\0\0\x01";
+    let mut entry = b"\x06Second\x01".to_vec(); // label and one TAGX control byte
+    put_index_varint(position, &mut entry);
+    single_index_entry(tags, &entry)
+}
+
+#[test]
+fn extended_kf8_huff_rewrites_a_normal_position_fragment() {
+    let root = TestRoot::new();
+    let text = br#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Gate</title></head><body><h1 id="start">Chapter</h1><p><a href="kindle:pos:fid:0000:off:0000">Back to chapter</a></p></body></html>"#;
+    let (huff, cdic, first, second) = huff_records(text);
+    let tags = b"TAGX\0\0\0\x14\0\0\0\x01\x06\x02\x01\0\0\0\0\x01";
+    let mut entry = b"\x03doc\x01".to_vec();
+    put_index_varint(0, &mut entry); // SKEL's start and length
+    put_index_varint(text.len() as u32, &mut entry);
+    let (skel, entries) = single_index_entry(tags, &entry);
+    let mut record_zero = full_record_zero(0x4448, text);
+    record_zero.resize(0x108, 0);
+    record_zero[8..10].copy_from_slice(&2_u16.to_be_bytes());
+    record_zero[20..24].copy_from_slice(&0xf8_u32.to_be_bytes());
+    record_zero[36..40].copy_from_slice(&8_u32.to_be_bytes());
+    record_zero[0x68..0x6c].copy_from_slice(&8_u32.to_be_bytes());
+    record_zero[0x6c..0x70].copy_from_slice(&u32::MAX.to_be_bytes());
+    record_zero[0x70..0x74].copy_from_slice(&3_u32.to_be_bytes());
+    record_zero[0x74..0x78].copy_from_slice(&2_u32.to_be_bytes());
+    record_zero[0xc0..0xc4].copy_from_slice(&u32::MAX.to_be_bytes()); // FDST
+    record_zero[0xf4..0xf8].copy_from_slice(&u32::MAX.to_be_bytes()); // NCX
+    record_zero[0xf8..0xfc].copy_from_slice(&u32::MAX.to_be_bytes()); // DIV
+    record_zero[0xfc..0x100].copy_from_slice(&5_u32.to_be_bytes()); // SKEL
+    let bytes = palm_records(&[
+        &record_zero,
+        &first,
+        &second,
+        &huff,
+        &cdic,
+        &skel,
+        &entries,
+        b"EOF",
+    ]);
+    let source = root.0.join("position.azw3");
+    let mut file = fs::File::create(&source).unwrap();
+    file.write_all(&bytes).unwrap();
+    file.set_len(5 * 1024 * 1024).unwrap();
+    drop(file);
+
+    let book = import_kindle(source, root.0.join("cache")).unwrap();
+    let doc = fs::read_to_string(book.root.join(".atha-kindle/section-0001.xhtml")).unwrap();
+    assert!(doc.contains(r#"id="start""#));
+    assert!(doc.contains(r##"href=".atha-kindle/section-0001.xhtml#start""##));
+}
+
+fn single_index_entry(tags: &[u8], entry: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let mut index = vec![0; 192];
+    index[..4].copy_from_slice(b"INDX");
+    index[4..8].copy_from_slice(&192_u32.to_be_bytes());
+    index[24..28].copy_from_slice(&1_u32.to_be_bytes()); // one data record
+    index[180..184].copy_from_slice(&192_u32.to_be_bytes());
+    let mut entries = index.clone();
+    index.extend_from_slice(tags);
+    entries.extend_from_slice(entry);
+    let idxt = entries.len() as u32;
+    entries[20..24].copy_from_slice(&idxt.to_be_bytes());
+    entries.extend_from_slice(b"IDXT\0\xc0"); // the row starts after the 192-byte header
+    (index, entries)
+}
+
+fn put_index_varint(value: u32, entry: &mut Vec<u8>) {
+    assert!(value < 16_384);
+    if value >= 128 {
+        entry.push((value >> 7) as u8);
+    }
+    entry.push(0x80 | (value as u8 & 0x7f));
+}
+
+fn small_png() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 1, 1);
+    encoder.set_color(png::ColorType::Grayscale);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&[128])
+        .unwrap();
+    bytes
+}
+
+/// A normal fixed-width HUFF codebook. Each code represents four source bytes.
+fn huff_records(text: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let mut huff = vec![0; 24];
+    huff[..8].copy_from_slice(b"HUFF\0\0\0\x18");
+    huff[8..12].copy_from_slice(&24_u32.to_be_bytes());
+    huff[12..16].copy_from_slice(&1048_u32.to_be_bytes());
+    for _ in 0..256 {
+        huff.extend_from_slice(&0xff88_u32.to_be_bytes());
+    }
+    huff.extend_from_slice(&[0; 32 * 8]);
+
+    let count = text.len().div_ceil(4);
+    assert!(count <= 256);
+    let mut cdic = vec![0; 16 + count * 2];
+    cdic[..8].copy_from_slice(b"CDIC\0\0\0\x10");
+    cdic[8..12].copy_from_slice(&(count as u32).to_be_bytes());
+    cdic[12..16].copy_from_slice(&8_u32.to_be_bytes());
+    let mut codes = Vec::with_capacity(count);
+    for (index, phrase) in text.chunks(4).enumerate() {
+        let offset = (cdic.len() - 16) as u16;
+        cdic[16 + index * 2..18 + index * 2].copy_from_slice(&offset.to_be_bytes());
+        cdic.extend_from_slice(&(0x8000 | phrase.len() as u16).to_be_bytes());
+        cdic.extend_from_slice(phrase);
+        codes.push(255 - index as u8);
+    }
+    let second = codes.split_off(count / 2);
+    (huff, cdic, codes, second)
+}
 
 #[test]
 fn kindle_can_be_staged_before_its_first_open() {
@@ -246,10 +502,8 @@ fn imports_private_kf8_samples() {
         2,
         "expected two private ordinary Kindle samples"
     );
-    let cache = repository.join(".tmp/kindle-private-imports");
-    if cache.exists() {
-        fs::remove_dir_all(&cache).expect("remove old private Kindle cache");
-    }
+    let work = TestRoot::new();
+    let cache = work.0.join("imported");
     let mut shapes = Vec::new();
     for path in &ordinary {
         let imported = import_kindle(path, &cache).expect("import private ordinary Kindle sample");
@@ -288,9 +542,7 @@ fn imports_private_kf8_samples() {
     if let Some(root) = std::env::var_os("ATHA_KINDLE_GATE_LIBRARY_ROOT") {
         let root = PathBuf::from(root);
         assert_gate_root(&repository, &root);
-        if root.exists() {
-            fs::remove_dir_all(&root).expect("remove old Kindle gate library");
-        }
+        fs::create_dir(&root).expect("create a new Kindle gate library");
         let selected = shapes
             .into_iter()
             .max_by_key(|(_, sections, toc, _)| (*toc, *sections))
@@ -302,14 +554,14 @@ fn imports_private_kf8_samples() {
             .open_book(&book.id)
             .expect("open seeded Kindle gate book through BookRoot");
     }
-    fs::remove_dir_all(cache).expect("clean private Kindle cache");
 }
 
 #[test]
 #[ignore = "uses a private local Kindle dictionary without copying or logging its content"]
 fn rejects_private_dictionary_before_expansion() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let cache = repository.join(".tmp/kindle-private-dictionary");
+    let work = TestRoot::new();
+    let cache = work.0.join("imported");
     let dictionary = repository
         .join("fixtures/local")
         .read_dir()
@@ -324,9 +576,10 @@ fn rejects_private_dictionary_before_expansion() {
             .code(),
         "kindle-dictionary-unsupported"
     );
-    if cache.exists() {
-        fs::remove_dir_all(cache).expect("clean private Kindle cache");
-    }
+    assert!(
+        !cache.exists(),
+        "dictionary rejection must precede cache creation"
+    );
 }
 
 fn private_kindle_samples(repository: &std::path::Path) -> Vec<PathBuf> {
@@ -382,16 +635,20 @@ fn full_record_zero(compression: u16, text: &[u8]) -> Vec<u8> {
 }
 
 fn palm_database(record_zero: Vec<u8>, text: &[u8]) -> Vec<u8> {
-    let first_offset = 78 + 2 * 8;
-    let second_offset = first_offset + record_zero.len();
-    let mut bytes = vec![0_u8; first_offset];
+    palm_records(&[&record_zero, text])
+}
+
+fn palm_records(records: &[&[u8]]) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 78 + records.len() * 8];
     bytes[..4].copy_from_slice(b"Gate");
     bytes[60..68].copy_from_slice(b"TEXtREAd");
-    bytes[76..78].copy_from_slice(&2_u16.to_be_bytes());
-    bytes[78..82].copy_from_slice(&(first_offset as u32).to_be_bytes());
-    bytes[86..90].copy_from_slice(&(second_offset as u32).to_be_bytes());
-    bytes.extend_from_slice(&record_zero);
-    bytes.extend_from_slice(text);
+    bytes[76..78].copy_from_slice(&(records.len() as u16).to_be_bytes());
+    for (index, record) in records.iter().enumerate() {
+        let offset = bytes.len() as u32;
+        let entry = 78 + index * 8;
+        bytes[entry..entry + 4].copy_from_slice(&offset.to_be_bytes());
+        bytes.extend_from_slice(record);
+    }
     bytes
 }
 
