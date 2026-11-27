@@ -123,7 +123,14 @@ export function createMessageStore({
     return content.captureRange(range, preferences.snapshot().effective);
   }
 
-  async function add(sourceAnchor, noteValue, range) {
+  /**
+   * @param {any} sourceAnchor
+   * @param {string} noteValue
+   * @param {Range | null} range
+   * @param {any} [capturedSnapshot]
+   * @param {any} [richText]
+   */
+  async function add(sourceAnchor, noteValue, range, capturedSnapshot = null, richText = null) {
     try {
       const created = await client.createRoot({
         edition: await currentEdition(),
@@ -131,11 +138,16 @@ export function createMessageStore({
           ...sourceAnchor,
           section: locator.inspect(sourceAnchor.canonicalLocator).start.section,
         },
-        snapshot: await capture(range),
+        snapshot: capturedSnapshot ?? (await capture(range)),
         text: String(noteValue).trim() || null,
-      });
+      }, richText);
       writes += 1;
-      await reload();
+      try {
+        await reload();
+      } catch {
+        // A committed root must never become a retryable create on a failed read.
+        lastError = "message-roots-refresh";
+      }
       return Object.freeze({
         ok: true,
         id: created.messageId,

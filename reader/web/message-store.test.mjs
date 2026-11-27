@@ -65,3 +65,27 @@ test("late roots read follows the newer projection rather than replacing it", as
   assert.equal((await older)[0].latestText, "new");
   assert.equal(store.active()[0].latestText, "new");
 });
+
+test("root creation includes the document once; a failed refresh does not undo the write", async () => {
+  const rich = { schema: 1, document: { type: "doc" } };
+  const snapshot = { fragmentHtml: "<p>quote</p>" };
+  const calls = [];
+  const store = createMessageStore({
+    session: { describe: () => ({ contentVersion: "edition" }) },
+    locator: { inspect: () => ({ start: { section: "one" } }) },
+    client: {
+      edition: async () => ({}),
+      createRoot: async (draft, doc) => {
+        calls.push({ draft, doc });
+        return { messageId: "root", conversationId: "thread" };
+      },
+      roots: async () => { throw Error("refresh failed"); },
+    },
+    legacy: {},
+  });
+  const result = await store.add({ canonicalLocator: "locator" }, "note", null, snapshot, rich);
+  assert.equal(result.id, "root");
+  assert.equal(result.ok, true);
+  assert.equal(store.snapshot().lastError, "message-roots-refresh");
+  assert.deepEqual(calls, [{ draft: { edition: {}, anchor: { canonicalLocator: "locator", section: "one" }, snapshot, text: "note" }, doc: rich }]);
+});

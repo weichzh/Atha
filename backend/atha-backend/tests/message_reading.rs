@@ -1823,3 +1823,83 @@ fn rich_text_is_validated_and_keeps_a_plain_projection() {
         Err(atha_backend::messages::MessageError::InvalidInput)
     );
 }
+
+#[test]
+fn reader_and_theme_css_pass_snapshot_validation_without_host_rules() {
+    let styles_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../reader/app/src/styles");
+    let reader_css =
+        fs::read_to_string(styles_dir.join("book-reader.css")).expect("read book-reader.css");
+    let theme_css =
+        fs::read_to_string(styles_dir.join("book-theme.css")).expect("read book-theme.css");
+
+    for (name, css) in [
+        ("book-reader.css", &reader_css),
+        ("book-theme.css", &theme_css),
+    ] {
+        assert!(!css.contains(":host"), "{name} must not contain :host");
+        assert!(!css.contains("::part"), "{name} must not contain ::part");
+        assert!(
+            !css.contains("::slotted"),
+            "{name} must not contain ::slotted"
+        );
+    }
+
+    let root = TestRoot::new("snapshot-real-css");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let mut real_snapshot = snapshot();
+    real_snapshot.reader_css = format!("{reader_css}\n{theme_css}");
+    store
+        .create_root(RootMessageDraft {
+            edition: edition(),
+            anchor: anchor(),
+            snapshot: real_snapshot,
+            text: Some("笔记".into()),
+        })
+        .expect("real reader CSS snapshot must succeed");
+}
+
+#[test]
+fn rich_root_is_one_initial_revision_and_invalid_input_leaves_no_root() {
+    let root = TestRoot::new("atomic-rich-root");
+    let store = MessageStore::open(&root.0).unwrap();
+    let make_draft = || RootMessageDraft {
+        edition: edition(),
+        anchor: anchor(),
+        snapshot: snapshot(),
+        text: Some("first note".into()),
+    };
+    let mut rich = RichTextInput {
+        schema: 0,
+        document: serde_json::json!({"type":"doc","content":[{"type":"paragraph","content":[
+            {"type":"text","marks":[{"type":"bold"}],"text":"first note"}
+        ]}]}),
+    };
+    assert!(
+        store
+            .create_root_with_content(make_draft(), Some(&rich))
+            .is_err()
+    );
+    assert!(
+        store
+            .roots(&edition().content_version, None)
+            .unwrap()
+            .is_empty()
+    );
+    rich.schema = 1;
+    let created = store
+        .create_root_with_content(make_draft(), Some(&rich))
+        .unwrap();
+    drop(store);
+    let store = MessageStore::open(&root.0).unwrap();
+    assert_eq!(
+        store.roots(&edition().content_version, None).unwrap().len(),
+        1
+    );
+    assert_eq!(store.revisions(&created.message_id).unwrap().len(), 1);
+    let conversation = store.conversation(&created.conversation_id).unwrap();
+    let msg = &conversation.messages[0];
+    assert_eq!(msg.revision_id, created.revision_id);
+    assert_eq!(msg.text, "first note");
+    let saved: serde_json::Value = serde_json::from_str(&msg.content_json).unwrap();
+    assert_eq!(saved["richText"]["document"], rich.document);
+}

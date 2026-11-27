@@ -138,7 +138,7 @@ const demoMessageClient: MessageClient = {
       }));
   },
 
-  async createRoot(draft: RootMessageDraft) {
+  async createRoot(draft: RootMessageDraft, richText: RichTextInput | null = null) {
     const store = loadStore();
     store.editions[draft.edition.contentVersion] = draft.edition;
     const now = Date.now();
@@ -164,7 +164,7 @@ const demoMessageClient: MessageClient = {
       kind,
       text,
       contentJson: text
-        ? JSON.stringify({
+        ? JSON.stringify(richText?.document ?? {
             type: "doc",
             content: [{ type: "paragraph", content: [{ type: "text", text }] }],
           })
@@ -348,7 +348,17 @@ const demoMessageClient: MessageClient = {
     return store.captures[messageId] ?? [];
   },
 
-  async snapshotResource() {
+  async snapshotResource(sourceId: string, sourcePath: string) {
+    for (const captures of Object.values(loadStore().captures)) {
+      const capture = captures.find(({ source }) => source.id === sourceId);
+      if (!capture) continue;
+      const resource = capture.snapshot.resources.find(({ path }) => path === sourcePath);
+      if (resource && "bytes" in resource && Array.isArray(resource.bytes) &&
+        "contentHash" in resource && typeof resource.contentHash === "string") {
+        return { mediaType: resource.mediaType, contentHash: resource.contentHash, bytes: resource.bytes };
+      }
+      break;
+    }
     throw new Error("resource-missing");
   },
 

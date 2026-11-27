@@ -208,9 +208,25 @@ async function run() {
     await page.waitForSelector(".dict-card");
     await page.getByRole("button", { name: "关闭词典" }).click();
 
-    // Create highlight from selection
-    await page.locator(".selection-capsule").getByRole("button", { name: "标注" }).click();
-    await page.waitForTimeout(300);
+    // The source must survive focus moving from the book to the editor.
+    const newNote = "从原文选区保存的粗体笔记";
+    await page.locator(".selection-capsule").getByRole("button", { name: "对话", exact: true }).click();
+    await page.waitForSelector(".ProseMirror");
+    await page.locator(".ProseMirror").focus();
+    await page.keyboard.press("Control+b");
+    await page.keyboard.insertText(newNote);
+    await page.getByRole("button", { name: "创建对话" }).click();
+    await page.waitForFunction((text) => {
+      const store = JSON.parse(localStorage.getItem("atha.demo.messages.v1"));
+      const root = store.conversations.find((item) => item.messages[0]?.text === text)?.messages[0];
+      return Boolean(root?.source?.canonicalLocator && store.revisions[root.id]?.length === 1 &&
+        JSON.parse(root.contentJson).content.some((block) =>
+          block.content?.some((child) => child.marks?.some((mark) => mark.type === "bold"))));
+    }, newNote);
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".pane-c", { state: "hidden" });
+    await page.locator(".reader-shell").click({ position: { x: 8, y: 8 } });
+    await page.keyboard.press("Escape");
 
     // 6. Open C1 A | B | C Workspace
     await page.keyboard.press("n");
@@ -280,6 +296,29 @@ async function run() {
     await page.waitForTimeout(300);
     assert.equal(await page.locator(".message-node").count(), countBeforeCancel - 1, "Confirm delete must remove message");
 
+    // Exercise edits that occur while the real submit handler waits for native IPC.
+    await page.evaluate(() => {
+      globalThis.__TAURI_INTERNALS__ = {
+        invoke(command) {
+          if (command !== "message_reply") return Promise.resolve(null);
+          return new Promise((resolve) => {
+            globalThis.finishTestReply = () => {
+              delete globalThis.__TAURI_INTERNALS__;
+              resolve({ messageId: "sent", revisionId: "sent" });
+            };
+          });
+        },
+      };
+    });
+    await prose.fill("已发出的部分");
+    await page.locator(".send-btn").click();
+    await page.waitForFunction(() => typeof globalThis.finishTestReply === "function");
+    await prose.fill("发送期间继续输入的草稿");
+    await page.evaluate(() => globalThis.finishTestReply());
+    await page.waitForFunction(() => document.querySelector(".send-btn")?.textContent.includes("发送中") === false);
+    assert.equal(await prose.innerText(), "发送期间继续输入的草稿");
+    await prose.fill("");
+
     // 7. Dark Mode Reader Workspace (09-reader-workspace-dark-1440.png)
     await page.mouse.click(340, 460); // toggle chrome on center of A
     await page.waitForSelector(".top-island");
@@ -316,6 +355,31 @@ async function run() {
     await page.getByRole("searchbox", { name: "搜索笔记与回复" }).fill("快照");
     await page.waitForTimeout(350);
     assert.ok((await page.locator(".hit-row").count()) >= 1, "Reading Memory search should find seeded hits");
+
+    // Restore an archived inline image from bytes, not from the current book or a remote URL.
+    await page.evaluate(() => {
+      const key = "atha.demo.messages.v1";
+      const store = JSON.parse(localStorage.getItem(key));
+      const bytes = Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), c => c.charCodeAt(0));
+      for (const entries of Object.values(store.captures)) {
+        for (const capture of entries) {
+          capture.snapshot.fragmentHtml += '<img src="Images/archived.gif" alt="历史图像">';
+          capture.snapshot.resources.push({
+            path: "Images/archived.gif", mediaType: "image/gif", contentHash: "a".repeat(64),
+            bytes, byteLength: bytes.length,
+          });
+        }
+      }
+      localStorage.setItem(key, JSON.stringify(store));
+    });
+    await page.getByRole("button", { name: "历史快照" }).first().click();
+    const archivedImage = page.locator(".snapshot-shadow-host img[alt='历史图像']").first();
+    await archivedImage.waitFor();
+    assert.ok(await archivedImage.evaluate(async (image) => {
+      await image.decode();
+      return image.naturalWidth === 1 && image.src.startsWith("blob:");
+    }));
+    await page.getByRole("button", { name: "关闭快照" }).click();
 
     // 9. App Settings (07-settings-light-1440.png)
     await page.getByRole("tab", { name: "设置" }).click();
@@ -389,6 +453,27 @@ async function run() {
     await page.locator(".pane-b").getByRole("button", { name: "关闭笔记工作区" }).click();
     await page.waitForTimeout(150);
     assert.equal(await page.locator(".pane-b").count(), 0, "Workspace closes cleanly under reduced motion");
+
+    // Direct URL jumps use the saved source anchor, including a later section.
+    const memoryTarget = await page.evaluate(() => {
+      const store = JSON.parse(localStorage.getItem("atha.demo.messages.v1"));
+      const conv = store.conversations.find((item) => item.messages[0]?.source?.section === "ch2");
+      const root = conv.messages[0];
+      return { version: conv.editionId, conversation: conv.id, root: root.id };
+    });
+    const query = new URLSearchParams({
+      manifest: "demo/manifest.json",
+      version: memoryTarget.version,
+      "memory-conversation": memoryTarget.conversation,
+      "memory-root": memoryTarget.root,
+      "memory-message": memoryTarget.root,
+    });
+    await page.goto(`${PREVIEW_URL}?${query}`);
+    await page.waitForSelector("html[data-reader-ready]");
+    await page.waitForFunction((id) => {
+      const raw = JSON.parse(localStorage.getItem(`atha.reader.progress.${id.slice(0, 16)}.v1`));
+      return raw && JSON.parse(raw.locator).start.section === "ch2";
+    }, memoryTarget.version);
 
     assert.equal(failedResponses.length, 0, `HTTP >=400 responses: ${failedResponses.join(" | ")}`);
     assert.equal(consoleErrors.length, 0, `Console errors found: ${consoleErrors.join(" | ")}`);

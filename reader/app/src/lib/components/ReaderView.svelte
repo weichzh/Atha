@@ -16,7 +16,7 @@
   import { fade, fly, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import type { DictionaryFontScale, DictionaryLookup } from "../../dictionary.ts";
-  import type { LibraryBook, ReadingMemoryJump } from "../../library.ts";
+  import type { LibraryBook, ReadingMemoryTarget } from "../../library.ts";
   import {
     getDictionaryPreferences,
     listOfflineDictionaries,
@@ -35,7 +35,7 @@
   interface Props {
     book: LibraryBook;
     manifestPath: string;
-    initialJump?: ReadingMemoryJump | null;
+    initialJump?: ReadingMemoryTarget | null;
     onBackToShelf: () => void;
   }
 
@@ -61,7 +61,7 @@
   let notesMode = $state<"closed" | "list" | "thread">("closed");
   let selectedRootId = $state<string | null>(null);
   let focusThread = $state(false);
-  let pendingDraft = $state<{ text: string } | null>(null);
+  let pendingDraft = $state<Awaited<ReturnType<ReaderEngine["captureSelectionDraft"]>>>(null);
 
   // Scrubber live preview
   let scrubbingValue = $state<number | null>(null);
@@ -167,7 +167,7 @@
           initialJump,
         });
 
-        if (initialJump) {
+        if (initialJump && engine.initialJumpLocated) {
           selectedRootId = initialJump.rootMessageId;
           notesMode = "thread";
         }
@@ -217,7 +217,7 @@
     await engine.createHighlightFromSelection("");
   }
 
-  function handleDiscussSelection() {
+  async function handleDiscussSelection() {
     const sel = engine.selection;
     if (!sel) return;
     if (sel.existingRootId) {
@@ -227,7 +227,14 @@
       engine.selection = null;
       return;
     }
-    pendingDraft = { text: sel.text };
+    const draft = await engine.captureSelectionDraft();
+    if (!draft) {
+      engine.showToast("未能保留原文选区，请重试");
+      return;
+    }
+    if (engine.selection !== sel) return;
+    pendingDraft = draft;
+    engine.clearSelection();
     selectedRootId = null;
     notesMode = "thread";
   }
@@ -550,7 +557,7 @@
     <SelectionPill
       selection={engine.selection}
       onHighlight={() => void handleHighlightOnly()}
-      onDiscuss={handleDiscussSelection}
+      onDiscuss={() => void handleDiscussSelection()}
       onLookup={() => void handleLookupSelection()}
       onCopy={() => void handleCopySelection()}
       onReselect={engine.selection.existingRootId

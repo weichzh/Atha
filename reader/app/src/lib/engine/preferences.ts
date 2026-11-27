@@ -124,7 +124,7 @@ export function createReaderPreferences({
   frame,
   onSync,
 }: {
-  content: { setStyles: (styles: { sourceStyles: boolean; userStylesEnabled: boolean; userStylesheet: string }) => void };
+  content: { book: HTMLElement; setStyles: (styles: { sourceStyles: boolean; userStylesEnabled: boolean; userStylesheet: string }) => void };
   reader: HTMLElement;
   host: HTMLElement;
   frame: HTMLElement;
@@ -183,6 +183,13 @@ export function createReaderPreferences({
     host.dataset.readingMode = effective.readingMode;
     host.dataset.paragraphIndent = effective.paragraphIndent;
     host.dataset.paragraphSpacing = effective.paragraphSpacing;
+    const book = content.book;
+    book.dataset.theme = resolvedTheme;
+    book.dataset.fontFamily = effective.fontFamily;
+    book.dataset.density = effective.density;
+    book.dataset.readingMode = effective.readingMode;
+    book.dataset.paragraphIndent = effective.paragraphIndent;
+    book.dataset.paragraphSpacing = effective.paragraphSpacing;
 
     content.setStyles({
       sourceStyles: effective.sourceStyles,

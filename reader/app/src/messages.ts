@@ -175,10 +175,10 @@ export const messageClient = Object.freeze({
     invoke<ConversationView>("message_conversation", { conversationId }),
   conversations: (editionId: string, section: string | null = null) =>
     invoke<ConversationView[]>("message_conversations", { editionId, section }),
-  createRoot: (draft: RootMessageDraft) =>
+  createRoot: (draft: RootMessageDraft, richText: RichTextInput | null = null) =>
     invoke<{ conversationId: string; messageId: string; revisionId: string }>(
       "message_create_root",
-      { draft },
+      { draft, richText },
     ),
   revise: (
     messageId: string,

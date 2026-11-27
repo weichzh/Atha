@@ -10,10 +10,11 @@ import { createReaderState, createReadingStatistics } from "../../../../web/read
 import { createReadingSession } from "../../../../web/session.mjs";
 import { createSearch } from "../../../../web/search.mjs";
 import { annotationTextHash, createAnnotationStore } from "../../../../web/annotation-store.mjs";
-import type { ReadingMemoryJump } from "../../library.ts";
-import type { ConversationView, SourceAnchorInput } from "../../messages.ts";
+import type { ReadingMemoryTarget } from "../../library.ts";
+import type { ConversationView, RichTextInput, SourceAnchorInput, SourceSnapshotInput } from "../../messages.ts";
 import bookReaderCssUrl from "../../styles/book-reader.css?url";
 import bookThemeCssUrl from "../../styles/book-theme.css?url";
+import { docHasRichFormatting } from "../data/message-doc.ts";
 import { getMessageClient } from "../data/message-adapter.ts";
 import { installDemoFetchBridge, isTauriRuntime } from "../data/runtime.ts";
 import type {
@@ -215,6 +216,7 @@ const ALLOWED_TELEMETRY_ERRORS = new Set([
 
 export class ReaderEngine {
   ready = $state(false);
+  initialJumpLocated = $state(false);
   loading = $state(true);
   error = $state<string | null>(null);
   sessionState = $state<string>("closed");
@@ -319,7 +321,7 @@ export class ReaderEngine {
       });
   }
 
-  private showToast(msg: string) {
+  showToast(msg: string) {
     this.statusToast = msg;
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
@@ -410,7 +412,7 @@ export class ReaderEngine {
     host: HTMLElement;
     bridgeRoot: HTMLElement;
     manifestPath: string;
-    initialJump?: ReadingMemoryJump | null;
+    initialJump?: ReadingMemoryTarget | null;
   }) {
     ensureKernelGlobals();
     installDemoFetchBridge();
@@ -773,7 +775,13 @@ export class ReaderEngine {
       await this.refreshMessages();
 
       if (initialJump) {
-        await this.navigation.goTo(initialJump.canonicalLocator);
+        const root = initialJump.editionId === this.contentVersion
+          ? this.roots.find((candidate) =>
+              candidate.id === initialJump.rootMessageId &&
+              candidate.conversationId === initialJump.conversationId)
+          : null;
+        this.initialJumpLocated = Boolean(root && await this.navigation.goTo(root.sourceAnchor.canonicalLocator));
+        if (!this.initialJumpLocated) this.showToast("未找到原文位置，可返回阅读记忆查看历史快照");
       }
 
       this.readerState.scheduleProgress(false, false, null);
@@ -906,7 +914,15 @@ export class ReaderEngine {
     this.syncHighlights();
   }
 
-  private async buildAnchorFromRange(range: Range): Promise<SourceAnchorInput> {
+  private extractPlainTextFromMarkup(fragmentHtml: string): string {
+    if (!fragmentHtml) return "";
+    const tpl = document.createElement("template");
+    tpl.innerHTML = fragmentHtml;
+    return tpl.content.textContent ?? "";
+  }
+
+
+  private async buildAnchorFromRange(range: Range, fragmentHtml?: string): Promise<SourceAnchorInput> {
     const description = this.session.describe();
     const sectionId = this.session.snapshot().currentSection || description.sections[0].id;
     const { segments, fullText } = collectTextSegments(this.content.book);
@@ -920,7 +936,9 @@ export class ReaderEngine {
         endOffset = idx + rawText.length;
       }
     }
-    const selectedText = fullText.slice(startOffset, endOffset);
+    const domSelectedText = fullText.slice(startOffset, endOffset);
+    const markupText = fragmentHtml ? this.extractPlainTextFromMarkup(fragmentHtml) : "";
+    const selectedText = markupText.length > 0 ? markupText : domSelectedText;
     const prefixText = fullText.slice(Math.max(0, startOffset - 32), startOffset);
     const suffixText = fullText.slice(endOffset, Math.min(fullText.length, endOffset + 32));
     const canonicalLocator = this.locator.serialize(
@@ -942,16 +960,71 @@ export class ReaderEngine {
     };
   }
 
-  async createHighlightFromSelection(noteText = ""): Promise<string | null> {
+  async captureSelectionDraft(): Promise<{
+    text: string;
+    anchor: SourceAnchorInput;
+    snapshot: SourceSnapshotInput;
+  } | null> {
     const sel = this.selection;
     if (!sel) return null;
-    const anchor = await this.buildAnchorFromRange(sel.range);
-    const result = await this.messageStore.add(anchor, noteText, sel.range);
-    if (result.ok) {
-      await this.refreshMessages();
-      this.clearSelection();
-      this.showToast(noteText.trim() ? "已创建对话标注" : "已高亮原文");
-      return result.id;
+    try {
+      const snapshot = (await this.content.captureRange(
+        sel.range,
+        this.prefController.snapshot().effective,
+      )) as SourceSnapshotInput;
+      const anchor = await this.buildAnchorFromRange(sel.range, snapshot?.fragmentHtml);
+      if (!anchor.selectedText.trim()) return null;
+      return { text: anchor.selectedText, anchor, snapshot };
+    } catch {
+      return null;
+    }
+  }
+
+  async createHighlightFromSelection(
+    noteText = "",
+    richText: RichTextInput | null = null,
+    draft?: { anchor: SourceAnchorInput; snapshot: SourceSnapshotInput } | null,
+  ): Promise<string | null> {
+    try {
+      let anchor: SourceAnchorInput;
+      let snapshot: SourceSnapshotInput;
+      let range: Range | null = null;
+      if (draft) {
+        anchor = draft.anchor;
+        snapshot = draft.snapshot;
+      } else {
+        const sel = this.selection;
+        if (!sel) return null;
+        range = sel.range;
+        snapshot = (await this.content.captureRange(
+          sel.range,
+          this.prefController.snapshot().effective,
+        )) as SourceSnapshotInput;
+        anchor = await this.buildAnchorFromRange(sel.range, snapshot?.fragmentHtml);
+      }
+      if (!anchor.selectedText.trim()) {
+        this.showToast("请先选择有效正文文字");
+        return null;
+      }
+      const normalizedNote = noteText.trim();
+      const result = await this.messageStore.add(
+        anchor, normalizedNote, range, snapshot,
+        richText && docHasRichFormatting(richText.document) ? richText : null,
+      );
+      if (result.ok && "id" in result && result.id) {
+        try {
+          await this.refreshMessages();
+        } catch {
+          this.clearSelection();
+          this.showToast("已保存，重新打开笔记可查看");
+          return result.id;
+        }
+        this.clearSelection();
+        this.showToast(normalizedNote || richText ? "已创建对话标注" : "已高亮原文");
+        return result.id;
+      }
+    } catch {
+      // Fall through to error toast
     }
     this.showToast("标注保存失败");
     return null;

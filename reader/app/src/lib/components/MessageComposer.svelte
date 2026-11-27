@@ -20,10 +20,13 @@
   import { isSafeMessageLink, messageExtensions } from "../../message-editor.ts";
   import { createMessageMarkdownCodec } from "../../message-markdown.ts";
   import type { RichTextInput } from "../../messages.ts";
+  import { extractMessageDocJson } from "../data/message-doc.ts";
   import type { ComposerSubmitPayload } from "../types.ts";
 
   interface Props {
     placeholder?: string;
+    draftKey: string;
+    sealDraftOnSubmit?: boolean;
     initialText?: string;
     initialContentJson?: string;
     replyChipLabel?: string | null;
@@ -33,10 +36,12 @@
     onClearReply?: () => void;
     onRemoveReference?: (id: string) => void;
     onCancelEdit?: () => void;
-    onSubmit: (payload: ComposerSubmitPayload) => Promise<void> | void;
+    onSubmit: (payload: ComposerSubmitPayload) => Promise<boolean> | boolean;
   }
 
   let {
+    draftKey,
+    sealDraftOnSubmit = false,
     placeholder = "写下此刻对这段文字的思考或追问…",
     initialText = "",
     initialContentJson = "",
@@ -59,6 +64,7 @@
   let markdownError = $state<string | null>(null);
   let expanded = $state(false);
   let submitting = $state(false);
+  let editingLocked = $state(false);
   let hasContent = $state(false);
 
   // Safe Link Dialog (bits-ui Dialog, zero window.prompt)
@@ -67,13 +73,8 @@
   let linkError = $state<string | null>(null);
 
   function parseInitialDoc(): JSONContent | string {
-    if (initialContentJson) {
-      try {
-        return JSON.parse(initialContentJson) as JSONContent;
-      } catch {
-        // Fallback to plain text
-      }
-    }
+    const parsed = extractMessageDocJson(initialContentJson);
+    if (parsed) return parsed as JSONContent;
     return initialText
       ? {
           type: "doc",
@@ -148,7 +149,7 @@
 
   let lastPropSig = "";
   $effect(() => {
-    const sig = `${editingLabel ?? ""}:${initialText}:${initialContentJson}`;
+    const sig = `${draftKey}:${editingLabel ?? ""}:${initialText}:${initialContentJson}`;
     const ed = editor;
     if (!ed || sig === lastPropSig) return;
     lastPropSig = sig;
@@ -247,19 +248,28 @@
     }
 
     if (!plainText) return;
+    const sent = { editor, doc: editor.state.doc, mode, markdown: markdownSource, key: draftKey };
     submitting = true;
+    editingLocked = sealDraftOnSubmit;
+    if (editingLocked) sent.editor.setEditable(false, false);
     try {
       const richText: RichTextInput = {
         schema: 1,
         document: documentJson as Record<string, unknown>,
       };
-      await onSubmit({ text: plainText, richText });
+      if (!(await onSubmit({ text: plainText, richText }))) return;
+      if (editor !== sent.editor || editor.isDestroyed || draftKey !== sent.key || mode !== sent.mode ||
+        markdownSource !== sent.markdown || !editor.state.doc.eq(sent.doc)) return;
       editor.commands.clearContent();
       markdownSource = "";
       mode = "visual";
       expanded = false;
       updateHasContent();
+    } catch {
+      if (draftKey === sent.key) markdownError = "发送失败，草稿已保留";
     } finally {
+      if (editingLocked && !sent.editor.isDestroyed) sent.editor.setEditable(true, false);
+      editingLocked = false;
       submitting = false;
     }
   }
@@ -301,7 +311,7 @@
     </div>
   {/if}
 
-  <div class="composer-toolbar">
+  <div class="composer-toolbar" inert={editingLocked}>
     <div class="format-tools">
       <button
         type="button"
@@ -413,6 +423,7 @@
       <textarea
         class="markdown-textarea"
         aria-label="Markdown 源码"
+        readonly={editingLocked}
         bind:value={markdownSource}
         oninput={updateHasContent}
         onkeydown={(e) => {

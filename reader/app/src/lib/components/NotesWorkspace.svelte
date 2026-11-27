@@ -22,6 +22,7 @@
     RevisionView,
     SourceCaptureView,
   } from "../../messages.ts";
+  import { renderSafeMessageHtml } from "../data/message-doc.ts";
   import { getMessageClient } from "../data/message-adapter.ts";
   import type { ReaderEngine } from "../engine/reader-engine.svelte.ts";
   import type { ComposerSubmitPayload, RootNoteItem } from "../types.ts";
@@ -34,7 +35,7 @@
     engine: ReaderEngine;
     mode: "closed" | "list" | "thread";
     selectedRootId: string | null;
-    pendingDraft: { text: string } | null;
+    pendingDraft: Awaited<ReturnType<ReaderEngine["captureSelectionDraft"]>>;
     viewportWidth: number;
     viewportHeight: number;
     focusThread: boolean;
@@ -217,41 +218,41 @@
     onBackToList();
   }
 
-  async function handleComposerSubmit(payload: ComposerSubmitPayload) {
+  async function handleComposerSubmit(payload: ComposerSubmitPayload): Promise<boolean> {
     const client = getMessageClient();
-    if (pendingDraft) {
-      const createdId = await engine.createHighlightFromSelection(payload.text);
-      onCancelDraft();
-      if (createdId) {
-        onSelectRoot(createdId);
-      }
-      return;
+    const sourceDraft = pendingDraft;
+    if (sourceDraft) {
+      const id = await engine.createHighlightFromSelection(payload.text, payload.richText, sourceDraft);
+      if (!id) return false;
+      if (pendingDraft === sourceDraft) onSelectRoot(id);
+      return true;
     }
-
-    if (editingMessage) {
-      await client.revise(
-        editingMessage.id,
-        editingMessage.revisionId,
-        payload.text,
-        payload.richText,
-      );
-      editingMessage = null;
-      await engine.refreshMessages();
-      return;
-    }
-
+    const edit = editingMessage;
     const targetRoot = activeRoot;
-    if (!targetRoot) return;
-    await client.reply({
-      conversationId: targetRoot.conversationId,
-      replyToMessageId: replyTarget?.id ?? targetRoot.id,
-      text: payload.text,
-      richText: payload.richText,
-      referenceIds: referenceItems.map((r) => r.id),
-    });
-    replyTarget = null;
-    referenceItems = [];
-    await engine.refreshMessages();
+    if (edit) {
+      await client.revise(edit.id, edit.revisionId, payload.text, payload.richText);
+      if (editingMessage === edit) editingMessage = null;
+    } else {
+      if (!targetRoot) return false;
+      const reply = replyTarget;
+      const references = referenceItems;
+      await client.reply({
+        conversationId: targetRoot.conversationId,
+        replyToMessageId: reply?.id ?? targetRoot.id,
+        text: payload.text,
+        richText: payload.richText,
+        referenceIds: references.map((ref) => ref.id),
+      });
+      if (replyTarget === reply) replyTarget = null;
+      if (referenceItems === references) referenceItems = [];
+    }
+    try {
+      await engine.refreshMessages();
+    } catch {
+      // The write committed; retrying it after a projection error would duplicate the message.
+      engine.showToast("已保存，重新打开笔记可查看");
+    }
+    return true;
   }
 
   async function openSnapshotForRoot(rootMessageId: string) {
@@ -311,45 +312,6 @@
     return target.deleted ? "（原消息已删除）" : target.text.slice(0, 42);
   }
 
-  function sanitizeMsgHtml(rawJson: string, fallbackText: string): string {
-    if (!rawJson) return `<p>${fallbackText.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c))}</p>`;
-    try {
-      const doc = JSON.parse(rawJson);
-      const renderNode = (node: Record<string, unknown>): string => {
-        if (node.type === "text") {
-          let txt = String(node.text ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c));
-          const marks = Array.isArray(node.marks) ? node.marks : [];
-          for (const mark of marks as { type: string; attrs?: { href?: string } }[]) {
-            if (mark.type === "bold") txt = `<strong>${txt}</strong>`;
-            else if (mark.type === "italic") txt = `<em>${txt}</em>`;
-            else if (mark.type === "link" && mark.attrs?.href && /^https?:\/\//i.test(mark.attrs.href)) {
-              const safeHref = mark.attrs.href.replace(/"/g, "&quot;");
-              txt = `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${txt}</a>`;
-            }
-          }
-          return txt;
-        }
-        if (node.type === "hardBreak") return "<br/>";
-        const children = Array.isArray(node.content) ? node.content.map((c) => renderNode(c as Record<string, unknown>)).join("") : "";
-        switch (node.type) {
-          case "doc": return children;
-          case "paragraph": return `<p>${children}</p>`;
-          case "blockquote": return `<blockquote>${children}</blockquote>`;
-          case "bulletList": return `<ul>${children}</ul>`;
-          case "orderedList": return `<ol>${children}</ol>`;
-          case "listItem": return `<li>${children}</li>`;
-          case "heading": {
-            const lvl = Math.min(3, Math.max(1, Number((node.attrs as { level?: number })?.level ?? 2)));
-            return `<h${lvl}>${children}</h${lvl}>`;
-          }
-          default: return children;
-        }
-      };
-      return renderNode(doc);
-    } catch {
-      return `<p>${fallbackText.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c))}</p>`;
-    }
-  }
 </script>
 
 {#if mode !== "closed"}
@@ -642,7 +604,7 @@
                               {/each}
 
                               <div class="msg-content atha-tiptap-body">
-                                {@html sanitizeMsgHtml(msg.contentJson, msg.text)}
+                                {@html renderSafeMessageHtml(msg.contentJson, msg.text)}
                               </div>
                             </div>
                           </article>
@@ -659,6 +621,8 @@
         {#if pendingDraft || activeRoot}
           <div class="composer-dock">
             <MessageComposer
+              draftKey={pendingDraft?.anchor.canonicalLocator ?? editingMessage?.id ?? selectedRootId ?? ""}
+              sealDraftOnSubmit={Boolean(pendingDraft || editingMessage)}
               initialText={editingMessage?.text ?? ""}
               initialContentJson={editingMessage?.contentJson ?? ""}
               editingLabel={editingMessage ? editingMessage.text.slice(0, 18) : null}
@@ -757,7 +721,7 @@
             {:else}
               <div class="modal-stack">
                 {#each snapshotCaptures as cap (cap.source.id)}
-                  <SnapshotPreview capture={cap} />
+                  <SnapshotPreview capture={cap} resourceClient={getMessageClient()} />
                 {/each}
               </div>
             {/if}
