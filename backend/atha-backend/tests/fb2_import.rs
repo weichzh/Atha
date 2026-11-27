@@ -240,6 +240,29 @@ fn supports_xml_predefined_and_numeric_references() {
 }
 
 #[test]
+fn fb2_toc_uses_listed_sections_as_ancestors() {
+    let root = TestRoot::new();
+    let source = root.0.join("toc.fb2");
+    fs::write(&source, r#"<?xml version="1.0"?><FictionBook><body>
+<section><title><p>Part</p></title><section id="inside"><title><p>Child</p></title><p>Text</p></section></section>
+<section><section id="outside"><title><p>Another</p></title><p>Text</p></section></section>
+</body></FictionBook>"#).unwrap();
+    let imported = import_fb2(&source, root.0.join("cache")).expect("import nested FB2");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(imported.root.join(".atha-reader.json")).unwrap())
+            .unwrap();
+    let toc = manifest["toc"].as_array().unwrap();
+    assert_eq!(toc.len(), 3);
+    assert_eq!(toc[0]["label"], "Part");
+    assert!(toc[0].get("level").is_none());
+    assert_eq!(toc[1]["label"], "Child");
+    assert_eq!(toc[1]["level"], 2);
+    assert!(toc[1]["href"].as_str().unwrap().ends_with("#inside"));
+    assert_eq!(toc[2]["label"], "Another");
+    assert!(toc[2].get("level").is_none());
+}
+
+#[test]
 fn nested_sections_without_ids_keep_unique_toc_targets() {
     let root = TestRoot::new();
     let source = root.0.join("nested.fb2");

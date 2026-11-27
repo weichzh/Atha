@@ -13,3 +13,5 @@
 - `change`：快照资产发布耐久性 → `docs/changes/message-asset-durability.md`
 
 - `change`：Kindle 有界导入 → `docs/changes/kindle-bounded-huff.md`
+
+- `change`：多级章节目录 → `docs/changes/hierarchical-book-toc.md`

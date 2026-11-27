@@ -9,9 +9,9 @@
   "resources": ["book.css"],
   "toc": [
     { "label": "第一章 · 边注、潮汐与对话的起源", "href": "ch1.xhtml#sec-1" },
-    { "label": "第一节 · 安静的页边距", "href": "ch1.xhtml#sec-1-1" },
+    { "label": "第一节 · 安静的页边距", "href": "ch1.xhtml#sec-1-1", "level": 2 },
     { "label": "第二章 · 纸页上的时间层（Palimpsest）", "href": "ch2.xhtml#sec-2" },
-    { "label": "第二节 · 锚点与快照的双重契约", "href": "ch2.xhtml#sec-2-1" },
+    { "label": "第二节 · 锚点与快照的双重契约", "href": "ch2.xhtml#sec-2-1", "level": 2 },
     { "label": "第三章 · 留白、尺度与夜间书房", "href": "ch3.xhtml#sec-3" }
   ]
 }

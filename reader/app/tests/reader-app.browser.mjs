@@ -454,6 +454,35 @@ async function run() {
     await page.waitForTimeout(150);
     assert.equal(await page.locator(".pane-b").count(), 0, "Workspace closes cleanly under reduced motion");
 
+    // Fold a real chapter branch before following one of its nested targets.
+    const openToc = async () => {
+      const trigger = page.getByRole("button", { name: "目录与全书搜索" });
+      if (!await trigger.isVisible()) await page.keyboard.press("h");
+      await trigger.click();
+      await page.waitForSelector(".toc-viewport");
+    };
+    await openToc();
+    const chapterPosition = () => page.locator("html").getAttribute("data-section-position");
+    const startSection = await chapterPosition();
+    const collapse = page.getByRole("button", { name: /^折叠：第二章/ });
+    const nested = page.getByRole("button", { name: "第二节 · 锚点与快照的双重契约" });
+    assert.equal(await collapse.getAttribute("aria-expanded"), "true");
+    await collapse.press("Enter");
+    assert.equal(await nested.count(), 0);
+    assert.equal(await chapterPosition(), startSection);
+    await page.getByRole("button", { name: /^展开：第二章/ }).press("Space");
+    assert.equal(await nested.isVisible(), true);
+    await assertNoHorizontalOverflow(page, "hierarchical-toc-mobile-390");
+    await page.screenshot({
+      path: path.join(screenshotDir, "12-reader-directory-mobile-390.png"),
+      animations: "disabled",
+    });
+    await nested.click();
+    await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "2 / 3");
+    await openToc();
+    assert.equal(await nested.getAttribute("aria-current"), "location");
+    await page.getByRole("button", { name: "关闭目录" }).click();
+
     // Direct URL jumps use the saved source anchor, including a later section.
     const memoryTarget = await page.evaluate(() => {
       const store = JSON.parse(localStorage.getItem("atha.demo.messages.v1"));
@@ -479,7 +508,7 @@ async function run() {
     assert.equal(consoleErrors.length, 0, `Console errors found: ${consoleErrors.join(" | ")}`);
     assert.equal(pageErrors.length, 0, `Page errors found: ${pageErrors.join(" | ")}`);
 
-    console.log("ALL BROWSER CHECKS PASSED! 11 screenshots saved to:", screenshotDir);
+    console.log("ALL BROWSER CHECKS PASSED! 12 screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();
     preview.kill("SIGTERM");

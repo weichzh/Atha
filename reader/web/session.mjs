@@ -87,7 +87,11 @@ export function createReadingSession({ params, content, render, onState, assert,
     const tocItems = new Set();
     const toc = value.toc?.map((item) => {
       manifestAssert(item && typeof item === "object" && !Array.isArray(item));
-      exactKeys(item, ["label", "href"]);
+      const hasLevel = Object.hasOwn(item, "level");
+      exactKeys(item, hasLevel ? ["label", "href", "level"] : ["label", "href"]);
+      if (hasLevel) {
+        manifestAssert(Number.isInteger(item.level) && item.level >= 1 && item.level <= 6);
+      }
       manifestAssert(
         typeof item.label === "string" && item.label.trim().length > 0 && item.label.length <= 256,
       );
@@ -103,7 +107,9 @@ export function createReadingSession({ params, content, render, onState, assert,
       }
       manifestAssert(!tocItems.has(item.href));
       tocItems.add(item.href);
-      return Object.freeze({ label: item.label, href: item.href });
+      return Object.freeze(hasLevel
+        ? { label: item.label, href: item.href, level: item.level }
+        : { label: item.label, href: item.href });
     });
     const frozenToc = Object.freeze(toc || []);
     return Object.freeze({
@@ -157,6 +163,11 @@ export function createReadingSession({ params, content, render, onState, assert,
       { ...valid, resources: ["https://example.com/image.png"] },
       { ...valid, toc: [{ label: "Elsewhere", href: "text/two.xhtml" }] },
       { ...valid, toc: [...valid.toc, ...valid.toc] },
+      ...[null, 0, 7, 2.5, "2"].map((level) => ({
+        ...valid, toc: [{ ...valid.toc[0], level }],
+      })),
+      { ...valid, toc: [{ ...valid.toc[0], level: 2, unknown: true }] },
+      { ...valid, toc: [{ ...valid.toc[0], level: 2, href: "../outside.xhtml" }] },
     ]) {
       assert(rejected(invalid), "invalid-manifest");
     }

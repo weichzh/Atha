@@ -18,6 +18,10 @@ test("section changes keep the live content and prefetch adjacent sections", asy
         { id: "three", href: "three.xhtml" },
       ],
       resources: [],
+      toc: [
+        { label: "One", href: "one.xhtml" },
+        { label: "Two", href: "two.xhtml#heading", level: 2 },
+      ],
     }),
   });
   context.after(() => {
@@ -74,6 +78,10 @@ test("section changes keep the live content and prefetch adjacent sections", asy
   });
 
   assert.equal(await session.open(0), true);
+  assert.deepEqual(session.describe().toc, [
+    { label: "One", href: "one.xhtml" },
+    { label: "Two", href: "two.xhtml#heading", level: 2 },
+  ]);
   assert.equal(await session.open(1), true);
   assert.deepEqual(loads, ["/one.xhtml", "/two.xhtml"]);
   assert.deepEqual(prefetched, ["/two.xhtml", "/one.xhtml", "/three.xhtml"]);

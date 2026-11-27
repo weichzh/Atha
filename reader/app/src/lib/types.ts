@@ -90,6 +90,7 @@ export interface SearchHit {
 export interface TocEntry {
   label: string;
   href: string;
+  level?: number;
 }
 
 export interface NotesScopeOption {
