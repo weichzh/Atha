@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Atha — 启门</title>
+  <rect id="background" width="128" height="128" rx="28" fill="#544232"/>
+  <!-- Two page blocks meet at the binding (64,38), leaving a pointed arch below. -->
+  <g fill="#F4E9D6">
+    <path d="M48 29 C54 35 59 38 64 38 C61 45 53 51 49 59 C45 67 46 86 44 99 H23 L27 63 C29 47 36 35 48 29 Z"/>
+    <path transform="translate(128 0) scale(-1 1)" d="M48 29 C54 35 59 38 64 38 C61 45 53 51 49 59 C45 67 46 86 44 99 H23 L27 63 C29 47 36 35 48 29 Z"/>
+  </g>
+  <!-- Hardcover follows the paper profile; the hollow spine is a true cutout. -->
+  <path id="hardcover" fill="#D19A70" fill-rule="evenodd" d="M19 99 L23 63 C25 45 33 32 46 25 C50 22 57 21 64 21 C71 21 78 22 82 25 C95 32 103 45 105 63 L109 99 H105 L101 63 C99 47 92 35 80 29 C74 35 69 38 64 38 C59 38 54 35 48 29 C36 35 29 47 27 63 L23 99 Z M49.5 27.5 C54 25.5 59 25 64 25 C69 25 74 25.5 78.5 27.5 C73 32.5 68 35 64 35 C60 35 55 32.5 49.5 27.5 Z"/>
+</svg>

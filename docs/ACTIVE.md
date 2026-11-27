@@ -10,6 +10,8 @@
 - `next`：根据用户反馈继续同一 change；提交、安装或跨平台验收需另行批准，`H1-H4` 保持未决。
 - UI 重设计的 Context Bundle：`docs/changes/ui-redesign.md`、`docs/product/OVERVIEW.md`、`docs/codebase/READER-MOBILE-UI.md`、`docs/architecture/MESSAGE-READING.md`、`docs/agents/references.md`。
 
+- `change`：Atha「启门」应用图标 → `docs/changes/launch-icon.md`
+
 - `change`：快照资产发布耐久性 → `docs/changes/message-asset-durability.md`
 
 - `change`：Kindle 有界导入 → `docs/changes/kindle-bounded-huff.md`

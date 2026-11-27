@@ -1,5 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="16" fill="#F7F6F2"/>
-  <circle cx="32" cy="32" r="20" fill="#A8442C" fill-opacity="0.14"/>
-  <text x="32" y="40" text-anchor="middle" font-family="Georgia, serif" font-size="26" font-weight="700" fill="#A8442C">A</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Atha — 启门</title>
+  <rect id="background" width="128" height="128" rx="28" fill="#544232" />
+  <g fill="#F4E9D6">
+    <path d="M48 29 C54 35 59 38 64 38 C61 45 53 51 49 59 C45 67 46 86 44 99 H23 L27 63 C29 47 36 35 48 29 Z" />
+    <path transform="translate(128 0) scale(-1 1)" d="M48 29 C54 35 59 38 64 38 C61 45 53 51 49 59 C45 67 46 86 44 99 H23 L27 63 C29 47 36 35 48 29 Z" />
+  </g>
+  <path id="hardcover" fill="#D19A70" fill-rule="evenodd" d="M19 99 L23 63 C25 45 33 32 46 25 C50 22 57 21 64 21 C71 21 78 22 82 25 C95 32 103 45 105 63 L109 99 H105 L101 63 C99 47 92 35 80 29 C74 35 69 38 64 38 C59 38 54 35 48 29 C36 35 29 47 27 63 L23 99 Z" />
 </svg>
