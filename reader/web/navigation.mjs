@@ -215,9 +215,11 @@ export function createNavigation({
     } catch {
       return fallback("locator-section");
     }
-    const sectionIndex = book().sections.findIndex(
-      (section) => new URL(section.url).href === `${target.origin}${target.pathname}`,
-    );
+    const sectionUrl = new URL(target.href);
+    sectionUrl.hash = "";
+    sectionUrl.search = "";
+    // Custom WebView schemes can have an opaque URL.origin.
+    const sectionIndex = book().sections.findIndex((section) => new URL(section.url).href === sectionUrl.href);
     if (sectionIndex < 0) return fallback("locator-section");
     if (session.snapshot().currentIndex !== sectionIndex && !(await openSection(sectionIndex))) {
       return false;

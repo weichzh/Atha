@@ -28,6 +28,7 @@
   import { ReaderEngine } from "../engine/reader-engine.svelte.ts";
   import type { LightboxPayload } from "../types.ts";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import FootnotePopover from "./FootnotePopover.svelte";
   import DictionaryCard from "./DictionaryCard.svelte";
   import NotesWorkspace from "./NotesWorkspace.svelte";
   import ReaderDirectoryToc from "./ReaderDirectoryToc.svelte";
@@ -81,6 +82,7 @@
 
   // Lightbox
   let lightboxPayload = $state<LightboxPayload | null>(null);
+  let footnoteDialog = $state<FootnotePopover>();
 
   // Highlight delete confirm
   let pendingDeleteRootId = $state<string | null>(null);
@@ -301,6 +303,16 @@
 
   function handleBackAction(source: BackSource): boolean {
     if (entryBlocked) return false;
+    if (engine.activeFootnote && footnoteDialog) {
+      // Escape uses the native dialog cancellation; the Android bridge calls close directly.
+      if (source === "escape") return false;
+      footnoteDialog.close();
+      return true;
+    }
+    if (engine.footnotePending) {
+      engine.dismissFootnote();
+      return true;
+    }
     if (Date.now() - lastOverlayClosedAt < 120) return true;
     if (lightboxPayload) {
       lightboxPayload = null;
@@ -336,7 +348,7 @@
   }
 
   function handleGlobalKeydown(event: KeyboardEvent) {
-    if (entryBlocked || !engine.firstScreenReady || event.defaultPrevented) return;
+    if (entryBlocked || !engine.firstScreenReady || engine.activeFootnote || event.defaultPrevented) return;
     const target = event.target as Element | null;
     const isEditing = Boolean(
       target?.closest("input, textarea, select, [contenteditable], .ProseMirror, .cm-editor"),
@@ -622,6 +634,15 @@
       fontScale={dictScale}
       onScaleChange={(s) => (dictScale = s)}
       onClose={() => (dictOpen = false)}
+    />
+  {/if}
+
+  {#if engine.activeFootnote}
+    <FootnotePopover
+      bind:this={footnoteDialog}
+      footnote={engine.activeFootnote}
+      onClose={() => engine.dismissFootnote()}
+      onJump={() => void engine.jumpToActiveFootnote()}
     />
   {/if}
 

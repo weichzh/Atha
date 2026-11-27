@@ -138,3 +138,56 @@ test("section changes keep the live content and prefetch adjacent sections", asy
   assert.equal(session.snapshot().state, "closed");
   assert.equal(session.snapshot().currentIndex, -1);
 });
+
+test("a footnote prepares only declared chapter content and never activates it", async (context) => {
+  const previousDocument = globalThis.document;
+  const previousFetch = globalThis.fetch;
+  globalThis.document = { documentElement: { dataset: {} } };
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      schema: 1,
+      contentVersion: "a".repeat(64),
+      sections: [{ id: "one", href: "one.xhtml" }, { id: "two", href: "two.xhtml" }],
+      resources: ["book.css"],
+    }),
+  });
+  context.after(() => {
+    globalThis.document = previousDocument;
+    globalThis.fetch = previousFetch;
+  });
+  const prepared = [];
+  const activated = [];
+  let deferred;
+  const session = createReadingSession({
+    params: new URLSearchParams("manifest=.atha-reader.json"),
+    content: {
+      async prepareSection(url, resources, errorCode) {
+        prepared.push([url.pathname, [...resources], errorCode]);
+        if (deferred) await deferred.promise;
+        return { body: { chapter: url.pathname } };
+      },
+      activateSection(section) { activated.push(section.body.chapter); },
+      close() {},
+    },
+    async render() {},
+    onState() {},
+    assert: assert.ok,
+    fail(code) { throw new Error(code); },
+  });
+  await session.open();
+  const stable = session.snapshot();
+  const url2 = session.describe().sections[1].url;
+  assert.equal(await session.previewSectionBody(new URL("unknown.xhtml", url2).href), null);
+  assert.equal(prepared.length, 1);
+  assert.deepEqual(await session.previewSectionBody(url2), { chapter: "/two.xhtml" });
+  assert.deepEqual(prepared[1], ["/two.xhtml", [new URL("book.css", url2).href], "section-load"]);
+  assert.deepEqual(session.snapshot(), stable);
+  assert.deepEqual(activated, ["/one.xhtml"]);
+  deferred = Promise.withResolvers();
+  const preview = session.previewSectionBody(url2);
+  session.close();
+  deferred.resolve();
+  assert.equal(await preview, null);
+  assert.deepEqual(activated, ["/one.xhtml"]);
+});

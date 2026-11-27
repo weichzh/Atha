@@ -63,6 +63,120 @@ async function waitForReaderEntry(page) {
   );
 }
 
+async function verifyFootnotePreview(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, hasTouch: true });
+  const release = Promise.withResolvers();
+  const requestedPaths = [];
+  try {
+    await page.addInitScript(() => {
+      // Open the reader's shadow root only for this isolated interaction fixture.
+      const attach = Element.prototype.attachShadow;
+      Element.prototype.attachShadow = function (options) {
+        return attach.call(this, this.classList.contains("reader-content-host")
+          ? { ...options, mode: "open" } : options);
+      };
+    });
+    const chapter = (name) => fs.readFile(path.join(appRoot, "public/demo", name), "utf8");
+    const ch1 = (await chapter("ch1.xhtml")).replace("<body>", `<body>
+      <p>书页边注 <a id="note-near" href="#fn-near" role="doc-noteref">[1]</a>
+        <a id="note-far" href="ch3.xhtml#fn-far" role="doc-noteref">[2]</a>
+        <a id="note-missing" href="unknown.xhtml#fn-missing" role="doc-noteref">[3]</a>
+        <a id="ordinary-link" href="ch2.xhtml#sec-2">普通链接</a></p>
+      <aside id="fn-near"><p>同章注释 <a href="#note-near" role="doc-backlink">↩</a></p></aside>`);
+    const ch3 = (await chapter("ch3.xhtml")).replace("<body>", `<body>
+      <aside id="fn-far"><p>跨章注释：书页投影 &lt;原文&gt;。</p>
+      <p>读完本段仍可留在原处。</p></aside>`);
+    page.on("request", request => requestedPaths.push(new URL(request.url()).pathname));
+    await page.route("**/demo/ch1.xhtml", route =>
+      route.fulfill({ status: 200, contentType: "application/xhtml+xml", body: ch1 }));
+    await page.route("**/demo/ch3.xhtml", async route => {
+      await release.promise;
+      await route.fulfill({ status: 200, contentType: "application/xhtml+xml", body: ch3 });
+    });
+    await page.goto(`${PREVIEW_URL}?manifest=demo/manifest.json`);
+    await page.waitForSelector("html[data-reader-ready]");
+    const note = page.getByRole("dialog", { name: /^脚注/ });
+    const position = () => page.locator("html").getAttribute("data-section-position");
+    const storedLocator = () => page.evaluate(() =>
+      localStorage.getItem("atha.reader.progress.a1b2c3d4e5f60718.v1"));
+    const originalLocator = await storedLocator();
+    assert.ok(originalLocator, "fixture opened at a saved reading position");
+
+    const near = page.locator("#note-near");
+    await near.focus();
+    await near.press("Enter");
+    await note.waitFor();
+    assert.equal((await note.locator(".footnote-text").textContent())?.trim(), "同章注释");
+    assert.equal(await position(), "1 / 3");
+    assert.ok(await note.evaluate(el => el.matches(":modal") && el.classList.contains("anchored")));
+    await page.screenshot({
+      path: path.join(screenshotDir, "13-reader-footnote-desktop.png"),
+      animations: "disabled",
+    });
+    await page.keyboard.press("ArrowRight");
+    assert.equal(await storedLocator(), originalLocator);
+    await page.keyboard.press("Escape");
+    await note.waitFor({ state: "hidden" });
+    assert.ok(await near.evaluate(el => el.getRootNode().activeElement === el));
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => Boolean(document.documentElement.dataset.viewportStable));
+    const mobileLocator = await storedLocator();
+    const missing = page.locator("#note-missing");
+    await missing.tap();
+    await page.getByRole("status").filter({ hasText: "未找到可预览的脚注" }).waitFor();
+    assert.equal(await position(), "1 / 3");
+    assert.ok(!requestedPaths.some(url => url.endsWith("/unknown.xhtml")));
+
+    const far = page.locator("#note-far");
+    const requested = page.waitForRequest("**/demo/ch3.xhtml");
+    await far.tap();
+    await requested;
+    assert.equal(await page.evaluate(() => window.__athaHandleBack()), true);
+    const resolved = page.waitForResponse("**/demo/ch3.xhtml");
+    release.resolve();
+    await (await resolved).finished();
+    // Let the delayed chapter parse; it must not reopen the dismissed preview.
+    await page.waitForTimeout(250);
+    assert.equal(await note.count(), 0);
+    assert.equal(await position(), "1 / 3");
+    assert.equal(await storedLocator(), mobileLocator);
+
+    await far.tap();
+    await note.waitFor();
+    assert.match((await note.locator(".footnote-text").textContent()) ?? "", /跨章注释：书页投影 <原文>/);
+    assert.equal(await note.locator(".footnote-text").evaluate(el => el.childElementCount), 0);
+    assert.equal(await position(), "1 / 3");
+    await assertNoHorizontalOverflow(page, "footnote-preview-390");
+    await page.screenshot({
+      path: path.join(screenshotDir, "14-reader-footnote-mobile-390.png"),
+      animations: "disabled",
+    });
+    await page.touchscreen.tap(24, 32);
+    await note.waitFor({ state: "hidden" });
+    assert.equal(await storedLocator(), mobileLocator);
+
+    await far.tap();
+    await note.waitFor();
+    assert.equal(await page.evaluate(() => window.__athaHandleBack()), true);
+    await note.waitFor({ state: "hidden" });
+
+    await far.tap();
+    await note.getByRole("button", { name: "跳转原文" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "3 / 3");
+    await note.waitFor({ state: "hidden" });
+
+    await page.goto(`${PREVIEW_URL}?manifest=demo/manifest.json&verify=1`);
+    await page.waitForSelector("html[data-reader-ready]");
+    await page.locator("#ordinary-link").tap();
+    await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "2 / 3");
+    assert.equal(await note.count(), 0);
+  } finally {
+    release.resolve();
+    await page.close();
+  }
+}
+
 async function run() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -538,7 +652,8 @@ async function run() {
     assert.equal(consoleErrors.length, 0, `Console errors found: ${consoleErrors.join(" | ")}`);
     assert.equal(pageErrors.length, 0, `Page errors found: ${pageErrors.join(" | ")}`);
 
-    console.log("ALL BROWSER CHECKS PASSED! 12 screenshots saved to:", screenshotDir);
+    await verifyFootnotePreview(browser);
+    console.log("ALL BROWSER CHECKS PASSED! 14 screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();
     preview.kill("SIGTERM");
