@@ -380,3 +380,7 @@ button:disabled {
     scroll-behavior: auto !important;
   }
 }
+
+[data-opening-theme="light"] { --opening-canvas: var(--reader-canvas-light); }
+[data-opening-theme="paper"] { --opening-canvas: var(--reader-canvas-paper); }
+[data-opening-theme="dark"] { --opening-canvas: var(--reader-canvas-dark); }

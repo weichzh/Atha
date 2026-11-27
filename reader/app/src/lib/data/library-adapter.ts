@@ -23,9 +23,10 @@ import {
   importBooks as tauriImportBooks,
   libraryAvailable,
   listBooks as tauriListBooks,
-  openBook as tauriOpenBook,
   openReadingMemoryHit as tauriOpenReadingMemoryHit,
+  prepareBookLaunch as tauriPrepareBookLaunch,
   prepareLocalDataRestore,
+  prepareReadingMemoryLaunch as tauriPrepareReadingMemoryLaunch,
   readAppTheme,
   readStorageUsage as tauriReadStorageUsage,
   removeBook as tauriRemoveBook,
@@ -207,26 +208,61 @@ export async function deleteLibraryBookData(id: string): Promise<LibraryBook[]> 
   return updated;
 }
 
-export async function launchReaderForBook(
-  id: string,
-  onDemoLaunch: (bookId: string, manifestPath: string) => void,
-): Promise<void> {
+function isAndroidAppShell(): boolean {
+  return typeof window !== "undefined" && Boolean(window.AthaSystemBars);
+}
+
+function normalizeAppHref(href: string): string {
+  return href.startsWith("/") ? href : `/${href}`;
+}
+
+function manifestFromHref(href: string, fallback = ".atha-reader.json"): string {
+  const idx = href.indexOf("?");
+  if (idx < 0) return fallback;
+  return new URLSearchParams(href.slice(idx + 1)).get("manifest") || fallback;
+}
+
+export function opensShelfReaderInPlace(): boolean {
+  return !isTauriRuntime() || !libraryAvailable || isAndroidAppShell();
+}
+
+export async function prepareShelfReaderHref(id: string): Promise<string> {
   if (isTauriRuntime() && libraryAvailable) {
-    await tauriOpenBook(id);
-    return;
+    const launch = await tauriPrepareBookLaunch(id);
+    return normalizeAppHref(launch.href);
   }
-  onDemoLaunch(id, "demo/manifest.json");
+  return `?manifest=${encodeURIComponent("demo/manifest.json")}&version=${encodeURIComponent(id)}`;
+}
+
+export function activateShelfReader(href: string): string {
+  history.replaceState({ athaReaderSpa: true }, "", href);
+  return manifestFromHref(href);
 }
 
 export async function launchReadingMemoryHit(
   hit: ReadingMemoryJump,
-  onDemoLaunch: (bookId: string, manifestPath: string, jump: ReadingMemoryJump) => void,
+  onSpaLaunch: (bookId: string, manifestPath: string, jump: ReadingMemoryJump) => void,
+  canActivate: () => boolean,
 ): Promise<void> {
   if (isTauriRuntime() && libraryAvailable) {
-    await tauriOpenReadingMemoryHit(hit);
+    if (!isAndroidAppShell()) {
+      await tauriOpenReadingMemoryHit(hit);
+      return;
+    }
+    const href = await tauriPrepareReadingMemoryLaunch(hit);
+    if (!canActivate()) return;
+    const nextHref = normalizeAppHref(href);
+    history.replaceState({ athaReaderSpa: true }, "", nextHref);
+    onSpaLaunch(hit.editionId, manifestFromHref(nextHref), hit);
     return;
   }
-  onDemoLaunch(hit.editionId, "demo/manifest.json", hit);
+  if (!canActivate()) return;
+  history.replaceState(
+    { athaReaderSpa: true },
+    "",
+    `?manifest=${encodeURIComponent("demo/manifest.json")}&version=${encodeURIComponent(hit.editionId)}`,
+  );
+  onSpaLaunch(hit.editionId, "demo/manifest.json", hit);
 }
 
 export function getAppTheme(): AppTheme {

@@ -100,24 +100,31 @@ export function createPagination({
   }
 
   function columnForRect(rect, bookLeft, step, scale) {
-    return Math.max(0, Math.floor((rect.left - bookLeft) / (step * scale)));
+    // Range and book rects round independently; a glyph at the column start must not slip back.
+    return Math.max(0, Math.floor((rect.left - bookLeft + 1 / 64) / (step * scale)));
+  }
+
+  function openingCameraScale() {
+    const camera = frame.closest("[data-opening-camera]");
+    // The outer, uniform presentation transform is independent of the reader's DPR scale.
+    return camera ? camera.getBoundingClientRect().width / parseFloat(getComputedStyle(camera).width) : 1;
   }
 
   function scanOffset() {
     if (isScrolled()) {
-      const readerTop = reader.getBoundingClientRect().top;
+      const readerTop = reader.getBoundingClientRect().top + openingCameraScale();
       let base = 0;
       for (const node of textNodes()) {
         const text = node.textContent || "";
         const whole = document.createRange();
         whole.selectNodeContents(node);
-        if ([...whole.getClientRects()].some((rect) => rect.height && rect.bottom > readerTop + 1)) {
+        if ([...whole.getClientRects()].some((rect) => rect.height && rect.bottom > readerTop)) {
           for (let offset = 0; offset < text.length; offset += 1) {
             const character = document.createRange();
             character.setStart(node, offset);
             character.setEnd(node, offset + 1);
             const rect = [...character.getClientRects()].find((item) => item.height);
-            if (rect && rect.bottom > readerTop + 1) return base + offset;
+            if (rect && rect.bottom > readerTop) return base + offset;
           }
         }
         base += text.length;
@@ -125,13 +132,14 @@ export function createPagination({
       return base;
     }
     const bookLeft = book.getBoundingClientRect().left;
+    const renderedScale = visualScale * openingCameraScale();
     let base = 0;
     for (const node of textNodes()) {
       const text = node.textContent || "";
       const whole = document.createRange();
       whole.selectNodeContents(node);
       const reachesPage = [...whole.getClientRects()].some(
-        (rect) => rect.width && columnForRect(rect, bookLeft, pageStep, visualScale) === state.page,
+        (rect) => rect.width && columnForRect(rect, bookLeft, pageStep, renderedScale) === state.page,
       );
       if (reachesPage) {
         for (let offset = 0; offset < text.length; offset += 1) {
@@ -139,7 +147,7 @@ export function createPagination({
           character.setStart(node, offset);
           character.setEnd(node, offset + 1);
           const rect = [...character.getClientRects()].find((item) => item.width);
-          if (rect && columnForRect(rect, bookLeft, pageStep, visualScale) === state.page) {
+          if (rect && columnForRect(rect, bookLeft, pageStep, renderedScale) === state.page) {
             return base + offset;
           }
         }
@@ -216,7 +224,7 @@ export function createPagination({
       rect,
       book.getBoundingClientRect().left,
       pageStep,
-      visualScale,
+      visualScale * openingCameraScale(),
     );
     return { exact: true, page: Math.min(pageIndex, state.pages - 1) };
   }
@@ -452,7 +460,8 @@ export function createPagination({
     else range.setEnd(book, 0);
     const right = range.getBoundingClientRect().right;
     book.style.transform = savedTransform;
-    return Math.max(1, Math.floor((right - left - 0.5) / (pageStep * visualScale)) + 1);
+    const cameraScale = openingCameraScale();
+    return Math.max(1, Math.floor(((right - left) / cameraScale - 0.5) / (pageStep * visualScale)) + 1);
   }
 
   function countCutRects(visibleOnly = false) {
@@ -495,13 +504,14 @@ export function createPagination({
   }
 
   function layoutSignature() {
-    const rect = book.getBoundingClientRect();
+    // Layout may already be stable while the opening camera is still moving.
+    const style = getComputedStyle(book);
     return [
       state.pages,
       book.scrollWidth,
       book.scrollHeight,
-      rect.width.toFixed(2),
-      rect.height.toFixed(2),
+      style.width,
+      style.height,
     ].join(":");
   }
 

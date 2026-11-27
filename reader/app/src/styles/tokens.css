@@ -6,6 +6,13 @@
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
 
+  --book-turn-time: 760ms;
+  --book-approach-delay: 350ms;
+  --book-approach: calc(var(--book-turn-time) - var(--book-approach-delay)) cubic-bezier(0.25, 0.45, 0.22, 1) var(--book-approach-delay) both;
+  --reader-canvas-light: #FAF9F5;
+  --reader-canvas-paper: #F4EFE4;
+  --reader-canvas-dark: #141413;
+
   --radius-xs: 8px;
   --radius-sm: 12px;
   --radius-md: 16px;

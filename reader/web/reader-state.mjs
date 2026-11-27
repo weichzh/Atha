@@ -333,7 +333,7 @@ export function createReaderState({
     return applicationPreferences;
   }
 
-  async function restore() {
+  async function restore(isCanceled = () => false) {
     restoring = true;
     const applicationPreferences = restoreApplication();
     const book = bookRecord();
@@ -352,13 +352,24 @@ export function createReaderState({
     }
     const state = preferences.restore({ application: applicationPreferences, book: bookPreferences });
     await pagination.setFontSize(state.effective.fontSize);
+    if (isCanceled()) {
+      restoring = false;
+      return;
+    }
     const progress = progressRecord();
     if (progress && progress.contentVersion !== session.describe().contentVersion) {
       lastFallback = "state-version";
       discard(keys.progress);
-    } else if (progress && !(await navigation.goTo(progress.locator))) {
-      lastFallback = "state-locator";
-      discard(keys.progress);
+    } else if (progress) {
+      const located = await navigation.goTo(progress.locator);
+      if (isCanceled()) {
+        restoring = false;
+        return;
+      }
+      if (!located) {
+        lastFallback = "state-locator";
+        discard(keys.progress);
+      }
     }
     restoring = false;
     restored = true;
