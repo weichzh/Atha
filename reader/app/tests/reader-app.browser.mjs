@@ -78,7 +78,7 @@ async function run() {
   let browser;
   try {
     await waitForServer(PREVIEW_URL);
-    const executablePath = process.env.CHROMIUM_PATH || "/home/nick/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome";
+    const executablePath = process.env.CHROMIUM_PATH;
     browser = await chromium.launch({
       executablePath,
       headless: true,
