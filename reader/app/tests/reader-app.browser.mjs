@@ -203,7 +203,7 @@ async function verifyShelfSelection(browser, previewUrl) {
   const first = "宋版书刻与江南纸坊考";
   const second = "建筑的现象学与安静空间";
   const third = "海风集：二十四节气散文选";
-  const selectionCount = (page, count) => group(page).getByText(`已选 ${count} 册`, { exact: true }).waitFor();
+  const selectionCount = (page, count) => page.getByRole("toolbar", { name: "批量选择" }).getByText(`已选 ${count} 册`, { exact: true }).waitFor();
   const booksAt = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("atha.demo.books.v1")));
 
   try {
@@ -298,7 +298,27 @@ async function verifyShelfSelection(browser, previewUrl) {
     await group(phone).waitFor({ state: "hidden" });
     await shelfNav.waitFor();
     await phone.getByRole("button", { name: "选择", exact: true }).click();
-    await group(phone).getByRole("button", { name: "退出选择" }).click();
+    const selectionHeader = phone.getByRole("toolbar", { name: "批量选择" });
+    await phone.getByRole("searchbox").fill("潮汐");
+    await selectionHeader.getByRole("button", { name: "全选", exact: true }).click();
+    await selectionCount(phone, 1);
+    assert.equal(await card(phone, primary).getAttribute("aria-pressed"), "true");
+    await selectionHeader.getByRole("button", { name: "取消全选" }).click();
+    await selectionCount(phone, 0);
+    await phone.getByRole("searchbox").fill("");
+    await selectionHeader.getByRole("button", { name: "退出选择" }).click();
+    await shelfNav.waitFor();
+    const lastCard = phone.locator(".shelf-catalog [data-shelf-open]").last();
+    await lastCard.scrollIntoViewIfNeeded();
+    const deep = await lastCard.boundingBox();
+    await deliver("touchStart", [{ x: deep.x + deep.width / 2, y: deep.y + deep.height / 2 }]);
+    await selectionCount(phone, 1);
+    await deliver("touchEnd", []);
+    assert.ok(await phone.evaluate(() => window.scrollY > 200));
+    const done = selectionHeader.getByRole("button", { name: "退出选择" });
+    const doneBox = await done.boundingBox();
+    assert.ok(doneBox.y >= 0 && doneBox.y + doneBox.height <= 160, JSON.stringify(doneBox));
+    await done.tap();
     await shelfNav.waitFor();
     await card(phone, primary).tap();
     await waitForReaderEntry(phone);
@@ -322,6 +342,10 @@ async function verifyShelfResumeAndLayout(browser, previewUrl) {
   try {
     await phone.goto(previewUrl);
     await bar.waitFor();
+    const mobileBar = await nav.boundingBox();
+    assert.equal(mobileBar.x, 0);
+    assert.equal(mobileBar.width, 390);
+    assert.equal(mobileBar.y + mobileBar.height, 844);
     assert.equal(await columns(), 3);
     assert.ok((await bar.boundingBox()).y + (await bar.boundingBox()).height <= (await nav.boundingBox()).y);
     await phone.locator(".book-grid .cover-art img.loaded").first().waitFor();
@@ -360,13 +384,13 @@ async function verifyShelfResumeAndLayout(browser, previewUrl) {
     await bar.waitFor();
     await nav.getByRole("tab", { name: "设置" }).click();
     await phone.getByRole("button", { name: /书架布局/ }).click();
-    await phone.getByLabel("手机封面列数").selectOption("2");
+    await phone.getByRole("group", { name: "手机封面列数" }).getByRole("button", { name: "2 列" }).click();
     await nav.getByRole("tab", { name: "书架" }).click();
     assert.equal(await columns(), 2);
     await nav.getByRole("tab", { name: "设置" }).click();
     await phone.getByRole("button", { name: /书架布局/ }).click();
-    await phone.getByLabel("手机封面列数").selectOption("4");
-    await phone.getByLabel("桌面封面密度").selectOption("compact");
+    await phone.getByRole("group", { name: "手机封面列数" }).getByRole("button", { name: "4 列" }).click();
+    await phone.getByRole("group", { name: "桌面封面密度" }).getByRole("button", { name: "紧凑" }).click();
     await phone.getByLabel("封面下显示书名和作者").uncheck();
     await phone.getByLabel("继续阅读默认收起").check();
     await nav.getByRole("tab", { name: "书架" }).click();
@@ -404,12 +428,19 @@ async function verifySettingsSections(browser, previewUrl) {
     await assertNoHorizontalOverflow(phone, "settings-index-390");
     await phone.screenshot({ path: path.join(screenshotDir, "settings-index-mobile-390.png"), animations: "disabled" });
 
+    assert.equal(await search.count(), 0);
+    await phone.getByRole("button", { name: "搜索设置项" }).click();
+    assert.equal(await search.evaluate((input) => document.activeElement === input), true);
+    await search.fill("3 列");
+    assert.deepEqual(await index.locator("[data-setting]").evaluateAll(items => items.map(item => item.dataset.setting)), ["shelf"]);
+    await search.fill("跟随系统");
+    assert.deepEqual(await index.locator("[data-setting]").evaluateAll(items => items.map(item => item.dataset.setting)), ["appearance"]);
     await search.fill("找不到的设置");
     await index.getByRole("status").waitFor();
     await index.getByRole("button", { name: "清除搜索" }).click();
     assert.equal(await search.inputValue(), "");
     await search.fill("ＭＯＢＩ");
-    const dictionary = index.getByRole("button", { name: /离线词典管理/ });
+    const dictionary = index.getByRole("button", { name: /离线词典/ });
     assert.equal(await index.locator("[data-setting]").count(), 1);
     await dictionary.click();
     await phone.getByRole("region", { name: "离线词典管理" }).getByRole("button", { name: "导入本地词典" }).waitFor();
@@ -420,7 +451,7 @@ async function verifySettingsSections(browser, previewUrl) {
     assert.equal(await dictionary.evaluate((button) => document.activeElement === button), true);
 
     await search.fill("字号");
-    const typography = index.getByRole("button", { name: "全书阅读默认" });
+    const typography = index.getByRole("button", { name: /全书默认排版/ });
     await typography.click();
     const panel = phone.getByRole("region", { name: "全书阅读默认" });
     await panel.waitFor();
@@ -438,7 +469,7 @@ async function verifySettingsSections(browser, previewUrl) {
     assert.equal(await typography.evaluate((button) => document.activeElement === button), true);
 
     await search.fill("备份");
-    await index.getByRole("button", { name: /本地资料与完整备份/ }).click();
+    await index.getByRole("button", { name: /本地存储与备份/ }).click();
     const storage = phone.getByRole("region", { name: "本地资料与完整备份" });
     await storage.getByRole("button", { name: "从备份文件恢复" }).waitFor();
     await storage.getByRole("button", { name: /导出 .*完整备份/ }).waitFor();
@@ -447,14 +478,16 @@ async function verifySettingsSections(browser, previewUrl) {
     await search.fill("手势");
     await index.getByRole("button", { name: /阅读与翻页/ }).click();
     const reading = phone.getByRole("region", { name: "阅读与翻页" });
-    const chrome = reading.getByRole("combobox", { name: "阅读控件" });
-    const turn = reading.getByRole("combobox", { name: "分页动效" });
+    const minimal = reading.getByRole("group", { name: "阅读控件" }).getByRole("button", { name: "极简手势" });
+    const turn = reading.getByRole("group", { name: "分页动效" });
+    const cover = turn.getByRole("button", { name: "覆盖翻页" });
     const pull = reading.getByRole("checkbox", { name: "下拉书签" });
     const swipe = reading.getByRole("checkbox", { name: "上滑打开笔记" });
-    assert.equal(await turn.inputValue(), "slide", "legacy scroll token is not a global layout choice");
-    assert.equal(await turn.getByRole("option").count(), 3);
-    await chrome.selectOption("minimal");
-    await turn.selectOption("cover");
+    assert.equal(await turn.getByRole("button", { name: "左右平移" }).getAttribute("aria-pressed"), "true",
+      "legacy scroll token is not a global layout choice");
+    assert.equal(await turn.getByRole("button").count(), 3);
+    await minimal.click();
+    await cover.click();
     await pull.uncheck();
     await swipe.uncheck();
     await assertNoHorizontalOverflow(phone, "reading-controls-390");
@@ -463,8 +496,8 @@ async function verifySettingsSections(browser, previewUrl) {
     await phone.reload();
     await phone.getByRole("tab", { name: "设置" }).click();
     await index.getByRole("button", { name: /阅读与翻页/ }).click();
-    assert.equal(await chrome.inputValue(), "minimal");
-    assert.equal(await turn.inputValue(), "cover");
+    assert.equal(await minimal.getAttribute("aria-pressed"), "true");
+    assert.equal(await cover.getAttribute("aria-pressed"), "true");
     assert.equal(await pull.isChecked(), false);
     assert.equal(await swipe.isChecked(), false);
     await phone.getByRole("tab", { name: "书架" }).click();
@@ -579,7 +612,7 @@ async function verifySettingsRemovalDuringBack(browser, previewUrl) {
   try {
     await phone.goto(previewUrl);
     await phone.getByRole("tab", { name: "设置" }).click();
-    await phone.getByRole("button", { name: /离线词典管理/ }).click();
+    await phone.getByRole("button", { name: /离线词典/ }).click();
     const panel = phone.getByRole("region", { name: "离线词典管理" });
     await panel.getByRole("button", { name: "移除词典：隔离测试词典" }).click();
     await phone.getByRole("alertdialog").getByRole("button", { name: "移除词典", exact: true }).click();
@@ -615,10 +648,17 @@ async function verifyCompactShelfToolbar(browser, previewUrl) {
     assert.ok(Math.abs(searchBox.y + searchBox.height / 2 - selectBox.y - selectBox.height / 2) < 2);
     await phone.getByRole("button", { name: "导入", exact: true }).waitFor();
     assert.ok(await order.evaluate((el) => el.scrollWidth > el.clientWidth));
+    assert.ok(await order.evaluate(row => row.scrollLeft <= 2), "only the initial snap inset may be scrolled");
+    assert.ok(await filters.evaluate(button => {
+      const box = button.getBoundingClientRect();
+      return box.width >= 44 && box.left >= 0 && box.right <= innerWidth &&
+        button.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    }), "filter must be discoverable and tappable before scrolling the sort strip");
     await phone.screenshot({ path: path.join(screenshotDir, "shelf-toolbar-360.png"), animations: "disabled" });
 
     const cards = phone.locator(".shelf-catalog [data-shelf-open]");
     const first = await cards.first().getAttribute("title");
+    assert.equal(await order.getByRole("button", { name: "书名 A–Z" }).getAttribute("aria-pressed"), "true");
     await order.getByRole("button", { name: "书名 Z–A" }).press("Enter");
     assert.equal(await order.getByRole("button", { name: "书名 Z–A" }).getAttribute("aria-pressed"), "true");
     assert.notEqual(await cards.first().getAttribute("title"), first);
@@ -639,6 +679,20 @@ async function verifyCompactShelfToolbar(browser, previewUrl) {
     await phone.locator(".book-list").waitFor();
     await phone.getByRole("button", { name: "封面网格" }).click();
     await phone.locator(".book-grid").waitFor();
+
+    const quick = order.getByRole("group", { name: "常用分类" }).getByRole("button").first();
+    await quick.tap();
+    assert.equal(await quick.getAttribute("aria-pressed"), "true");
+    assert.ok(await cards.count() > 0);
+    const scrollX = await order.evaluate((row) => row.scrollLeft);
+    assert.ok(scrollX > 0);
+    await cards.first().tap();
+    await waitForReaderEntry(phone);
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await quick.waitFor();
+    await phone.waitForFunction((x) =>
+      Math.abs(document.querySelector(".sort-strip")?.scrollLeft - x) < 2, scrollX);
+    assert.equal(await quick.getAttribute("aria-pressed"), "true");
   } finally {
     await phone.close();
   }
@@ -798,6 +852,36 @@ async function run() {
     await page.waitForSelector(".book-card");
     await page.waitForTimeout(450);
 
+    const coverProgress = page.locator(".book-grid .progress-fill").first();
+    const progressMotion = await coverProgress.evaluate(async (fill) => {
+      const track = fill.parentElement;
+      const property = getComputedStyle(fill).transitionProperty;
+      const original = fill.style.getPropertyValue("--progress-percent");
+      const bar = track.getBoundingClientRect();
+      const fraction = () => (fill.getBoundingClientRect().right - bar.left) / bar.width;
+      const start = fraction();
+      const layoutWidth = fill.offsetWidth;
+
+      fill.style.setProperty("--progress-percent", "100%");
+      getComputedStyle(fill).transform;
+      await Promise.all(fill.getAnimations().map(animation => animation.finished));
+      const complete = fraction();
+      const trackUnchanged = track.getBoundingClientRect().width === bar.width &&
+        fill.offsetWidth === layoutWidth;
+
+      fill.style.setProperty("--progress-percent", original);
+      getComputedStyle(fill).transform;
+      await Promise.all(fill.getAnimations().map(animation => animation.finished));
+      return { property, expected: Number.parseFloat(original) / 100, start, complete, trackUnchanged };
+    });
+    assert.equal(progressMotion.property, "transform");
+    assert.ok(Math.abs(progressMotion.start - progressMotion.expected) < 0.002);
+    assert.ok(Math.abs(progressMotion.complete - 1) < 0.002);
+    assert.equal(progressMotion.trackUnchanged, true);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await coverProgress.evaluate(fill => getComputedStyle(fill).transitionDuration), "0s");
+    await page.emulateMedia({ reducedMotion: null });
+
     await assertNoHorizontalOverflow(page, "library-light-1440");
     await assertBorderless(page, [
       ".nav-shell",
@@ -850,9 +934,11 @@ async function run() {
       const btn = document.querySelector('button[aria-label*="书签"]');
       return btn?.getAttribute("aria-pressed") === "true";
     });
+    await page.getByRole("button", { name: "进度", exact: true }).click();
     await page.getByRole("button", { name: "下一页" }).click();
     await page.waitForTimeout(250);
     await page.getByRole("button", { name: "上一页" }).click();
+    await page.getByRole("button", { name: "关闭阅读进度" }).click();
     await page.waitForTimeout(250);
 
     // Open C2 Reader Settings Dialog + verify Paper theme + CSS Modules lazy CodeMirror

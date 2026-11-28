@@ -322,17 +322,9 @@ button:disabled {
   position: relative;
   width: var(--reader-col-w, min(calc(var(--reader-width, 100vw) - var(--reader-pad-x, 32px) * 2), var(--reader-content-max-width, 760px)));
   height: 100%;
+  /* Long chapters still use scrollLeft, but only pagination moves the page. */
   overflow: hidden;
   flex: none;
-}
-
-.reader[data-native-page-scroll] .page {
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.reader[data-native-page-scroll] .page::-webkit-scrollbar {
-  display: none;
 }
 
 .reader[data-reading-mode="scroll"] .page {

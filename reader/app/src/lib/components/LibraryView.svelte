@@ -48,7 +48,6 @@
     recentShelf,
     shelfFacetOptions,
     shelfFacets,
-    shelfSorts,
     toggleFacet,
     type Facet,
     type ShelfEntry,
@@ -94,6 +93,13 @@
   let searchQuery = $state("");
   let filters = $state<ShelfFilters>(emptyFilters());
   let sort = $state<ShelfSort>("title");
+  const primarySorts = [
+    ["recent", "最近阅读", "最近阅读"],
+    ["title", "书名", "书名 A–Z"],
+    ["author", "作者", "作者"],
+    ["progress", "进度", "阅读进度"],
+    ["added", "最近添加", "最近添加"],
+  ] as const;
   let layout = $state<ShelfLayout>("grid");
   let filterPopoverOpen = $state(false);
   let searchInput = $state<HTMLInputElement>();
@@ -102,9 +108,9 @@
 
   // Scroll containers for C4 continuity
   let pageEl = $state<HTMLElement | null>(null);
+  let sortStripEl = $state<HTMLElement>();
   let recentScroll = $state(0);
   let recentDrawerOpen = $state(false);
-  let tagsStripEl = $state<HTMLElement | null>(null);
 
   let selecting = $state(false);
   let selectedIds = $state<ReadonlySet<string>>(new Set());
@@ -141,6 +147,7 @@
   const selectedBooks = $derived(
     filteredEntries.filter(({ book }) => selectedIds.has(book.id)).map(({ book }) => book),
   );
+  const allFilteredSelected = $derived(filteredEntries.length > 0 && selectedBooks.length === filteredEntries.length);
   const singleBook = $derived(selectedBooks.length === 1 ? selectedBooks[0] : undefined);
   const favoriteLabel = $derived(selectedBooks.every((book) => book.favorite) ? "取消收藏" : "收藏");
   const facetSummary = $derived(shelfFacetOptions(entries, searchQuery, filters));
@@ -159,7 +166,7 @@
     const pos = emptyShelfPosition();
     pos.y = pageEl?.scrollTop ?? window.scrollY ?? 0;
     pos.recentX = recentScroll;
-    pos.tagsX = tagsStripEl?.scrollLeft ?? 0;
+    pos.sortX = sortStripEl?.scrollLeft ?? 0;
     if (origin) {
       pos.anchor = origin;
       pos.focus = origin;
@@ -200,9 +207,7 @@
       window.scrollTo({ top: saved.position.y, behavior: "instant" as ScrollBehavior });
     }
     recentScroll = saved.position.recentX;
-    if (tagsStripEl && saved.position.tagsX > 0) {
-      tagsStripEl.scrollLeft = saved.position.tagsX;
-    }
+    if (sortStripEl) sortStripEl.scrollLeft = saved.position.sortX;
     sessionReady = true;
   }
 
@@ -439,6 +444,10 @@
     selectedIds = next;
   }
 
+  function toggleSelectAll() {
+    selectedIds = allFilteredSelected ? new Set() : new Set(filteredEntries.map(({ book }) => book.id));
+  }
+
   function cancelHold() {
     clearTimeout(holdTimer);
     press = undefined;
@@ -644,13 +653,25 @@
     <div class="drop-scrim glass-popover" role="status">松开鼠标，立即导入书籍至书架</div>
   {/if}
   <header class="shelf-header">
-    <div class="header-titles">
-      <h1>书架</h1>
-      <button type="button" class="accent-btn import-btn" onclick={handleImport}>
-        <Plus size={16} />
-        <span>导入</span>
-      </button>
-    </div>
+    {#if selecting}
+      <div class="selection-header" role="toolbar" aria-label="批量选择">
+        <button type="button" class="pill-btn select-trigger" disabled={loading || batchBusy || filteredEntries.length === 0}
+          onclick={toggleSelectAll}>
+          <CheckSquare size={15} />{allFilteredSelected ? "取消全选" : "全选"}
+        </button>
+        <span class="selection-count tabular" aria-live="polite">已选 {selectedBooks.length} 册</span>
+        <button type="button" class="accent-btn select-trigger" aria-label="退出选择" disabled={batchBusy}
+          onclick={() => exitSelection(true)}>完成</button>
+      </div>
+    {:else}
+      <div class="header-titles">
+        <div class="shelf-title-group"><h1>书架</h1><span class="shelf-count tabular">{entries.length} 册</span></div>
+        <button type="button" class="accent-btn import-btn" onclick={handleImport}>
+          <Plus size={16} />
+          <span>导入</span>
+        </button>
+      </div>
+    {/if}
 
     <div class="find-bar">
       <div class="well-input search-pill">
@@ -675,69 +696,6 @@
       </div>
 
       <div class="bar-controls">
-        <Popover.Root bind:open={filterPopoverOpen}>
-          <Popover.Trigger class="pill-btn filter-trigger {activeFilterCount > 0 ? 'active-accent' : ''}" aria-label="筛选藏书">
-            <Filter size={15} />
-            <span class="filter-label">筛选</span>
-            {#if activeFilterCount > 0}
-              <span class="count-badge tabular">{activeFilterCount}</span>
-            {/if}
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content sideOffset={10} align="end" class="glass-popover filter-popover">
-              <div class="filter-head">
-                <span class="filter-title">筛选藏书</span>
-                <span class="filter-matches tabular">匹配 {facetSummary.matches} 册</span>
-              </div>
-
-              <div class="filter-favorite-row">
-                <label class="switch-label" for="shelf-fav-switch">
-                  <Heart size={15} />
-                  <span>仅看收藏书籍</span>
-                </label>
-                <Switch.Root
-                  id="shelf-fav-switch"
-                  checked={filters.favorite}
-                  onCheckedChange={(checked) => (filters = { ...filters, favorite: checked })}
-                  class="atha-switch"
-                >
-                  <Switch.Thumb class="atha-switch-thumb" />
-                </Switch.Root>
-              </div>
-
-              {#each facetSummary.groups as group (group.key)}
-                {#if group.options.length > 0}
-                  <div class="facet-group">
-                    <div class="facet-label">{shelfFacets[group.key]}</div>
-                    <div class="facet-pills">
-                      {#each group.options as option (option.value)}
-                        {@const selected = filters[group.key].includes(option.value)}
-                        <button
-                          type="button"
-                          class="facet-pill"
-                          class:selected
-                          onclick={() => toggleFilterFacet(group.key, option.value)}
-                        >
-                          <span>{facetLabel(group.key, option.value)}</span>
-                          <span class="facet-count tabular">{option.count}</span>
-                        </button>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-              {/each}
-
-              {#if activeFilterCount > 0}
-                <div class="filter-footer">
-                  <button type="button" class="pill-btn" onclick={clearAllFilters}>
-                    清除全部条件
-                  </button>
-                </div>
-              {/if}
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-
         <button
           type="button"
           class="icon-btn shelf-layout-toggle"
@@ -755,41 +713,109 @@
           aria-pressed={selecting}
           disabled={loading || batchBusy}
           bind:this={selectionToggle}
-          onclick={() => selecting ? exitSelection() : enterSelection()}
+          onclick={() => selecting ? exitSelection(true) : enterSelection()}
         >
-          {#if selecting}<X size={15} />{:else}<CheckSquare size={15} />{/if}
-          <span>{selecting ? "取消选择" : "选择"}</span>
+          <span>{selecting ? "取消" : "选择"}</span>
         </button>
 
       </div>
     </div>
 
-    <div class="sort-strip" role="group" aria-label="书架排序">
-      {#each shelfSorts as [value, label] (value)}
+    <div class="shelf-sort-row">
+      <div class="sort-strip" role="group" aria-label="书架排序" bind:this={sortStripEl}>
+        {#each primarySorts as [value, label, name] (value)}
+          <button
+            type="button"
+            class="sort-chip"
+            aria-label={name}
+            aria-pressed={sort === value}
+            onclick={() => (sort = value)}
+          >{label}</button>
+        {/each}
         <button
           type="button"
-          class="sort-chip"
-          aria-pressed={sort === value}
-          onclick={() => (sort = value)}
-        >{label}</button>
-      {/each}
-      <button
-        type="button"
-        class="sort-chip favorite-toggle"
-        aria-pressed={filters.favorite}
-        onclick={() => (filters = { ...filters, favorite: !filters.favorite })}
-      ><Heart size={14} /> 收藏</button>
+          class="sort-chip favorite-toggle"
+          aria-pressed={filters.favorite}
+          onclick={() => (filters = { ...filters, favorite: !filters.favorite })}
+        >收藏</button>
+        <button type="button" class="sort-chip" aria-pressed={sort === "title-desc"} onclick={() => (sort = "title-desc")}>书名 Z–A</button>
+        {#if quickFacets.length > 0}
+          <div class="quick-facets" role="group" aria-label="常用分类">
+            {#each quickFacets as item (`${item.key}:${item.value}`)}
+              {@const active = filters[item.key].includes(item.value)}
+              <button type="button" class="quick-pill" aria-pressed={active}
+                onclick={() => toggleFilterFacet(item.key, item.value)}>{item.value}</button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <Popover.Root bind:open={filterPopoverOpen}>
+        <Popover.Trigger class="icon-btn filter-trigger {activeFilterCount > 0 ? 'active-accent' : ''}" aria-label="筛选藏书">
+          <Filter size={15} />
+          <span class="filter-label" aria-hidden="true">筛选</span>
+          {#if activeFilterCount > 0}
+            <span class="count-badge tabular">{activeFilterCount}</span>
+          {/if}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content sideOffset={10} align="end" class="glass-popover filter-popover">
+            <div class="filter-head">
+              <span class="filter-title">筛选藏书</span>
+              <span class="filter-matches tabular">匹配 {facetSummary.matches} 册</span>
+            </div>
+
+            <div class="filter-favorite-row">
+              <label class="switch-label" for="shelf-fav-switch">
+                <Heart size={15} />
+                <span>仅看收藏书籍</span>
+              </label>
+              <Switch.Root
+                id="shelf-fav-switch"
+                checked={filters.favorite}
+                onCheckedChange={(checked) => (filters = { ...filters, favorite: checked })}
+                class="atha-switch"
+              >
+                <Switch.Thumb class="atha-switch-thumb" />
+              </Switch.Root>
+            </div>
+
+            {#each facetSummary.groups as group (group.key)}
+              {#if group.options.length > 0}
+                <div class="facet-group">
+                  <div class="facet-label">{shelfFacets[group.key]}</div>
+                  <div class="facet-pills">
+                    {#each group.options as option (option.value)}
+                      {@const selected = filters[group.key].includes(option.value)}
+                      <button
+                        type="button"
+                        class="facet-pill"
+                        class:selected
+                        onclick={() => toggleFilterFacet(group.key, option.value)}
+                      >
+                        <span>{facetLabel(group.key, option.value)}</span>
+                        <span class="facet-count tabular">{option.count}</span>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            {/each}
+
+            {#if activeFilterCount > 0}
+              <div class="filter-footer">
+                <button type="button" class="pill-btn" onclick={clearAllFilters}>
+                  清除全部条件
+                </button>
+              </div>
+            {/if}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   </header>
 
   {#if selecting}
     <div class="shelf-actions glass-island" role="group" aria-label="选中书籍操作">
-      <div class="selection-summary">
-        <span class="selection-count tabular" aria-live="polite">已选 {selectedBooks.length} 册</span>
-        <button type="button" class="shelf-action selection-close" aria-label="退出选择" disabled={batchBusy} onclick={() => exitSelection(true)}>
-          <X size={17} />
-        </button>
-      </div>
       <div class="selection-options">
         {#if selectedBooks.length === 0}
           <span class="selection-hint">点按书籍，可选多册</span>
@@ -799,13 +825,13 @@
             <span>{favoriteLabel}</span>
           </button>
           {#if singleBook}
-            <button type="button" class="shelf-action" disabled={batchBusy} onclick={() => openEditDialog(singleBook!)}>
-              <Tag size={17} />
-              <span>编辑信息</span>
-            </button>
             <button type="button" class="shelf-action" disabled={batchBusy} onclick={() => void handleSetCover(singleBook!)}>
               <Image size={17} />
               <span>换封面</span>
+            </button>
+            <button type="button" class="shelf-action" disabled={batchBusy} onclick={() => openEditDialog(singleBook!)}>
+              <Tag size={17} />
+              <span>编辑信息</span>
             </button>
           {/if}
           <button type="button" class="shelf-action" disabled={batchBusy} onclick={() => requestBookConfirm("remove")}>
@@ -872,27 +898,13 @@
     />
   {/if}
 
-  {#if quickFacets.length > 0}
-    <div class="quick-facets" bind:this={tagsStripEl} aria-label="常用分类">
-      {#each quickFacets as item (`${item.key}:${item.value}`)}
-        {@const active = filters[item.key].includes(item.value)}
-        <button
-          type="button"
-          class="quick-pill"
-          class:active
-          onclick={() => toggleFilterFacet(item.key, item.value)}
-        >
-          {item.value}
-        </button>
-      {/each}
-    </div>
-  {/if}
-
   <section class="shelf-section" aria-label="全部藏书">
-    <div class="section-head">
-      <h2>{searchQuery.trim() || activeFilterCount > 0 ? "筛选结果" : "全部藏书"}</h2>
-      <span class="section-hint tabular">{filteredEntries.length} 册</span>
-    </div>
+    {#if searchQuery.trim() || activeFilterCount > 0}
+      <div class="section-head">
+        <h2>{searchQuery.trim() ? "搜索结果" : filters.favorite && activeFilterCount === 1 ? "我的收藏" : "筛选结果"}</h2>
+        <span class="section-hint tabular">{filteredEntries.length} / {entries.length} 册</span>
+      </div>
+    {/if}
 
     {#if loading && books.length === 0}
       <div class="empty-shelf">正在整理书房藏书…</div>
@@ -933,6 +945,7 @@
                   book={entry.book}
                   index={idx}
                   percent={entry.fact?.percent ?? null}
+                  showFavorite={!uiPrefs.state.shelfShowMeta}
                   coverRevision={coverRevision[entry.book.id] ?? 0}
                 />
                 {#if selecting}
@@ -945,7 +958,10 @@
             {#if uiPrefs.state.shelfShowMeta}
               <div class="book-info">
                 <div class="book-title">{entry.book.title}</div>
-                <div class="book-author">{entry.author || "佚名"}</div>
+                <div class="book-author">
+                  {#if entry.book.favorite}<Heart size={11} fill="currentColor" aria-label="已收藏" />{/if}
+                  <span>{entry.author || "佚名"}</span>
+                </div>
               </div>
             {/if}
           </article>
@@ -1106,6 +1122,14 @@
     margin-bottom: 18px;
   }
 
+  .library-shell.selecting .shelf-header {
+    position: sticky;
+    top: var(--safe-area-top);
+    z-index: 30;
+    padding-block: 6px;
+    background: var(--bg-canvas);
+  }
+
   .header-titles {
     display: flex;
     align-items: center;
@@ -1184,7 +1208,6 @@
     gap: 6px;
   }
 
-  .bar-controls :global(.filter-trigger),
   .shelf-layout-toggle,
   .select-trigger,
   .import-btn {
@@ -1196,15 +1219,43 @@
     background: var(--bg-well);
   }
 
-  .sort-strip {
+  .shelf-title-group {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .shelf-count {
+    font-size: 12px;
+    color: var(--ink-secondary);
+  }
+
+  .selection-header {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .selection-header button:first-child { justify-self: start; }
+  .selection-header button:last-child { justify-self: end; }
+
+  .shelf-sort-row {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
+  }
+
+  .sort-strip {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     min-width: 0;
     overflow-x: auto;
     padding: 2px 2px 4px;
     scroll-snap-type: x proximity;
-    scrollbar-width: thin;
+    scrollbar-width: none;
   }
 
   .sort-chip {
@@ -1213,7 +1264,7 @@
     gap: 5px;
     flex: none;
     min-height: 44px;
-    padding: 0 11px;
+    padding: 0 4px;
     border-radius: var(--radius-pill);
     color: var(--ink-secondary);
     font-size: 14px;
@@ -1221,8 +1272,54 @@
     scroll-snap-align: start;
   }
 
-  .sort-chip:hover { background: var(--bg-well); }
-  .sort-chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .sort-chip:hover { color: var(--ink-primary); }
+  .sort-chip[aria-pressed="true"] {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 7px;
+  }
+
+  .shelf-sort-row :global(.filter-trigger) {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 5px;
+    min-width: 44px;
+    min-height: 44px;
+    width: auto;
+    padding-inline: 10px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-well);
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .shelf-sort-row :global(.filter-trigger.active-accent) {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .quick-facets {
+    display: flex;
+    flex: none;
+    gap: 6px;
+    padding-inline-start: 12px;
+    border-inline-start: 1px solid var(--bg-well-active);
+  }
+
+  .quick-pill {
+    min-height: 44px;
+    padding-inline: 12px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-well);
+    color: var(--ink-secondary);
+    font-size: 13px;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+
+  .quick-pill[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
 
   :global(.pill-btn.active-accent) {
     background: var(--accent-soft);
@@ -1297,41 +1394,6 @@
   .section-hint {
     font-size: 12.5px;
     color: var(--ink-muted);
-  }
-
-  .quick-facets {
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    padding: 4px 0 8px;
-    scrollbar-width: none;
-  }
-
-  .quick-facets::-webkit-scrollbar {
-    display: none;
-  }
-
-  .quick-pill {
-    flex: none;
-    height: 32px;
-    padding: 0 14px;
-    border-radius: var(--radius-pill);
-    background: var(--bg-well);
-    color: var(--ink-secondary);
-    font-size: 12.5px;
-    font-weight: 500;
-    transition: background-color 180ms var(--ease-smooth), color 180ms var(--ease-smooth);
-  }
-
-  .quick-pill:hover {
-    background: var(--bg-well-hover);
-    color: var(--ink-primary);
-  }
-
-  .quick-pill.active {
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-weight: 600;
   }
 
   .book-grid {
@@ -1424,12 +1486,18 @@
   }
 
   .book-author {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     font-size: 12px;
     color: var(--ink-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .book-author :global(svg) { flex: none; color: var(--accent); }
+  .book-author span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .book-list {
     display: flex;
@@ -1540,7 +1608,8 @@
     background: var(--bg-glass-strong);
   }
 
-  .selection-count,
+  .selection-count { font-weight: 600; white-space: nowrap; }
+
   .selection-hint {
     padding: 0 8px;
     color: var(--ink-secondary);
@@ -1548,7 +1617,6 @@
     white-space: nowrap;
   }
 
-  .selection-summary,
   .selection-options {
     display: flex;
     align-items: center;
@@ -1769,34 +1837,24 @@
 
   @media (max-width: 899px) {
     .library-shell {
-      padding: 22px 16px 104px;
+      padding: 14px 16px 104px;
+    }
+
+    .shelf-section { margin-top: 14px; }
+    .sort-strip { gap: 8px; }
+    .filter-label { display: none; }
+    .shelf-sort-row :global(.filter-trigger) { position: relative; }
+    .shelf-sort-row .count-badge {
+      position: absolute;
+      inset: 2px 2px auto auto;
+      height: 15px;
+      min-width: 15px;
+      padding: 0 2px;
+      font-size: 10px;
     }
 
     .header-titles h1 {
       font-size: 26px;
-    }
-
-    .bar-controls :global(.filter-trigger) {
-      position: relative;
-      padding: 0 8px;
-    }
-
-    .filter-label {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-    }
-
-    .bar-controls .count-badge {
-      position: absolute;
-      top: 3px;
-      right: 3px;
-      min-width: 14px;
-      height: 14px;
-      padding: 0 2px;
-      font-size: 9px;
     }
 
     .select-trigger { padding: 0 10px; }
@@ -1807,34 +1865,29 @@
     }
 
     .library-shell.selecting {
-      padding-bottom: 130px;
+      padding-bottom: calc(96px + var(--safe-area-bottom));
     }
 
     .shelf-actions {
-      left: 50%;
-      translate: -50% 0;
-      bottom: max(14px, var(--safe-area-bottom));
-      margin-left: calc((var(--safe-area-left) - var(--safe-area-right)) / 2);
-      width: min(calc(100% - 32px - var(--safe-area-left) - var(--safe-area-right)), 420px);
-      flex-direction: column;
-      align-items: stretch;
-      gap: 0;
-      padding: 5px 8px;
-    }
-
-    .selection-summary {
-      justify-content: space-between;
+      inset-inline: 0;
+      bottom: 0;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      padding: 8px calc(10px + var(--safe-area-right)) calc(10px + var(--safe-area-bottom)) calc(10px + var(--safe-area-left));
     }
 
     .selection-options {
-      justify-content: space-evenly;
-      flex-wrap: wrap;
+      width: 100%;
+      justify-content: center;
+      gap: 6px;
     }
 
     .shelf-action {
+      flex: 1;
       flex-direction: column;
       gap: 3px;
-      padding: 3px 4px;
+      min-height: 48px;
+      padding: 4px 2px;
+      background: var(--bg-well);
     }
 
     .library-shell.has-resume {

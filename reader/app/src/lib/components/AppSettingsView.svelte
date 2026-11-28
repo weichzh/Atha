@@ -67,10 +67,13 @@
   ];
 
   type Section = "appearance" | "shelf" | "reading" | "typography" | "dictionary" | "storage";
+  type SettingsGroup = { title: string; items: { id: Section; label: string; keywords: string; icon: typeof Sun; detail: string }[] };
 
   let width = $state(window.innerWidth);
   let section = $state<Section | null>(window.innerWidth >= 900 ? "appearance" : null);
   let query = $state("");
+  let searchOpen = $state(false);
+  let searchToggle = $state<HTMLButtonElement>();
   let searchInput = $state<HTMLInputElement>();
   let indexEl = $state<HTMLElement>();
   let detailEl = $state<HTMLElement>();
@@ -78,41 +81,52 @@
   let indexScroll = 0;
   const wide = $derived(width >= 900);
   const pageTurnStyle = $derived(uiPrefs.state.pageTurnStyle === "scroll" ? "slide" : uiPrefs.state.pageTurnStyle);
-  const groups = $derived([
+  const chromeChoices: { value: ReaderChromeStyle; label: string }[] = [
+    { value: "classic", label: "经典双栏" }, { value: "minimal", label: "极简手势" },
+  ];
+  const turnChoices: { value: Exclude<PageTurnStyle, "scroll">; label: string }[] = [
+    { value: "slide", label: "左右平移" }, { value: "cover", label: "覆盖翻页" }, { value: "curl", label: "仿真卷页" },
+  ];
+  const densityChoices: { value: ShelfDesktopDensity; label: string }[] = [
+    { value: "comfortable", label: "宽松" }, { value: "standard", label: "标准" }, { value: "compact", label: "紧凑" },
+  ];
+  const mobileColumns: ShelfMobileColumns[] = [2, 3, 4];
+  const groups: SettingsGroup[] = $derived([
     {
       title: "界面与书架",
       items: [
-        { id: "appearance", label: "应用外观", keywords: "主题 深色 浅色 夜间", icon: Palette,
+        { id: "appearance", label: "外观主题", keywords: "应用外观 主题 深色 浅色 夜间", icon: Palette,
           detail: themeOptions.find((option) => option.value === appTheme)?.label ?? "" },
         { id: "shelf", label: "书架布局", keywords: "封面 列数 密度 继续阅读", icon: LayoutGrid,
-          detail: `${uiPrefs.state.shelfMobileColumns} 列` },
+          detail: `${uiPrefs.state.shelfMobileColumns} 列 · ${densityChoices.find((opt) => opt.value === uiPrefs.state.shelfDesktopDensity)?.label ?? ""}` },
       ],
     },
     {
       title: "阅读体验",
       items: [
         { id: "reading", label: "阅读与翻页", keywords: "控件 手势 经典 极简 书签 笔记 动效 滑动 覆盖 卷页", icon: BookOpen,
-          detail: uiPrefs.state.readerChromeStyle === "minimal" ? "极简" : "经典" },
-        { id: "typography", label: "全书阅读默认", keywords: "排版 字号 行距 亮度 恢复 重置", icon: Type, detail: "" },
+          detail: `${chromeChoices.find((opt) => opt.value === uiPrefs.state.readerChromeStyle)?.label ?? ""} · ${turnChoices.find((opt) => opt.value === pageTurnStyle)?.label ?? ""}` },
+        { id: "typography", label: "全书默认排版", keywords: "全书阅读默认 排版 字号 行距 亮度 恢复 重置", icon: Type, detail: "恢复默认" },
       ],
     },
     {
       title: "词典与数据",
       items: [
-        { id: "dictionary", label: "离线词典管理", keywords: "词典 查词 MDX MDD MOBI 字号", icon: BookMarked,
-          detail: `${dictionaries.length} 部` },
-        { id: "storage", label: "本地资料与完整备份", keywords: "存储 恢复 导出 数据 空间", icon: Database,
+        { id: "dictionary", label: "离线词典", keywords: "离线词典管理 查词 MDX MDD MOBI 字号", icon: BookMarked,
+          detail: `${dictionaries.length} 本` },
+        { id: "storage", label: "本地存储与备份", keywords: "本地资料与完整备份 存储 恢复 导出 数据 空间", icon: Database,
           detail: usage ? formatBytes(usage.totalBytes) : "" },
       ],
     },
-  ] satisfies { title: string; items: { id: Section; label: string; keywords: string; icon: typeof Sun; detail: string }[] }[]);
+  ]);
+  const sectionTitle = $derived(groups.flatMap((group) => group.items).find((item) => item.id === section)?.label ?? "设置");
   const sectionGroups = $derived.by(() => {
     const term = query.trim().normalize("NFKC").toLocaleLowerCase();
     if (!term) return groups;
     return groups.map((group) => ({
       ...group,
       items: group.items.filter((item) =>
-        `${item.label} ${item.keywords}`.toLocaleLowerCase().includes(term)),
+        `${item.label} ${item.detail} ${item.keywords}`.normalize("NFKC").toLocaleLowerCase().includes(term)),
     })).filter((group) => group.items.length);
   });
 
@@ -136,6 +150,13 @@
     window.scrollTo({ top: indexScroll, behavior: "instant" });
     const entry = indexEl?.querySelector<HTMLButtonElement>(`[data-setting="${lastSection}"]`);
     (entry ?? searchInput)?.focus({ preventScroll: true });
+  }
+
+  async function toggleSearch() {
+    searchOpen = !searchOpen;
+    if (!searchOpen) query = "";
+    await tick();
+    (searchOpen ? searchInput : searchToggle)?.focus({ preventScroll: true });
   }
 
   function clearSearch() {
@@ -174,9 +195,8 @@
         void showIndex();
         return true;
       }
-      if (query || document.activeElement === searchInput) {
-        query = "";
-        searchInput?.blur();
+      if (searchOpen) {
+        void toggleSearch();
         return true;
       }
       return false;
@@ -289,14 +309,19 @@
 <svelte:window bind:innerWidth={width} />
 
 <section class="settings-shell" aria-label="设置" aria-busy={applyingChange}>
-  <header class="settings-header">
+  <header class="settings-header" class:subpage={!wide && section !== null}>
     {#if !wide && section}
-      <button type="button" class="pill-btn settings-back" disabled={applyingChange} onclick={() => void showIndex()}>
+      <button type="button" class="settings-back" aria-label="返回设置" disabled={applyingChange} onclick={() => void showIndex()}>
         <ArrowLeft size={17} />
-        <span>返回设置</span>
+        <span>设置</span>
       </button>
+      <h1 class="settings-subtitle">{sectionTitle}</h1>
     {:else}
       <h1>设置</h1>
+      <button type="button" class="icon-btn settings-search-toggle" aria-label="搜索设置项"
+        aria-expanded={searchOpen} bind:this={searchToggle} onclick={() => void toggleSearch()}>
+        {#if searchOpen}<X size={19} />{:else}<Search size={19} />{/if}
+      </button>
     {/if}
   </header>
 
@@ -307,32 +332,36 @@
   <div class="settings-layout">
     {#if wide || !section}
       <nav class="settings-index" aria-label="设置项目" bind:this={indexEl}>
-        <div class="well-input settings-search">
-          <Search size={16} />
-          <input type="search" aria-label="搜索设置" placeholder="搜索设置…" bind:value={query} bind:this={searchInput} />
-          {#if query}
-            <button type="button" class="icon-btn" aria-label="清除搜索" onclick={clearSearch}><X size={16} /></button>
-          {/if}
-        </div>
+        {#if searchOpen}
+          <div class="well-input settings-search">
+            <Search size={16} />
+            <input type="search" aria-label="搜索设置" placeholder="检索主题、列数、翻页、词典或备份…" bind:value={query} bind:this={searchInput} />
+            {#if query}
+              <button type="button" class="icon-btn" aria-label="清除搜索" onclick={clearSearch}><X size={16} /></button>
+            {/if}
+          </div>
+        {/if}
         {#each sectionGroups as group (group.title)}
           <section class="settings-index-group">
             <h2>{group.title}</h2>
-            {#each group.items as item (item.id)}
-              {@const Icon = item.icon}
-              <button
-                type="button"
-                class="settings-link"
-                class:current={section === item.id}
-                data-setting={item.id}
-                aria-current={section === item.id ? "true" : undefined}
-                onclick={() => void showSection(item.id)}
-              >
-                <Icon size={17} />
-                <span>{item.label}</span>
-                {#if item.detail}<span class="settings-value">{item.detail}</span>{/if}
-                <ChevronRight size={15} />
-              </button>
-            {/each}
+            <div class="settings-group-card">
+              {#each group.items as item (item.id)}
+                {@const Icon = item.icon}
+                <button
+                  type="button"
+                  class="settings-link"
+                  class:current={section === item.id}
+                  data-setting={item.id}
+                  aria-current={section === item.id ? "true" : undefined}
+                  onclick={() => void showSection(item.id)}
+                >
+                  <Icon size={19} strokeWidth={1.75} aria-hidden="true" />
+                  <span>{item.label}</span>
+                  {#if item.detail}<span class="settings-value">{item.detail}</span>{/if}
+                  <ChevronRight size={17} aria-hidden="true" />
+                </button>
+              {/each}
+            </div>
           </section>
         {:else}
           <p class="settings-empty" role="status">没有匹配的设置。</p>
@@ -350,19 +379,20 @@
             </div>
             <p class="block-desc">决定书房工具界面的明暗呈现，不会覆盖书籍正文内的日间 / 纸色 / 夜间主题。</p>
 
-            <div class="segmented-row" role="radiogroup" aria-label="应用外观模式">
+            <div class="settings-group-card" role="radiogroup" aria-label="应用外观模式">
               {#each themeOptions as opt (opt.value)}
                 {@const Icon = opt.icon}
                 <button
                   type="button"
                   role="radio"
                   aria-checked={appTheme === opt.value}
-                  class="theme-pill"
-                  class:active={appTheme === opt.value}
+                  class="settings-link theme-row"
+                  class:current={appTheme === opt.value}
                   onclick={() => selectTheme(opt.value)}
                 >
-                  <Icon size={16} />
+                  <Icon size={18} aria-hidden="true" />
                   <span>{opt.label}</span>
+                  {#if appTheme === opt.value}<span class="selected-theme" aria-hidden="true">当前使用</span>{/if}
                 </button>
               {/each}
             </div>
@@ -375,28 +405,24 @@
               <span class="scope-tag">仅此设备</span>
             </div>
             <div class="preference-rows">
-              <label>
-                <span>手机封面列数</span>
-                <select
-                  value={uiPrefs.state.shelfMobileColumns}
-                  onchange={(event) => uiPrefs.update({ shelfMobileColumns: Number(event.currentTarget.value) as ShelfMobileColumns })}
-                >
-                  <option value={2}>2 列</option>
-                  <option value={3}>3 列</option>
-                  <option value={4}>4 列</option>
-                </select>
-              </label>
-              <label>
-                <span>桌面封面密度</span>
-                <select
-                  value={uiPrefs.state.shelfDesktopDensity}
-                  onchange={(event) => uiPrefs.update({ shelfDesktopDensity: event.currentTarget.value as ShelfDesktopDensity })}
-                >
-                  <option value="comfortable">宽松</option>
-                  <option value="standard">标准</option>
-                  <option value="compact">紧凑</option>
-                </select>
-              </label>
+              <fieldset class="preference-options">
+                <legend>手机封面列数</legend>
+                <div class="choice-row">
+                  {#each mobileColumns as value (value)}
+                    <button type="button" class="preference-choice" aria-pressed={uiPrefs.state.shelfMobileColumns === value}
+                      onclick={() => uiPrefs.update({ shelfMobileColumns: value })}>{value} 列</button>
+                  {/each}
+                </div>
+              </fieldset>
+              <fieldset class="preference-options">
+                <legend>桌面封面密度</legend>
+                <div class="choice-row">
+                  {#each densityChoices as opt (opt.value)}
+                    <button type="button" class="preference-choice" aria-pressed={uiPrefs.state.shelfDesktopDensity === opt.value}
+                      onclick={() => uiPrefs.update({ shelfDesktopDensity: opt.value })}>{opt.label}</button>
+                  {/each}
+                </div>
+              </fieldset>
               <label>
                 <span>封面下显示书名和作者</span>
                 <input
@@ -422,31 +448,27 @@
               <h2 id="current-setting-heading">阅读与翻页</h2>
             </div>
             <div class="preference-rows">
-              <label for="app-reader-chrome">
-                <span>阅读控件</span>
-                <select
-                  id="app-reader-chrome"
-                  value={uiPrefs.state.readerChromeStyle}
-                  onchange={(event) => uiPrefs.update({ readerChromeStyle: event.currentTarget.value as ReaderChromeStyle })}
-                >
-                  <option value="classic">经典</option>
-                  <option value="minimal">极简</option>
-                </select>
-              </label>
-              <label for="app-reader-turn">
-                <span>分页动效</span>
-                <select
-                  id="app-reader-turn"
-                  value={pageTurnStyle}
-                  aria-describedby="app-reader-turn-hint"
-                  onchange={(event) => uiPrefs.update({ pageTurnStyle: event.currentTarget.value as Exclude<PageTurnStyle, "scroll"> })}
-                >
-                  <option value="slide">滑动</option>
-                  <option value="cover">覆盖</option>
-                  <option value="curl">卷页</option>
-                </select>
-              </label>
+              <fieldset class="preference-options">
+                <legend>阅读控件</legend>
+                <div class="choice-row">
+                  {#each chromeChoices as opt (opt.value)}
+                    <button type="button" class="preference-choice" aria-pressed={uiPrefs.state.readerChromeStyle === opt.value}
+                      onclick={() => uiPrefs.update({ readerChromeStyle: opt.value })}>{opt.label}</button>
+                  {/each}
+                </div>
+              </fieldset>
+              <fieldset class="preference-options" aria-describedby="app-reader-turn-hint">
+                <legend>分页动效</legend>
+                <div class="choice-row">
+                  {#each turnChoices as opt (opt.value)}
+                    <button type="button" class="preference-choice" aria-pressed={pageTurnStyle === opt.value}
+                      onclick={() => uiPrefs.update({ pageTurnStyle: opt.value })}>{opt.label}</button>
+                  {/each}
+                </div>
+              </fieldset>
               <p class="preference-hint" id="app-reader-turn-hint">仅影响分页的书；连续滚动在书内设置。</p>
+            </div>
+            <div class="preference-rows gesture-options">
               <label for="app-reader-pull">
                 <span>下拉书签</span>
                 <input
@@ -659,8 +681,14 @@
   }
 
   .settings-header {
-    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    margin-bottom: 20px;
   }
+
+  .settings-search-toggle { width: 44px; height: 44px; background: var(--bg-well); }
 
   .settings-layout {
     display: grid;
@@ -689,35 +717,66 @@
 
   .settings-search .icon-btn { width: 32px; height: 32px; }
 
-  .settings-index-group { margin-top: 18px; }
+  .settings-index-group + .settings-index-group,
+  .settings-search + .settings-index-group { margin-top: 22px; }
 
   .settings-index-group h2 {
-    margin: 0 8px 6px;
+    margin: 0 8px 8px;
     font-size: 13px;
     font-weight: 600;
     color: var(--ink-secondary);
   }
 
+  .settings-group-card {
+    border-radius: 20px;
+    overflow: hidden;
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-xs);
+  }
+
   .settings-link {
+    position: relative;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, max-content) auto;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
-    min-height: 46px;
-    padding: 8px 10px;
-    border-radius: var(--radius-md);
-    font-size: 14px;
+    min-height: 54px;
+    padding: 10px 14px;
+    font-size: 15px;
     text-align: left;
   }
 
+  .settings-link + .settings-link::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 48px;
+    border-top: 1px solid var(--bg-well);
+  }
+
+  .settings-link :global(svg) { color: var(--ink-secondary); }
   .settings-link :global(svg:last-child) { grid-column: 4; color: var(--ink-secondary); }
   .settings-link:hover { background: var(--bg-well-hover); }
   .settings-link.current { background: var(--accent-soft); color: var(--accent); }
-  .settings-value { font-size: 12px; color: var(--ink-secondary); }
+  .settings-link:focus-visible, .preference-choice:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .settings-value { max-width: 23ch; font-size: 13px; color: var(--ink-secondary); text-align: end; }
   .settings-empty { padding: 12px; color: var(--ink-secondary); }
   .settings-detail { min-width: 0; }
-  .settings-back { min-height: 44px; }
+
+  .settings-back {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    gap: 4px;
+    min-height: 44px;
+    padding: 0 12px 0 8px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-well);
+    font-size: 14px;
+  }
 
   .settings-block {
     display: flex;
@@ -727,8 +786,12 @@
 
   .preference-rows {
     display: grid;
-    gap: 8px;
+    gap: 12px;
     max-width: 500px;
+    padding: 16px;
+    border-radius: 20px;
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-xs);
   }
 
   .preference-rows label {
@@ -740,12 +803,34 @@
     font-size: 14px;
   }
 
-  .preference-rows select {
+  .preference-options {
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .preference-options legend {
+    margin-bottom: 8px;
+    padding: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  .choice-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .preference-choice {
     min-height: 44px;
     padding: 0 12px;
     border-radius: var(--radius-md);
     background: var(--bg-well);
-    color: var(--ink-primary);
+    font-size: 14px;
+  }
+
+  .preference-choice[aria-pressed="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .preference-rows input {
@@ -787,35 +872,8 @@
     color: var(--ink-secondary);
   }
 
-  .segmented-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 6px;
-    border-radius: var(--radius-lg);
-    background: var(--bg-well);
-    width: fit-content;
-  }
-
-  .theme-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 40px;
-    padding: 0 16px;
-    border-radius: var(--radius-md);
-    font-size: 13.5px;
-    font-weight: 500;
-    color: var(--ink-secondary);
-    transition: background-color 180ms var(--ease-smooth), color 180ms var(--ease-smooth), box-shadow 180ms var(--ease-smooth);
-  }
-
-  .theme-pill.active {
-    background: var(--bg-pill-active);
-    color: var(--ink-primary);
-    font-weight: 600;
-    box-shadow: var(--shadow-xs);
-  }
+  .theme-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .selected-theme { font-size: 13px; color: var(--accent); }
 
   .action-surface,
   .surface-panel {
@@ -1031,11 +1089,31 @@
 
   @media (max-width: 899px) {
     .settings-shell {
-      padding: 22px 16px 104px;
+      padding: 14px 16px 104px;
     }
 
     .settings-header h1 {
       font-size: 26px;
+    }
+
+    .settings-header.subpage {
+      display: grid;
+      grid-template-columns: minmax(70px, 1fr) auto minmax(70px, 1fr);
+      gap: 4px;
+    }
+
+    .settings-header .settings-subtitle {
+      font-family: inherit;
+      font-size: 18px;
+      text-align: center;
+    }
+
+    .settings-detail .block-head h2 {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
     }
 
     .settings-layout {

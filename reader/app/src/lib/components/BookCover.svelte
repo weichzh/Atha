@@ -8,10 +8,11 @@
     index: number;
     percent?: number | null;
     compact?: boolean;
+    showFavorite?: boolean;
     coverRevision?: number;
   }
 
-  let { book, index, percent = null, compact = false, coverRevision = 0 }: Props = $props();
+  let { book, index, percent = null, compact = false, coverRevision = 0, showFavorite = true }: Props = $props();
 
   let imageLoaded = $state(false);
   let imageFailed = $state(false);
@@ -47,7 +48,7 @@
       </div>
     {/if}
 
-    {#if book.favorite}
+    {#if book.favorite && showFavorite}
       <span class="favorite-pip" aria-label="已收藏">
         <Heart size={11} fill="currentColor" strokeWidth={2} />
       </span>
@@ -61,7 +62,7 @@
       aria-label={percent && percent > 0 ? `阅读进度 ${percent}%` : undefined}
     >
       {#if percent !== null && percent > 0}
-        <div class="progress-fill" style:width={`${Math.min(100, Math.max(4, percent))}%`}></div>
+        <div class="progress-fill" style:--progress-percent={`${Math.min(100, Math.max(4, percent))}%`}></div>
       {/if}
     </div>
   {/if}
@@ -197,9 +198,14 @@
   }
 
   .progress-fill {
+    width: 100%;
     height: 100%;
     border-radius: 999px;
     background: var(--accent);
-    transition: width 260ms var(--ease-smooth);
+    transform: translateX(calc(var(--progress-percent) - 100%));
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .progress-fill { transition: transform 260ms var(--ease-smooth); }
   }
 </style>

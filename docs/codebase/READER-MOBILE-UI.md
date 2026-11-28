@@ -12,11 +12,11 @@ description: 现代极简书房无框线前端的代码位置、结构、尺寸�
 | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `reader/app/src/main.ts`、`App.svelte`、`lib/data/back-stack.ts`                                            | 阅读入口、首屏外观预置、Android/Web 同文档开书、键盘与原生返回分发                                      |
 | `reader/app/src/lib/components/BookOpeningCover.svelte`、`lib/data/open-transition.ts`                      | 取可见封面、沿书脊翻开、等比放大真实正文；不改变排版与书内位置                                          |
-| `reader/app/src/lib/components/NavRail.svelte`                                                              | 悬浮玻璃左侧导航轨（>= 900 px）与底部胶囊导航栏（< 900 px）                                             |
-| `reader/app/src/lib/components/LibraryView.svelte`、`BookCover.svelte`                                      | 无框线极简书架、继续阅读条带、快捷分类胶囊、网格/列表视图、崩溃恢复、拖放导入与桌面悬浮单书菜单         |
+| `reader/app/src/lib/components/NavRail.svelte`                                                              | 悬浮玻璃左侧导航轨（>= 900 px）与贴底的图标加标签导航（< 900 px）                                       |
+| `reader/app/src/lib/components/LibraryView.svelte`、`BookCover.svelte`                                      | 无框线极简书架、继续阅读条带、横向排序与筛选、网格/列表视图、崩溃恢复、拖放导入与桌面悬浮单书菜单       |
 | `reader/app/src/lib/components/MemoryView.svelte`、`SnapshotPreview.svelte`                                 | 跨书阅读记忆中心：全文检索、最近阅读投影、安全跳回原书与历史快照预览                                    |
-| `reader/app/src/lib/components/AppSettingsView.svelte`、`ConfirmDialog.svelte`                              | 应用外观、全书阅读默认重置、离线词典管理与完整 `.atha-data` 备份/恢复/存储分类统计                      |
-| `reader/app/src/lib/components/ReaderView.svelte`                                                           | 极简沉浸分页阅读器、悬浮上下玻璃工具岛、`directory` 目录/书签/搜索工作区与快捷键响应                    |
+| `reader/app/src/lib/components/AppSettingsView.svelte`、`ConfirmDialog.svelte`                              | 分组设置、应用外观、全书阅读默认重置、离线词典与完整 `.atha-data` 备份/恢复/存储分类统计                |
+| `reader/app/src/lib/components/ReaderView.svelte`                                                           | 经典与极简阅读控件、独立进度浮层、`directory` 目录/书签/搜索工作区与快捷键响应                          |
 | `reader/app/src/lib/components/NotesWorkspace.svelte`、`MessageComposer.svelte`、`MessageActionMenu.svelte` | 竖屏两页/横屏 `A+B` / `A+B+C` 笔记对话工作区、按需 Tiptap/Markdown 输入器与 `@floating-ui/dom` 消息菜单 |
 | `reader/app/src/lib/components/ReaderSettingsDialog.svelte`、`CssModulesPanel.svelte`                       | 全书默认、本书覆盖与 32 模块 CSS 管理/CodeMirror 实时编辑弹窗                                           |
 | `reader/app/src/lib/components/SelectionPill.svelte`、`DictionaryCard.svelte`、`StructuredLightbox.svelte`  | 正文选区悬浮动作胶囊、离线查词浮卡与图片/公式/表格/代码安全灯箱查看器                                   |
@@ -32,7 +32,7 @@ description: 现代极简书房无框线前端的代码位置、结构、尺寸�
 
 ```text
 tauri://localhost/（或未带阅读参数的浏览器预览）
-├─ NavRail（桌面左侧悬浮玻璃轨 / 窄屏底部胶囊）
+├─ NavRail（桌面左侧悬浮玻璃轨 / 窄屏贴底导航）
 └─ LibraryView（main.library-shell[aria-busy]）| MemoryView | AppSettingsView
    └─ .shelf-catalog [data-shelf-open]（C4 同文档返回焦点与位置锚点）
 
@@ -67,11 +67,12 @@ tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换�
 
 ## 交互连接与当前状态
 
-- 书架整理：从「选择」、长按、右键或 Shift+F10 进入多选。底栏随册数显示操作，窄屏暂替底部导航；退出恢复原位置。批量移出和删除逐册执行，确认时锁定目标，遇错停止后续写入。
-- 书架工具栏：搜索、筛选、视图与多选同排；排序和收藏位于横向栏。收藏快捷入口与完整筛选共用状态。
+- 书架整理：从「选择」、长按、右键或 Shift+F10 进入多选。滚动时顶栏仍可全选当前结果或完成；底栏随册数显示操作，窄屏暂替底部导航。退出恢复原焦点。批量移出和删除逐册执行，确认时锁定目标，遇错停止后续写入。
+- 书架工具栏：搜索、视图与多选同排；横向栏从最近阅读、书名、作者、进度、最近添加和收藏开始，随后是倒序与常用分类。完整筛选固定在横向栏右侧，不随滚动移出；各入口共用筛选状态。
 - 继续阅读：`ContinueReadingDock.svelte` 在底部续读最近一本或展开书单。搜索和筛选临时收起，多选让出底栏；关闭抽屉或读完返回保持书架状态。设置中的列数、密度和封面文字仅作用于当前设备。
 - 设置：桌面同时显示可搜索分组与当前设置，窄屏在列表与子页间切换；返回保留查询、位置和进入按钮的焦点。数据操作仍以原确认和备份适配器为准。
-- 阅读控件：经典提供显式按键，极简使用三点菜单和切章；沉浸栏显示章节、时间、页码和可读到的 Android 电量。分页下拉可预览书签，极简分页可上滑打开笔记。应用设置中的「阅读与翻页」同时控制这些选项和分页动效，不改变某本书的连续滚动。
+- 阅读控件：经典底栏是目录、笔记、进度、日夜和样式；进度入口打开翻页、进度滑杆和阅读统计。极简顶栏是返回、章节与三点菜单，底栏是切章与进度。沉浸栏显示章节、时间、页码和可读到的 Android 电量。分页下拉可预览书签，极简分页可上滑打开笔记。
+- 应用设置：分组卡片显示当前值，按需展开搜索。窄屏进入独立子页，返回恢复搜索与入口焦点；桌面并列展示。全局控件样式和分页动效不改变某本书的连续滚动。
 - 阅读记忆：同文档返回或恢复历史页面时按原查询重读书架与消息；只有当前请求能更新结果。读取失败可保留查询重试。
 - Android：书架、阅读控件和浮层使用宿主给出的同一安全区。软键盘由宿主避让；收起仅让搜索失焦，不清查询。正文选区让 Atha 菜单接管时保留原生手柄，编辑器菜单保持平台行为。
 - 笔记对话：原文在先，排版工具按需展开；窄屏的笔记列表与对话使用同一底部面板。桌面紧凑可视化编辑可用 Enter 发送，触控、Markdown 或展开编辑器中 Enter 保留换行。

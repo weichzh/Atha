@@ -64,7 +64,7 @@ const rows = [...document.querySelectorAll(".book-list [data-shelf-open]")];
 return { titles: rows.map(row => row.title) };' \
       '.titles == ["Atha FB2 Gate"]' 'shelf search did not filter the catalogue' >/dev/null
     set_shelf_query ''
-    choose_shelf_sort '阅读进度'
+    choose_shelf_sort '进度'
     wait_for_script '
 const rows = [...document.querySelectorAll(".book-list [data-shelf-open]")];
 const progress = rows.map(row => Number(row.querySelector(".list-percent")?.textContent.replace("%", "") ?? -1));
@@ -72,7 +72,7 @@ return { count: rows.length, sorted: progress.every((value, i) => i === 0 || val
   publicHasProgress: rows.some(row => row.title === "Atha FB2 Gate" && row.querySelector(".list-percent")) };' \
       ".count == $expected_books and .sorted == true and .publicHasProgress == true" \
       'reading-progress order did not reuse the complete catalogue' >/dev/null
-    choose_shelf_sort '书名 A–Z'
+    choose_shelf_sort '书名'
   fi
   webdriver_click_element 'button[aria-label="封面网格"]' || die 'could not switch to grid view'
   wait_for_script '
@@ -96,7 +96,7 @@ return {selected: document.querySelectorAll(".shelf-catalog [data-shelf-open][ar
     (i === 0 || rects[i-1].right <= rect.left + 1)),
   clipped: buttons.some(button => button.scrollWidth > button.clientWidth + 1 || button.scrollHeight > button.clientHeight + 1) };' \
     '.selected == 1 and (.labels[0] == "收藏" or .labels[0] == "取消收藏") and
-      .labels[1:] == ["编辑信息","换封面","移出","删除"] and .fits and (.clipped | not)' \
+      .labels[1:] == ["换封面","编辑信息","移出","删除"] and .fits and (.clipped | not)' \
     'single-book selection actions did not fit' >/dev/null
 }
 
@@ -183,7 +183,7 @@ return {count: cards.length, id: cards.find(card => card.title === "ShelfGateRou
   select_shelf_book "$card"
   click_label '.selection-options button' '收藏'
   wait_for_script '
-return {favorite: Boolean(document.querySelector(".shelf-catalog [title=ShelfGateRoundTrip] [aria-label=已收藏]")),
+return {favorite: Boolean(document.querySelector(".book-card:has([title=ShelfGateRoundTrip]) [aria-label=已收藏]")),
   selecting: Boolean(document.querySelector(".shelf-actions"))};' \
     '.favorite and (.selecting | not)' 'favorite did not save and exit selection' >/dev/null
   select_shelf_book "$card" keyboard
@@ -197,10 +197,12 @@ return {favorite: Boolean(document.querySelector(".shelf-catalog [title=ShelfGat
     '.saved' 'classification did not save' >/dev/null
   open_library "$((expected_books + 1))"
   wait_for_script '
-return {favorite: Boolean(document.querySelector(".shelf-catalog [title=ShelfGateRoundTrip] [aria-label=已收藏]")),
-  facets: [...document.querySelectorAll(".quick-pill")].map(el => el.textContent.trim())};' \
-    '.favorite and (.facets | index("原生验收标签") != null)' 'organization did not survive reload' >/dev/null
+return {favorite: Boolean(document.querySelector(".book-card:has([title=ShelfGateRoundTrip]) [aria-label=已收藏]"))};' \
+    '.favorite' 'favorite did not survive reload' >/dev/null
   webdriver_click_element 'button[aria-label="筛选藏书"]' || die 'could not open filters'
+  wait_for_script '
+return {tags: [...document.querySelectorAll(".filter-popover .facet-pill span:first-child")].map(el => el.textContent.trim())};' \
+    '(.tags | index("原生验收标签") != null)' 'saved tag is missing from the filter' >/dev/null
   webdriver_click_element '#shelf-fav-switch' || die 'could not enable favorite filter'
   click_label '.filter-popover .facet-pill span:first-child' '原生验收标签'
   webdriver_click_element 'button[aria-label="筛选藏书"]' || die 'could not dismiss filters'
@@ -259,7 +261,7 @@ return {focused: Boolean(button && document.activeElement === button), closed: !
     '.focused and .closed' 'return from recent reading did not restore the drawer trigger' >/dev/null
 
   webdriver_click_element '.clear-all-link' || die 'could not reset all shelf conditions'
-  choose_shelf_sort '书名 A–Z'
+  choose_shelf_sort '书名'
   webdriver_click_element 'button[aria-label="封面网格"]' || die 'could not restore the grid'
   long_press_shelf_book "$card"
   click_label '.selection-options button' '删除'
@@ -607,6 +609,7 @@ const state = JSON.parse(localStorage.getItem("atha.reader.progress." + url.sear
 return {section: JSON.parse(state?.locator || "null")?.start?.section, locator: state?.locator};' \
         ".section == \"$chapter_one\" and .locator != null" 'TOC did not navigate to Chapter 1')
       reader_chrome
+      webdriver_click_element 'button[aria-label="进度"]' || die 'could not open reading progress'
       webdriver_click_element 'button[aria-label="下一页"]' || die 'could not navigate forward'
       wait_for_script '
 const key = "atha.reader.progress." + new URL(location.href).searchParams.get("state") + ".v1";
@@ -623,6 +626,7 @@ return {locator: JSON.parse(localStorage.getItem(key) || "null")?.locator};' \
       wait_for_script '
 return {progress: Number(document.querySelector(".scrubber-wrap [role=slider]")?.getAttribute("aria-valuenow"))};' \
         '.progress >= 90' 'reader scrubber did not navigate near the end' >/dev/null
+      webdriver_click_element 'button[aria-label="关闭阅读进度"]' || die 'could not close reading progress'
     fi
 
     reader_chrome
@@ -886,12 +890,14 @@ return {width:innerWidth, edition: saved?.contentVersion, section: loc?.start?.s
       'memory jump restored the thread but the selected original text is not on the rendered page' "$note_args" >/dev/null
     if ((width == 360)); then
       reader_chrome keyboard
+      webdriver_click_element 'button[aria-label="进度"]' || die 'could not open reading progress'
       webdriver_click_element 'button[aria-label="下一页"]' || die 'could not exercise the same-chapter wrong-page control'
       wait_for_script "$reader_position_script" \
         "($valid_reader_position) and .locator.start.section == \"$section\" and .page == $(jq '.page + 1' <<<"$restored")" \
         'wrong-page control did not move one page within the original chapter' >/dev/null
       wait_for_script "$reader_highlight_script" '.matches == 1 and .rectCount > 0 and (.visible | not)' \
         'the same-chapter wrong page did not leave the registered original text off-page' "$note_args" >/dev/null
+      webdriver_click_element 'button[aria-label="关闭阅读进度"]' || die 'could not close reading progress'
       wrong_page_rejected=true
     fi
     viewports=$(jq -cn --argjson prior "$viewports" --argjson requestedWidth "$width" \

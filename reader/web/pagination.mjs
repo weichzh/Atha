@@ -850,15 +850,18 @@ export function createPagination({
   }
 
   function applySwipe(deltaX) {
+    const pageOffset = state.page * pageStep;
+    const offset = swipeOrigin - deltaX / visualScale;
+    const preview = Math.max(pageOffset - pageStep, Math.min(pageOffset + pageStep, offset));
     if (nativePagedScroll) {
-      page.scrollLeft = swipeOrigin - deltaX / visualScale;
+      page.scrollLeft = preview;
     } else {
-      book.style.transform = `translateX(${-state.page * pageStep + deltaX / visualScale}px)`;
+      book.style.transform = `translateX(${-preview}px)`;
     }
   }
 
   function turnEffect() {
-    // Very long chapters use the native horizontal scroll path to avoid WebView transform limits.
+    // Very long chapters use programmatic scrollLeft to avoid WebView transform limits.
     return !isScrolled() && !nativePagedScroll ? pageTurn?.effect() : null;
   }
 

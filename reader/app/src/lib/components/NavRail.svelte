@@ -43,7 +43,7 @@
           <span class="active-indicator" aria-hidden="true"></span>
         {/if}
         <span class="nav-icon">
-          <Icon size={18} strokeWidth={active ? 2.1 : 1.75} />
+          <Icon size={20} strokeWidth={active ? 2.1 : 1.75} />
         </span>
         <span class="nav-label">{item.label}</span>
       </button>
@@ -158,16 +158,13 @@
 
   @media (max-width: 899px) {
     .nav-shell {
-      left: 50%;
-      top: auto;
-      bottom: max(14px, var(--safe-area-bottom));
-      margin-left: calc((var(--safe-area-left) - var(--safe-area-right)) / 2);
-      translate: -50% 0;
-      width: min(calc(100vw - 28px - var(--safe-area-left) - var(--safe-area-right)), 348px);
-      height: auto;
+      inset: auto 0 0;
+      width: auto;
+      min-height: calc(72px + var(--safe-area-bottom));
       flex-direction: row;
-      padding: 6px;
-      border-radius: var(--radius-pill);
+      padding: 6px calc(12px + var(--safe-area-right)) calc(8px + var(--safe-area-bottom)) calc(12px + var(--safe-area-left));
+      border-radius: 0;
+      border-top: 1px solid var(--bg-well);
       background: var(--bg-glass-strong);
       backdrop-filter: var(--shell-nav-backdrop, blur(28px) saturate(180%));
       -webkit-backdrop-filter: var(--shell-nav-backdrop, blur(28px) saturate(180%));
@@ -180,22 +177,31 @@
     .nav-items {
       flex-direction: row;
       width: 100%;
+      max-width: 480px;
+      margin-inline: auto;
       gap: 4px;
     }
 
     .nav-item {
       flex: 1;
+      flex-direction: column;
       justify-content: center;
-      gap: 6px;
+      gap: 3px;
       padding: 0 10px;
-      min-height: 44px;
+      min-height: 52px;
       border-radius: var(--radius-pill);
-      font-size: 13px;
+      font-size: 11px;
     }
 
-    .active-indicator {
+    .nav-icon {
+      justify-content: center;
+      width: 52px;
+      height: 28px;
       border-radius: var(--radius-pill);
     }
+
+    .nav-item.active .nav-icon { background: var(--accent-soft); }
+    .active-indicator { inset: 0; background: transparent; box-shadow: none; }
   }
 
   @media (forced-colors: active) {

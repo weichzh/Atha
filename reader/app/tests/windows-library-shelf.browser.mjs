@@ -18,6 +18,7 @@ const button = (scope, name) => scope.getByRole("button", { name, exact: true })
 const shelf = (page) => page.locator("main.library-shell[aria-busy=false]");
 const search = (page) => shelf(page).getByRole("searchbox");
 const sort = (page) => shelf(page).getByRole("group", { name: "书架排序" });
+const selectionHeader = (page) => shelf(page).getByRole("toolbar", { name: "批量选择" });
 const select = (page) => shelf(page).getByRole("group", { name: "选中书籍操作" });
 const card = (page, id) => shelf(page).locator(`${cardSelector}[data-shelf-open="${id}"]`);
 
@@ -114,6 +115,7 @@ async function importBook(page, knownBooks, pick) {
 
 export async function exerciseShelf(page, target, control, { native = false } = {}) {
   const ascending = await stage("title order", async () => {
+    await button(sort(page), "书名 A–Z").click();
     const books = await readBooks(page);
     assert.equal(books.length, 2);
     assert.notEqual(target.title, control.title, "distinct titles are required for ordering");
@@ -187,16 +189,16 @@ export async function exerciseShelf(page, target, control, { native = false } = 
     await button(shelf(page), "选择").click();
     await card(page, target.id).click();
     await card(page, control.id).click();
-    await select(page).getByText("已选 2 册", { exact: true }).waitFor();
+    await selectionHeader(page).getByText("已选 2 册", { exact: true }).waitFor();
     for (const { id } of [target, control]) assert.equal(await card(page, id).getAttribute("aria-pressed"), "true");
-    await button(select(page), "退出选择").click();
+    await button(selectionHeader(page), "退出选择").click();
     await select(page).waitFor({ state: "hidden" });
     assert.equal(await card(page, target.id).getAttribute("aria-pressed"), null);
     await waitForOrder(page, [...ascending].reverse());
 
     // The keyboard context action replaces the old book menu on this surface.
     await card(page, target.id).press("Shift+F10");
-    await select(page).getByText("已选 1 册", { exact: true }).waitFor();
+    await selectionHeader(page).getByText("已选 1 册", { exact: true }).waitFor();
     assert.equal(await card(page, target.id).getAttribute("aria-pressed"), "true");
     await button(select(page), "收藏").click();
     await page.getByText("已收藏 1 册", { exact: true }).waitFor();
@@ -240,7 +242,7 @@ export async function exerciseShelf(page, target, control, { native = false } = 
   await stage("cancel then confirm removal", async () => {
     await button(shelf(page), "选择").click();
     await card(page, target.id).click();
-    await select(page).getByText("已选 1 册", { exact: true }).waitFor();
+    await selectionHeader(page).getByText("已选 1 册", { exact: true }).waitFor();
     const confirmation = page.getByRole("alertdialog", { name: "将书籍移出书架？" });
     await button(select(page), "移出").click();
     await confirmation.waitFor();
@@ -318,14 +320,14 @@ async function verifyResponsive(page, screenshots) {
     await button(shelf(page), "选择").click();
     const last = grid.locator("[data-shelf-open]").last();
     await last.click();
-    await select(page).getByText("已选 1 册", { exact: true }).waitFor();
+    await selectionHeader(page).getByText("已选 1 册", { exact: true }).waitFor();
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     const lastBox = await last.boundingBox();
     const actionsBox = await select(page).boundingBox();
     const removeBox = await button(select(page), "移出").boundingBox();
     assert.ok(lastBox.y + lastBox.height <= actionsBox.y + 1, `last row behind actions at ${width}x${height}`);
     assert.ok(removeBox.width >= 44 && removeBox.height >= 44);
-    await button(select(page), "退出选择").click();
+    await button(selectionHeader(page), "退出选择").click();
     await page.evaluate(() => window.scrollTo(0, 0));
     if (width === 360 || width === 1280) {
       await page.screenshot({ path: path.join(screenshots, `library-shelf-${width}x${height}.png`) });

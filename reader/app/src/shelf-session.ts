@@ -11,7 +11,7 @@ export type ShelfOrigin = {
 export type ShelfPosition = {
   y: number;
   recentX: number;
-  tagsX: number;
+  sortX: number;
   conditionsY: number;
   anchor?: ShelfOrigin;
   focus?: ShelfOrigin;
@@ -25,7 +25,7 @@ export type ShelfSession = {
 };
 
 export function emptyShelfPosition(): ShelfPosition {
-  return { y: 0, recentX: 0, tagsX: 0, conditionsY: 0 };
+  return { y: 0, recentX: 0, sortX: 0, conditionsY: 0 };
 }
 
 const coordinate = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -60,7 +60,7 @@ export function readShelfSession(): ShelfSession {
       position: {
         y: coordinate(position?.y),
         recentX: coordinate(position?.recentX),
-        tagsX: coordinate(position?.tagsX),
+        sortX: coordinate(position?.sortX),
         conditionsY: coordinate(position?.conditionsY),
         anchor: readOrigin(position?.anchor),
         focus: readOrigin(position?.focus),
