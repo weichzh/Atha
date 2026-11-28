@@ -38,15 +38,20 @@ Svelte、Vite、工作流与桌面/390px Chromium 回归，覆盖搜索、退回
 
 ## Iteration Control
 
-- Mode: `single-pass`
+- Mode: `iterative`
+- Maximum repair iterations: `2`
+- Unchanged-delta limit: `1`
+- Human stop: 需要写入真实资料或设备时停止。
 
 ## Result
 
 桌面在选项旁显示当前设置，390px 按组选入子页。Chromium 验证了全角 MOBI 与常用设置关键词、清除空结果、返回保留查询与发起焦点、确认先关闭再退出，以及词典导入和备份入口可达；既有浅色/暗色和书架偏好设置仍按原路径生效。以已合并 Android 适配的 `9d6c5c6` 为基底，Svelte 检查、Vite 和完整 Chromium 通过；已查看桌面和窄屏实际画面。
 
+审查后复验：以隔离 Chromium 模拟延迟的词典移除和存储统计 IPC，两阶段按返回均留在词典页。随后模拟统计失败，词典确实移除，页面提示统计未刷新且无异常；再按返回正常回到索引。Svelte、Vite 和完整 Chromium 再次通过。
+
 ## Review
 
-分支只改设置导航、布局和对应回归，不改变适配器或数据格式。独立审查在 PR 中进行。
+代码审查发现移除词典期间原生返回可能清除确认对象，待 IPC 完成后再读取词典名会出错。修复为在开始时保存目标，移除和恢复执行期间消费返回；已移除但统计刷新失败时单独报告。适配器和数据格式不变。
 
 ## Evidence And Residual Risks
 

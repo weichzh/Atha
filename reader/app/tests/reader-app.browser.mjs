@@ -442,6 +442,65 @@ async function verifySettingsSections(browser, previewUrl) {
   }
 }
 
+async function verifySettingsRemovalDuringBack(browser, previewUrl) {
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  phone.on("pageerror", (error) => errors.push(error.message));
+  await phone.addInitScript(() => {
+    const dictionary = { id: "d".repeat(64), title: "隔离测试词典", format: "mdict", entryCount: 1, resourceCount: 0, importedAt: 0 };
+    const emptyUsage = { totalBytes: 0, booksBytes: 0, cacheBytes: 0, dictionariesBytes: 0, messagesBytes: 0, preferencesBytes: 0 };
+    let waitForUsage = false;
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+      transformCallback: () => 1,
+      unregisterCallback() {},
+      async invoke(command, args) {
+        if (command === "list_library_books" || command === "pending_library_book_deletions") return [];
+        if (command === "list_local_dictionaries") return [dictionary];
+        if (command === "local_data_storage_usage") {
+          if (!waitForUsage) return emptyUsage;
+          return new Promise((_, reject) => {
+            window.finishStatsTest = () => reject(new Error("usage unavailable"));
+          });
+        }
+        if (command === "remove_local_dictionary" && args.dictionaryId === dictionary.id) {
+          return new Promise((resolve) => {
+            window.finishDictionaryTest = () => {
+              waitForUsage = true;
+              resolve([]);
+            };
+          });
+        }
+        return null;
+      },
+    };
+  });
+  try {
+    await phone.goto(previewUrl);
+    await phone.getByRole("tab", { name: "设置" }).click();
+    await phone.getByRole("button", { name: /离线词典管理/ }).click();
+    const panel = phone.getByRole("region", { name: "离线词典管理" });
+    await panel.getByRole("button", { name: "移除词典：隔离测试词典" }).click();
+    await phone.getByRole("alertdialog").getByRole("button", { name: "移除词典", exact: true }).click();
+    await phone.waitForFunction(() => typeof window.finishDictionaryTest === "function");
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    assert.equal(await panel.isVisible(), true);
+    await phone.evaluate(() => window.finishDictionaryTest());
+    await phone.waitForFunction(() => typeof window.finishStatsTest === "function");
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    assert.equal(await panel.isVisible(), true);
+    await phone.evaluate(() => window.finishStatsTest());
+    await phone.getByText("已移除词典《隔离测试词典》，暂时无法刷新存储统计").waitFor();
+    assert.equal(await panel.getByRole("button", { name: "移除词典：隔离测试词典" }).count(), 0);
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await phone.getByRole("navigation", { name: "设置项目" }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await phone.close();
+  }
+}
+
 async function run() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -994,6 +1053,7 @@ async function run() {
     await verifyShelfSelection(browser, previewUrl);
     await verifyShelfResumeAndLayout(browser, previewUrl);
     await verifySettingsSections(browser, previewUrl);
+    await verifySettingsRemovalDuringBack(browser, previewUrl);
     console.log("ALL BROWSER CHECKS PASSED! Screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();

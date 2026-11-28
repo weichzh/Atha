@@ -51,6 +51,7 @@
   let confirmRemoveDict = $state<LocalDictionary | null>(null);
   let confirmRestoreOpen = $state(false);
   let pendingRestoreFile = $state<File | null>(null);
+  let applyingChange = $state(false);
 
   const themeOptions: { value: AppTheme; label: string; icon: typeof Sun }[] = [
     { value: "system", label: "跟随系统", icon: Monitor },
@@ -149,6 +150,7 @@
   onMount(() => {
     void refreshAll();
     return registerBackHandler((source) => {
+      if (applyingChange) return true;
       if (confirmResetOpen || confirmRestoreOpen || confirmRemoveDict) {
         if (source === "escape") return false;
         if (confirmResetOpen) confirmResetOpen = false;
@@ -193,11 +195,26 @@
   }
 
   async function executeRemoveDictionary() {
-    if (!confirmRemoveDict) return;
-    dictionaries = await removeOfflineDictionary(confirmRemoveDict.id);
-    usage = await readLocalStorageUsage();
-    notify(`已移除词典《${confirmRemoveDict.title}》`);
-    confirmRemoveDict = null;
+    const target = confirmRemoveDict;
+    if (!target || applyingChange) return;
+    applyingChange = true;
+    let removed = false;
+    try {
+      dictionaries = await removeOfflineDictionary(target.id);
+      removed = true;
+      usage = await readLocalStorageUsage();
+      notify(`已移除词典《${target.title}》`);
+    } catch {
+      if (removed) {
+        usage = null;
+        notify(`已移除词典《${target.title}》，暂时无法刷新存储统计`);
+      } else {
+        notify(`未能移除词典《${target.title}》，请重试`);
+      }
+    } finally {
+      confirmRemoveDict = null;
+      applyingChange = false;
+    }
   }
 
   function executeResetDefaults() {
@@ -229,11 +246,15 @@
   }
 
   async function executeRestore() {
-    const res = await restoreFullLocalDataBackup(pendingRestoreFile);
-    pendingRestoreFile = null;
-    notify(res.label);
-    if (res.ok) {
-      await refreshAll();
+    if (applyingChange) return;
+    applyingChange = true;
+    try {
+      const res = await restoreFullLocalDataBackup(pendingRestoreFile);
+      notify(res.label);
+      if (res.ok) await refreshAll();
+    } finally {
+      pendingRestoreFile = null;
+      applyingChange = false;
     }
   }
 
@@ -257,10 +278,10 @@
 
 <svelte:window bind:innerWidth={width} />
 
-<section class="settings-shell" aria-label="设置">
+<section class="settings-shell" aria-label="设置" aria-busy={applyingChange}>
   <header class="settings-header">
     {#if !wide && section}
-      <button type="button" class="pill-btn settings-back" onclick={() => void showIndex()}>
+      <button type="button" class="pill-btn settings-back" disabled={applyingChange} onclick={() => void showIndex()}>
         <ArrowLeft size={17} />
         <span>返回设置</span>
       </button>
@@ -448,6 +469,7 @@
                         type="button"
                         class="icon-btn danger-hover"
                         aria-label={`移除词典：${dict.title}`}
+                        disabled={applyingChange}
                         onclick={() => (confirmRemoveDict = dict)}
                       >
                         <Trash2 size={16} />
