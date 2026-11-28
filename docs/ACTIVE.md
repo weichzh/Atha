@@ -1,6 +1,6 @@
 # 当前工作
 
-- `change`：SVG 阅读主题兼容修复 → `docs/changes/reader-svg-color-scheme.md`
+- `change`：恢复上次阅读位置时的分页与公式稳定性 → `docs/changes/pct-resume-formula-stability.md`
 
 后续验收在以下 Issue 跟进：
 
