@@ -721,7 +721,6 @@ window.__TAURI_INTERNALS__.invoke('delete_library_book_data', { id: '$public_id'
 }
 
 verify_current_shelf() {
-  local input='main[aria-label="书架"] input[type=search]'
   local book='.shelf-catalog [data-shelf-open][title="Atha FB2 Gate"]'
   local point fixture="$run_root/ShelfCheckSecond.txt"
   set_window_size 360 760
@@ -756,7 +755,7 @@ return { titles: [...document.querySelectorAll(".book-list [data-shelf-open]")].
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };' \
     '.titles == ["ShelfCheckSecond","Atha FB2 Gate"] and .overflow == false' \
     'current shelf list did not sort both books at the narrow width' >/dev/null
-  webdriver_send_keys "$input" 'Atha FB2 Gate' || die 'could not type the book query'
+  set_shelf_query 'Atha FB2 Gate'
   wait_for_script '
 return { titles: [...document.querySelectorAll(".book-list [data-shelf-open]")].map(book => book.title) };
 ' '.titles == ["Atha FB2 Gate"]' 'shelf search did not isolate the public book' >/dev/null
