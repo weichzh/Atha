@@ -31,7 +31,7 @@ none
 
 ## Checks
 
-复用本机 WebKitGTK 和 Chromium，验证相反的系统／阅读配色，核对正文、图片预览与资源身份；保留组合色彩规则和未命中资源的回归。
+复用本机 WebKitGTK 和 Chromium，验证相反的系统／阅读配色，核对正文、图片预览与资源身份；保留组合色彩规则和未命中资源的回归。在 PCT-AL10 上复验原故障场景和夜间主题。
 
 ## Iteration Control
 
@@ -50,6 +50,7 @@ none
 - Iteration: 2 — 切回系统主题的回归发现 Chromium 会复用被修改的实时 CSSOM；改为投影 detached stylesheet 后再应用，切回系统时恢复原书 CSS。新增回归对基线失败、对候选通过；覆盖加载、预览、快照、过章及不适用的图片。
 - Iteration: 3 — 独立审查指出样式表级媒体条件及同路径的两种快照呈现。排除含样式表级主题条件的 SVG；快照仅在同文件的原图与变体并存时为变体分配独立资源键。新增对照验证两种节点顺序和原始字节保留。
 - Validation: 本机 WebKitGTK 2.54.3 中，系统深色／阅读浅白、系统浅色／阅读深色均显示书内对应配色；点击独立公式仍呈现浅色变体，关闭后留在原页。Chromium 保留原 SVG，夹具覆盖两种相反配色。Svelte 检查、前端和 Tauri 本机构建、文档门通过。
+- Validation: 2026-11-28，PCT-AL10（Android API 29，华为系统 WebView 114.0.5.302）同签名覆盖安装基于 `09b3e9c` 的 arm64 测试包（0.1.1，versionCode 1001）。系统保留深色：同一原故障章节的行内和独立公式在「浅白」下为白底黑字，在「夜间」下为深底浅字；切回「浅白」后留在该节。
 - Remaining delta: Linux 系统主题在大图已打开时切换，正文会刷新，已打开的大图重新打开后才更新。非 Linux 目标证据见下。
 
 ## Review
@@ -58,4 +59,4 @@ none
 
 ## Evidence And Residual Risks
 
-本机原生和 Chromium 证据分开记录。PCT-AL10 和 Windows 未安装或运行候选。WebKitGTK 原生通过系统／阅读主题相反时的 SVG 像素回归后，移除 Linux 投影分支；不以 SVG 能否在 Canvas 中读回作为退役判断。
+本机原生 WebKitGTK、Chromium 和 PCT-AL10 真机证据分开记录；Windows 目标仍按 Issue #1 的平台验收跟进。WebKitGTK 原生通过系统／阅读主题相反时的 SVG 像素回归后，移除 Linux 投影分支；不以 SVG 能否在 Canvas 中读回作为退役判断。
