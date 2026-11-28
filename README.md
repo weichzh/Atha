@@ -19,7 +19,7 @@ bash scripts/check-workflow.sh
 bash scripts/check-reader-linux.sh --shelf
 ```
 
-当前 Linux 与 PCT 开发入口只使用 Bash；旧 `.ps1` 仅保留为 Windows 历史兼容入口，不由当前门禁调用。
+Linux 与 PCT 开发入口使用 Bash。Windows 书架的原生验收单独使用 PowerShell 和 WebView2，见 [Windows 书架检查](docs/agents/references.md#webview2)。
 
 ## 打开本地书籍
 

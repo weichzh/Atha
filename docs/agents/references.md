@@ -219,6 +219,13 @@ adb -s "$serial" logcat --pid="$pid" -d
 - 版本事实：Windows 目标机的 Evergreen WebView2 Runtime；产品入口由 Tauri 2 承载，`reader/atha-reader-host` 只保留为性能和安全基线。
 - 官方入口：[WebView2 文档](https://learn.microsoft.com/en-us/microsoft-edge/webview2/)。
 - 项目快速用法：书籍内容保持脚本、网络、路径和未知资源隔离；真实交互回归使用 `scripts/check-reader-samples.ps1`，Tauri 产品入口使用 `scripts/check-tauri-reader.ps1`。
+- Windows 书架检查：在已配置 `env/local.ps1` 和 `agent-browser` 的 Windows 交互桌面运行下列命令。它在隔离目录驱动原生选择器和 WebView2 验证导入、搜索、排序、收藏、多选、移出及阅读返回；Chromium 夹具的结果单独记录。
+
+  ```powershell
+  cargo test --locked -p atha-backend --test epub_import writes_epub2_gate_fixture -- --ignored --exact
+  pwsh -NoProfile -File .\scripts\check-library-shelf.ps1 -BookPath .\.tmp\epub2-ncx-gate.epub
+  ```
+
 - 必须重查：runtime 分发、浏览器能力差异、窗口缩放、输入事件、进程模型、安全边界和性能诊断。
 
 ## CSS 渲染与资源边界
