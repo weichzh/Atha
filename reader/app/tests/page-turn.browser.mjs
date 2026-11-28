@@ -152,6 +152,19 @@ async function touchDrag(page, dx) {
   };
 }
 
+async function mouseGutterDrag(page, direction) {
+  const frame = await page.locator(".reader-frame").boundingBox();
+  const paper = await page.locator(".page").boundingBox();
+  const x = direction > 0
+    ? (frame.x + frame.width + paper.x + paper.width) / 2
+    : (frame.x + paper.x) / 2;
+  const y = frame.y + frame.height * 0.68;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - direction * 415, y, { steps: 8 });
+  return () => page.mouse.up();
+}
+
 async function facingText(page) {
   return page.evaluate(() => {
     const aperture = document.querySelector(".page").getBoundingClientRect();
@@ -196,7 +209,7 @@ async function verifyFacingPages(browser, base) {
     await advance(page, -1, "spread");
     await settled(page);
 
-    const release = await touchDrag(page, -415);
+    const release = await mouseGutterDrag(page, 1);
     await stage(page, "spread").waitFor();
     assert.equal(await position(page), 1, "preview does not change navigation");
     const faces = await stage(page, "spread").evaluate(root => {
@@ -216,9 +229,30 @@ async function verifyFacingPages(browser, base) {
     await settled(page);
     const second = await facingText(page);
     assert.ok(second[0][0] >= opening[1].at(-1));
-    await advance(page, -1, "spread");
+    const rewind = await mouseGutterDrag(page, -1);
+    await stage(page, "spread").waitFor();
+    await rewind();
+    await page.waitForFunction(() => /page 1 \/ /.test(document.title));
     await settled(page);
     assert.deepEqual(await facingText(page), opening);
+
+    const line = await page.locator(".reader-content-host").evaluate(host => {
+      const text = host.shadowRoot.querySelector(".book p").firstChild;
+      const range = document.createRange();
+      range.setStart(text, 2);
+      range.setEnd(text, 14);
+      return range.getBoundingClientRect().toJSON();
+    });
+    await page.mouse.move(line.left + 1, line.top + line.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(line.right - 1, line.top + line.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.locator(".selection-capsule").waitFor();
+    await settled(page);
+    assert.equal(await position(page), 1, "dragging on printed text selects instead of turning");
+    await page.keyboard.press("Escape");
+    await page.locator(".selection-capsule").waitFor({ state: "hidden" });
+
     const cancel = await touchDrag(page, -36);
     await stage(page, "spread").waitFor();
     await setToolbar(page, true);

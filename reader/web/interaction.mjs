@@ -49,11 +49,11 @@ function scrollSwipeDirection(startY, endY, atStart, atEnd) {
 
 /**
  * @typedef {(phase: "move" | "end" | "cancel", deltaY: number) => void} VerticalSwipe
- * @param {{reader: any, content: any, navigation: any, pagination: any,
+ * @param {{reader: any, content: any, navigation: any, pagination: any, mousePage?: HTMLElement,
  *   onCenter: () => void, beginVerticalSwipe?: () => VerticalSwipe | undefined,
  *   assert: (condition: boolean, code: string) => void, fail: (code: string) => void}} options
  */
-export function createInteraction({ reader, content, navigation, pagination, onCenter, beginVerticalSwipe, assert, fail }) {
+export function createInteraction({ reader, content, navigation, pagination, mousePage, onCenter, beginVerticalSwipe, assert, fail }) {
   const wheel = createWheelDetector();
   const counts = {
     keyboard: 0,
@@ -321,6 +321,15 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     if (selected) {
       counts.selectionProtected += 1;
     }
+    const paper = event.pointerType === "mouse" && !selected && !scrollMode()
+      ? mousePage?.getBoundingClientRect()
+      : null;
+    const edgeTurn = paper?.width
+      ? event.clientX < paper.left ? -1 : event.clientX >= paper.right ? 1 : 0
+      : 0;
+    // Browsers can start a text selection from adjacent whitespace. Claim only
+    // a mouse press in an outside gutter; the printed area keeps native selection.
+    if (edgeTurn) event.preventDefault();
     const media = matchingPath(event, "img[role='button']");
     const structured = matchingPath(event, "table, pre");
     const table = matchingPath(event, "table");
@@ -349,7 +358,8 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       media,
       table,
       overflow,
-      dragEnabled: (event.pointerType || "touch") === "touch" || Boolean(media || structured),
+      dragEnabled: (event.pointerType || "touch") === "touch" || Boolean(edgeTurn || media || structured),
+      edgeTurn,
       rect,
       layoutScale: rect.width > 0 ? reader.clientWidth / rect.width : 1,
       deltaX: 0,
@@ -390,7 +400,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     }
     if (!pointer.owner && Math.max(horizontal, vertical) > CLICK_DRIFT) {
       if (vertical > horizontal * AXIS_ADVANTAGE) pointer.owner = "vertical";
-      else if (horizontal > vertical * AXIS_ADVANTAGE && pointer.dragEnabled) {
+      else if (horizontal > vertical * AXIS_ADVANTAGE && pointer.dragEnabled && pointer.edgeTurn * deltaX <= 0) {
         pointer.owner =
           pointer.overflow && canScrollOverflow(pointer.overflow, deltaX) ? "overflow" : "page";
       }
@@ -407,7 +417,8 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     }
     if (pointer.owner !== "page") return;
     event.preventDefault();
-    pagination.previewSwipe(deltaX, pointer.y);
+    if (pointer.edgeTurn && pointer.edgeTurn * deltaX >= 0) pagination.cancelSwipe();
+    else pagination.previewSwipe(deltaX, pointer.y);
   }
 
   function onPointerUp(event) {
@@ -450,9 +461,14 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       return;
     }
     if (start.owner === "page") {
-      pagination.finishSwipe(event.clientX - start.x, start.y);
-      const direction = swipeDirection(start, event);
       suppressCompatibilityClick(event);
+      const deltaX = event.clientX - start.x;
+      if (start.edgeTurn && start.edgeTurn * deltaX >= 0) {
+        pagination.cancelSwipe();
+        return;
+      }
+      pagination.finishSwipe(deltaX, start.y);
+      const direction = swipeDirection(start, event);
       if (direction) {
         run(direction, start.type === "mouse" ? "mouse" : "touch");
         return;
