@@ -347,19 +347,24 @@ return {usage: [...scope?.querySelectorAll(".legend-name") ?? []].map(el => el.t
 verify_reading_memory() {
   # A restarted automation session may use fresh site storage. Seed the
   # public recent-reading record after setting the requested viewport.
-  local statistics
+  local statistics recent_state recent_predicate
   statistics=$(jq -cn --arg id "$public_id" '{
     schema: 1, days: [{date:"2026-08-13",durationMs:90000}],
     books: [{contentVersion:$id,durationMs:90000,lastReadDate:"2026-08-13"}]
   } | [tojson]')
   execute_sync 'localStorage.setItem("atha.reader.statistics.v1", arguments[0]); return true;' "$statistics" >/dev/null
+  recent_state='
+const results = document.querySelector(".memory-hits");
+return {heading: results?.querySelector("h2")?.textContent,
+  ready: results?.getAttribute("aria-busy") === "false",
+  failed: Boolean(results?.querySelector(".empty-memory button")),
+  hits: results?.querySelectorAll(".hit-row").length,
+  recent: [...document.querySelectorAll(".recent-chip .chip-title")].map(el => el.textContent),
+  overflow: document.documentElement.scrollWidth > innerWidth};'
+  recent_predicate='.heading == "最近记忆片段" and .ready and (.failed | not) and .hits == 4 and .recent == ["Atha FB2 Gate"] and (.overflow | not)'
   nav_tab '阅读记忆'
-  wait_for_script '
-return {heading: document.querySelector(".memory-shell h1")?.textContent,
-  search: Boolean(document.querySelector(".memory-shell input[aria-label=搜索笔记与回复]")),
-  overflow: document.documentElement.scrollWidth > innerWidth};' \
-    '.heading == "阅读记忆" and .search and (.overflow | not)' \
-    'cross-book search did not become ready' >/dev/null
+  wait_for_script "$recent_state" "$recent_predicate" \
+    'opening native reading memory did not show the four recent fragments' >/dev/null
   set_text_input '.memory-shell input[type=search]' '公共记忆'
   wait_for_script '
 const rows = [...document.querySelectorAll(".hit-row")];
@@ -369,11 +374,9 @@ return {count: rows.length, jump: document.querySelectorAll(".hit-row .jump-btn"
   overflow: document.documentElement.scrollWidth > innerWidth};' \
     '.count == 2 and .jump == 1 and .snapshots == 2 and .missing == 1 and (.overflow | not)' \
     'seeded memory did not distinguish available from missing source editions' >/dev/null
-  set_text_input '.memory-shell input[type=search]' ''
-  wait_for_script '
-return {publicRecent: [...document.querySelectorAll(".recent-chip .chip-title")]
-  .some(el => el.textContent === "Atha FB2 Gate")};' \
-    '.publicRecent' 'the memory view did not show the recent public book after clearing a search' >/dev/null
+  webdriver_click_element '.memory-shell button[aria-label="清空搜索"]' || die 'could not clear the native memory search'
+  wait_for_script "$recent_state" "$recent_predicate" \
+    'clearing a native search did not restore recent memory and the recent book' >/dev/null
   set_text_input '.memory-shell input[type=search]' '公共记忆'
   wait_for_script 'return {hits: document.querySelectorAll(".hit-row").length};' \
     '.hits == 2' 'restored memory query did not produce the two seeded hits' >/dev/null
@@ -672,6 +675,15 @@ verify_authoring_cycle() {
   printf '%s\n' "$fixture" "$(basename -- "$fixture")" 'Atha Linux Source Return' '原文锚点' "$marker" >>"$privacy_file"
   open_library "$expected_books"
   set_window_size 360 760
+  nav_tab '阅读记忆'
+  wait_for_script '
+const results = document.querySelector(".memory-hits");
+return {heading: results?.querySelector("h2")?.textContent,
+  ready: results?.getAttribute("aria-busy") === "false",
+  empty: results?.querySelector(".empty-memory p")?.textContent};' \
+    '.heading == "最近记忆片段" and .ready and .empty == "还没有阅读记忆。"' \
+    'a fresh native message store did not show the recent-memory empty state' >/dev/null
+  nav_tab '书架'
   fire_tauri_drag_event 'tauri://drag-drop' "$fixture" >/dev/null || die 'could not import the original EPUB'
   wait_for_script '
 return {ready: Boolean(document.querySelector(".shelf-catalog [title=\"Atha Linux Source Return\"]")),

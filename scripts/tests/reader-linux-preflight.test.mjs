@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 const helper = fileURLToPath(new URL('../lib/reader-linux-preflight.sh', import.meta.url));
 const runner = fileURLToPath(new URL('../check-reader-linux.sh', import.meta.url));
+const ui = fileURLToPath(new URL('../lib/reader-linux-ui.sh', import.meta.url));
 const linux = { skip: process.platform !== 'linux' };
 function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'atha-driver-'));
@@ -52,7 +53,7 @@ test('Driver preflight prefers PATH and supports custom CARGO_HOME and legacy ca
 test('Missing driver fails the full gate before build, fixture writes or GUI startup', linux, t => {
   const f = setup(t), touched = join(f.root, 'unexpected-side-effect');
   for (const command of ['dirname', 'uname']) symlinkSync('/usr/bin/' + command, join(f.bin, command));
-  for (const command of ['base64', 'curl', 'jq', 'sha256sum', 'ss', 'systemctl', 'systemd-run', 'WebKitWebDriver', 'mise', 'mkdir']) {
+  for (const command of ['base64', 'curl', 'jq', 'sha256sum', 'ss', 'systemctl', 'systemd-run', 'WebKitWebDriver', 'mise', 'python3', 'mkdir']) {
     f.executable(join(f.bin, command), `echo touched > '${touched}'; exit 99`);
   }
   f.env.ATHA_TAURI_DRIVER = join(f.root, 'missing-driver');
@@ -64,18 +65,24 @@ test('Missing driver fails the full gate before build, fixture writes or GUI sta
 });
 
 test('Reading-memory fixture resets after optional reading without loosening the exact assertion', linux, () => {
-  const source = readFileSync(runner, 'utf8');
-  const start = source.indexOf('memory_statistics=$(jq -cn');
-  const endMarker = "|| die 'could not seed reading memory statistics'";
-  const end = source.indexOf(endMarker, start) + endMarker.length;
-  assert(start > source.indexOf('run_gesture_gate private'), 'optional real reading must precede the isolated memory fixture');
-  assert(end < source.indexOf('for width in 360 1000; do'), 'fixture must be ready before both memory viewports');
-  assert(source.includes('.recent == 1 and'), 'do not relax the one-book memory contract');
+  const main = readFileSync(runner, 'utf8');
+  const call = main.indexOf('  verify_reading_memory\n');
+  assert(call > main.indexOf('run_gesture_gate private'), 'optional real reading must precede the isolated memory fixture');
+  assert(main.slice(main.lastIndexOf('for width in 360 1000; do', call), call).startsWith('for width in 360 1000; do'),
+    'reseed in each reopened memory viewport');
+  const source = readFileSync(ui, 'utf8');
+  const start = source.indexOf('  statistics=$(jq -cn', source.indexOf('verify_reading_memory()'));
+  const end = source.indexOf("  nav_tab '阅读记忆'", start);
+  assert(start > 0 && end > start, 'seed the isolated fixture before opening memory');
+  const memory = source.slice(start, source.indexOf('\nreader_progress()', end));
+  assert(memory.includes('.recent == ["Atha FB2 Gate"]'), 'do not relax the one-book memory contract');
   const seed = source.slice(start, end);
   const result = spawnSync('/bin/bash', ['-c', `set -euo pipefail
 public_id=${'1'.repeat(64)}
 execute_sync() { printf '%s' "$2" >&2; printf true; }
-${seed}`], { encoding: 'utf8' });
+seed_fixture() {
+${seed}}
+seed_fixture`], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const [record] = JSON.parse(result.stderr);
   const statistics = JSON.parse(record);
@@ -85,7 +92,7 @@ ${seed}`], { encoding: 'utf8' });
   assert.equal(statistics.books[0].durationMs, 90000);
 });
 
-for (const formalNavigation of [false, true]) test(`Native action timeout stops only its unit without cancellation in ${formalNavigation ? 'formal navigation' : 'direct invocation'}`, linux, t => {
+for (const formalGate of [false, true]) test(`Native action timeout stops only its unit without cancellation in ${formalGate ? 'the formal gesture gate' : 'direct invocation'}`, linux, t => {
   const root = mkdtempSync(join(tmpdir(), 'atha-input-timeout-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const calls = join(root, 'calls');
@@ -93,15 +100,13 @@ for (const formalNavigation of [false, true]) test(`Native action timeout stops 
   mkdirSync(join(root, 'run'));
   const source = readFileSync(runner, 'utf8');
   const body = (name, next) => source.slice(source.indexOf(`${name}() {`), source.indexOf(`${next}() {`));
-  const navigationStart = source.indexOf('interface_navigation_file=$run_root/');
-  const navigationEnd = source.indexOf('pending_formula_queue=', navigationStart);
-  assert(navigationStart > 0 && navigationEnd > navigationStart);
-  const invoke = formalNavigation ? `
-verify_reader_interface_navigation() {
+  const publicGate = source.match(/^run_gesture_gate public$/m)?.[0];
+  assert(publicGate, 'the formal public gesture gate must run in the current shell');
+  const invoke = formalGate ? `
+run_gesture_gate() {
   perform_pointer_action '{"x":10,"y":20}' tap || exit 1
-  printf '{}'
 }
-${source.slice(navigationStart, navigationEnd)}` : `
+${publicGate}` : `
 status=0
 perform_pointer_action '{"x":10,"y":20}' tap || status=$?
 exit "$status"`;
@@ -129,7 +134,7 @@ ${body('cleanup', 'wait_for_script')}
 trap cleanup EXIT
 ${invoke}
 `], { env: { ...process.env, ATHA_TIMEOUT_TEST_ROOT: root }, encoding: 'utf8' });
-  assert.equal(result.status, formalNavigation ? 1 : 28, result.stderr);
+  assert.equal(result.status, formalGate ? 1 : 28, result.stderr);
   assert.match(result.stderr, /failure:28/);
   const requests = readFileSync(calls, 'utf8').trim().split('\n');
   assert.equal(requests.filter(line => line.startsWith('curl:')).length, 1, 'do not issue another native command after the stalled action');
