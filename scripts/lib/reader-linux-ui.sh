@@ -713,6 +713,9 @@ const visible = rects.length > 0 && rects.every(r => {
 });
 const line = rects.length === 1 && rects[0];
 return {matches:ranges.length, visible, rectCount:rects.length,
+  width:innerWidth, height:innerHeight,
+  page:page?.toJSON(), rects:rects.map(rect => rect.toJSON()),
+  hits:rects.map(rect => document.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)?.className ?? null),
   point: visible && line ? {x:Math.max(page.left + 1, line.left - 1), y:(line.top + line.bottom) / 2,
     endX:Math.min(page.right - 1, line.right + 1), endY:(line.top + line.bottom) / 2} : null};'
 visible_source_highlight='.matches == 1 and .visible and .rectCount > 0'
@@ -873,6 +876,7 @@ return {width:innerWidth, edition: saved?.contentVersion, section: loc?.start?.s
     restored=$(wait_for_script "$reader_position_script" \
       "($valid_reader_position) and .book == \"$edition\" and .locator.start.section == \"$section\" and .page > 1" \
       'memory jump did not open a non-first page of the original chapter')
+    capture_public_ui authoring-restored-page
     wait_for_script "$reader_highlight_script" "$visible_source_highlight" \
       'memory jump restored the thread but the selected original text is not on the rendered page' "$note_args" >/dev/null
     if ((width == 360)); then
