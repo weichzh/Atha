@@ -14,6 +14,8 @@ import type { ReadingMemoryTarget } from "../../library.ts";
 import type { ConversationView, RichTextInput, SourceAnchorInput, SourceSnapshotInput } from "../../messages.ts";
 import bookReaderCssUrl from "../../styles/book-reader.css?url";
 import bookThemeCssUrl from "../../styles/book-theme.css?url";
+import type PageTurnStage from "../components/PageTurnStage.svelte";
+import { uiPrefs } from "../data/ui-prefs.svelte.ts";
 import { docHasRichFormatting } from "../data/message-doc.ts";
 import { getMessageClient } from "../data/message-adapter.ts";
 import { installDemoFetchBridge, isTauriRuntime } from "../data/runtime.ts";
@@ -30,6 +32,7 @@ import { ensureKernelGlobals } from "./kernel-globals.ts";
 import { createReaderPreferences, DEFAULT_APPLICATION_PREFS, DEFAULT_BOOK_PREFS } from "./preferences.ts";
 
 export interface ReaderEngineCallbacks {
+  getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "cancel" | "stop"> | undefined;
   onToggleChrome: () => void;
   onOpenNoteThread: (rootId: string) => void;
   onOpenLightbox: (target: HTMLElement) => void;
@@ -533,7 +536,23 @@ export class ReaderEngine {
       },
     });
 
+    const stage = () => this.callbacks.getPageTurnStage?.();
+    const reducePageMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     this.pagination = createPagination({
+      pageTurn: {
+        effect: () => {
+          const style = uiPrefs.state.pageTurnStyle;
+          return stage() && (style === "cover" || style === "curl") &&
+              !reducePageMotion.matches
+            ? style : null;
+        },
+        preview: (pageStep: number, from: number, pages: number, dx: number, style: "cover" | "curl", y?: number) =>
+          stage()?.preview({ frame, reader, page, book: this.content.book, pageStep }, from, pages, dx, style, y),
+        commit: (pageStep: number, from: number, dir: 1 | -1, style: "cover" | "curl") =>
+          stage()?.commit({ frame, reader, page, book: this.content.book, pageStep }, from, dir, style),
+        cancel: () => stage()?.cancel(),
+        stop: () => stage()?.stop(),
+      },
       book: this.content.book,
       measureViewportHeight: () => frame.clientHeight,
       reader,

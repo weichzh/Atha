@@ -1,0 +1,260 @@
+// Build reader/app first. Use the same Playwright setup as reader-app.browser.mjs.
+import assert from "node:assert/strict";
+import { mkdir, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { preview as startPreview } from "vite";
+
+const { chromium } = createRequire(import.meta.url)("playwright");
+const appRoot = fileURLToPath(new URL("../", import.meta.url));
+const artifacts = new URL("../../../artifacts/local/page-turn/", import.meta.url);
+const manifest = JSON.parse(await readFile(new URL("../public/demo/manifest.json", import.meta.url)));
+const version = manifest.contentVersion;
+const csp = JSON.parse(await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url))).app.security.csp;
+manifest.resources = [];
+manifest.toc = manifest.sections.map(({ href }, i) => ({ href, label: `原创合成章 ${i + 1}` }));
+const body = (chapter, paragraphs) => `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>卷页检查</title></head><body>
+  <h1>潮汐记录 · 第 ${chapter} 章</h1>${Array.from({ length: paragraphs }, (_, i) => `
+  <p>第 ${chapter} 章 · 第 ${i + 1} 段。灰白的云在港口缓缓开阔，灯塔后面有一条窄小的石路。
+  On the far side of the harbor, each stone recorded a different tide.</p>`).join("")}</body></html>`;
+
+const saved = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null")?.locator,
+  `atha.reader.progress.${version.slice(0, 16)}.v1`);
+const position = (page) => page.evaluate(() => Number(document.title.match(/page (\d+) \/ (\d+)$/)?.[1]));
+const section = (page) => page.locator("html").getAttribute("data-section-position");
+const stage = (page, mode) => page.locator(`[data-page-turn-renderer="${mode}"]`);
+const settled = (page) => page.locator("[data-page-turn-renderer]").waitFor({ state: "detached" });
+
+async function mode(page, name) {
+  if (!await page.getByRole("button", { name: "排版与主题设置" }).isVisible()) {
+    const rect = await page.locator(".reader-frame").boundingBox();
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  }
+  await page.getByRole("button", { name: "排版与主题设置" }).click();
+  await page.getByRole("tab", { name: "本书覆盖" }).click();
+  const option = page.getByRole("group", { name: "阅读方式" }).getByRole("button", { name, exact: true });
+  await option.click();
+  await page.waitForFunction((label) => Array.from(document.querySelectorAll(".reader-settings-dialog button"))
+    .some((button) => button.textContent.trim() === label && button.getAttribute("aria-pressed") === "true"), name);
+  await page.keyboard.press("Escape");
+  await page.getByRole("dialog", { name: "阅读排版设置" }).waitFor({ state: "hidden" });
+  await page.locator(".reader-shell").focus();
+}
+
+async function advance(page, direction, renderer, button = false) {
+  const before = await position(page);
+  if (button) await page.getByRole("button", { name: direction > 0 ? "下一页" : "上一页" }).click();
+  else await page.keyboard.press(direction > 0 ? "ArrowRight" : "ArrowLeft");
+  if (renderer) {
+    try {
+      await stage(page, renderer).waitFor({ timeout: 3000 });
+    } catch (error) {
+      throw new Error(`Expected ${renderer}; ${await page.title()}; observed ${await page.evaluate(() => JSON.stringify(window.turnRenderers))}`, {
+        cause: error,
+      });
+    }
+  }
+  await page.waitForFunction((wanted) => new RegExp(`page ${wanted} / `).test(document.title), before + direction);
+  if (!renderer) await settled(page);
+}
+
+async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference" } = {}) {
+  const page = await browser.newPage({
+    viewport: mobile ? { width: 390, height: 844 } : { width: 1120, height: 820 },
+    deviceScaleFactor: mobile ? 2 : 1,
+    hasTouch: touch,
+    reducedMotion,
+  });
+  page.setDefaultTimeout(7000);
+  const errors = [];
+  await page.addInitScript(() => {
+    window.turnRenderers = [];
+    new MutationObserver((records) => {
+      for (const { target } of records) {
+        const value = target.getAttribute("data-page-turn-renderer");
+        if (value) window.turnRenderers.push(value);
+      }
+    }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-page-turn-renderer"] });
+  });
+  page.on("pageerror", error => errors.push(error.stack));
+  if (noGl) {
+    await page.addInitScript(() => {
+      const get = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+        return type.startsWith("webgl") ? null : get.call(this, type, ...args);
+      };
+    });
+  }
+  await page.route(`${base}**`, async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (route.request().isNavigationRequest() && pathname === "/") {
+      const response = await route.fetch();
+      await route.fulfill({ response, headers: { ...response.headers(), "content-security-policy": csp } });
+    } else if (pathname === "/demo/manifest.json") {
+      await route.fulfill({ json: manifest });
+    } else if (/\/demo\/ch[123]\.xhtml$/.test(pathname)) {
+      const source = body(pathname.match(/ch(\d)/)[1], paragraphs);
+      await route.fulfill({
+        contentType: "application/xhtml+xml",
+        body: complex ? source.replace("<h1>", "<blockquote><p>原样保留的引文</p></blockquote><h1>") : source,
+      });
+    } else {
+      await route.continue();
+    }
+  });
+  await page.route((url) => url.origin !== new URL(base).origin, (route) => route.abort());
+  return { page, errors };
+}
+
+async function open(page, base, fromShelf = false) {
+  if (fromShelf) await page.locator('[data-shelf-area="catalog"]').first().click();
+  else await page.goto(`${base}?manifest=demo/manifest.json`);
+  await page.waitForFunction(() => document.querySelector(".reader-root")?.dataset.screenReady === "true" &&
+    !document.querySelector(".opening-cover, .opening-back"));
+  await page.locator(".reader-shell").focus();
+}
+
+async function touchDrag(page, dx) {
+  const cdp = await page.context().newCDPSession(page);
+  const { x, y, width, height } = await page.locator(".reader-frame").boundingBox();
+  const startX = Math.round(x + width * (dx < 0 ? 0.8 : 0.2));
+  const startY = Math.round(y + height * 0.58);
+  const move = (type, delta) => cdp.send("Input.dispatchTouchEvent", {
+    type,
+    touchPoints: delta === undefined ? [] : [{ x: startX + delta, y: startY }],
+  });
+  await move("touchStart", 0);
+  await move("touchMove", Math.round(dx / 2));
+  await move("touchMove", dx);
+  return async () => {
+    await move("touchEnd");
+    await cdp.detach();
+  };
+}
+
+const preview = await startPreview({ root: appRoot, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
+const base = `http://127.0.0.1:${preview.httpServer.address().port}/`;
+let browser;
+try {
+  await mkdir(artifacts, { recursive: true });
+  browser = await chromium.launch({
+    executablePath: process.env.CHROMIUM_PATH,
+    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+  });
+
+  const desktop = await prepare(browser, base, { touch: true });
+  const { page } = desktop;
+  await page.goto(base);
+  await open(page, base, true);
+  await mode(page, "卷页");
+  const commitWebgl = await touchDrag(page, -440);
+  await stage(page, "webgl").waitFor();
+  await page.screenshot({ path: fileURLToPath(new URL("webgl-desktop.png", artifacts)) });
+  const lost = await page.locator('.page-turn-stage canvas.visible').evaluate((canvas) => {
+    const extension = canvas.getContext("webgl").getExtension("WEBGL_lose_context");
+    if (!extension) return false;
+    extension.loseContext();
+    return true;
+  });
+  assert.equal(lost, true);
+  await stage(page, "canvas2d").waitFor();
+  await commitWebgl();
+  await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+  await settled(page);
+  await advance(page, -1, "canvas2d");
+  await settled(page);
+  await mode(page, "覆盖");
+  await advance(page, 1, "cover", true);
+  await page.screenshot({ path: fileURLToPath(new URL("cover-desktop.png", artifacts)) });
+  await advance(page, -1, "cover", true);
+  await page.locator(".reader-shell").focus();
+  await advance(page, 1, "cover");
+  await settled(page);
+  const beforeScroll = await saved(page);
+  await mode(page, "连续滚动");
+  assert.equal(await page.locator(".reader").getAttribute("data-reading-mode"), "scroll");
+  assert.equal(await page.evaluate(() => document.querySelector(".reader").scrollTop > 0), true);
+  await mode(page, "覆盖");
+  assert.equal(await saved(page), beforeScroll, "mode round trip reopens the same paged Locator");
+  await page.getByRole("button", { name: "返回书架" }).click();
+  await page.locator(".reader-root").waitFor({ state: "detached" });
+  await open(page, base, true);
+  assert.equal(await saved(page), beforeScroll, "shelf round trip restores the stored Locator");
+  assert.equal(await position(page), 2);
+  await page.keyboard.press("ArrowLeft");
+  await settled(page);
+  const first = await section(page);
+  const count = Number((await page.title()).match(/page \d+ \/ (\d+)$/)[1]);
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(() => /page 3 \/ /.test(document.title));
+  for (let i = 3; i < count; i++) await advance(page, 1, "cover");
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "2 / 3");
+  await settled(page);
+  assert.equal(await position(page), 1);
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForFunction(({ first, count }) => document.documentElement.dataset.sectionPosition === first &&
+    new RegExp(`page ${count} / `).test(document.title), { first, count });
+  assert.equal(await position(page), count);
+  await settled(page);
+  assert.deepEqual(desktop.errors, []);
+
+  const fallback = await prepare(browser, base, { mobile: true, noGl: true });
+  await open(fallback.page, base);
+  await mode(fallback.page, "卷页");
+  const firstPage = await saved(fallback.page);
+  const cancel = await touchDrag(fallback.page, -32);
+  await stage(fallback.page, "canvas2d").waitFor();
+  await cancel();
+  await settled(fallback.page);
+  assert.equal(await saved(fallback.page), firstPage);
+  const forward = await touchDrag(fallback.page, -185);
+  await stage(fallback.page, "canvas2d").waitFor();
+  await fallback.page.screenshot({ path: fileURLToPath(new URL("canvas2d-touch-390.png", artifacts)) });
+  assert.equal(await position(fallback.page), 1);
+  await forward();
+  await fallback.page.waitForFunction(() => /page 2 \/ /.test(document.title));
+  await settled(fallback.page);
+  const backward = await touchDrag(fallback.page, 185);
+  await stage(fallback.page, "canvas2d").waitFor();
+  await backward();
+  await fallback.page.waitForFunction(() => /page 1 \/ /.test(document.title));
+  await settled(fallback.page);
+  await mode(fallback.page, "滑动");
+  await advance(fallback.page, 1, null);
+  await mode(fallback.page, "连续滚动");
+  const beforeWheel = await fallback.page.locator(".reader").evaluate(el => el.scrollTop);
+  await fallback.page.mouse.move(180, 450);
+  await fallback.page.mouse.wheel(0, 345);
+  await fallback.page.waitForFunction((before) => document.querySelector(".reader").scrollTop > before, beforeWheel);
+  await settled(fallback.page);
+  assert.deepEqual(fallback.errors, []);
+
+  const long = await prepare(browser, base, { mobile: true, paragraphs: 320 });
+  await open(long.page, base);
+  await mode(long.page, "卷页");
+  assert.equal(await long.page.locator(".reader").evaluate(el => el.hasAttribute("data-native-page-scroll")), true);
+  await advance(long.page, 1, null);
+  assert.ok(await long.page.locator(".page").evaluate(el => el.scrollLeft > 0));
+  assert.deepEqual(await long.page.evaluate(() => window.turnRenderers), []);
+  assert.deepEqual(long.errors, []);
+
+  const complex = await prepare(browser, base, { complex: true });
+  await open(complex.page, base);
+  await mode(complex.page, "卷页");
+  await advance(complex.page, 1, "cover");
+  await settled(complex.page);
+  assert.deepEqual(complex.errors, []);
+
+  const reduced = await prepare(browser, base, { reducedMotion: "reduce" });
+  await open(reduced.page, base);
+  await mode(reduced.page, "卷页");
+  await advance(reduced.page, 1, null);
+  assert.deepEqual(await reduced.page.evaluate(() => window.turnRenderers), []);
+  assert.deepEqual(reduced.errors, []);
+  console.log("Page turns passed: WebGL, Canvas2D, DOM cover, slide, scroll, cross-section and Locator restore.");
+} finally {
+  await browser?.close();
+  await new Promise(resolve => preview.httpServer.close(resolve));
+}

@@ -3,6 +3,7 @@
   import { Dialog, Slider, Switch } from "bits-ui";
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
+  import { uiPrefs, type PageTurnStyle } from "../data/ui-prefs.svelte.ts";
   import type { ReaderEngine } from "../engine/reader-engine.svelte.ts";
   import type {
     PageMargin,
@@ -11,7 +12,6 @@
     ReaderDensity,
     ReaderFontFamily,
     ReaderTheme,
-    ReadingMode,
   } from "../types.ts";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
@@ -26,6 +26,8 @@
 
   let activeTab = $state<"global" | "book" | "css">("global");
   let confirmResetBook = $state(false);
+  let changingReadingMode = $state(false);
+  let pageTurnError = $state(false);
 
   const appPrefs = $derived(engine.preferences.application);
   const bookPrefs = $derived(engine.preferences.book);
@@ -43,6 +45,27 @@
 
   async function setBook(patch: Record<string, unknown>) {
     await engine.updatePreferences("book", patch);
+  }
+
+  const activeTurnStyle = $derived<PageTurnStyle>(bookPrefs.readingMode === "scroll"
+    ? "scroll"
+    : uiPrefs.state.pageTurnStyle === "scroll" ? "slide" : uiPrefs.state.pageTurnStyle);
+
+  async function selectPageTurn(style: PageTurnStyle) {
+    pageTurnError = false;
+    const readingMode = style === "scroll" ? "scroll" : "paged";
+    if (bookPrefs.readingMode !== readingMode) {
+      changingReadingMode = true;
+      try {
+        await setBook({ readingMode });
+      } catch {
+        pageTurnError = true;
+        return;
+      } finally {
+        changingReadingMode = false;
+      }
+    }
+    if (style !== "scroll") uiPrefs.update({ pageTurnStyle: style });
   }
 
   async function executeResetBook() {
@@ -235,21 +258,29 @@
               <div class="settings-grid">
                 <div class="setting-block">
                   <div class="setting-label">阅读方式</div>
-                  <div class="pill-group">
+                  <div class="pill-group" role="group" aria-label="阅读方式">
                     {#each [
-                      { value: "paged", label: "分页翻页" },
+                      { value: "slide", label: "滑动" },
+                      { value: "cover", label: "覆盖" },
+                      { value: "curl", label: "卷页" },
                       { value: "scroll", label: "连续滚动" },
-                    ] as m (m.value)}
+                    ] as const as m (m.value)}
                       <button
                         type="button"
                         class="pill-btn"
-                        class:active={bookPrefs.readingMode === m.value}
-                        onclick={() => void setBook({ readingMode: m.value as ReadingMode })}
+                        class:active={activeTurnStyle === m.value}
+                        aria-pressed={activeTurnStyle === m.value}
+                        disabled={changingReadingMode}
+                        onclick={() => void selectPageTurn(m.value)}
                       >
                         {m.label}
                       </button>
                     {/each}
                   </div>
+                  <p class="setting-help">连续滚动仅用于本书；分页动效适用于所有分页书籍。</p>
+                  {#if pageTurnError}
+                    <p class="setting-help" role="alert">未能保存阅读方式，请重试。</p>
+                  {/if}
                 </div>
 
                 <div class="setting-block">
@@ -424,6 +455,12 @@
     font-size: 13.5px;
     font-weight: 600;
     color: var(--ink-primary);
+  }
+
+  .setting-help {
+    margin: 0;
+    font-size: 13px;
+    color: var(--ink-muted);
   }
 
   .setting-val {
