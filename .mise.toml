@@ -4,3 +4,11 @@
 java = "temurin-21.0.12+8.0.LTS"
 node = "24.1.0"
 pnpm = "11.19.0"
+
+[tasks."repo:cleanup"]
+description = "预览并按编号清理已合入分支和失效跟踪引用"
+run = "python3 scripts/repo-cleanup.py"
+
+[tasks."android:run"]
+description = "编译并以本机试用签名覆盖安装到指定 PCT-AL10，启动 Atha"
+run = "bash scripts/check-pct-reader.sh run --local-test"
