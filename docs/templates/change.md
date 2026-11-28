@@ -26,7 +26,7 @@ none / present
 
 ## Files And Steps
 
-有关联 Issue 或 PR 时在此链接。
+链接关联的 Issue 或 PR（如有），列出本次实施步骤。
 
 ## Checks
 

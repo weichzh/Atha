@@ -30,32 +30,32 @@ _Avoid_：脱离书籍的通用聊天室。
 
 ## 文档所有权
 
-| 事实 | 唯一当前所有者 |
-| --- | --- |
-| 启动顺序和硬规则 | `AGENTS.md` |
-| 稳定目标、目录和所有权 | `CONTEXT.md` |
-| 第一方代码许可与第三方资产边界 | `CONTEXT.md`；根 `LICENSE`、`THIRD_PARTY_NOTICES.md` 与 package manifest 是对应投影 |
-| 当前执行指针 | `docs/ACTIVE.md` |
-| 当前文档注册表和最小上下文 | `docs/INDEX.md` |
-| 任务分类与变更生命周期 | `docs/workflow/PROTOCOL.md` |
-| GitHub Flow、协作规则与检查入口 | `docs/agents/workflow.md` |
-| Issue 交接与关闭规则 | `docs/agents/issue-tracker.md` |
-| 外部技术与标准的官方入口和项目快速用法 | `docs/agents/references.md` |
-| 产品目标和体验边界 | `docs/product/OVERVIEW.md` |
-| 长期架构与领域边界 | `docs/architecture/` |
-| 已实现事实和机器契约 | `docs/codebase/` 与真实代码/测试 |
-| 当前跨模块变更 | `docs/changes/*.md` |
-| 当前未决技术研究 | `docs/research/*.md` |
-| 已关闭计划、评审和研究 | Git 历史；迁移期旧目录仅作兼容档案 |
+| 事实                                   | 唯一当前所有者                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------------------- |
+| 启动顺序和硬规则                       | `AGENTS.md`                                                                         |
+| 稳定目标、目录和所有权                 | `CONTEXT.md`                                                                        |
+| 第一方代码许可与第三方资产边界         | `CONTEXT.md`；根 `LICENSE`、`THIRD_PARTY_NOTICES.md` 与 package manifest 是对应投影 |
+| 当前执行指针                           | `docs/ACTIVE.md`                                                                    |
+| 当前文档注册表和最小上下文             | `docs/INDEX.md`                                                                     |
+| 任务分类与变更生命周期                 | `docs/workflow/PROTOCOL.md`                                                         |
+| GitHub Flow、协作规则与检查入口        | `docs/agents/workflow.md`                                                           |
+| Issue 登记、交接与关闭规则             | `docs/agents/issue-tracker.md`                                                      |
+| 外部技术与标准的官方入口和项目快速用法 | `docs/agents/references.md`                                                         |
+| 产品目标和体验边界                     | `docs/product/OVERVIEW.md`                                                          |
+| 长期架构与领域边界                     | `docs/architecture/`                                                                |
+| 已实现事实和机器契约                   | `docs/codebase/` 与真实代码/测试                                                    |
+| 需批准的实施方案与验收证据             | `docs/changes/*.md`                                                                 |
+| 当前未决技术研究                       | `docs/research/*.md`                                                                |
+| 已关闭计划、评审和研究                 | Git 历史；迁移期旧目录仅作兼容档案                                                  |
 
 ## 目录边界
 
-| 路径 | 职责 |
-| --- | --- |
-| `backend/` | 平台无关后端与资源边界 |
-| `reader/` | 平台 WebView 阅读 host 与唯一阅读页实现 |
-| `p0/` | 不进入正式产品的技术验证 |
-| `docs/` | 当前规则、事实所有者、活动变更和未决研究 |
-| `artifacts/local/` | Git 忽略的本机性能与验收证据 |
+| 路径               | 职责                                     |
+| ------------------ | ---------------------------------------- |
+| `backend/`         | 平台无关后端与资源边界                   |
+| `reader/`          | 平台 WebView 阅读 host 与唯一阅读页实现  |
+| `p0/`              | 不进入正式产品的技术验证                 |
+| `docs/`            | 当前规则、事实所有者、活动变更和未决研究 |
+| `artifacts/local/` | Git 忽略的本机性能与验收证据             |
 
 发生冲突时，先服从用户当前指令和 `AGENTS.md`；机器行为以真实代码、测试和正式命令为准；产品与流程意图以当前所有者和已接受的活动 change 为准。

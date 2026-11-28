@@ -21,7 +21,7 @@
 | [CONTEXT.md](../CONTEXT.md)                                        | 稳定目标、目录和所有权                     |
 | [ACTIVE.md](ACTIVE.md)                                             | 当前执行指针                               |
 | [agents/workflow.md](agents/workflow.md)                           | GitHub Flow、协作规则与检查入口            |
-| [agents/issue-tracker.md](agents/issue-tracker.md)                 | Issue 交接与关闭规则                       |
+| [agents/issue-tracker.md](agents/issue-tracker.md)                 | Issue 登记、交接与关闭规则                 |
 | [agents/references.md](agents/references.md)                       | 外部技术与标准的官方入口和项目快速用法     |
 | [workflow/PROTOCOL.md](workflow/PROTOCOL.md)                       | 任务和 change 生命周期                     |
 | [product/OVERVIEW.md](product/OVERVIEW.md)                         | 产品目标与体验边界                         |
@@ -34,7 +34,7 @@
 | [codebase/DATABASE.md](codebase/DATABASE.md)                       | P0 数据库语义与缺口                        |
 | [roadmap/ROADMAP.md](roadmap/ROADMAP.md)                           | 当前方向、候选顺序、暂缓范围与完成能力摘要 |
 | [decisions/](decisions/)                                           | 仍有效的长期决策                           |
-| [changes/](changes/)                                               | 活动跨模块变更                             |
+| [changes/](changes/)                                               | 需批准的实施方案与验收证据                 |
 | [research/](research/)                                             | 当前未决技术研究                           |
 
 ## 生命周期
@@ -46,5 +46,5 @@
 
 ## 模板
 
-- `templates/change.md`：新跨模块 change；
+- `templates/change.md`：需批准的实施方案；
 - `templates/decision.md`：仍有效的长期技术或产品决策。
