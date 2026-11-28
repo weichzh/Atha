@@ -442,6 +442,66 @@ async function verifySettingsSections(browser, previewUrl) {
   }
 }
 
+async function verifyGraphiteShell(browser, previewUrl) {
+  for (const width of [1440, 360]) {
+    const page = await browser.newPage({ viewport: { width, height: 860 }, colorScheme: "light" });
+    try {
+      await page.goto(previewUrl);
+      const navigation = page.getByRole("navigation", { name: "主导航" });
+      const settings = navigation.getByRole("tab", { name: "设置" });
+      await settings.click();
+      const dark = page.getByRole("radio", { name: "黑曜石暗色" });
+      if (!(await dark.isVisible())) await page.locator('[data-setting="appearance"]').click();
+      const lightBounds = await navigation.boundingBox();
+      assert.ok(lightBounds);
+      await dark.click();
+      await page.waitForFunction(() => document.documentElement.dataset.appTheme === "dark");
+      assert.deepEqual(await navigation.boundingBox(), lightBounds, "app theme leaves navigation geometry unchanged");
+
+      const frame = page.locator(".app-frame");
+      const navPaint = await navigation.evaluate((node) => {
+        const { backdropFilter, backgroundColor } = getComputedStyle(node);
+        return { backdropFilter, backgroundColor };
+      });
+      assert.equal(await frame.evaluate((node) => getComputedStyle(node).colorScheme), "dark");
+      assert.equal(await settings.getAttribute("aria-selected"), "true");
+      assert.equal(navPaint.backdropFilter, "none");
+      assert.equal(navPaint.backgroundColor, width === 360 ? "rgb(45, 44, 46)" : "rgb(39, 39, 41)");
+      await assertNoHorizontalOverflow(page, `graphite-settings-${width}`);
+      await page.screenshot({ path: path.join(screenshotDir, `graphite-settings-${width}.png`), animations: "disabled" });
+
+      const memory = navigation.getByRole("tab", { name: "阅读记忆" });
+      await memory.click();
+      await page.locator(".memory-shell").waitFor();
+      assert.equal(await frame.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(21, 21, 22)");
+      const library = navigation.getByRole("tab", { name: "书架" });
+      await library.click();
+      const firstBook = page.locator(".book-open-trigger").first();
+      await firstBook.waitFor();
+      assert.equal(await page.locator(".favorite-pip").first().evaluate((node) =>
+        getComputedStyle(node).color), "rgb(136, 78, 44)", "favorites keep dark ink on their light badges");
+      await assertNoHorizontalOverflow(page, `graphite-library-${width}`);
+      await page.screenshot({ path: path.join(screenshotDir, `graphite-library-${width}.png`), animations: "disabled" });
+
+      if (width === 360) {
+        await page.emulateMedia({ forcedColors: "active" });
+        await library.focus();
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Shift+Tab");
+        assert.equal(await library.evaluate((node) => getComputedStyle(node).outlineStyle), "solid");
+        assert.equal(await library.locator(".active-indicator").evaluate((node) => getComputedStyle(node).borderTopWidth), "1px");
+        await page.emulateMedia({ forcedColors: "none" });
+        await firstBook.click();
+        await waitForReaderEntry(page);
+        assert.notEqual(await page.locator(".reader-shell").evaluate((node) =>
+          getComputedStyle(node).getPropertyValue("--bg-canvas").trim()), "#151516", "reader excludes the shell palette");
+      }
+    } finally {
+      await page.close();
+    }
+  }
+}
+
 async function verifySettingsRemovalDuringBack(browser, previewUrl) {
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const errors = [];
@@ -1053,6 +1113,7 @@ async function run() {
     await verifyShelfSelection(browser, previewUrl);
     await verifyShelfResumeAndLayout(browser, previewUrl);
     await verifySettingsSections(browser, previewUrl);
+    await verifyGraphiteShell(browser, previewUrl);
     await verifySettingsRemovalDuringBack(browser, previewUrl);
     console.log("ALL BROWSER CHECKS PASSED! Screenshots saved to:", screenshotDir);
   } finally {

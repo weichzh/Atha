@@ -112,3 +112,30 @@
 
   --quote-tint: #23201B;
 }
+
+/* The app shell can change its palette without changing the page of a book. */
+:root[data-app-theme="dark"] .app-frame {
+  color-scheme: dark;
+  accent-color: var(--accent);
+  --bg-canvas: #151516;
+  --bg-surface: #242425;
+  --bg-elevated: #2D2C2E;
+  --bg-well: #222223;
+  --bg-well-hover: #303033;
+  --bg-well-active: #38373A;
+  --bg-pill-active: #39373A;
+  --bg-glass: #272729;
+  --bg-glass-strong: #2D2C2E;
+  --ink-primary: #F2EEEB;
+  --ink-secondary: #C6BFC0;
+  --ink-muted: #AEA6A8;
+  --accent: #EAB68F;
+  --accent-hover: #F3C4A2;
+  --accent-ink: #2B1B12;
+  --accent-soft: #393033;
+  --accent-soft-hover: #493A3A;
+  --cover-favorite-ink: #884E2C;
+  --ring: var(--accent);
+  --shell-nav-shadow: 0 7px 21px rgba(0, 0, 0, 0.34);
+  --shell-nav-backdrop: none;
+}

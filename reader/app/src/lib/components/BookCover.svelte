@@ -179,7 +179,7 @@
     align-items: center;
     justify-content: center;
     background: rgba(255, 253, 249, 0.88);
-    color: var(--accent);
+    color: var(--cover-favorite-ink, var(--accent));
     box-shadow: var(--shadow-xs);
     backdrop-filter: blur(8px);
   }

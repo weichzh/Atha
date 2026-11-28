@@ -2,6 +2,7 @@
 
 本页指向当前工作的入口。
 
+- `change`：石墨暗色应用壳 → `docs/changes/graphite-app-shell.md`
 - `now`：继续拆分尚未交付的阅读交互和验证工具。
 - `change`：UI 重设计 → `docs/changes/ui-redesign.md`
 - `change`：可搜索的分组设置 → `docs/changes/settings-sections.md`
