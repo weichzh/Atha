@@ -19,7 +19,7 @@ import type PageTurnStage from "../components/PageTurnStage.svelte";
 import { uiPrefs } from "../data/ui-prefs.svelte.ts";
 import { docHasRichFormatting } from "../data/message-doc.ts";
 import { getMessageClient } from "../data/message-adapter.ts";
-import { installDemoFetchBridge, isTauriRuntime } from "../data/runtime.ts";
+import { installDemoFetchBridge, isTauriRuntime, isWebKitGtkRuntime } from "../data/runtime.ts";
 import type {
   ActiveSelectionState,
   FootnotePreview,
@@ -516,13 +516,15 @@ export class ReaderEngine {
     const bookKey = params.get("state") || this.contentVersion.slice(0, 16);
 
     this.locator = createLocator({ assert });
+    const webKitGtk = isWebKitGtkRuntime();
     this.content = createContent({
       host,
       reader,
       // WebKitGTK ignores the img's color scheme for an embedded SVG.
       // Retire this override when the native Linux mismatch case passes.
-      projectSvgColorScheme: isTauriRuntime() && location.protocol === "tauri:" &&
-        /\bLinux\b/.test(navigator.userAgent) && !/\bAndroid\b/.test(navigator.userAgent),
+      projectSvgColorScheme: webKitGtk,
+      // WebKitGTK does not resolve @counter-style defined in the reading shadow.
+      projectShadowCounters: webKitGtk,
       themeStyleSource: { href: new URL(bookThemeCssUrl, location.href).href },
       readerStyleSource: { href: new URL(bookReaderCssUrl, location.href).href },
       formulaPlaceholderUrl: new URL(formulaPlaceholderUrl, location.href).href,
