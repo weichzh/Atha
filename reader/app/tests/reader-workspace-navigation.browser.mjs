@@ -111,6 +111,13 @@ async function verifyAtWidth(browser, url, width) {
       assert.ok(later.offset > offset + quote.length);
       const openThread = async () => {
         await page.keyboard.press("n");
+        // Opening the notes list really reflows A before B+C hides it.
+        await page.waitForFunction(() => {
+          const frame = document.querySelector(".reader-frame");
+          const reader = frame?.querySelector(".reader");
+          return frame?.clientWidth > 0 && frame.clientWidth < innerWidth - 100 &&
+            Math.abs(reader?.getBoundingClientRect().width - frame.clientWidth) <= 1;
+        });
         await page.locator(".note-index-row", { hasText: quote }).click();
         await regionA.waitFor({ state: "hidden" });
       };

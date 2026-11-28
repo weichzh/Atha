@@ -74,8 +74,8 @@ export function createNavigation({
 }) {
   let lastFallback = null;
   let pending = Promise.resolve();
-  // The page usually starts before a jump's target. Keep its exact point for reflow
-  // until another reading action takes over, without changing the progress Locator.
+  // A reflow may expose an earlier page start than its anchor. Retain the original
+  // point across reflows until another reading action takes over.
   let layoutPoint = null;
 
   function run(action, readingAction = null, eligible = () => true) {
@@ -346,12 +346,13 @@ export function createNavigation({
       (layoutPoint.scrollTop !== null && Math.abs(pagination.scrollPosition() - layoutPoint.scrollTop) > 1))) {
       layoutPoint = null;
     }
-    const resized = await pagination.resizeViewport(
-      layoutPoint?.point.offset ??
-        (pageChanged || scrollChanged ? anchor.start.offset : (offset ?? anchor.start.offset)),
-    );
+    const point = layoutPoint?.point ?? {
+      section: anchor.start.section,
+      offset: pageChanged || scrollChanged ? anchor.start.offset : (offset ?? anchor.start.offset),
+    };
+    const resized = await pagination.resizeViewport(point.offset);
     if (resized === false) return null;
-    if (layoutPoint) rememberLayoutPoint(layoutPoint.point);
+    rememberLayoutPoint(point);
     syncControls();
     return anchor;
   }

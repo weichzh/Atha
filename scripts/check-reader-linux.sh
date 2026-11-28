@@ -245,8 +245,8 @@ webdriver_value() {
 }
 
 webdriver_native_action() {
-  local payload=$1 result=0
-  webdriver_value POST "/session/$session_id/actions" "$payload" >/dev/null || result=$?
+  local endpoint=$1 payload=$2 result=0
+  webdriver_value POST "/session/$session_id/$endpoint" "$payload" >/dev/null || result=$?
   ((result != 28)) || native_action_timed_out=1
   return "$result"
 }
@@ -274,7 +274,7 @@ webdriver_element_id() {
 
 webdriver_click_element_ref() {
   local element_id=$1
-  webdriver_value POST "/session/$session_id/element/$element_id/click" '{}' >/dev/null
+  webdriver_native_action "element/$element_id/click" '{}'
 }
 
 webdriver_click_element() {
@@ -287,7 +287,7 @@ webdriver_send_keys() {
   local selector=$1 text=$2 element_id payload
   element_id=$(webdriver_element_id "$selector") || return 1
   payload=$(jq -cn --arg text "$text" '{text: $text, value: ($text | explode | map([.] | implode))}')
-  webdriver_value POST "/session/$session_id/element/$element_id/value" "$payload" >/dev/null
+  webdriver_native_action "element/$element_id/value" "$payload"
 }
 
 capture_public_ui() {
@@ -982,7 +982,7 @@ perform_pointer_action() {
       }]
     }')
   fi
-  webdriver_native_action "$payload" || result=$?
+  webdriver_native_action actions "$payload" || result=$?
   if ((result != 0)); then
     pointer_action_failure_diagnostic "$action" "$result"
   else
@@ -994,7 +994,7 @@ perform_pointer_action() {
 pointer_action_failure_diagnostic() {
   local action=$1 exit_code=$2 payload response probe='{"probeResponded":false}'
   payload=$(jq -cn '{script: "const dialog = document.querySelector(\"#content-dialog\"); return { readyState: document.readyState, visibility: document.visibilityState, dialogOpen: Boolean(dialog?.open), mediaPreview: Boolean(dialog?.classList.contains(\"media-preview\")), readerReady: document.documentElement.hasAttribute(\"data-reader-ready\"), runtimeErrorCount: Array.isArray(globalThis.__athaReaderRuntimeErrors) ? globalThis.__athaReaderRuntimeErrors.length : null };", args: []}')
-  if [[ -n $session_id ]] && response=$(curl --silent --show-error --max-time 2 \
+  if ((exit_code != 28)) && [[ -n $session_id ]] && response=$(curl --silent --show-error --max-time 2 \
     --request POST --header 'Accept: application/json' --header 'Content-Type: application/json' \
     --data "$payload" "$base_url/session/$session_id/execute/sync" 2>/dev/null); then
     probe=$(jq -c '

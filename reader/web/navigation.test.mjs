@@ -53,6 +53,8 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
   let visible = true;
   let scrolling = false;
   let scrollTop = 0;
+  let columnSize = 10;
+  let resizeTo = 10;
   const reflows = [];
   const locator = createLocator({ assert: assert.ok });
   const navigation = createNavigation({
@@ -63,13 +65,19 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
     },
     pagination: {
       snapshot: () => ({ page, pages: 10 }),
-      captureOffset: () => page * 10 + scrollTop,
+      captureOffset: () => page * columnSize + scrollTop,
       isScrolled: () => scrolling,
       scrollPosition: () => scrollTop,
       async showOffset(offset) { page = Math.floor(offset / 10); return true; },
       async show(target) { page = target; },
       async move(delta) { page += delta; return true; },
-      async resizeViewport(offset) { reflows.push(offset); },
+      async resizeViewport(offset) {
+        reflows.push(offset);
+        if (resizeTo !== columnSize) {
+          columnSize = resizeTo;
+          page = Math.floor(offset / columnSize);
+        }
+      },
     },
     locator,
     canResizeViewport: () => visible,
@@ -97,7 +105,12 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
   visible = true;
   await navigation.resize();
   await navigation.next();
+  resizeTo = 12;
   await navigation.resize();
+  assert.equal(navigation.current().start.offset, 48, "the narrower workspace projects an earlier page start");
+  resizeTo = 10;
+  await navigation.resize();
+  assert.equal(navigation.current().start.offset, 50, "opening and closing a pane must preserve the later reading point");
   await navigation.goToHref(sections[1].url);
   await navigation.resize(43, 0, 4); // A late image from the previous section cannot resize this one.
   await navigation.resize();
@@ -106,5 +119,5 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
   await navigation.resize();
   scrollTop = 35;
   await navigation.resize();
-  assert.deepEqual(reflows, [43, 50, 0, 28, 55]);
+  assert.deepEqual(reflows, [43, 50, 50, 0, 28, 55]);
 });

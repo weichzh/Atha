@@ -140,20 +140,25 @@ webdriver_key() {
   local key=$1 payload
   payload=$(jq -cn --arg key "$key" '{actions:[{type:"key",id:"atha-keyboard",actions:[
     {type:"keyDown",value:$key},{type:"keyUp",value:$key}]}]}')
-  webdriver_native_action "$payload"
+  webdriver_native_action actions "$payload"
 }
 
 reader_chrome() {
   [[ $(execute_sync 'return Boolean(document.querySelector(".reader-controls"));') == true ]] && return
-  local point
-  point=$(execute_sync 'const r=document.querySelector(".reader").getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2};')
-  perform_pointer_action "$point" tap || die 'could not reveal reader chrome'
+  if [[ ${1:-} == keyboard ]]; then
+    # A tap on the saved original can select its annotation rather than show controls.
+    webdriver_key h || die 'could not reveal reader chrome with the keyboard'
+  else
+    local point
+    point=$(execute_sync 'const r=document.querySelector(".reader").getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2};')
+    perform_pointer_action "$point" tap || die 'could not reveal reader chrome'
+  fi
   wait_for_script 'return { chrome: Boolean(document.querySelector("#reader-back")) };' \
     '.chrome == true' 'reader chrome did not open' >/dev/null
 }
 
 reader_back() {
-  reader_chrome
+  reader_chrome "$@"
   webdriver_click_element '#reader-back' || die 'could not return with the reader back control'
   current_book_kind=
   diagnostics_enabled=0
@@ -818,7 +823,7 @@ const messages = [...document.querySelectorAll(".pane-c .msg-content")];
 return {messages:messages.length, long: messages.some(el => el.textContent.length > 1500 && el.querySelectorAll("p").length >= 40)};' \
     '.messages == 2 and .long' 'long reply did not save' >/dev/null
   webdriver_click_element '.pane-c button[aria-label="关闭笔记工作区"]' || die 'could not close source discussion'
-  reader_back
+  reader_back keyboard
   wait_for_script 'return {shelf: Boolean(document.querySelector(".library-shell"))};' '.shelf' 'authoring did not return to the shelf' >/dev/null
   set_shelf_query ''
   # Additional book exists only in this isolated authoring store.
@@ -880,7 +885,7 @@ return {width:innerWidth, edition: saved?.contentVersion, section: loc?.start?.s
     wait_for_script "$reader_highlight_script" "$visible_source_highlight" \
       'memory jump restored the thread but the selected original text is not on the rendered page' "$note_args" >/dev/null
     if ((width == 360)); then
-      reader_chrome
+      reader_chrome keyboard
       webdriver_click_element 'button[aria-label="下一页"]' || die 'could not exercise the same-chapter wrong-page control'
       wait_for_script "$reader_position_script" \
         "($valid_reader_position) and .locator.start.section == \"$section\" and .page == $(jq '.page + 1' <<<"$restored")" \
@@ -893,7 +898,7 @@ return {width:innerWidth, edition: saved?.contentVersion, section: loc?.start?.s
       --argjson actualWidth "$(jq .width <<<"$jump")" --argjson page "$(jq .page <<<"$restored")" \
       '$prior + [{requestedWidth:$requestedWidth,width:$actualWidth,sourcePage:$page,sourceVisible:true,
         searchHits:2,sameEdition:true,sameSection:true,sourceQuote:true,longReply:true,sendVisible:true,sendEnabled:true}]')
-    reader_back
+    reader_back keyboard
     wait_for_script '
 return {memory: Boolean(document.querySelector(".memory-shell")), results: document.querySelectorAll(".hit-row").length};' \
       '.memory and .results == 2' 'source return did not restore the results list' >/dev/null

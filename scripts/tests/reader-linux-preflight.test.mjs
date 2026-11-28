@@ -155,7 +155,7 @@ test('Original-source probe rejects a same-chapter off-page highlight even with 
   assert.equal(probe(51, true).visible, false, 'a covered range is not visible either');
 });
 
-for (const caseName of ['pointer', 'formal gesture gate', 'key']) test(`Native action timeout stops only its unit without cancellation: ${caseName}`, linux, t => {
+for (const caseName of ['pointer', 'formal gesture gate', 'key', 'text', 'click']) test(`Native action timeout stops only its unit without cancellation: ${caseName}`, linux, t => {
   const root = mkdtempSync(join(tmpdir(), 'atha-input-timeout-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const calls = join(root, 'calls');
@@ -168,13 +168,19 @@ for (const caseName of ['pointer', 'formal gesture gate', 'key']) test(`Native a
   const body = (name, next) => source.slice(source.indexOf(`${name}() {`), source.indexOf(`${next}() {`));
   const publicGate = source.match(/^run_gesture_gate public$/m)?.[0];
   assert(publicGate, 'the formal public gesture gate must run in the current shell');
+  const input = {
+    pointer: `perform_pointer_action '{"x":10,"y":20}' tap`,
+    key: 'webdriver_key n',
+    text: 'webdriver_send_keys .editor draft',
+    click: 'webdriver_click_element_ref owned-element',
+  };
   const invoke = caseName === 'formal gesture gate' ? `
 run_gesture_gate() {
   perform_pointer_action '{"x":10,"y":20}' tap || exit 1
 }
 ${publicGate}` : `
 status=0
-${caseName === 'key' ? 'webdriver_key n' : `perform_pointer_action '{"x":10,"y":20}' tap`} || status=$?
+${input[caseName]} || status=$?
 exit "$status"`;
   const result = spawnSync('/bin/bash', ['-c', `set -Eeuo pipefail
 repo_root=$ATHA_TIMEOUT_TEST_ROOT
@@ -184,32 +190,40 @@ session_id=owned-session
 base_url=http://127.0.0.1:1
 unit_started=1
 native_action_timed_out=0
+gdk_backend=wayland
 curl() {
   for request_arg in "$@"; do audit_last_request=$request_arg; done
   local payload
   IFS= read -r payload
-  printf 'curl:%s:%s\\n' "$audit_last_request" "$(jq -c '.actions[0].actions[1]' <<<"$payload")" >> "$repo_root/calls"
+  printf 'curl:%s:%s\\n' "$audit_last_request" "$(jq -c '.actions[0].actions[1] // .text // null' <<<"$payload")" >> "$repo_root/calls"
   return 28
 }
 systemctl() { printf 'systemctl:%s\\n' "$*" >> "$repo_root/calls"; }
 cleanup_gesture() { printf 'gesture-cancel\\n' >> "$repo_root/calls"; }
 wait_for_script() { printf true; }
-pointer_action_failure_diagnostic() { printf 'failure:%s\\n' "$2" >&2; }
+webdriver_element_id() { printf owned-element; }
 ${body('webdriver_request', 'webdriver_value')}
 ${body('webdriver_value', 'webdriver_native_action')}
 ${body('webdriver_native_action', 'execute_script')}
+${body('webdriver_click_element_ref', 'capture_public_ui')}
 ${body('perform_pointer_action', 'pointer_action_failure_diagnostic')}
+${body('pointer_action_failure_diagnostic', 'run_gesture_gate')}
 ${body('cleanup', 'wait_for_script')}
 source "$1"
 trap cleanup EXIT
 ${invoke}
 `, 'native-timeout', ui], { env: { ...process.env, ATHA_TIMEOUT_TEST_ROOT: root }, encoding: 'utf8' });
   assert.equal(result.status, caseName === 'formal gesture gate' ? 1 : 28, result.stderr);
-  if (caseName !== 'key') assert.match(result.stderr, /failure:28/);
+  if (caseName === 'pointer' || caseName === 'formal gesture gate') {
+    const diagnosis = JSON.parse(result.stderr);
+    assert.equal(diagnosis.exitCode, 28);
+    assert.equal(diagnosis.probe.probeResponded, false);
+  }
   const requests = readFileSync(calls, 'utf8').trim().split('\n');
-  const lastAction = caseName === 'key' ? '{"type":"keyUp","value":"n"}' : '{"type":"pointerDown","button":0}';
+  const endpoint = { text: 'element/owned-element/value', click: 'element/owned-element/click' }[caseName] ?? 'actions';
+  const lastAction = { key: '{"type":"keyUp","value":"n"}', text: '"draft"', click: 'null' }[caseName] ?? '{"type":"pointerDown","button":0}';
   assert.deepEqual(requests, [
-    `curl:http://127.0.0.1:1/session/owned-session/actions:${lastAction}`,
+    `curl:http://127.0.0.1:1/session/owned-session/${endpoint}:${lastAction}`,
     'systemctl:--user stop atha-timeout-owned.service',
     'systemctl:--user reset-failed atha-timeout-owned.service'
   ], 'do not send cancellation or touch other units after the stalled action');
