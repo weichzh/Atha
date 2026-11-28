@@ -26,7 +26,7 @@
 
 - **候选差异**：`bash scripts/check-workflow.sh --base origin/main`。以实际 PR 目标替换基底；按协议走 `fast` 时加 `--kind fast`。检查从共同祖先到候选的已提交差异及空白错误；检查工作区时不带参数。纯文档改动到这里即可，不启动产品构建。改动文档门本身时，用 `python3 scripts/tests/test_doc_guard.py -v` 复验真实 Git 历史的正反例。
 - **代码改动**：跑受影响的单测、静态检查和构建；跨模块可直接用 `bash scripts/check-fast.sh --base origin/main`，其中已包含候选文档门。当前浏览器回归入口见 [阅读代码地图](../codebase/MAP.md) 与 `reader/app/tests/*.browser.mjs`；Chromium 结果按浏览器证据记录。
-- **原生行为**：书架到阅读再返回，用 `bash scripts/check-reader-linux.sh --shelf` 在 Linux WebView 复验。它只验这条链路；旧全量入口仍保留供诊断，不能拿专项代替。系统输入、原生桥或安装改动按对应平台与候选选择检查。
+- **原生行为**：只改书架往返时，运行 `bash scripts/check-reader-linux.sh --shelf`；影响完整阅读链路时，运行无参 `bash scripts/check-reader-linux.sh`。Linux AppImage 候选用 `bash scripts/check-reader-candidate.sh` 另行验包；系统输入、原生桥或安装改动按对应平台和候选选择检查。
 
 ## 发版单独验收
 
