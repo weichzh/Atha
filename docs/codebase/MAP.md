@@ -61,6 +61,8 @@
 | `docs/agents/workflow.md`、`docs/agents/references.md`                                                          | GitHub Flow、仓库检查入口和外部技术参考                                                                                                                                                                                                 | 当前入口                                                                |
 | `docs/`                                                                                                         | 当前事实、路线、长期决策、活动 change 与未决研究                                                                                                                                                                                        | 已建立                                                                  |
 
+合成书架基准先用 `shelf_benchmark seed` 创建 256 本原创书，再由 `scripts/bench-library-shelf.py backend` 测试冷文件页启动、热启动和热返回。命令与证据见[合成书架基准](../changes/synthetic-shelf-benchmark.md)；后端计时与 WebView 原生窗口计时分别报告。
+
 `p0/` 只保存技术验证，不是生产后端。后续正式代码不得直接在 P0 目录上堆叠。
 
 ### 正式后端基线
