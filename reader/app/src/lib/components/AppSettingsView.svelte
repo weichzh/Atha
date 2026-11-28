@@ -29,6 +29,7 @@
     setAppTheme,
   } from "../data/library-adapter.ts";
   import { isTauriRuntime } from "../data/runtime.ts";
+  import { uiPrefs, type ShelfDesktopDensity, type ShelfMobileColumns } from "../data/ui-prefs.svelte.ts";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
   let appTheme = $state<AppTheme>(getAppTheme());
@@ -185,6 +186,53 @@
             <span>{opt.label}</span>
           </button>
         {/each}
+      </div>
+    </section>
+
+    <section class="settings-block" aria-labelledby="shelf-display-heading">
+      <div class="block-head">
+        <h2 id="shelf-display-heading">书架布局</h2>
+        <span class="scope-tag">仅此设备</span>
+      </div>
+      <div class="shelf-display-settings">
+        <label>
+          <span>手机封面列数</span>
+          <select
+            value={uiPrefs.state.shelfMobileColumns}
+            onchange={(event) => uiPrefs.update({ shelfMobileColumns: Number(event.currentTarget.value) as ShelfMobileColumns })}
+          >
+            <option value={2}>2 列</option>
+            <option value={3}>3 列</option>
+            <option value={4}>4 列</option>
+          </select>
+        </label>
+        <label>
+          <span>桌面封面密度</span>
+          <select
+            value={uiPrefs.state.shelfDesktopDensity}
+            onchange={(event) => uiPrefs.update({ shelfDesktopDensity: event.currentTarget.value as ShelfDesktopDensity })}
+          >
+            <option value="comfortable">宽松</option>
+            <option value="standard">标准</option>
+            <option value="compact">紧凑</option>
+          </select>
+        </label>
+        <label>
+          <span>封面下显示书名和作者</span>
+          <input
+            type="checkbox"
+            checked={uiPrefs.state.shelfShowMeta}
+            onchange={(event) => uiPrefs.update({ shelfShowMeta: event.currentTarget.checked })}
+          />
+        </label>
+        <label>
+          <span>继续阅读默认收起</span>
+          <input
+            type="checkbox"
+            checked={uiPrefs.state.shelfDockCollapsed}
+            onchange={(event) => uiPrefs.update({ shelfDockCollapsed: event.currentTarget.checked })}
+          />
+        </label>
       </div>
     </section>
 
@@ -388,6 +436,36 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .shelf-display-settings {
+    display: grid;
+    gap: 8px;
+    max-width: 500px;
+  }
+
+  .shelf-display-settings label {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    font-size: 14px;
+  }
+
+  .shelf-display-settings select {
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg-well);
+    color: var(--ink-primary);
+  }
+
+  .shelf-display-settings input {
+    width: 22px;
+    height: 22px;
+    margin: 0 10px;
+    accent-color: var(--accent);
   }
 
   .block-head {

@@ -72,6 +72,8 @@
     setLibraryBookCover,
     updateLibraryBookOrganization,
   } from "../data/library-adapter.ts";
+  import { uiPrefs } from "../data/ui-prefs.svelte.ts";
+  import ContinueReadingDock from "./ContinueReadingDock.svelte";
   import BookCover from "./BookCover.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
@@ -101,7 +103,8 @@
 
   // Scroll containers for C4 continuity
   let pageEl = $state<HTMLElement | null>(null);
-  let recentStripEl = $state<HTMLElement | null>(null);
+  let recentScroll = $state(0);
+  let recentDrawerOpen = $state(false);
   let tagsStripEl = $state<HTMLElement | null>(null);
 
   let selecting = $state(false);
@@ -159,7 +162,7 @@
   function persistSession(origin?: ShelfOrigin) {
     const pos = emptyShelfPosition();
     pos.y = pageEl?.scrollTop ?? window.scrollY ?? 0;
-    pos.recentX = recentStripEl?.scrollLeft ?? 0;
+    pos.recentX = recentScroll;
     pos.tagsX = tagsStripEl?.scrollLeft ?? 0;
     if (origin) {
       pos.anchor = origin;
@@ -187,10 +190,9 @@
     await tick();
     await tick();
     if (saved.position.focus) {
-      const selector = `.shelf-catalog [data-shelf-open="${saved.position.focus.id}"], [data-shelf-area="${saved.position.focus.area}"][data-book-id="${saved.position.focus.id}"]`;
-      const target = document.querySelector<HTMLElement>(selector);
+      const target = findOpenTrigger(saved.position.focus);
       if (target) {
-        if (saved.position.focus.offset > 0) {
+        if (saved.position.focus.area === "catalog" && saved.position.focus.offset > 0) {
           window.scrollBy(0, target.getBoundingClientRect().top - saved.position.focus.offset);
           await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
           const drift = target.getBoundingClientRect().top - saved.position.focus.offset;
@@ -201,9 +203,7 @@
     } else if (saved.position.y > 0) {
       window.scrollTo({ top: saved.position.y, behavior: "instant" as ScrollBehavior });
     }
-    if (recentStripEl && saved.position.recentX > 0) {
-      recentStripEl.scrollLeft = saved.position.recentX;
-    }
+    recentScroll = saved.position.recentX;
     if (tagsStripEl && saved.position.tagsX > 0) {
       tagsStripEl.scrollLeft = saved.position.tagsX;
     }
@@ -286,7 +286,12 @@
     };
     window.addEventListener("pageshow", onPageShow);
     const unregisterBack = registerBackHandler((source) => {
-      if (!active || !selecting) return false;
+      if (!active) return false;
+      if (recentDrawerOpen && source === "back") {
+        recentDrawerOpen = false;
+        return true;
+      }
+      if (!selecting) return false;
       if (batchBusy) return true;
       if (confirmState.open || editDialogOpen || filterPopoverOpen || sortPopoverOpen) {
         if (source === "escape") return false; // Let Bits UI dismiss its own top layer.
@@ -357,6 +362,7 @@
     const find = (selector: string) => [...(pageEl?.querySelectorAll<HTMLElement>(selector) ?? [])]
       .find((el) => el.getClientRects().length && !el.closest("[inert]"));
     return find(`[data-shelf-area="${origin.area}"][data-book-id="${id}"]`)
+      ?? (origin.area === "recent" ? find("[data-shelf-recent-return]") : undefined)
       ?? find(`[data-shelf-open="${id}"]`) ?? null;
   }
 
@@ -390,6 +396,7 @@
 
   $effect(() => {
     if (!active) {
+      recentDrawerOpen = false;
       cancelHold();
       if (selecting) exitSelection();
     }
@@ -626,6 +633,7 @@
 <main
   class="library-shell"
   class:selecting
+  class:has-resume={!selecting && recentEntries.length > 0}
   bind:this={pageEl}
   aria-label="书架"
   aria-busy={loading || batchBusy}
@@ -636,12 +644,6 @@
   <header class="shelf-header">
     <div class="header-titles">
       <h1>书架</h1>
-      <p class="subtitle">
-        <span class="tabular">{entries.length}</span> 册藏书
-        {#if recentEntries.length > 0}
-          · <span class="tabular">{recentEntries.length}</span> 本近期在读
-        {/if}
-      </p>
     </div>
 
     <div class="find-bar">
@@ -881,48 +883,17 @@
     <div class="toast-banner glass-island" role="status">{statusMessage}</div>
   {/if}
 
-  {#if (!loading || books.length > 0) && recentEntries.length > 0 && !searchQuery.trim() && activeFilterCount === 0}
-    <section class="shelf-section" aria-label="继续阅读">
-      <div class="section-head">
-        <h2>继续阅读</h2>
-        <span class="section-hint">最近开启的书页</span>
-      </div>
-      <div class="recent-strip" bind:this={recentStripEl}>
-        {#each recentEntries as entry, idx (entry.book.id)}
-          <div class="recent-card-wrap">
-            <button
-              type="button"
-              class="recent-card"
-              disabled={loading || selecting}
-              data-shelf-area="recent"
-              data-book-id={entry.book.id}
-              title={entry.book.title}
-              onclick={(e) => handleOpenBook(entry, "recent", e.currentTarget)}
-            >
-              <div class="recent-cover">
-                <BookCover
-                  book={entry.book}
-                  index={idx}
-                  percent={entry.fact?.percent ?? null}
-                  coverRevision={coverRevision[entry.book.id] ?? 0}
-                />
-              </div>
-              <div class="recent-meta">
-                <div class="recent-title">{entry.book.title}</div>
-                <div class="recent-sub tabular">
-                  {#if entry.fact?.percent != null}
-                    <span>{entry.fact.percent}%</span>
-                  {/if}
-                  {#if entry.fact?.lastReadDate}
-                    <span>{formatDateBadge(entry.fact.lastReadDate)}</span>
-                  {/if}
-                </div>
-              </div>
-            </button>
-          </div>
-        {/each}
-      </div>
-    </section>
+  {#if !selecting && recentEntries.length}
+    <ContinueReadingDock
+      entries={recentEntries}
+      collapsed={uiPrefs.state.shelfDockCollapsed}
+      compact={Boolean(searchQuery.trim()) || activeFilterCount > 0}
+      bind:open={recentDrawerOpen}
+      bind:scrollX={recentScroll}
+      {coverRevision}
+      onRead={(entry, trigger) => void handleOpenBook(entry, "recent", trigger)}
+      onCollapse={(collapsed) => uiPrefs.update({ shelfDockCollapsed: collapsed })}
+    />
   {/if}
 
   {#if quickFacets.length > 0}
@@ -960,7 +931,11 @@
         <button type="button" class="pill-btn" onclick={clearAllFilters}>显示全部藏书</button>
       </div>
     {:else if layout === "grid"}
-      <div class="book-grid shelf-catalog">
+      <div
+        class="book-grid shelf-catalog"
+        data-density={uiPrefs.state.shelfDesktopDensity}
+        style:--shelf-mobile-cols={uiPrefs.state.shelfMobileColumns}
+      >
         {#each filteredEntries as entry, idx (entry.book.id)}
           <article class="book-card">
             <div class="book-cover-hit">
@@ -991,10 +966,12 @@
                 {/if}
               </button>
             </div>
-            <div class="book-info">
-              <div class="book-title">{entry.book.title}</div>
-              <div class="book-author">{entry.author || "佚名"}</div>
-            </div>
+            {#if uiPrefs.state.shelfShowMeta}
+              <div class="book-info">
+                <div class="book-title">{entry.book.title}</div>
+                <div class="book-author">{entry.author || "佚名"}</div>
+              </div>
+            {/if}
           </article>
         {/each}
       </div>
@@ -1162,12 +1139,6 @@
     line-height: 1.2;
   }
 
-  .subtitle {
-    margin: 6px 0 0;
-    font-size: 13.5px;
-    color: var(--ink-secondary);
-  }
-
   .find-bar {
     display: flex;
     flex-wrap: wrap;
@@ -1321,65 +1292,6 @@
     color: var(--ink-muted);
   }
 
-  .recent-strip {
-    display: flex;
-    gap: 20px;
-    overflow-x: auto;
-    padding: 6px 4px 18px;
-    margin: -6px -4px 0;
-    scrollbar-width: none;
-  }
-
-  .recent-strip::-webkit-scrollbar {
-    display: none;
-  }
-
-  .recent-card-wrap {
-    flex: none;
-    width: 132px;
-  }
-
-  .recent-card {
-    width: 100%;
-    text-align: left;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .recent-card:hover .recent-cover {
-    transform: translateY(-4px);
-  }
-
-  .recent-cover {
-    width: 100%;
-    transition: transform 240ms var(--ease-spring);
-  }
-
-  .recent-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .recent-title {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.35;
-    display: -webkit-box;
-    line-clamp: 2;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .recent-sub {
-    display: flex;
-    gap: 8px;
-    font-size: 11.5px;
-    color: var(--ink-muted);
-  }
-
   .quick-facets {
     display: flex;
     gap: 8px;
@@ -1419,6 +1331,16 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
     gap: 28px 24px;
+  }
+
+  @media (min-width: 900px) {
+    .book-grid[data-density="comfortable"] {
+      grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
+    }
+
+    .book-grid[data-density="compact"] {
+      grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    }
   }
 
   .book-card {
@@ -1870,8 +1792,8 @@
     }
 
     .book-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 20px 16px;
+      grid-template-columns: repeat(var(--shelf-mobile-cols), minmax(0, 1fr));
+      gap: 18px 12px;
     }
 
     .library-shell.selecting {
@@ -1904,8 +1826,8 @@
       padding: 3px 4px;
     }
 
-    .recent-card-wrap {
-      width: 112px;
+    .library-shell.has-resume {
+      padding-bottom: calc(164px + env(safe-area-inset-bottom));
     }
   }
 </style>

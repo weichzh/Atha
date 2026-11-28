@@ -323,6 +323,83 @@ async function verifyShelfSelection(browser) {
   }
 }
 
+async function verifyShelfResumeAndLayout(browser) {
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const columns = () => phone.locator(".book-grid").evaluate(grid =>
+    getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length);
+  const dock = phone.getByRole("complementary", { name: "继续阅读" });
+  const history = dock.getByRole("button", { name: "展开最近在读" });
+  const drawer = phone.getByRole("dialog", { name: "最近在读" });
+  const bar = dock.locator(".resume-bar");
+  const nav = phone.getByRole("navigation", { name: "主导航" });
+  try {
+    await phone.goto(PREVIEW_URL);
+    await bar.waitFor();
+    assert.equal(await columns(), 3);
+    assert.ok((await bar.boundingBox()).y + (await bar.boundingBox()).height <= (await nav.boundingBox()).y);
+    await phone.locator(".book-grid .cover-art img.loaded").first().waitFor();
+    await phone.screenshot({ path: path.join(screenshotDir, "17-shelf-resume-mobile-390.png"), animations: "disabled" });
+
+    await dock.getByRole("button", { name: "收起继续阅读" }).click();
+    await bar.waitFor({ state: "hidden" });
+    await phone.reload();
+    await history.waitFor();
+    assert.equal(await bar.count(), 0);
+    await history.tap();
+    await drawer.waitFor();
+    await drawer.locator(".cover-art img.loaded").first().waitFor();
+    await phone.screenshot({ path: path.join(screenshotDir, "18-shelf-recent-mobile-390.png"), animations: "disabled" });
+    await phone.keyboard.press("Escape");
+    await drawer.waitFor({ state: "hidden" });
+    assert.equal(await history.evaluate(button => document.activeElement === button), true);
+    await history.tap();
+    await drawer.waitFor();
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await drawer.waitFor({ state: "hidden" });
+    await history.tap();
+    await drawer.getByRole("button", { name: "恢复阅读条" }).click();
+    await bar.waitFor();
+
+    const search = phone.getByRole("searchbox");
+    await search.fill("潮汐");
+    await bar.waitFor({ state: "hidden" });
+    await history.waitFor();
+    await search.fill("");
+    await bar.waitFor();
+
+    await phone.getByRole("button", { name: "选择", exact: true }).click();
+    await dock.waitFor({ state: "hidden" });
+    await phone.getByRole("button", { name: "退出选择" }).click();
+    await bar.waitFor();
+    await nav.getByRole("tab", { name: "设置" }).click();
+    await phone.getByLabel("手机封面列数").selectOption("2");
+    await nav.getByRole("tab", { name: "书架" }).click();
+    assert.equal(await columns(), 2);
+    await nav.getByRole("tab", { name: "设置" }).click();
+    await phone.getByLabel("手机封面列数").selectOption("4");
+    await phone.getByLabel("桌面封面密度").selectOption("compact");
+    await phone.getByLabel("封面下显示书名和作者").uncheck();
+    await phone.getByLabel("继续阅读默认收起").check();
+    await nav.getByRole("tab", { name: "书架" }).click();
+    assert.equal(await columns(), 4);
+    assert.equal(await phone.locator(".book-info").count(), 0);
+    await assertNoHorizontalOverflow(phone, "shelf-four-columns");
+    await phone.reload();
+    await history.waitFor();
+    assert.equal(await columns(), 4);
+    assert.equal(await phone.locator(".book-grid").getAttribute("data-density"), "compact");
+    await history.tap();
+    await drawer.getByRole("button", { name: /潮汐与纸页/ }).tap();
+    await waitForReaderEntry(phone);
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await history.waitFor();
+    assert.equal(await history.evaluate(button => document.activeElement === button), true);
+    assert.equal(await drawer.count(), 0);
+  } finally {
+    await phone.close();
+  }
+}
+
 async function run() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -873,7 +950,8 @@ async function run() {
 
     await verifyFootnotePreview(browser);
     await verifyShelfSelection(browser);
-    console.log("ALL BROWSER CHECKS PASSED! 16 screenshots saved to:", screenshotDir);
+    await verifyShelfResumeAndLayout(browser);
+    console.log("ALL BROWSER CHECKS PASSED! 18 screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();
     preview.kill("SIGTERM");
