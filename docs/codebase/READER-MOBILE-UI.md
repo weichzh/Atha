@@ -69,6 +69,7 @@ tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换�
 - 书架整理：从「选择」、长按、右键或 Shift+F10 进入多选。底栏随册数显示操作，窄屏暂替底部导航；退出恢复原位置。批量移出和删除逐册执行，确认时锁定目标，遇错停止后续写入。
 - 继续阅读：`ContinueReadingDock.svelte` 在底部续读最近一本或展开书单。搜索和筛选临时收起，多选让出底栏；关闭抽屉或读完返回保持书架状态。设置中的列数、密度和封面文字仅作用于当前设备。
 - 阅读记忆：同文档返回或恢复历史页面时按原查询重读书架与消息；只有当前请求能更新结果。读取失败可保留查询重试。
+- 笔记对话：原文在先，排版工具按需展开；窄屏的笔记列表与对话使用同一底部面板。桌面紧凑可视化编辑可用 Enter 发送，触控、Markdown 或展开编辑器中 Enter 保留换行。
 - 目录：`ReaderDirectoryToc.svelte` 从 manifest 层级显示可折叠章节。标题跳转，箭头只折叠；重新打开时展现当前章节路径，旧缓存仍用平面目录。
 - 脚注：`FootnotePopover.svelte` 在当前页展示注释纯文本。跨章预读不激活章节；关闭后仍在原处，选择「跳转原文」才走章节导航。
 - 书架冷启动：初始挂载执行崩溃恢复、`resumeBookDataDeletions()`、`listLibraryBooks()`，并消费一次性 `takeStartupImport()`；非持久化 `pageshow` 不再取消初始加载，BFCache 持久化 `pageshow` 仅执行轻量刷新与 `restoreSessionAndFocus()`；

@@ -14,6 +14,7 @@
   } from "@lucide/svelte";
   import { Dialog, Popover, Select } from "bits-ui";
   import { tick } from "svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import { fade, fly, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import type {
@@ -67,15 +68,17 @@
   let threadSort = $state<"time" | "position">("time");
 
   let paneBEl = $state<HTMLElement | null>(null);
+  let threadScrollEl = $state<HTMLDivElement | null>(null);
+  const reducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
   let savedListScrollTop = 0;
 
   // Thread interactive state
-  let replyTarget = $state<{ id: string; preview: string } | null>(null);
+  let replyTarget = $state<{ id: string; preview: string; rootId: string } | null>(null);
   let referenceItems = $state<{ id: string; label: string }[]>([]);
-  let editingMessage = $state<MessageView | null>(null);
+  let editingTarget = $state<{ rootId: string; message: MessageView } | null>(null);
 
   // Action menu state
-  let activeMenu = $state<{ message: MessageView; anchor: HTMLElement; isRoot: boolean } | null>(null);
+  let activeMenu = $state<{ message: MessageView; anchor: HTMLElement; rootId: string } | null>(null);
 
   // Modals: Snapshot, Revisions, Confirm Delete
   let snapshotOpen = $state(false);
@@ -171,16 +174,39 @@
   });
 
   const activeRoot = $derived(
-    engine.roots.find((r) => r.id === selectedRootId) ?? filteredRoots[0] ?? null,
+    selectedRootId
+      ? engine.roots.find((r) => r.id === selectedRootId) ?? null
+      : filteredRoots[0] ?? null,
   );
+  const activeConversation = $derived(
+    engine.conversations.find((c) => c.id === activeRoot?.conversationId &&
+      c.messages[0]?.id === activeRoot?.id && !c.messages[0]?.deleted) ?? null,
+  );
+  const missingSelectedThread = $derived(selectedRootId !== null && !activeConversation);
+  const editingMessage = $derived(
+    !pendingDraft && editingTarget?.rootId === activeRoot?.id ? editingTarget?.message ?? null : null,
+  );
+  const activeReply = $derived(
+    !pendingDraft && replyTarget?.rootId === activeRoot?.id ? replyTarget : null,
+  );
+  let refreshingThread = $state(false);
+
+  async function reloadSelectedThread() {
+    const rootId = selectedRootId;
+    refreshingThread = true;
+    try {
+      await engine.refreshMessages();
+      if (selectedRootId === rootId && activeConversation) threadScope = "current";
+    } catch {
+      engine.showToast("笔记暂时无法读取");
+    } finally {
+      refreshingThread = false;
+    }
+  }
 
   const visibleConversations = $derived.by((): ConversationView[] => {
-    if (pendingDraft) return [];
-    if (threadScope === "current") {
-      if (!activeRoot) return [];
-      const conv = engine.conversations.find((c) => c.id === activeRoot.conversationId);
-      return conv ? [conv] : [];
-    }
+    if (pendingDraft || missingSelectedThread) return [];
+    if (threadScope === "current") return activeConversation ? [activeConversation] : [];
     const list = engine.conversations.filter((conv) => {
       const root = conv.messages[0];
       if (!root || root.deleted || !root.source) return false;
@@ -208,12 +234,12 @@
     if (paneBEl) savedListScrollTop = paneBEl.scrollTop;
     threadScope = "current";
     replyTarget = null;
-    editingMessage = null;
+    editingTarget = null;
     onSelectRoot(rootId);
   }
 
   function handleBackToB() {
-    editingMessage = null;
+    editingTarget = null;
     replyTarget = null;
     onBackToList();
   }
@@ -224,17 +250,24 @@
     if (sourceDraft) {
       const id = await engine.createHighlightFromSelection(payload.text, payload.richText, sourceDraft);
       if (!id) return false;
-      if (pendingDraft === sourceDraft) onSelectRoot(id);
+      if (pendingDraft === sourceDraft) {
+        threadScope = "current";
+        editingTarget = null;
+        replyTarget = null;
+        referenceItems = [];
+        onSelectRoot(id);
+      }
       return true;
     }
     const edit = editingMessage;
     const targetRoot = activeRoot;
+    const scrollAtSubmit = threadScrollEl;
+    if (!targetRoot || !activeConversation) return false;
     if (edit) {
       await client.revise(edit.id, edit.revisionId, payload.text, payload.richText);
-      if (editingMessage === edit) editingMessage = null;
+      if (editingMessage === edit) editingTarget = null;
     } else {
-      if (!targetRoot) return false;
-      const reply = replyTarget;
+      const reply = activeReply;
       const references = referenceItems;
       await client.reply({
         conversationId: targetRoot.conversationId,
@@ -248,11 +281,32 @@
     }
     try {
       await engine.refreshMessages();
+      if (!edit) {
+        await tick();
+        if (mode === "thread" && !pendingDraft && threadScope === "current" &&
+          activeRoot?.id === targetRoot.id && scrollAtSubmit && threadScrollEl === scrollAtSubmit) {
+          threadScrollEl.scrollTop = threadScrollEl.scrollHeight;
+        }
+      }
     } catch {
       // The write committed; retrying it after a projection error would duplicate the message.
       engine.showToast("已保存，重新打开笔记可查看");
     }
     return true;
+  }
+
+  // Reset on navigation, not when a refresh replaces the same projected messages.
+  const threadViewKey = $derived(JSON.stringify([
+    pendingDraft?.anchor.canonicalLocator ?? activeRoot?.id,
+    threadScope,
+    threadScope === "current" ? null : threadSort,
+  ]));
+  $effect(() => {
+    if (mode === "thread" && threadScrollEl && threadViewKey) threadScrollEl.scrollTop = 0;
+  });
+
+  function activateMessageThread(rootId: string) {
+    if (rootId !== activeRoot?.id || threadScope !== "current") openRootFromList(rootId);
   }
 
   async function openSnapshotForRoot(rootMessageId: string) {
@@ -325,7 +379,7 @@
       <aside
         class="pane-b glass-popover"
         aria-label="笔记列表"
-        transition:fly={{ x: isCompact ? -24 : 24, duration: 220, easing: cubicOut }}
+        transition:fly={{ x: isCompact ? -24 : 24, duration: reducedMotion.current ? 0 : 220, easing: cubicOut }}
       >
         <div class="pane-head">
           <div class="pane-title-group">
@@ -442,7 +496,7 @@
         id="message-conversation"
         class="pane-c glass-popover"
         aria-label="当前消息线程"
-        transition:fly={{ x: 24, duration: 220, easing: cubicOut }}
+        transition:fly={{ x: 24, duration: reducedMotion.current ? 0 : 220, easing: cubicOut }}
       >
         <div class="pane-head">
           <div class="pane-title-group">
@@ -509,11 +563,11 @@
           </div>
         {/if}
 
-        <div class="thread-scroll">
+        <div class="thread-scroll" bind:this={threadScrollEl}>
           {#if pendingDraft}
             <div class="editorial-quote-box">
               <div class="quote-head">
-                <span class="quote-badge">新建对话起点</span>
+                <span class="quote-badge">新建对话 · 原文</span>
                 <button type="button" class="clear-draft-link" onclick={onCancelDraft}>放弃草稿</button>
               </div>
               <blockquote class="source-quote">
@@ -521,9 +575,15 @@
                 <p>{pendingDraft.text}</p>
               </blockquote>
             </div>
-            <div class="thread-empty-hint">在下方写下你的第一句批注、吐槽或追问，开启这段对话。</div>
+          {:else if missingSelectedThread}
+            <div class="thread-empty-hint">
+              <p role="status">这条对话暂时无法读取。</p>
+              <button type="button" class="pill-btn" disabled={refreshingThread} onclick={reloadSelectedThread}>
+                {refreshingThread ? "正在读取…" : "重新读取"}
+              </button>
+            </div>
           {:else if visibleConversations.length === 0}
-            <div class="thread-empty-hint">选择左侧一条摘录，即可围绕原文展开讨论。</div>
+            <div class="thread-empty-hint">选择一条摘录，围绕原文展开对话。</div>
           {:else}
             {#each visibleConversations as conv (conv.id)}
               {@const rootMsg = conv.messages[0]}
@@ -564,35 +624,11 @@
                     </div>
                   {:else}
                     <div class="messages-timeline">
-                      {#each activeMessages as msg, msgIdx (msg.id)}
+                      {#each activeMessages as msg (msg.id)}
                         {#if msg.kind !== "source-only"}
                           {@const parentSnippet = findParentSnippet(conv, msg.replyToMessageId)}
-                          {@const isRoot = msgIdx === 0}
                           <article class="message-node">
-                            <div class="msg-line-rail" aria-hidden="true">
-                              <span class="msg-dot"></span>
-                              <span class="msg-stem"></span>
-                            </div>
-
-                            <div class="msg-body-card">
-                              <div class="msg-top">
-                                <span class="msg-meta tabular">
-                                  我的笔记 · {formatTime(msg.updatedAt)}
-                                  {#if msg.updatedAt > msg.createdAt}
-                                    <span class="edited-tag">（已编辑）</span>
-                                  {/if}
-                                </span>
-                                <button
-                                  type="button"
-                                  class="msg-more-btn"
-                                  aria-label="消息操作"
-                                  onclick={(e) =>
-                                    (activeMenu = { message: msg, anchor: e.currentTarget, isRoot })}
-                                >
-                                  <MoreHorizontal size={15} />
-                                </button>
-                              </div>
-
+                            <div class="message-bubble">
                               {#if parentSnippet}
                                 <div class="provenance-chip">回复：{parentSnippet}</div>
                               {/if}
@@ -606,6 +642,23 @@
                               <div class="msg-content atha-tiptap-body">
                                 {@html renderSafeMessageHtml(msg.contentJson, msg.text)}
                               </div>
+
+                              <div class="msg-footer">
+                                <span class="msg-meta tabular">
+                                  {formatTime(msg.updatedAt)}
+                                  {#if msg.updatedAt > msg.createdAt}
+                                    <span> · 已编辑</span>
+                                  {/if}
+                                </span>
+                                <button
+                                  type="button"
+                                  class="msg-more-btn"
+                                  aria-label="消息操作"
+                                  onclick={(e) => (activeMenu = { message: msg, anchor: e.currentTarget, rootId: rootMsg.id })}
+                                >
+                                  <MoreHorizontal size={16} />
+                                </button>
+                              </div>
                             </div>
                           </article>
                         {/if}
@@ -618,20 +671,20 @@
           {/if}
         </div>
 
-        {#if pendingDraft || activeRoot}
+        {#if pendingDraft || activeConversation}
           <div class="composer-dock">
             <MessageComposer
-              draftKey={pendingDraft?.anchor.canonicalLocator ?? editingMessage?.id ?? selectedRootId ?? ""}
+              draftKey={pendingDraft?.anchor.canonicalLocator ?? editingMessage?.id ?? activeRoot?.id ?? ""}
               sealDraftOnSubmit={Boolean(pendingDraft || editingMessage)}
               initialText={editingMessage?.text ?? ""}
               initialContentJson={editingMessage?.contentJson ?? ""}
               editingLabel={editingMessage ? editingMessage.text.slice(0, 18) : null}
-              replyChipLabel={replyTarget?.preview ?? null}
-              referenceChipLabels={referenceItems}
+              replyChipLabel={editingMessage ? null : activeReply?.preview ?? null}
+              referenceChipLabels={pendingDraft || editingMessage ? [] : referenceItems}
               submitLabel={editingMessage ? "保存修订" : pendingDraft ? "创建对话" : "发送"}
               onClearReply={() => (replyTarget = null)}
               onRemoveReference={(id) => (referenceItems = referenceItems.filter((r) => r.id !== id))}
-              onCancelEdit={() => (editingMessage = null)}
+              onCancelEdit={() => (editingTarget = null)}
               onSubmit={handleComposerSubmit}
             />
           </div>
@@ -647,8 +700,11 @@
     anchorEl={menuState.anchor}
     canEdit={menuState.message.kind === "text"}
     onReply={() => {
+      activateMessageThread(menuState.rootId);
+      editingTarget = null;
       replyTarget = {
         id: menuState.message.id,
+        rootId: menuState.rootId,
         preview: menuState.message.text.slice(0, 20) || "原文",
       };
     }}
@@ -661,14 +717,15 @@
       }
     }}
     onEdit={() => {
-      editingMessage = menuState.message;
+      activateMessageThread(menuState.rootId);
+      editingTarget = { rootId: menuState.rootId, message: menuState.message };
     }}
     onRevisions={() => void openRevisionsForMessage(menuState.message.id)}
     onDelete={() => {
       confirmDelete = {
         open: true,
         message: menuState.message,
-        isRoot: menuState.isRoot,
+        isRoot: menuState.message.id === menuState.rootId,
       };
     }}
     onClose={() => (activeMenu = null)}
@@ -786,7 +843,7 @@
   .workspace-overlay.compact {
     position: fixed;
     inset: 0;
-    padding: 12px;
+    padding: 0;
     z-index: 50;
     background: var(--bg-scrim);
     backdrop-filter: blur(8px);
@@ -840,9 +897,25 @@
 
   .workspace-overlay.compact .pane-b,
   .workspace-overlay.compact .pane-c {
+    position: absolute;
+    inset: auto 0 0;
     width: 100%;
-    flex: 1;
+    height: min(var(--reader-mobile-sheet-h, 78dvh), calc(100% - env(safe-area-inset-top, 0px)));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
     background: var(--bg-elevated);
+  }
+
+  .workspace-overlay.compact .pane-head :global(.icon-btn) {
+    width: 44px;
+    min-height: 44px;
+  }
+
+  @media (max-height: 530px) {
+    .workspace-overlay.compact .pane-b,
+    .workspace-overlay.compact .pane-c {
+      height: calc(100% - env(safe-area-inset-top, 0px));
+    }
   }
 
   .pane-head {
@@ -1008,6 +1081,7 @@
   /* Pane C Thread */
   .scope-bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
@@ -1049,6 +1123,7 @@
 
   .thread-scroll {
     flex: 1;
+    overscroll-behavior: contain;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -1086,6 +1161,8 @@
 
   .quote-actions {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: 6px;
   }
@@ -1121,6 +1198,7 @@
 
   .source-quote p {
     margin: 0;
+    overflow-wrap: anywhere;
   }
 
   .quote-accent-bar {
@@ -1145,59 +1223,33 @@
     text-align: center;
   }
 
+  .thread-empty-hint p {
+    margin: 0 0 8px;
+  }
+
   .messages-timeline {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
   }
 
   .message-node {
     display: flex;
-    gap: 10px;
+    justify-content: flex-end;
   }
 
-  .msg-line-rail {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 12px;
-    flex: none;
-    padding-top: 16px;
-  }
-
-  .msg-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: var(--accent);
-    flex: none;
-  }
-
-  .msg-stem {
-    flex: 1;
-    width: 2px;
-    margin-top: 6px;
-    border-radius: 999px;
-    background: var(--accent-soft);
-  }
-
-  .message-node:last-child .msg-stem {
-    display: none;
-  }
-
-  .msg-body-card {
-    flex: 1;
+  .message-bubble {
+    max-width: 90%;
     min-width: 0;
-    padding: 12px 14px;
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-    box-shadow: var(--shadow-xs);
+    padding: 10px 12px 0;
+    border-radius: var(--radius-md) var(--radius-md) 4px var(--radius-md);
+    background: var(--accent-soft);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
   }
 
-  .msg-top {
+  .msg-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1206,28 +1258,37 @@
 
   .msg-meta {
     font-size: 11.5px;
-    color: var(--ink-muted);
-  }
-
-  .edited-tag {
-    opacity: 0.85;
+    color: var(--ink-secondary);
   }
 
   .msg-more-btn {
-    width: 26px;
-    height: 26px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--ink-muted);
-    transition: background-color 140ms var(--ease-smooth), color 140ms var(--ease-smooth);
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-pill);
+    display: grid;
+    place-items: center;
+    color: var(--ink-secondary);
   }
 
   .msg-more-btn:hover,
   .msg-more-btn:focus-visible {
-    background: var(--bg-well);
+    background: var(--bg-well-hover);
     color: var(--ink-primary);
+  }
+
+  @media (pointer: coarse) {
+    .msg-more-btn {
+      width: 44px;
+      height: 44px;
+    }
+
+    .scope-pill,
+    .sort-pill,
+    .mini-action,
+    .clear-draft-link {
+      min-height: 44px;
+    }
   }
 
   .provenance-chip {
@@ -1242,14 +1303,15 @@
   }
 
   .provenance-chip.ref {
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--accent-soft-hover);
+    color: var(--ink-primary);
   }
 
   .msg-content {
     font-size: 14px;
     line-height: 1.65;
     color: var(--ink-primary);
+    overflow-wrap: anywhere;
   }
 
   .composer-dock {

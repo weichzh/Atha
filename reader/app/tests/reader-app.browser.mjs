@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { preview as startPreview } from "vite";
+import { verifyConversationEditor } from "./conversation-editor.browser.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -11,22 +12,7 @@ const { chromium } = require("playwright");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(appRoot, "../..");
-const screenshotDir = path.join(repoRoot, "artifacts/local/audits/borderless-reader-20261126");
-const PREVIEW_URL = "http://127.0.0.1:4174/";
-
-async function waitForServer(url, timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      // retry
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error(`Preview server did not start within ${timeoutMs}ms`);
-}
+const screenshotDir = path.join(repoRoot, "artifacts/local/audits/conversation-editor-v2");
 
 async function assertBorderless(page, selectors) {
   const violations = await page.evaluate((sels) => {
@@ -63,7 +49,7 @@ async function waitForReaderEntry(page) {
   );
 }
 
-async function verifyFootnotePreview(browser) {
+async function verifyFootnotePreview(browser, previewUrl) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, hasTouch: true });
   const release = Promise.withResolvers();
   const requestedPaths = [];
@@ -109,7 +95,7 @@ async function verifyFootnotePreview(browser) {
       await release.promise;
       await route.fulfill({ status: 200, contentType: "application/xhtml+xml", body: ch3 });
     });
-    await page.goto(`${PREVIEW_URL}?manifest=demo/manifest.json`);
+    await page.goto(`${previewUrl}?manifest=demo/manifest.json`);
     await page.waitForSelector("html[data-reader-ready]");
     const note = page.getByRole("dialog", { name: /^脚注/ });
     const position = () => page.locator("html").getAttribute("data-section-position");
@@ -182,7 +168,7 @@ async function verifyFootnotePreview(browser) {
     await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "3 / 3");
     await note.waitFor({ state: "hidden" });
 
-    await page.goto(`${PREVIEW_URL}?manifest=demo/manifest.json&verify=1`);
+    await page.goto(`${previewUrl}?manifest=demo/manifest.json&verify=1`);
     await page.waitForSelector("html[data-reader-ready]");
     await page.locator("#ordinary-link").tap();
     await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "2 / 3");
@@ -190,7 +176,7 @@ async function verifyFootnotePreview(browser) {
 
     // A known target still offers explicit navigation when it has no previewable text.
     for (const [link, destination] of [["#note-marker", "2 / 3"], ["#note-image", "3 / 3"]]) {
-      await page.goto(`${PREVIEW_URL}?manifest=demo/manifest.json&verify=1`);
+      await page.goto(`${previewUrl}?manifest=demo/manifest.json&verify=1`);
       await page.waitForSelector("html[data-reader-ready]");
       await page.locator(link).tap();
       await note.waitFor();
@@ -207,7 +193,7 @@ async function verifyFootnotePreview(browser) {
   }
 }
 
-async function verifyShelfSelection(browser) {
+async function verifyShelfSelection(browser, previewUrl) {
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const group = (page) => page.getByRole("group", { name: "选中书籍操作" });
@@ -220,7 +206,7 @@ async function verifyShelfSelection(browser) {
   const booksAt = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("atha.demo.books.v1")));
 
   try {
-    await desktop.goto(PREVIEW_URL);
+    await desktop.goto(previewUrl);
     await card(desktop, first).click({ button: "right" });
     await selectionCount(desktop, 1);
     assert.equal(await card(desktop, first).getAttribute("aria-pressed"), "true");
@@ -284,7 +270,7 @@ async function verifyShelfSelection(browser) {
     await group(desktop).waitFor({ state: "hidden" });
     assert.equal((await booksAt(desktop)).filter(book => [first, second, third].includes(book.title)).length, 0);
 
-    await phone.goto(PREVIEW_URL);
+    await phone.goto(previewUrl);
     await card(phone, primary).scrollIntoViewIfNeeded();
     const bounds = await card(phone, primary).boundingBox();
     const x = bounds.x + bounds.width / 2;
@@ -323,7 +309,7 @@ async function verifyShelfSelection(browser) {
   }
 }
 
-async function verifyShelfResumeAndLayout(browser) {
+async function verifyShelfResumeAndLayout(browser, previewUrl) {
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const columns = () => phone.locator(".book-grid").evaluate(grid =>
     getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length);
@@ -333,7 +319,7 @@ async function verifyShelfResumeAndLayout(browser) {
   const bar = dock.locator(".resume-bar");
   const nav = phone.getByRole("navigation", { name: "主导航" });
   try {
-    await phone.goto(PREVIEW_URL);
+    await phone.goto(previewUrl);
     await bar.waitFor();
     assert.equal(await columns(), 3);
     assert.ok((await bar.boundingBox()).y + (await bar.boundingBox()).height <= (await nav.boundingBox()).y);
@@ -412,22 +398,19 @@ async function run() {
     `CSP violation: inline <script> found in dist/index.html: ${inlineScriptMatches.join(", ")}`,
   );
 
-  // 2. Spawn vite preview
-  const preview = spawn("pnpm", ["preview"], {
-    cwd: appRoot,
-    stdio: "pipe",
-    env: { ...process.env },
-  });
-
+  // Let the OS choose an unused loopback port; no dependency on another preview session.
+  const preview = await startPreview({ root: appRoot, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
   let browser;
   try {
-    await waitForServer(PREVIEW_URL);
+    const previewUrl = `http://127.0.0.1:${preview.httpServer.address().port}/`;
     const executablePath = process.env.CHROMIUM_PATH;
     browser = await chromium.launch({
       executablePath,
       headless: true,
       args: ["--no-sandbox", "--disable-gpu"],
     });
+
+    await verifyConversationEditor(browser, previewUrl, screenshotDir);
 
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
@@ -442,14 +425,14 @@ async function run() {
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
     page.on("pageerror", (err) => {
-      pageErrors.push(String(err));
+      pageErrors.push(err.stack ?? String(err));
     });
     page.on("response", (res) => {
       if (res.status() >= 400) failedResponses.push(`${res.status()} ${res.url()}`);
     });
 
     // 3. Load Library (Light 1440x900)
-    await page.goto(PREVIEW_URL, { waitUntil: "networkidle" });
+    await page.goto(previewUrl, { waitUntil: "networkidle" });
     await page.waitForSelector(".book-card");
     await page.waitForTimeout(450);
 
@@ -585,7 +568,7 @@ async function run() {
       return Boolean(a && b && c && a.right <= b.left + 2 && b.right <= c.left + 2);
     });
     assert.equal(abcOrderOk, true, "Layout must maintain strict A | B | C order");
-    await assertBorderless(page, [".pane-b", ".pane-c", ".note-index-row", ".msg-body-card", ".composer-card"]);
+    await assertBorderless(page, [".pane-b", ".pane-c", ".note-index-row", ".message-bubble", ".composer-pill"]);
 
     await page.screenshot({
       path: path.join(screenshotDir, "05-reader-workspace-abc-1440.png"),
@@ -596,6 +579,9 @@ async function run() {
     const prose = page.locator(".ProseMirror");
     await prose.click();
     await page.keyboard.type("测试安全链接：");
+    const formatToggle = page.getByRole("button", { name: "排版工具" });
+    assert.equal(await formatToggle.getAttribute("aria-expanded"), "false");
+    await formatToggle.click();
     await page.getByRole("button", { name: "插入链接" }).click();
     await page.waitForSelector(".link-dialog");
     const linkInput = page.getByRole("textbox", { name: "链接地址" });
@@ -657,7 +643,7 @@ async function run() {
     await page.waitForFunction(() => typeof globalThis.finishTestReply === "function");
     await prose.fill("发送期间继续输入的草稿");
     await page.evaluate(() => globalThis.finishTestReply());
-    await page.waitForFunction(() => document.querySelector(".send-btn")?.textContent.includes("发送中") === false);
+    await page.locator('.composer-card[aria-busy="false"]').waitFor();
     assert.equal(await prose.innerText(), "发送期间继续输入的草稿");
     await prose.fill("");
 
@@ -937,7 +923,7 @@ async function run() {
       "memory-root": memoryTarget.root,
       "memory-message": memoryTarget.root,
     });
-    await page.goto(`${PREVIEW_URL}?${query}`);
+    await page.goto(`${previewUrl}?${query}`);
     await page.waitForSelector("html[data-reader-ready]");
     await page.waitForFunction((id) => {
       const raw = JSON.parse(localStorage.getItem(`atha.reader.progress.${id.slice(0, 16)}.v1`));
@@ -948,13 +934,13 @@ async function run() {
     assert.equal(consoleErrors.length, 0, `Console errors found: ${consoleErrors.join(" | ")}`);
     assert.equal(pageErrors.length, 0, `Page errors found: ${pageErrors.join(" | ")}`);
 
-    await verifyFootnotePreview(browser);
-    await verifyShelfSelection(browser);
-    await verifyShelfResumeAndLayout(browser);
-    console.log("ALL BROWSER CHECKS PASSED! 18 screenshots saved to:", screenshotDir);
+    await verifyFootnotePreview(browser, previewUrl);
+    await verifyShelfSelection(browser, previewUrl);
+    await verifyShelfResumeAndLayout(browser, previewUrl);
+    console.log("ALL BROWSER CHECKS PASSED! Screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();
-    preview.kill("SIGTERM");
+    await preview.close();
   }
 }
 
