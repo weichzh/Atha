@@ -131,12 +131,16 @@ test('Original-source probe rejects a same-chapter off-page highlight even with 
   const loaded = spawnSync('/bin/bash', ['-ec', 'source "$1"; printf "%s" "$reader_highlight_script"', 'reader-highlight', ui], { encoding: 'utf8' });
   assert.equal(loaded.status, 0, loaded.stderr);
   const text = '青铜钟下的一只白鹭';
-  const page = { left: 32, right: 328, top: 46, bottom: 714 };
+  const domRect = (left, top, width, height) => {
+    const bounds = { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height };
+    return { ...bounds, toJSON: () => bounds };
+  };
+  const page = domRect(32, 46, 296, 668);
   const host = { closest: () => ({ getBoundingClientRect: () => page }) };
   const probe = (left, covered = false) => {
     const range = {
       startContainer: { getRootNode: () => ({ host }) }, toString: () => text,
-      getClientRects: () => [{ left, right: left + 133, top: 74, bottom: 96, width: 133, height: 22 }]
+      getClientRects: () => [domRect(left, 74, 133, 22)]
     };
     const document = { querySelector: () => host, elementFromPoint: () => covered ? {} : host };
     return new Function('document', 'CSS', 'innerWidth', 'innerHeight', `
