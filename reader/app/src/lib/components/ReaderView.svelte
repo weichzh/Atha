@@ -1146,7 +1146,7 @@
   }
 
   .reader-frame > .reader[data-reader-spread] {
-    padding-block: calc(40px * var(--reader-dpr, 1));
+    padding-block: calc(24px * var(--reader-dpr, 1));
   }
 
   .reader-frame > .reader.pulling {

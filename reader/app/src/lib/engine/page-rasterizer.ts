@@ -24,6 +24,7 @@ export function rasterizeReaderPage(
   width: number,
   height: number,
   paper: string,
+  leaf?: "left" | "right",
 ): HTMLCanvasElement | null {
   const { frame, reader, page, book, pageStep } = viewport;
   const frameRect = frame.getBoundingClientRect();
@@ -34,9 +35,12 @@ export function rasterizeReaderPage(
 
   const shift = columnDelta * pageStep * readerScale;
   const projection = { frameRect, pageRect, shift, frameScale, readerScale };
+  const spine = (pageRect.left + pageRect.right) / 2;
+  const left = leaf === "right" ? spine : pageRect.left;
+  const right = leaf === "left" ? spine : pageRect.right;
   const visible = (rect: DOMRect) =>
-    rect.width > 0 && rect.height > 0 && rect.left < pageRect.right + shift - 0.25 &&
-    rect.right > pageRect.left + shift + 0.25 && rect.top < pageRect.bottom && rect.bottom > pageRect.top;
+    rect.width > 0 && rect.height > 0 && rect.left < right + shift - 0.25 &&
+    rect.right > left + shift + 0.25 && rect.top < pageRect.bottom && rect.bottom > pageRect.top;
   const canvas = document.createElement("canvas");
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.ceil(width * dpr);
@@ -47,7 +51,9 @@ export function rasterizeReaderPage(
   ctx.fillStyle = paper;
   ctx.fillRect(0, 0, width, height);
 
-  const { x, y, w, h } = project(pageRect, { ...projection, shift: 0 });
+  const { x, y, w, h } = project(new DOMRect(left, pageRect.top, right - left, pageRect.height), {
+    ...projection, shift: 0,
+  });
   ctx.beginPath();
   ctx.rect(x, y, w, h);
   ctx.clip();

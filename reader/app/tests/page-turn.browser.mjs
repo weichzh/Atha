@@ -183,16 +183,15 @@ async function verifyFacingPages(browser, base) {
     await stage(page, "spread").waitFor();
     assert.equal(await position(page), 1, "preview does not change navigation");
     const faces = await stage(page, "spread").evaluate(root => {
-      const leaf = root.querySelector(".spread-leaf");
+      const canvas = root.querySelector("canvas.visible");
+      const gl = canvas.getContext("webgl");
+      const program = gl.getParameter(gl.CURRENT_PROGRAM);
+      const read = name => gl.getUniform(program, gl.getUniformLocation(program, name));
       const paper = root.closest(".reader-frame").querySelector(".page").getBoundingClientRect();
-      const left = parseFloat(leaf.style.left) + root.getBoundingClientRect().left;
-      const matrix = new DOMMatrix(getComputedStyle(leaf).transform);
-      const layers = [...leaf.querySelectorAll(".face-copy")].map(copy =>
-        copy.querySelector(".reader-content-host").shadowRoot.querySelector(".book").style.transform);
-      return { pinned: Math.abs(left - (paper.left + paper.right) / 2) <= 1, folded: matrix.m13 > 0.5, layers };
+      const spine = (paper.left + paper.right) / 2 - root.getBoundingClientRect().left;
+      return { pinned: Math.abs(read("u_spine") - spine) <= 1, folded: read("u_radius") > 0, back: read("u_incoming") };
     });
-    assert.ok(faces.pinned && faces.folded);
-    assert.notEqual(...faces.layers, "front and back are taken from different spreads");
+    assert.deepEqual(faces, { pinned: true, folded: true, back: 1 });
     await capture("facing-pages-turn.png");
     await release();
     await page.waitForFunction(() => /page 2 \/ /.test(document.title));
@@ -214,8 +213,17 @@ async function verifyFacingPages(browser, base) {
     await page.setViewportSize(viewport);
     await spread.waitFor();
     assert.equal(await saved(page), before);
+    const lost = await touchDrag(page, -415);
+    await stage(page, "spread").waitFor();
+    await stage(page, "spread").locator("canvas.visible").evaluate(canvas => {
+      canvas.getContext("webgl").getExtension("WEBGL_lose_context").loseContext();
+    });
+    await stage(page, "cover").waitFor();
+    await lost();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    await settled(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await advance(page, 1, null);
+    await advance(page, -1, null);
     await mode(page, "连续滚动");
     await spread.waitFor({ state: "detached" });
     assert.deepEqual(errors, []);
@@ -255,17 +263,12 @@ async function verifyOddLongSpread(browser, base) {
   }
 }
 
-const preview = await startPreview({ root: appRoot, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
-const base = `http://127.0.0.1:${preview.httpServer.address().port}/`;
-let browser;
-try {
-  await mkdir(artifacts, { recursive: true });
-  browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH,
-    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
-  });
-
+async function verifyTurns(browser, base) {
   await verifyFacingPages(browser, base);
+  if (process.argv.includes("--spread-only")) {
+    console.log("Facing pages: curl, return, cancellation, resize and reduced motion passed.");
+    return;
+  }
   await verifyOddLongSpread(browser, base);
 
   const desktop = await prepare(browser, base, { touch: true });
@@ -467,6 +470,18 @@ try {
   assert.deepEqual(await reduced.page.evaluate(() => window.turnRenderers), []);
   assert.deepEqual(reduced.errors, []);
   console.log("Page turns passed: one-page swipes, WebGL, Canvas2D, DOM cover, slide, scroll, cross-section and Locator restore.");
+}
+
+const preview = await startPreview({ root: appRoot, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
+const base = `http://127.0.0.1:${preview.httpServer.address().port}/`;
+let browser;
+try {
+  await mkdir(artifacts, { recursive: true });
+  browser = await chromium.launch({
+    executablePath: process.env.CHROMIUM_PATH,
+    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+  });
+  await verifyTurns(browser, base);
 } finally {
   await browser?.close();
   await new Promise(resolve => preview.httpServer.close(resolve));

@@ -290,7 +290,6 @@ button:disabled {
 
 /* Reader viewport light-DOM frame */
 .reader-frame {
-  --reader-sheet-edge: 20px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -327,10 +326,6 @@ button:disabled {
   --reader-spread-w: calc(2 * var(--reader-col-w) + var(--reader-column-gap));
 }
 
-.reader-frame:has(> .reader[data-reader-spread]) {
-  background: color-mix(in srgb, var(--reader-canvas) 92%, var(--ink-muted));
-}
-
 .page {
   position: relative;
   width: var(--reader-col-w, min(calc(var(--reader-width, 100vw) - var(--reader-pad-x, 32px) * 2), var(--reader-content-max-width, 760px)));
@@ -344,27 +339,13 @@ button:disabled {
   width: var(--reader-spread-w);
 }
 
-.reader[data-reader-spread] > .page,
-.reader-spread-paper {
-  --paper-edge: calc(var(--reader-sheet-edge) * var(--reader-dpr, 1));
-  background: var(--reader-canvas);
-  box-shadow: 0 0 0 var(--paper-edge) var(--reader-canvas),
-    0 0 0 calc(var(--paper-edge) + 1px) rgb(0 0 0 / 8%),
-    0 8px 18px calc(var(--paper-edge) - 4px) rgb(0 0 0 / 12%);
-  border-radius: 2px;
-}
-
-.reader[data-reader-spread] > .page::after,
-.reader-spread-paper::after {
+.reader[data-reader-spread] > .page::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset-block: 0;
+  left: 50%;
+  border-inline-start: 1px solid color-mix(in srgb, currentColor 8%, transparent);
   pointer-events: none;
-  background: linear-gradient(to right,
-    transparent calc(50% - 16px), rgb(0 0 0 / 10%) calc(50% - 1px),
-    rgb(0 0 0 / 19%) 50%, rgb(0 0 0 / 7%) calc(50% + 1px),
-    transparent calc(50% + 18px)
-  );
 }
 
 .reader[data-reader-spread][data-native-page-scroll] > .page::before {

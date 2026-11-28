@@ -1,3 +1,5 @@
+import type { SpreadLeaf } from "./spread-fold.ts";
+
 export interface CurlPose {
   originX: number;
   originY: number;
@@ -13,20 +15,28 @@ const VERT_MESH = `
   uniform vec2 u_origin;
   uniform vec2 u_axis;
   uniform float u_radius;
+  uniform vec4 u_leaf;
+  uniform float u_spine;
   varying vec2 v_uv;
   varying float v_side;
   varying float v_shade;
+  varying float v_roll;
 
   const float PI = 3.14159265;
   const float HALF_PI = 1.57079632;
 
   void main() {
-    v_uv = a_uv;
-    vec2 p = a_uv * u_size;
+    // Readest's leaf-only cylinder: pin the spine and keep texture coordinates
+    // on the original paper while the open edge wraps around the crease.
+    // Adapted from Readest pageCurl.ts (c3a95ba7, AGPL-3.0-only).
+    vec2 p = u_leaf.xy + a_uv * u_leaf.zw;
+    v_uv = p / u_size;
     float R = max(u_radius, 0.001);
     float d = dot(p - u_origin, u_axis);
+    if (u_spine >= 0.0 && abs(p.x - u_spine) < 0.01) d = 0.0;
     vec2 pos = p;
     float z = 0.0;
+    v_roll = 0.0;
 
     if (d <= 0.0) {
       v_side = 0.0;
@@ -36,6 +46,7 @@ const VERT_MESH = `
       pos = p + u_axis * (R * sin(theta) - d);
       z = R * (1.0 - cos(theta));
       v_side = step(HALF_PI, theta);
+      v_roll = sin(theta);
       float cylLight = 0.72 + 0.28 * abs(cos(theta));
       float specular = 0.09 * exp(-5.76 * (theta - HALF_PI) * (theta - HALF_PI));
       v_shade = min(1.06, cylLight + specular);
@@ -57,14 +68,24 @@ const VERT_MESH = `
 const FRAG_MESH = `
   precision mediump float;
   uniform sampler2D u_tex;
+  uniform sampler2D u_incoming;
+  uniform float u_backMirror;
   uniform vec3 u_paperColor;
   varying vec2 v_uv;
   varying float v_side;
   varying float v_shade;
+  varying float v_roll;
 
   void main() {
     vec4 tex = texture2D(u_tex, v_uv);
-    if (v_side < 0.5) {
+    if (u_backMirror >= 0.0) {
+      // Reflect around the spine so the destination leaf is legible on landing,
+      // not mirrored like ink seen through the outgoing page.
+      vec4 face = gl_FrontFacing ? tex :
+        texture2D(u_incoming, vec2(u_backMirror - v_uv.x, v_uv.y));
+      float lighting = 1.0 - 0.20 * v_roll;
+      gl_FragColor = vec4(face.rgb * lighting, 1.0);
+    } else if (v_side < 0.5) {
       gl_FragColor = vec4(tex.rgb * v_shade, 1.0);
     } else {
       vec3 backTint = mix(u_paperColor, tex.rgb, 0.18) * v_shade;
@@ -169,6 +190,7 @@ export class PageCurlRenderer {
   private shadowVbo: WebGLBuffer | null = null;
   private indexCount = 0;
   private texture: WebGLTexture | null = null;
+  private incoming: WebGLTexture | null = null;
   private meshUniforms: Record<string, WebGLUniformLocation | null> = {};
   private shadowUniforms: Record<string, WebGLUniformLocation | null> = {};
   private meshAttribute = 0;
@@ -248,13 +270,42 @@ export class PageCurlRenderer {
     this.indexCount = indices.length;
     this.meshAttribute = gl.getAttribLocation(meshProgram, "a_uv");
     this.shadowAttribute = gl.getAttribLocation(shadowProgram, "a_uv");
-    for (const key of ["size", "origin", "axis", "radius", "tex", "paperColor"]) {
+    for (const key of ["size", "origin", "axis", "radius", "tex", "paperColor", "leaf", "spine", "incoming", "backMirror"]) {
       this.meshUniforms[key] = gl.getUniformLocation(meshProgram, `u_${key}`);
     }
     for (const key of ["size", "origin", "axis", "radius", "progress"]) {
       this.shadowUniforms[key] = gl.getUniformLocation(shadowProgram, `u_${key}`);
     }
     return gl.getError() === gl.NO_ERROR;
+  }
+
+  setSpreadSurface(source: HTMLCanvasElement, back: HTMLCanvasElement, w: number, h: number, paper: string) {
+    this.setPageSurface(source, w, h, paper);
+    const gl = this.gl;
+    if (!gl || !this.gpuSurface) return false;
+    this.incoming ??= gl.createTexture();
+    if (!this.incoming) return false;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.incoming);
+    try {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, back);
+      return gl.getError() === gl.NO_ERROR;
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "SecurityError")) throw error;
+      return false;
+    } finally {
+      gl.activeTexture(gl.TEXTURE0);
+    }
+  }
+
+  renderSpread(pose: CurlPose, leaf: SpreadLeaf): boolean {
+    if (!this.gpuSurface || !this.gl || this.gl.isContextLost()) return false;
+    this.renderWebGL(pose, leaf);
+    return true;
   }
 
   setPageSurface(source: HTMLCanvasElement, w: number, h: number, paper: string) {
@@ -310,13 +361,16 @@ export class PageCurlRenderer {
       this.fallback.width = this.fallback.height = 1;
     }
     const gl = this.gl;
+    if (gl && this.incoming) gl.deleteTexture(this.incoming);
+    this.incoming = null;
     if (gl && !gl.isContextLost() && this.texture) {
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.texture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     }
   }
 
-  private renderWebGL(pose: CurlPose) {
+  private renderWebGL(pose: CurlPose, leaf?: SpreadLeaf) {
     const gl = this.gl!;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0, 0, 0, 0);
@@ -357,6 +411,13 @@ export class PageCurlRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.uniform1i(this.meshUniforms.tex, 0);
     gl.uniform2f(this.meshUniforms.size, this.width, this.height);
+    const spine = leaf ? leaf.left + (leaf.direction < 0 ? leaf.width : 0) : -1;
+    gl.uniform4f(this.meshUniforms.leaf, leaf?.left ?? 0, leaf?.top ?? 0,
+      leaf?.width ?? this.width, leaf?.height ?? this.height);
+    gl.uniform1f(this.meshUniforms.spine, spine);
+    gl.uniform1f(this.meshUniforms.backMirror, 2 * spine / this.width);
+    gl.uniform1i(this.meshUniforms.incoming, leaf ? 1 : 0);
+    gl.frontFace(gl.CCW);
     gl.uniform2f(this.meshUniforms.origin, pose.originX, pose.originY);
     gl.uniform2f(this.meshUniforms.axis, pose.axisX, pose.axisY);
     gl.uniform1f(this.meshUniforms.radius, pose.radius);
@@ -428,6 +489,7 @@ export class PageCurlRenderer {
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.shadowVbo) gl.deleteBuffer(this.shadowVbo);
     if (this.texture) gl.deleteTexture(this.texture);
+    if (this.incoming) gl.deleteTexture(this.incoming);
     if (this.meshProgram) gl.deleteProgram(this.meshProgram);
     if (this.shadowProgram) gl.deleteProgram(this.shadowProgram);
     this.gl = null;

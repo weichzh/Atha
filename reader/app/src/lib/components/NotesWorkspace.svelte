@@ -405,7 +405,8 @@
   >
     {#if showPaneB}
       <aside
-        class="pane-b glass-popover"
+        class="pane-b"
+        class:glass-popover={isCompact}
         bind:this={listEl}
         aria-label="笔记列表"
         transition:fly={{ x: isCompact ? 0 : 14, y: isCompact ? 20 : 0, duration: reducedMotion.current ? 0 : 220, easing: cubicOut }}
@@ -523,7 +524,8 @@
     {#if showPaneC}
       <section
         id="message-conversation"
-        class="pane-c glass-popover"
+        class="pane-c"
+        class:glass-popover={isCompact}
         aria-label="当前消息线程"
         transition:fly={{ x: isCompact ? 0 : 18, y: isCompact ? 20 : 0, duration: reducedMotion.current ? 0 : 240, easing: cubicOut }}
       >
@@ -866,8 +868,6 @@
     height: 100%;
     /* A flexible thread can contribute its longest paragraph to the preferred width. */
     max-inline-size: 100%;
-    gap: 12px;
-    padding: 14px 14px 14px 0;
     z-index: 40;
   }
 
@@ -882,7 +882,6 @@
   }
 
   .workspace-overlay.medium {
-    padding: 14px;
     flex: none;
   }
 
@@ -891,7 +890,6 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    border-radius: var(--radius-xl);
     overflow: hidden;
   }
 
@@ -905,6 +903,15 @@
     width: clamp(330px, 23vw, 414px);
     flex: none;
     padding: 18px 18px 16px;
+  }
+
+  .workspace-overlay:not(.compact) :is(.pane-b, .pane-c) {
+    background: color-mix(in srgb, var(--bg-canvas) 92%, var(--ink-muted));
+    border-inline-start: 1px solid color-mix(in srgb, var(--ink-muted) 28%, transparent);
+  }
+
+  .workspace-overlay:not(.compact) .pane-c {
+    background: color-mix(in srgb, var(--bg-canvas) 97%, var(--bg-elevated));
   }
 
   .workspace-overlay.medium .pane-b {
