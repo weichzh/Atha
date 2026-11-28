@@ -358,10 +358,12 @@ async function verifyShelfResumeAndLayout(browser, previewUrl) {
     await phone.getByRole("button", { name: "退出选择" }).click();
     await bar.waitFor();
     await nav.getByRole("tab", { name: "设置" }).click();
+    await phone.getByRole("button", { name: /书架布局/ }).click();
     await phone.getByLabel("手机封面列数").selectOption("2");
     await nav.getByRole("tab", { name: "书架" }).click();
     assert.equal(await columns(), 2);
     await nav.getByRole("tab", { name: "设置" }).click();
+    await phone.getByRole("button", { name: /书架布局/ }).click();
     await phone.getByLabel("手机封面列数").selectOption("4");
     await phone.getByLabel("桌面封面密度").selectOption("compact");
     await phone.getByLabel("封面下显示书名和作者").uncheck();
@@ -381,6 +383,60 @@ async function verifyShelfResumeAndLayout(browser, previewUrl) {
     await history.waitFor();
     assert.equal(await history.evaluate(button => document.activeElement === button), true);
     assert.equal(await drawer.count(), 0);
+  } finally {
+    await phone.close();
+  }
+}
+
+async function verifySettingsSections(browser, previewUrl) {
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const index = phone.getByRole("navigation", { name: "设置项目" });
+  const search = phone.getByRole("searchbox", { name: "搜索设置" });
+  try {
+    await phone.goto(previewUrl);
+    await phone.getByRole("tab", { name: "设置" }).click();
+    await index.waitFor();
+    await assertNoHorizontalOverflow(phone, "settings-index-390");
+    await phone.screenshot({ path: path.join(screenshotDir, "settings-index-mobile-390.png"), animations: "disabled" });
+
+    await search.fill("找不到的设置");
+    await index.getByRole("status").waitFor();
+    await index.getByRole("button", { name: "清除搜索" }).click();
+    assert.equal(await search.inputValue(), "");
+    await search.fill("ＭＯＢＩ");
+    const dictionary = index.getByRole("button", { name: /离线词典管理/ });
+    assert.equal(await index.locator("[data-setting]").count(), 1);
+    await dictionary.click();
+    await phone.getByRole("region", { name: "离线词典管理" }).getByRole("button", { name: "导入本地词典" }).waitFor();
+    await index.waitFor({ state: "hidden" });
+    await phone.getByRole("button", { name: "返回设置", exact: true }).click();
+    await index.waitFor();
+    assert.equal(await search.inputValue(), "ＭＯＢＩ");
+    assert.equal(await dictionary.evaluate((button) => document.activeElement === button), true);
+
+    await search.fill("字号");
+    const typography = index.getByRole("button", { name: "全书阅读默认" });
+    await typography.click();
+    const panel = phone.getByRole("region", { name: "全书阅读默认" });
+    await panel.waitFor();
+    await assertNoHorizontalOverflow(phone, "settings-detail-390");
+    await phone.screenshot({ path: path.join(screenshotDir, "settings-detail-mobile-390.png"), animations: "disabled" });
+    await panel.getByRole("button", { name: "恢复默认", exact: true }).click();
+    const confirmation = phone.getByRole("alertdialog");
+    await confirmation.waitFor();
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await confirmation.waitFor({ state: "hidden" });
+    assert.equal(await panel.isVisible(), true);
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await index.waitFor();
+    assert.equal(await search.inputValue(), "字号");
+    assert.equal(await typography.evaluate((button) => document.activeElement === button), true);
+
+    await search.fill("备份");
+    await index.getByRole("button", { name: /本地资料与完整备份/ }).click();
+    const storage = phone.getByRole("region", { name: "本地资料与完整备份" });
+    await storage.getByRole("button", { name: "从备份文件恢复" }).waitFor();
+    await storage.getByRole("button", { name: /导出 .*完整备份/ }).waitFor();
   } finally {
     await phone.close();
   }
@@ -937,6 +993,7 @@ async function run() {
     await verifyFootnotePreview(browser, previewUrl);
     await verifyShelfSelection(browser, previewUrl);
     await verifyShelfResumeAndLayout(browser, previewUrl);
+    await verifySettingsSections(browser, previewUrl);
     console.log("ALL BROWSER CHECKS PASSED! Screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();
