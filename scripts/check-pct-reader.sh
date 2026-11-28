@@ -5,8 +5,11 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 package=com.atha.reader
-unsigned_apk="$repo_root/reader/app/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
-default_apk="$repo_root/reader/app/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-local-test.apk"
+android_dir="$repo_root/reader/app/src-tauri/gen/android"
+release_dir="$android_dir/app/build/outputs/apk/universal/release"
+unsigned_apk="$release_dir/app-universal-release-unsigned.apk"
+default_apk="$release_dir/app-universal-release-local-test.apk"
+local_test=0
 
 adb_bin=
 aligned_apk=
@@ -30,16 +33,21 @@ candidate_version=
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/check-pct-reader.sh build
+  scripts/check-pct-reader.sh build [--local-test]
   scripts/check-pct-reader.sh verify [--apk PATH]
   scripts/check-pct-reader.sh install --device SERIAL [--apk PATH]
+  scripts/check-pct-reader.sh run --device SERIAL [--local-test]
 
 build creates an optimized arm64 APK, signs it with the configured local
 Android test key, and verifies its package, launcher keyboard resize mode,
 signature, and 16 KiB alignment.
 
+run builds a fresh candidate and overlays it on the selected device, then
+opens Atha. The installed app and the candidate must have matching signatures.
+--local-test uses the existing SDK debug key for a local trial, not a release key.
+
 Environment for build:
-  ATHA_ANDROID_KEYSTORE_PASSWORD  Required keystore password.
+  ATHA_ANDROID_KEYSTORE_PASSWORD  Required unless using --local-test.
   ATHA_ANDROID_KEYSTORE           Defaults to $HOME/.android/debug.keystore.
   ATHA_ANDROID_KEY_ALIAS          Defaults to androiddebugkey.
   ATHA_ANDROID_KEY_PASSWORD       Defaults to the keystore password.
@@ -365,7 +373,32 @@ verify_apk() {
   printf 'zipaligned_16k=true\nelf_aligned_16k=true\n'
 }
 
+build_unsigned_apk() {
+  (
+    cd "$repo_root"
+    mise exec -- pnpm --dir reader/app tauri android build --target aarch64 --apk --ci
+  )
+  [[ -f "$unsigned_apk" ]] || die "Unsigned release APK not found: $unsigned_apk"
+}
+
 build_apk() {
+  local output=$1 verify_output=${2:-1}
+  if ((local_test)); then
+    [[ -f "${ANDROID_USER_HOME:-$HOME/.android}/debug.keystore" ]] ||
+      die 'Local trial requires the existing Android SDK debug key.'
+    build_unsigned_apk
+    (
+      cd "$android_dir"
+      ./gradlew --offline --console=plain -I "$repo_root/scripts/lib/pct-local-signing.gradle" \
+        -PabiList=arm64-v8a :app:assembleUniversalRelease -x :app:rustBuildUniversalRelease
+    )
+    local local_apk="$release_dir/app-universal-release.apk"
+    if ((verify_output)); then verify_apk "$local_apk"; fi
+    cp -- "$local_apk" "$output"
+    printf 'apk=%s\n' "$output"
+    return
+  fi
+
   local keystore=${ATHA_ANDROID_KEYSTORE:-$HOME/.android/debug.keystore}
   local alias=${ATHA_ANDROID_KEY_ALIAS:-androiddebugkey}
   local keystore_password=${ATHA_ANDROID_KEYSTORE_PASSWORD:-}
@@ -373,11 +406,7 @@ build_apk() {
   [[ -f "$keystore" ]] || die "Android keystore not found: $keystore"
   [[ -n "$keystore_password" ]] || die 'ATHA_ANDROID_KEYSTORE_PASSWORD is required.'
 
-  (
-    cd "$repo_root"
-    mise exec -- pnpm --dir reader/app tauri android build --target aarch64 --apk --ci
-  )
-  [[ -f "$unsigned_apk" ]] || die "Unsigned release APK not found: $unsigned_apk"
+  build_unsigned_apk
 
   mkdir -p "$repo_root/.tmp"
   aligned_apk="$repo_root/.tmp/pct-reader-aligned-$$.apk"
@@ -395,11 +424,11 @@ build_apk() {
     --out "$signed_apk" \
     "$aligned_apk"
 
-  verify_apk "$signed_apk"
-  rm -f -- "${default_apk}.idsig"
-  mv -f -- "$signed_apk" "$default_apk"
+  if ((verify_output)); then verify_apk "$signed_apk"; fi
+  rm -f -- "${output}.idsig"
+  mv -f -- "$signed_apk" "$output"
   signed_apk=
-  printf 'apk=%s\n' "$default_apk"
+  printf 'apk=%s\n' "$output"
 }
 
 current_component() {
@@ -440,9 +469,8 @@ is_confirmation_component() {
   esac
 }
 
-install_apk() {
-  local apk=$1
-  [[ -n "$device" ]] || die 'install requires --device SERIAL.'
+check_device() {
+  [[ -n "$device" ]] || die 'install and run require --device SERIAL.'
   [[ "$device" =~ ^[A-Za-z0-9._:-]+$ ]] || die 'Invalid Android device serial.'
 
   local device_line
@@ -455,9 +483,9 @@ install_apk() {
     die 'The requested device is not arm64-v8a.'
   [[ $("$adb_bin" -s "$device" shell getprop ro.kernel.qemu | tr -d '\r') != 1 ]] ||
     die 'The requested device is an emulator.'
+}
 
-  verify_apk "$apk"
-
+installed_base_apk() {
   local installed_paths=()
   mapfile -t installed_paths < <(
     "$adb_bin" -s "$device" shell pm path "$package" |
@@ -466,6 +494,14 @@ install_apk() {
   )
   ((${#installed_paths[@]} == 1)) ||
     die 'Safe update requires one already-installed, non-split Atha package.'
+  printf '%s\n' "${installed_paths[0]}"
+}
+
+install_apk() {
+  local apk=$1 installed_path
+  check_device
+  verify_apk "$apk"
+  installed_path=$(installed_base_apk)
 
   local evidence_rel
   evidence_rel="artifacts/local/audits/pct-reader-install-$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -477,7 +513,7 @@ install_apk() {
   fi
 
   local installed_apk="$evidence_dir/installed-before.apk"
-  "$adb_bin" -s "$device" pull "${installed_paths[0]}" "$installed_apk" >/dev/null
+  "$adb_bin" -s "$device" pull "$installed_path" "$installed_apk" >/dev/null
   installed_before_certificate=$(certificate_digest "$installed_apk")
   candidate_certificate=$(certificate_digest "$apk")
   [[ -n "$installed_before_certificate" && "$candidate_certificate" == "$installed_before_certificate" ]] ||
@@ -673,7 +709,33 @@ install_apk() {
   printf 'installed=true\nevidence=%s\n' "$evidence_rel"
 }
 
+run_on_device() {
+  check_device
+  installed_base_apk >/dev/null
+  local parent="$repo_root/artifacts/local/audits" run_dir candidate
+  git -C "$repo_root" check-ignore -q "$parent/pct-reader-run" ||
+    die 'PCT run output directory must be ignored by Git.'
+  mkdir -p "$parent"
+  run_dir=$(mktemp -d "$parent/pct-reader-run-XXXXXXXX")
+  candidate="$run_dir/Atha-arm64-trial.apk"
+  {
+    printf 'source_commit='
+    git -C "$repo_root" rev-parse HEAD
+    if [[ -n $(git -C "$repo_root" status --porcelain) ]]; then
+      printf 'source_has_uncommitted_changes=true\n'
+    else
+      printf 'source_has_uncommitted_changes=false\n'
+    fi
+  } >"$run_dir/source.txt"
+  # The installer verifies this private candidate before writing to the device.
+  build_apk "$candidate" 0
+  install_apk "$candidate"
+}
+
 command=${1:-}
+case "$command" in
+  -h | --help) usage; exit 0 ;;
+esac
 [[ -n "$command" ]] || {
   usage
   exit 2
@@ -681,17 +743,23 @@ command=${1:-}
 shift
 
 apk=$default_apk
+apk_supplied=0
 while (($#)); do
   case "$1" in
     --apk)
       (($# >= 2)) || die '--apk requires a path.'
       apk=$(realpath -e -- "$2")
+      apk_supplied=1
       shift 2
       ;;
     --device)
       (($# >= 2)) || die '--device requires a serial.'
       device=$2
       shift 2
+      ;;
+    --local-test)
+      local_test=1
+      shift
       ;;
     -h | --help)
       usage
@@ -701,18 +769,28 @@ while (($#)); do
   esac
 done
 
-load_tools
 case "$command" in
   build)
-    [[ "$apk" == "$default_apk" && -z "$device" ]] || die 'build accepts no arguments.'
-    build_apk
+    [[ $apk_supplied == 0 && -z "$device" ]] || die 'build accepts only --local-test.'
+    load_tools
+    build_apk "$default_apk"
     ;;
   verify)
-    [[ -z "$device" ]] || die 'verify does not accept --device.'
+    [[ -z "$device" && $local_test == 0 ]] || die 'verify accepts only --apk.'
+    load_tools
     verify_apk "$apk"
     ;;
   install)
+    ((local_test == 0)) || die '--local-test is only for build and run.'
+    [[ -n "$device" ]] || die 'install requires --device SERIAL.'
+    load_tools
     install_apk "$apk"
+    ;;
+  run)
+    [[ -n "$device" ]] || die 'run requires --device SERIAL.'
+    ((apk_supplied == 0)) || die 'run always builds a fresh candidate.'
+    load_tools
+    run_on_device
     ;;
   *)
     usage

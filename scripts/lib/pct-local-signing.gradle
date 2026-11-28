@@ -1,0 +1,14 @@
+// Local device trials only; reuse the Android SDK's debug signing configuration.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.android.application') {
+        if (project.path == ':app') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                def local = android.signingConfigs.getByName('debug')
+                local.enableV2Signing = true
+                local.enableV3Signing = true
+                local.enableV4Signing = false
+                android.buildTypes.getByName('release').signingConfig = local
+            }
+        }
+    }
+}
