@@ -34,6 +34,7 @@ import { createReaderPreferences, DEFAULT_APPLICATION_PREFS, DEFAULT_BOOK_PREFS 
 
 export interface ReaderEngineCallbacks {
   getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "cancel" | "stop"> | undefined;
+  wantsFacingPages?: () => boolean;
   beginVerticalSwipe?: () => ((phase: "move" | "end" | "cancel", deltaY: number) => void) | undefined;
   onToggleChrome: () => void;
   onOpenNoteThread: (rootId: string) => void;
@@ -563,6 +564,7 @@ export class ReaderEngine {
       },
       book: this.content.book,
       measureViewportHeight: () => frame.clientHeight,
+      wantsFacingPages: this.callbacks.wantsFacingPages,
       reader,
       page,
       position,

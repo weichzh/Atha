@@ -103,15 +103,19 @@ gdk_backend=wayland
 jq -e "$(viewport_width_predicate "$2") and ($focus_geometry_predicate)" >/dev/null
 `, 'focus-geometry', ui, String(requested)], { input: JSON.stringify(record), encoding: 'utf8' }).status;
   };
-  const desktop = { width: 1280, page: 760, paddingLeft: 32, paddingRight: 32, filled: true, centered: true, overflow: false };
+  const desktop = { width: 1280, height: 1040, page: 760, spread: false, paddingLeft: 32, paddingRight: 32, filled: true, centered: true, overflow: false };
   assert.equal(check(desktop), 0);
   assert.equal(check({ ...desktop, page: 500 }), 1, 'centering an overly narrow desktop column is not sufficient');
   assert.equal(check({ ...desktop, paddingLeft: 16 }), 1, 'a desktop outer gutter cannot substitute for the left inset');
   assert.equal(check({ ...desktop, paddingRight: 48 }), 1, 'a centered page still needs the default right inset');
   assert.equal(check({ ...desktop, width: 360, page: 296 }), 0);
   assert.equal(check({ ...desktop, width: 360, page: 270 }), 1);
-  assert.equal(check({ ...desktop, width: 1707, availableWidth: 1707 }, 1600), 0);
-  assert.equal(check({ ...desktop, width: 1706, availableWidth: 1707 }, 1600), 1);
+  const spread = { ...desktop, height: 800, page: 1172, spread: true, spine: true };
+  assert.equal(check(spread), 0);
+  assert.equal(check({ ...spread, page: 760 }), 1, 'wide landscape must not silently show one column');
+  assert.equal(check({ ...spread, spine: false }), 1, 'a spread needs a visible gutter');
+  assert.equal(check({ ...spread, width: 1707, availableWidth: 1707 }, 1600), 0);
+  assert.equal(check({ ...spread, width: 1706, availableWidth: 1707 }, 1600), 1);
 });
 
 test('Switching workspace tools rejects a missing or moved position within one chapter', linux, () => {

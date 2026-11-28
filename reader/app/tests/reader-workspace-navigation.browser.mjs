@@ -30,9 +30,9 @@ async function progress(page) {
   return page.evaluate(key => JSON.parse(JSON.parse(localStorage.getItem(key)).locator).start, progressKey);
 }
 
-async function verifyAtWidth(browser, url, width) {
+async function verifyAtWidth(browser, url, width, height, threePanes) {
   // Keep the real pane outros: a read just after a Svelte update may see a transitioning flex box.
-  const page = await browser.newPage({ viewport: { width, height: 713 } });
+  const page = await browser.newPage({ viewport: { width, height } });
   const regionA = page.locator(".region-a");
   const thread = page.locator(".pane-c");
   const close = async () => {
@@ -77,14 +77,19 @@ async function verifyAtWidth(browser, url, width) {
     await page.waitForSelector(".reader-root[data-screen-ready=true] .pane-c");
     await thread.getByText(quote, { exact: true }).waitFor();
 
-    const medium = width === 1000;
+    const medium = width >= 800 && !threePanes;
     if (medium) {
       await regionA.waitFor({ state: "hidden" });
       // Let the kernel's window-resize debounce finish while only the workspace is visible.
-      await page.setViewportSize({ width: 1010, height: 713 });
+      await page.setViewportSize({ width: width + 10, height });
       await page.locator("html[data-viewport-stable]").waitFor({ state: "attached" });
-    } else if (width >= 1440) {
+    } else if (threePanes) {
       await waitForOriginal(page);
+      assert.equal(await page.locator(".reader").getAttribute("data-reader-spread"), null);
+      const panes = await page.locator(".region-a, .pane-b, .pane-c").evaluateAll(nodes =>
+        nodes.map(node => node.getBoundingClientRect().toJSON()));
+      assert.equal(panes.length, 3);
+      assert.ok(panes[0].width >= 600 && panes[0].right <= panes[1].left && panes[1].right <= panes[2].left);
       await thread.getByRole("button", { name: "专注对话" }).click();
       await regionA.waitFor({ state: "hidden" });
       await thread.getByRole("button", { name: "退出专注" }).click();
@@ -93,8 +98,28 @@ async function verifyAtWidth(browser, url, width) {
 
     await close();
     await waitForOriginal(page);
+    if (threePanes) {
+      const spread = page.locator(".reader[data-reader-spread]");
+      await spread.waitFor();
+      const beforeNotes = await progress(page);
+      const list = page.locator(".pane-b");
+      await page.locator(".reader-shell").focus();
+      await page.keyboard.press("n");
+      await list.waitFor();
+      await list.locator(".note-index-row", { hasText: quote }).click();
+      await thread.waitFor();
+      await spread.waitFor({ state: "detached" });
+      await waitForOriginal(page);
+      if (process.env.ATHA_DESKTOP_EVIDENCE) {
+        await page.screenshot({ path: process.env.ATHA_DESKTOP_EVIDENCE, animations: "disabled" });
+      }
+      await close();
+      await spread.waitFor();
+      await waitForOriginal(page);
+      assert.deepEqual(await progress(page), beforeNotes);
+    }
 
-    if (medium) {
+    if (width === 1000) {
       // Later reading actions supersede the memory jump, even in the same chapter.
       const next = async () => {
         const previous = await progress(page);
@@ -147,5 +172,7 @@ async function verifyAtWidth(browser, url, width) {
 }
 
 export async function verifyReaderWorkspaceNavigation(browser, url) {
-  for (const width of [1000, 360, 1500]) await verifyAtWidth(browser, url, width);
+  for (const [width, height, threePanes] of [[1000, 713, false], [360, 713, false], [1400, 1100, false], [1400, 900, true]]) {
+    await verifyAtWidth(browser, url, width, height, threePanes);
+  }
 }

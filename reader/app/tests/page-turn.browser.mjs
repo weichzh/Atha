@@ -64,9 +64,9 @@ async function advance(page, direction, renderer, button = false) {
   }
 }
 
-async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference", prefix = "", inspectClones = false } = {}) {
+async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference", prefix = "", inspectClones = false, viewport } = {}) {
   const page = await browser.newPage({
-    viewport: mobile ? { width: 390, height: 844 } : { width: 1120, height: 820 },
+    viewport: viewport ?? (mobile ? { width: 390, height: 844 } : { width: 1120, height: 820 }),
     deviceScaleFactor: mobile ? 2 : 1,
     hasTouch: touch,
     reducedMotion,
@@ -147,6 +147,114 @@ async function touchDrag(page, dx) {
   };
 }
 
+async function facingText(page) {
+  return page.evaluate(() => {
+    const aperture = document.querySelector(".page").getBoundingClientRect();
+    const spine = (aperture.left + aperture.right) / 2;
+    const book = document.querySelector(".reader-content-host").shadowRoot.querySelector(".book");
+    const text = [new Set(), new Set()];
+    for (const paragraph of book.querySelectorAll("p")) {
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      for (const rect of range.getClientRects()) {
+        if (rect.width < 1 || rect.left < aperture.left - 1 || rect.right > aperture.right + 1) continue;
+        text[rect.left < spine ? 0 : 1].add(Number(paragraph.textContent.match(/第 (\d+) 段/)?.[1]));
+      }
+    }
+    return text.map(side => [...side]);
+  });
+}
+
+async function verifyFacingPages(browser, base) {
+  const viewport = { width: 1500, height: 900 };
+  const { page, errors } = await prepare(browser, base, { viewport, touch: true, inspectClones: true, paragraphs: 93 });
+  const spread = page.locator(".reader[data-reader-spread]");
+  const capture = name => page.screenshot({ path: fileURLToPath(new URL(name, artifacts)) });
+  try {
+    await open(page, base);
+    await spread.waitFor();
+    const opening = await facingText(page);
+    assert.equal(opening[0][0], 1);
+    assert.ok(opening[1][0] >= opening[0].at(-1), "the right leaf continues the left");
+    await capture("facing-pages-desktop.png");
+
+    await mode(page, "卷页");
+    const release = await touchDrag(page, -415);
+    await stage(page, "spread").waitFor();
+    assert.equal(await position(page), 1, "preview does not change navigation");
+    const faces = await stage(page, "spread").evaluate(root => {
+      const leaf = root.querySelector(".spread-leaf");
+      const paper = root.closest(".reader-frame").querySelector(".page").getBoundingClientRect();
+      const left = parseFloat(leaf.style.left) + root.getBoundingClientRect().left;
+      const matrix = new DOMMatrix(getComputedStyle(leaf).transform);
+      const layers = [...leaf.querySelectorAll(".face-copy")].map(copy =>
+        copy.querySelector(".reader-content-host").shadowRoot.querySelector(".book").style.transform);
+      return { pinned: Math.abs(left - (paper.left + paper.right) / 2) <= 1, folded: matrix.m13 > 0.5, layers };
+    });
+    assert.ok(faces.pinned && faces.folded);
+    assert.notEqual(...faces.layers, "front and back are taken from different spreads");
+    await capture("facing-pages-turn.png");
+    await release();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    await settled(page);
+    const second = await facingText(page);
+    assert.ok(second[0][0] >= opening[1].at(-1));
+    await advance(page, -1, "spread");
+    await settled(page);
+    assert.deepEqual(await facingText(page), opening);
+    const cancel = await touchDrag(page, -36);
+    await stage(page, "spread").waitFor();
+    await cancel();
+    await settled(page);
+    assert.equal(await position(page), 1);
+
+    const before = await saved(page);
+    await page.setViewportSize({ width: 1240, height: 1030 });
+    await spread.waitFor({ state: "detached" });
+    await page.setViewportSize(viewport);
+    await spread.waitFor();
+    assert.equal(await saved(page), before);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await advance(page, 1, null);
+    await mode(page, "连续滚动");
+    await spread.waitFor({ state: "detached" });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
+async function verifyOddLongSpread(browser, base) {
+  const { page, errors } = await prepare(browser, base, {
+    viewport: { width: 1500, height: 900 },
+    inspectClones: true,
+    paragraphs: 35,
+    reducedMotion: "reduce",
+  });
+  try {
+    await open(page, base);
+    // Give each original paragraph a leaf to make the final blank leaf independent of fonts.
+    await page.locator(".reader-content-host").evaluate(host => {
+      const style = document.createElement("style");
+      style.textContent = ".book p + p { break-before: column; }";
+      host.shadowRoot.append(style);
+    });
+    await page.setViewportSize({ width: 1502, height: 900 });
+    await page.waitForFunction(() => /page 1 \/ 18$/.test(document.title) &&
+      document.querySelector(".reader").hasAttribute("data-native-page-scroll"));
+    for (let i = 1; i < 18; ++i) await advance(page, 1, null);
+    assert.deepEqual(await facingText(page), [[35], []], "the odd final leaf stays on its side of the spine");
+    const geometry = await page.locator(".page").evaluate(page => ({
+      left: page.scrollLeft,
+      step: page.clientWidth + parseFloat(getComputedStyle(page).getPropertyValue("--reader-column-gap")),
+    }));
+    assert.ok(Math.abs(geometry.left - 17 * geometry.step) <= 1);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
 const preview = await startPreview({ root: appRoot, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
 const base = `http://127.0.0.1:${preview.httpServer.address().port}/`;
 let browser;
@@ -156,6 +264,9 @@ try {
     executablePath: process.env.CHROMIUM_PATH,
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
   });
+
+  await verifyFacingPages(browser, base);
+  await verifyOddLongSpread(browser, base);
 
   const desktop = await prepare(browser, base, { touch: true });
   const { page } = desktop;

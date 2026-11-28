@@ -8,10 +8,15 @@
   let root: HTMLDivElement;
   let under: HTMLDivElement;
   let front: HTMLDivElement;
+  let leafFront: HTMLDivElement;
+  let leafBack: HTMLDivElement;
   let webgl: HTMLCanvasElement;
   let fallback: HTMLCanvasElement;
-  let mode = $state<"cover" | "webgl" | "canvas2d" | null>(null);
+  let mode = $state<"cover" | "webgl" | "canvas2d" | "spread" | null>(null);
   let coverX = $state(0);
+  let angle = $state(0);
+  let foldShade = $state(0);
+  let leaf = $state({ x: 0, y: 0, width: 0, height: 0, spine: 0, forward: true, stageWidth: 0, stageHeight: 0 });
   let renderer: PageCurlRenderer | null = null;
   let motion: MediaQueryList;
   let turn: {
@@ -24,6 +29,7 @@
     progress: number;
     dragging: boolean;
     curled: boolean;
+    spread: boolean;
   } | null = null;
   let frameId = 0;
 
@@ -48,6 +54,11 @@
     const pageCopy = document.createElement("div");
     pageCopy.style.cssText = "position:relative;overflow:hidden;flex:none";
     pageCopy.style.width = getComputedStyle(page).width;
+    if (reader.hasAttribute("data-reader-spread")) {
+      readerCopy.style.setProperty("--reader-col-w", readerStyle.getPropertyValue("--reader-col-w"));
+      readerCopy.style.setProperty("--reader-spread-w", readerStyle.getPropertyValue("--reader-spread-w"));
+      pageCopy.className = "reader-spread-paper";
+    }
     const host = document.createElement("div");
     host.className = oldHost.className;
     for (const attr of oldHost.attributes) {
@@ -105,6 +116,12 @@
   function draw(progress: number) {
     if (!turn) return;
     turn.progress = progress;
+    if (turn.spread) {
+      angle = -turn.direction * 180 * progress;
+      foldShade = 0.24 * Math.sin(progress * Math.PI);
+      mode = "spread";
+      return;
+    }
     const fold = turn.direction === 1 ? progress : 1 - progress;
     if (turn.curled) {
       mode = renderer?.render(pose(fold, turn.y, turn.width, turn.height)) ?? "cover";
@@ -123,6 +140,32 @@
     const viewport = view.frame.getBoundingClientRect();
     const y = clientY === undefined ? height * 0.72 : (clientY - viewport.top) * height / viewport.height;
     const paper = getComputedStyle(view.frame).backgroundColor;
+    const spread = effect === "curl" && view.reader.hasAttribute("data-reader-spread");
+    if (spread) {
+      const bounds = view.page.getBoundingClientRect();
+      const edge = Number.parseFloat(getComputedStyle(view.frame).getPropertyValue("--reader-sheet-edge"));
+      const scale = width / viewport.width;
+      const spine = ((bounds.left + bounds.right) / 2 - viewport.left) * scale;
+      const leafWidth = (bounds.width / 2 + edge) * scale;
+      leaf = {
+        x: dir === 1 ? spine : spine - leafWidth,
+        y: (bounds.top - viewport.top - edge) * scale,
+        width: leafWidth,
+        height: (bounds.height + edge * 2) * scale,
+        spine,
+        forward: dir === 1,
+        stageWidth: width,
+        stageHeight: height,
+      };
+      // Keep the outgoing stationary side above the revealed spread. The turning
+      // sheet carries its real front and the opposite leaf of the destination.
+      cloneColumn(under, view, from + dir, paper);
+      cloneColumn(front, view, from, paper);
+      cloneColumn(leafFront, view, from, paper);
+      cloneColumn(leafBack, view, from + dir, paper);
+      turn = { effect, direction: dir, from, width, height, y, progress: 0, dragging: false, curled: false, spread };
+      return true;
+    }
     const top = dir === 1 ? from : from - 1;
     const bottom = dir === 1 ? from + 1 : from;
     cloneColumn(under, view, bottom, paper);
@@ -136,7 +179,7 @@
         curled = true;
       }
     }
-    turn = { effect, direction: dir, from, width, height, y, progress: 0, dragging: false, curled };
+    turn = { effect, direction: dir, from, width, height, y, progress: 0, dragging: false, curled, spread };
     return true;
   }
 
@@ -144,7 +187,7 @@
     if (!turn) return;
     if (frameId) cancelAnimationFrame(frameId);
     const start = turn.progress;
-    const duration = (turn.curled ? 380 : 250) * Math.max(0.4, Math.abs(target - start));
+    const duration = (turn.spread ? 540 : turn.curled ? 380 : 250) * Math.max(0.4, Math.abs(target - start));
     const time = performance.now();
     turn.dragging = false;
     const tick = (now: number) => {
@@ -168,7 +211,7 @@
       !begin(view, from, dir, effect, clientY)) return;
     if (!turn) return;
     turn.dragging = true;
-    draw(Math.min(1, Math.abs(dx) / turn.width));
+    draw(Math.min(1, Math.abs(dx) / (turn.spread ? leaf.width * 2 : turn.width)));
   }
 
   export function commit(view: PageTurnViewport, from: number, dir: Direction, effect: Effect) {
@@ -193,6 +236,8 @@
     if (hadSurface) renderer?.releaseSurface();
     under?.replaceChildren();
     front?.replaceChildren();
+    leafFront?.replaceChildren();
+    leafBack?.replaceChildren();
   }
 
   onMount(() => {
@@ -213,8 +258,36 @@
 
 <div class="page-turn-stage" data-page-turn-renderer={mode} bind:this={root} aria-hidden="true" inert>
   <div class="turn-layer" bind:this={under}></div>
-  <div class="turn-layer cover" class:visible={mode === "cover"} style:transform={`translate3d(${coverX}px, 0, 0)`}>
+  <div
+    class="turn-layer cover"
+    class:visible={mode === "cover" || mode === "spread"}
+    style:transform={mode === "spread" ? "none" : `translate3d(${coverX}px, 0, 0)`}
+    style:clip-path={mode === "spread" ? leaf.forward
+        ? `inset(0 ${leaf.stageWidth - leaf.spine}px 0 0)`
+        : `inset(0 0 0 ${leaf.spine}px)` : undefined}
+  >
     <div class="turn-layer" bind:this={front}></div>
+  </div>
+  <div
+    class="spread-leaf"
+    class:forward={leaf.forward}
+    style:left={`${leaf.x}px`}
+    style:top={`${leaf.y}px`}
+    style:width={`${leaf.width}px`}
+    style:height={`${leaf.height}px`}
+    style:transform={`rotateY(${angle}deg)`}
+    style:--fold-shade={foldShade}
+  >
+    <div class="spread-face">
+      <div class="face-copy" bind:this={leafFront}
+        style:left={`-${leaf.x}px`} style:top={`-${leaf.y}px`}
+        style:width={`${leaf.stageWidth}px`} style:height={`${leaf.stageHeight}px`}></div>
+    </div>
+    <div class="spread-face reverse">
+      <div class="face-copy" bind:this={leafBack}
+        style:left={`-${leaf.forward ? leaf.spine - leaf.width : leaf.spine}px`} style:top={`-${leaf.y}px`}
+        style:width={`${leaf.stageWidth}px`} style:height={`${leaf.stageHeight}px`}></div>
+    </div>
   </div>
   <canvas class="turn-layer" class:visible={mode === "webgl"} bind:this={webgl}></canvas>
   <canvas class="turn-layer" class:visible={mode === "canvas2d"} bind:this={fallback}></canvas>
@@ -255,5 +328,54 @@
     opacity: 1;
     will-change: transform;
     box-shadow: 8px 0 22px var(--shadow-ink, rgb(0 0 0 / 18%));
+  }
+
+  .page-turn-stage[data-page-turn-renderer="spread"] {
+    perspective: 3000px;
+  }
+
+  .spread-leaf {
+    position: absolute;
+    visibility: hidden;
+    transform-origin: right center;
+    transform-style: preserve-3d;
+    --fold-light: to left;
+  }
+
+  .page-turn-stage[data-page-turn-renderer="spread"] .spread-leaf {
+    visibility: visible;
+    will-change: transform;
+  }
+
+  .spread-leaf.forward {
+    transform-origin: left center;
+    --fold-light: to right;
+  }
+
+  .spread-face {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    background: var(--reader-canvas);
+    box-shadow: 0 3px 12px rgb(0 0 0 / 15%);
+    border-radius: 2px;
+  }
+
+  .spread-face.reverse {
+    transform: rotateY(180deg);
+  }
+
+  .face-copy {
+    position: absolute;
+  }
+
+  .spread-face::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(var(--fold-light),
+      rgb(0 0 0 / var(--fold-shade)), transparent 46%, rgb(0 0 0 / calc(var(--fold-shade) * 0.35)));
   }
 </style>

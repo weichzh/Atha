@@ -62,6 +62,7 @@ export function createPagination({
   next,
   fontSizeControl,
   measureViewportHeight = () => innerHeight,
+  wantsFacingPages = () => false,
   onPageShown,
   assert,
   fail,
@@ -319,7 +320,9 @@ export function createPagination({
 
   function applyFormulaScale() {
     const fontScale = readerPixels(state.fontSize) / SOURCE_FONT_SIZE;
-    const contentWidth = book.clientWidth;
+    const contentWidth = reader.hasAttribute("data-reader-spread")
+      ? parseFloat(getComputedStyle(book).columnWidth)
+      : book.clientWidth;
     for (const formula of book.querySelectorAll("img.math-inline, img.math-display")) {
       if (!formula.dataset.sourceWidth) {
         const width = Number(formula.getAttribute("width"));
@@ -421,8 +424,11 @@ export function createPagination({
     stopSettle();
     nativePagedScroll = false;
     reader.removeAttribute("data-native-page-scroll");
+    reader.style.removeProperty("--reader-scroll-end");
     page.scrollLeft = 0;
     book.style.transform = "none";
+    const spread = !isScrolled() && !book.classList.contains("atha-cbz-section") && wantsFacingPages();
+    reader.toggleAttribute("data-reader-spread", spread);
     applyFormulaScale();
     if (isScrolled()) {
       syncScrollPage();
@@ -439,6 +445,10 @@ export function createPagination({
     state.page = Math.min(state.page, state.pages - 1);
     nativePagedScroll = book.scrollWidth * visualScale > MAX_TRANSFORM_WIDTH;
     reader.toggleAttribute("data-native-page-scroll", nativePagedScroll);
+    if (spread && nativePagedScroll) {
+      // An odd final leaf still needs a full, spine-aligned spread viewport.
+      reader.style.setProperty("--reader-scroll-end", `${(state.pages - 1) * pageStep + width - 1}px`);
+    }
     reader.dataset.pageColumns = "paged";
     reader.dataset.scrollable = "false";
     showPage();
@@ -606,7 +616,7 @@ export function createPagination({
     const fitScale = page.getBoundingClientRect().width / page.clientWidth;
     const bookRect = book.getBoundingClientRect();
     const style = getComputedStyle(book);
-    const columnWidth = parseFloat(style.width);
+    const columnWidth = parseFloat(reader.hasAttribute("data-reader-spread") ? style.columnWidth : style.width);
     const columnStep = columnWidth + parseFloat(style.columnGap);
     try {
       for (const formula of formulas) {

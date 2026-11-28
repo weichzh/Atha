@@ -32,6 +32,7 @@
   } from "../data/library-adapter.ts";
   import { registerBackHandler, type BackSource } from "../data/back-stack.ts";
   import type { OpeningPaperMeasure } from "../data/open-transition.ts";
+  import { readerWorkspaceLayout, usesFacingPages } from "../data/reader-layout.ts";
   import { resolveEffectiveTheme } from "../engine/preferences.ts";
   import { setNativeSelectionSuppressed, syncSystemBarsMode, watchReaderBattery } from "../data/system-bars.ts";
   import { uiPrefs } from "../data/ui-prefs.svelte.ts";
@@ -68,6 +69,7 @@
 
   let viewportWidth = $state(typeof window !== "undefined" ? window.innerWidth : 1440);
   let viewportHeight = $state(typeof window !== "undefined" ? window.innerHeight : 900);
+  const android = typeof navigator !== "undefined" && /\bAndroid\b/.test(navigator.userAgent);
 
   let chromeOpen = $state(false);
   let quickActionsOpen = $state(false);
@@ -117,6 +119,7 @@
     bookTitle: untrack(() => book.title),
     callbacks: {
       getPageTurnStage: () => pageTurnStage,
+      wantsFacingPages: () => !android && usesFacingPages(frameEl?.clientWidth ?? 0, window.innerWidth, window.innerHeight),
       beginVerticalSwipe,
       onToggleChrome: toggleChrome,
       onOpenNoteThread: (rootId: string) => {
@@ -204,9 +207,10 @@
     );
   });
 
-  const isCompact = $derived(viewportWidth < 800 || viewportHeight > viewportWidth);
-  const isMediumLandscape = $derived(!isCompact && viewportWidth < 1440);
-  const isWideLandscape = $derived(!isCompact && viewportWidth >= 1440);
+  const workspaceLayout = $derived(readerWorkspaceLayout(viewportWidth, viewportHeight));
+  const isCompact = $derived(workspaceLayout === "compact");
+  const isMediumLandscape = $derived(workspaceLayout === "split");
+  const isWideLandscape = $derived(workspaceLayout === "three");
 
   const hideReaderA = $derived(
     (isMediumLandscape && notesMode === "thread") ||
@@ -1139,6 +1143,10 @@
     touch-action: pan-x pinch-zoom;
     translate: 0 var(--pull-translation);
     transition: translate 230ms var(--ease-spring);
+  }
+
+  .reader-frame > .reader[data-reader-spread] {
+    padding-block: calc(40px * var(--reader-dpr, 1));
   }
 
   .reader-frame > .reader.pulling {
