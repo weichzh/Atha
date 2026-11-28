@@ -11,6 +11,7 @@ minimum_pages=10
 gesture_warmups=5
 gesture_measurements=20
 epub=
+graphics_options=()
 
 require_count() {
   local value="$1" minimum="$2" maximum="$3" label="$4"
@@ -28,6 +29,7 @@ while (($#)); do
     --minimum-pages) minimum_pages="${2:?missing page minimum}"; shift 2 ;;
     --gesture-warmups) gesture_warmups="${2:?missing warmup count}"; shift 2 ;;
     --gesture-measurements) gesture_measurements="${2:?missing measurement count}"; shift 2 ;;
+    --software-compositing|--cpu-painting) graphics_options+=("$1"); shift ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
@@ -46,6 +48,7 @@ jq -e '.entry | strings | select(length > 0)' "$metadata" >/dev/null
 }
 
 exec bash "$script_dir/check-reader-linux.sh" \
+  "${graphics_options[@]}" \
   --formula-epub "$epub" \
   --formula-metadata "$metadata" \
   --minimum-formulas "$minimum_formulas" \

@@ -35,7 +35,8 @@ Usage:
   scripts/check-pct-reader.sh install --device SERIAL [--apk PATH]
 
 build creates an optimized arm64 APK, signs it with the configured local
-Android test key, and verifies its package, signature, and 16 KiB alignment.
+Android test key, and verifies its package, launcher keyboard resize mode,
+signature, and 16 KiB alignment.
 
 Environment for build:
   ATHA_ANDROID_KEYSTORE_PASSWORD  Required keystore password.
@@ -294,11 +295,36 @@ verify_apk() {
   local apk=$1
   [[ -f "$apk" ]] || die "APK not found: $apk"
 
-  local badging launch_activity signatures
-  badging=$($aapt2 dump badging "$apk")
+  local badging launch_activity signatures manifest_tree
+  badging=$("$aapt2" dump badging "$apk")
   grep -q "^package: name='$package'" <<<"$badging" || die 'Unexpected Android package id.'
   launch_activity=$(sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p" <<<"$badging" | head -n 1)
   [[ "$launch_activity" == "$package."* ]] || die 'Unexpected Android launch activity.'
+  manifest_tree=$("$aapt2" dump xmltree --file AndroidManifest.xml "$apk")
+  # badging expands shorthand class names, but xmltree keeps the declared name.
+  # Every element boundary ends the preceding element's own attributes.
+  awk -v package="$package" -v activity="$launch_activity" '
+    function record_activity() {
+      if (is_activity && name == activity) {
+        matches++
+        launch_resize = resize
+      }
+    }
+    /^[[:space:]]*E:/ {
+      record_activity()
+      is_activity = ($2 == "activity")
+      name = ""
+      resize = 0
+    }
+    is_activity && /:name\(0x01010003\)="/ {
+      split($0, quoted, "\"")
+      name = quoted[2]
+      if (name ~ /^\./) name = package name
+      else if (name !~ /\./) name = package "." name
+    }
+    is_activity && /:windowSoftInputMode\(0x0101022b\)=0x0*10[[:space:]]*$/ { resize = 1 }
+    END { record_activity(); exit(matches == 1 && launch_resize ? 0 : 1) }
+  ' <<<"$manifest_tree" || die 'Launch activity must use adjustResize for the Android keyboard.'
   grep -qx "minSdkVersion:'26'" <<<"$badging" || die 'Unexpected Android minSdkVersion.'
   grep -qx "targetSdkVersion:'36'" <<<"$badging" || die 'Unexpected Android targetSdkVersion.'
   grep -qx "native-code: 'arm64-v8a'" <<<"$badging" || die 'APK is not arm64-v8a-only.'
