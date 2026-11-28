@@ -13,6 +13,10 @@ cargo_bin=${CARGO_HOME:-$HOME/.cargo}/bin
 if [[ -x $cargo_bin/rustup && -x $cargo_bin/cargo ]]; then export PATH="$cargo_bin:$PATH"; fi
 cd -- "$repo_root"
 bash "$script_root/check-workflow.sh" "$@"
+# The committed path checks its PR diff in doc_guard; retain the local diff check otherwise.
+if [[ $# == 0 ]]; then
+  git diff --check
+fi
 bash -n "$script_root/check-fast.sh" "$script_root/check-reader-linux.sh" "$script_root/lib/reader-linux-preflight.sh"
 mise exec -- node --check "$script_root/test-node.mjs"
 mise exec -- cargo fmt --all -- --check
@@ -20,5 +24,4 @@ mise exec -- pnpm --dir reader/app test
 mise exec -- pnpm --dir reader/app check
 mise exec -- cargo test --workspace --locked --offline
 mise exec -- pnpm --dir reader/app build
-git diff --check
 printf 'fast_checks=passed\n'

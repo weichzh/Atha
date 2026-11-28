@@ -14,6 +14,7 @@ from pathlib import Path
 
 CODE_PREFIXES = (
     "backend/",
+    "reader/",
     "src/",
     "app/",
     "lib/",
@@ -27,8 +28,10 @@ CODE_PREFIXES = (
 
 CODE_FILES = {
     ".cargo/config.toml",
+    ".mise.toml",
     "Cargo.lock",
     "Cargo.toml",
+    "env/example.ps1",
     "package.json",
     "rust-toolchain.toml",
     "vite.config.ts",
@@ -56,50 +59,30 @@ ARCHITECTURE_IMPACT_VALUES = {"none", "present"}
 ITERATION_MODES = {"single-pass", "iterative"}
 
 
-def run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        text=True,
-        capture_output=True,
-        check=True,
-    )
+def git_output(*args: str) -> bytes:
+    return subprocess.check_output(["git", *args])
 
 
 def repo_root() -> Path:
-    result = run_git(["rev-parse", "--show-toplevel"])
-    return Path(result.stdout.strip())
-
-
-def normalize(path: str) -> str:
-    return path.replace("\\", "/").strip()
+    # Drop Git's line terminator, not whitespace in the path itself.
+    return Path(os.fsdecode(git_output("rev-parse", "--show-toplevel")[:-1]))
 
 
 def changed_files() -> list[str]:
-    result = run_git(["status", "--porcelain=v1", "--untracked-files=all"])
-    files: set[str] = set()
-
-    for raw_line in result.stdout.splitlines():
-        if not raw_line:
-            continue
-
-        path = raw_line[3:]
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1]
-
-        files.add(normalize(path))
-
-    return sorted(files)
+    # Disable rename detection to enumerate both endpoints. NUL framing preserves
+    # literal names (including whitespace, backslashes and " -> ").
+    status = git_output("status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all")
+    return sorted({os.fsdecode(entry[3:]) for entry in status.split(b"\0") if entry})
 
 
 def commit(ref: str) -> str:
-    return run_git(["rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"]).stdout.strip()
+    oid = git_output("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
+    return oid.decode("ascii").strip()
 
 
-def committed_paths(base: str, head: str) -> list[str]:
+def committed_paths(commit_range: str) -> list[str]:
     """Compare resolved commits; include both sides of a rename in the policy check."""
-    paths = subprocess.check_output(
-        ["git", "diff", "--no-renames", "--name-only", "-z", f"{base}...{head}", "--"]
-    )
+    paths = git_output("diff", "--no-renames", "--name-only", "-z", commit_range, "--")
     return sorted(os.fsdecode(path) for path in paths.split(b"\0") if path)
 
 
@@ -112,8 +95,20 @@ def is_code(path: str) -> bool:
 
 
 def active_changes(root: Path) -> list[str]:
-    text = (root / "docs/ACTIVE.md").read_text(encoding="utf-8")
-    return re.findall(r"^- `change`：.*→ `([^`]+)`\s*$", text, re.MULTILINE)
+    changes = []
+    active = root / "docs/ACTIVE.md"
+    for number, line in enumerate(active.read_text(encoding="utf-8").splitlines(), 1):
+        marker = re.match(r"[ \t]*[-+*][ \t]+`change`", line)
+        if marker is None:
+            continue
+        route = re.fullmatch(r"：.*→ `([^`]+)`[ \t]*", line[marker.end():])
+        if route is None:
+            raise ValueError(
+                f"malformed active change route at docs/ACTIVE.md:{number}; "
+                "use - `change`：Description → `docs/changes/<slug>.md`."
+            )
+        changes.append(route.group(1))
+    return changes
 
 
 def architecture_impact(text: str) -> str | None:
@@ -161,7 +156,12 @@ def valid_change_text(text: str) -> bool:
 
 def accepted_change(root: Path, relative: str) -> bool:
     path = Path(relative)
-    if path.is_absolute() or ".." in path.parts or path.parts[:2] != ("docs", "changes"):
+    if (
+        len(path.parts) != 3
+        or path.parts[:2] != ("docs", "changes")
+        or path.suffix != ".md"
+        or path.as_posix() != relative
+    ):
         return False
     target = root / path
     if not target.is_file():
@@ -234,22 +234,27 @@ def main() -> int:
     parser.add_argument("--base", help="compare committed HEAD with this PR base")
     parser.add_argument("--kind", choices=("fast", "change"), help="workflow path for a committed PR diff")
     args = parser.parse_args()
-    if args.kind and not args.base:
+    if args.kind and args.base is None:
         parser.error("--kind requires --base")
 
     root = repo_root()
-    if args.base:
-        if run_git(["status", "--porcelain", "--untracked-files=all"]).stdout:
+    changed = changed_files()
+    commit_range = None
+    if args.base is not None:
+        if changed:
             parser.error("committed-diff mode needs a clean worktree")
         try:
-            changed = committed_paths(commit(args.base), commit("HEAD"))
+            commit_range = f"{commit(args.base)}...{commit('HEAD')}"
+            changed = committed_paths(commit_range)
         except subprocess.CalledProcessError:
             parser.error("cannot compare the specified base with HEAD")
-    else:
-        changed = changed_files()
 
-    code_changed = any(is_code(path) or (args.base and path.startswith("reader/")) for path in changed)
-    changes = active_changes(root)
+    code_changed = any(is_code(path) for path in changed)
+    try:
+        changes = active_changes(root)
+    except ValueError as error:
+        print(f"BLOCKED: {error}", file=sys.stderr)
+        return 1
 
     invalid_changes = [path for path in changes if not accepted_change(root, path)]
     if invalid_changes:
@@ -267,6 +272,11 @@ def main() -> int:
             print(f" - {path}")
         print()
         print("Point docs/ACTIVE.md at a changed accepted/implemented docs/changes/*.md file.")
+        return 1
+
+    if commit_range and subprocess.run(
+        ["git", "diff", "--check", commit_range, "--"]
+    ).returncode:
         return 1
 
     lane = (args.kind or "change") if code_changed else "docs-only"
