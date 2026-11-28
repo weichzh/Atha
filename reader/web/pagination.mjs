@@ -698,7 +698,7 @@ export function createPagination({
     // A pane relayout can still be awaiting stable frames when the reader closes.
     // Its anchor belongs to the detached book, not the next document.
     const stillMounted = () => reader.isConnected;
-    if (!stillMounted()) return false;
+    if (!stillMounted() || !frame.clientWidth || !measureViewportHeight()) return false;
     syncViewportDeviceSize();
     if (!(await relayoutAtOffset(anchor, "窗口尺寸重排", stillMounted))) return false;
     const { layoutChanged } = await onPageShown(true, () => ({
@@ -980,6 +980,11 @@ export function createPagination({
     };
     window.addEventListener("resize", scheduleResize);
     window.addEventListener("atha-safe-area-change", scheduleResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", scheduleResize);
+      window.removeEventListener("atha-safe-area-change", scheduleResize);
+    };
   }
 
   return Object.freeze({

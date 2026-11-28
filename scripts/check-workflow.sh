@@ -11,5 +11,5 @@ if grep -EIn "$forbidden" "$script_dir"/*.sh; then
   exit 1
 fi
 
-bash "$script_dir/check-docs.sh"
+bash "$script_dir/check-docs.sh" "$@"
 mise exec -- python3 "$script_dir/doc_guard.py" --self-check

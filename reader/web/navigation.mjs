@@ -54,6 +54,7 @@ export function createNavigation({
   pagination,
   locator,
   preferences,
+  canResizeViewport = () => true,
   toc,
   chapterLabel,
   progressChapter,
@@ -73,9 +74,14 @@ export function createNavigation({
 }) {
   let lastFallback = null;
   let pending = Promise.resolve();
+  // A reflow may expose an earlier page start than its anchor. Retain the original
+  // point across reflows until another reading action takes over.
+  let layoutPoint = null;
 
-  function run(action, readingAction = null) {
+  function run(action, readingAction = null, eligible = () => true) {
     const result = pending.then(async () => {
+      if (!eligible()) return null;
+      if (readingAction === "navigate" || readingAction === "forward") layoutPoint = null;
       const wasAtEnd = readingAction === "navigate" && currentPercent() === 100;
       const value = await action();
       const atEnd = readingAction !== null && currentPercent() === 100;
@@ -189,6 +195,7 @@ export function createNavigation({
     if (!(await pagination.showOffset(target.start.offset))) {
       return fallback("locator-offset", sectionIndex);
     }
+    rememberLayoutPoint(target.start);
     syncControls(-1, target.start.offset);
     return true;
   }
@@ -315,6 +322,10 @@ export function createNavigation({
     return commitPreferences(scope, () => preferences.reset(scope));
   }
 
+  function rememberLayoutPoint(point) {
+    layoutPoint = { point, scrollTop: pagination.isScrolled() ? pagination.scrollPosition() : null };
+  }
+
   async function resizeViewport(
     offset = null,
     expectedSectionIndex = null,
@@ -331,16 +342,24 @@ export function createNavigation({
     const scrollChanged =
       expectedScrollTop !== null &&
       Math.abs(pagination.scrollPosition() - expectedScrollTop) > 1;
-    const resized = await pagination.resizeViewport(
-      pageChanged || scrollChanged ? anchor.start.offset : (offset ?? anchor.start.offset),
-    );
+    if (layoutPoint && (layoutPoint.point.section !== anchor.start.section ||
+      (layoutPoint.scrollTop !== null && Math.abs(pagination.scrollPosition() - layoutPoint.scrollTop) > 1))) {
+      layoutPoint = null;
+    }
+    const point = layoutPoint?.point ?? {
+      section: anchor.start.section,
+      offset: pageChanged || scrollChanged ? anchor.start.offset : (offset ?? anchor.start.offset),
+    };
+    const resized = await pagination.resizeViewport(point.offset);
     if (resized === false) return null;
+    rememberLayoutPoint(point);
     syncControls();
     return anchor;
   }
 
   async function settleScroll() {
     const movedAt = pagination.takeReadingScroll();
+    if (movedAt !== null) layoutPoint = null;
     const reachedEnd = movedAt !== null && currentPercent(true) === 100;
     await pagination.settleScrolledContent();
     syncControls();
@@ -460,6 +479,8 @@ export function createNavigation({
     resize: (offset, expectedSectionIndex, expectedPageIndex, expectedScrollTop) =>
       run(() =>
         resizeViewport(offset, expectedSectionIndex, expectedPageIndex, expectedScrollTop),
+        null,
+        canResizeViewport,
       ),
     setFontSize: (value) => run(() => setFontSize(value)),
     setPreferences: (scope, patch) => run(() => setPreferences(scope, patch)),

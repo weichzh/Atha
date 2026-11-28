@@ -236,5 +236,10 @@ export const readingMemoryClient = Object.freeze({
     ),
 });
 
+export function isReadingMemoryRecentQuery(query: string): boolean {
+  // Rust's str::trim() uses Unicode White_Space, unlike JavaScript's trim().
+  return !/\P{White_Space}/u.test(query);
+}
+
 export type MessageClient = typeof messageClient;
 export type ReadingMemoryClient = typeof readingMemoryClient;

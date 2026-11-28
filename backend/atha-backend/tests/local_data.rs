@@ -12,10 +12,12 @@ use atha_backend::{
         BrowserState, BrowserStateRecord, LocalData, LocalDataError, MAX_BROWSER_STATE_BYTES,
     },
     messages::{
-        EditionInput, MessageStore, RootMessageDraft, SourceAnchorInput, SourceSnapshotInput,
+        EditionInput, MessageStore, RootMessageDraft, SnapshotResourceInput, SourceAnchorInput,
+        SourceSnapshotInput,
     },
     reader::{
         dictionary::LocalDictionaries,
+        epub::READER_MANIFEST,
         library::{LibraryError, LocalLibrary},
     },
 };
@@ -166,6 +168,145 @@ fn complete_local_data_round_trip_rebuilds_cache_and_confirms_browser_state() {
         destination_data.pending_restore().expect("no pending"),
         None
     );
+}
+
+#[test]
+fn complete_backup_preserves_epub_anchor_and_snapshot_after_reopen() {
+    const QUOTE: &str = "纸上星光";
+    const IMAGE: &str = "images/star.png";
+    let source = TestRoot::new("epub-backup-source");
+    let epub = source.path().join("stars.epub");
+    write_small_epub(&epub, QUOTE, IMAGE);
+    let archive = source.path().join("stars.atha-data");
+
+    let library = LocalLibrary::open(source.path()).expect("open source library");
+    let book = library
+        .stage_with_title_hint(&epub, None)
+        .expect("import EPUB");
+    let opened = library.open_book(&book.id).expect("prepare EPUB");
+    let manifest_path = format!("/{READER_MANIFEST}");
+    let manifest = opened.root.read(&manifest_path).expect("read manifest");
+    let manifest: Value = serde_json::from_slice(&manifest.bytes).expect("parse manifest");
+    let section = manifest["sections"][0]["id"].as_str().expect("section id");
+    let mut draft = message_draft(&book.id);
+    draft.edition.title.clone_from(&book.title);
+    draft.anchor.section = section.into();
+    draft.anchor.selected_text = QUOTE.into();
+    draft.anchor.content_hash = hex(&Sha256::digest(QUOTE.as_bytes()));
+    draft.anchor.canonical_locator = serde_json::json!({
+        "schema": 1,
+        "contentVersion": book.id,
+        "start": { "section": section, "offset": 0 },
+        "end": { "section": section, "offset": QUOTE.encode_utf16().count() },
+    })
+    .to_string();
+    draft.snapshot.fragment_html = format!(r#"<p>{QUOTE}<img src="{IMAGE}" alt=""></p>"#);
+    draft.snapshot.resources = vec![SnapshotResourceInput {
+        path: IMAGE.into(),
+        media_type: "image/png".into(),
+        bytes: opened
+            .root
+            .read(&format!("/OPS/{IMAGE}"))
+            .expect("read source image")
+            .bytes,
+    }];
+    let messages = MessageStore::open(source.path()).expect("open source messages");
+    let note = messages.create_root(draft).expect("save note and snapshot");
+    let captured = messages
+        .source_captures(&note.message_id)
+        .expect("read source capture");
+    let dictionaries = LocalDictionaries::open(source.path()).expect("open source dictionaries");
+    LocalData::open(source.path())
+        .expect("open source data")
+        .create_backup(
+            &archive,
+            &empty_browser_state(),
+            &library,
+            &dictionaries,
+            &messages,
+        )
+        .expect("backup EPUB, message and assets together");
+
+    let destination = TestRoot::new("epub-backup-restored");
+    {
+        LocalLibrary::open(destination.path()).expect("initialize destination library");
+        LocalDictionaries::open(destination.path()).expect("initialize destination dictionaries");
+        let data = LocalData::open(destination.path()).expect("open destination data");
+        let store = MessageStore::open(destination.path()).expect("open destination messages");
+        let pending = data
+            .prepare_restore(&archive, &empty_browser_state(), &store)
+            .expect("prepare restore");
+        data.commit_restore(&pending.token, &store)
+            .expect("commit restore");
+        data.finish_restore(&pending.token).expect("finish restore");
+    }
+
+    let restored = LocalLibrary::open(destination.path())
+        .expect("reopen library")
+        .open_book(&book.id)
+        .expect("rebuild restored EPUB from durable source");
+    let store = MessageStore::open(destination.path()).expect("reopen messages");
+    let captures = store
+        .source_captures(&note.message_id)
+        .expect("read restored capture");
+    assert_eq!(captures, captured);
+    assert_eq!(captures[0].source.section, section);
+    assert_eq!(captures[0].source.selected_text, QUOTE);
+    let restored_manifest = restored
+        .root
+        .read(&manifest_path)
+        .expect("read restored manifest");
+    let restored_manifest: Value =
+        serde_json::from_slice(&restored_manifest.bytes).expect("parse restored manifest");
+    let target = restored_manifest["sections"]
+        .as_array()
+        .expect("sections")
+        .iter()
+        .find(|entry| entry["id"] == captures[0].source.section.as_str())
+        .and_then(|entry| entry["href"].as_str())
+        .expect("restored anchor names a real chapter");
+    let target = format!("/{target}");
+    let chapter = restored.root.read(&target).expect("open restored chapter");
+    assert_eq!(
+        chapter,
+        opened.root.read(&target).expect("read original chapter")
+    );
+    assert!(
+        String::from_utf8(chapter.bytes)
+            .expect("UTF-8 chapter")
+            .contains(QUOTE)
+    );
+    assert_eq!(
+        store
+            .read_snapshot_resource(&captures[0].source.id, IMAGE)
+            .expect("load restored snapshot image")
+            .bytes,
+        PNG_1X1
+    );
+    assert!(store.health().expect("check restored database").integrity);
+}
+
+fn write_small_epub(path: &Path, quote: &str, image: &str) {
+    let mut epub = ZipWriter::new(File::create(path).expect("create fixture EPUB"));
+    let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    let package = format!(
+        r#"<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0" unique-identifier="book"><metadata><dc:title>星夜</dc:title><dc:identifier id="book">urn:atha:backup-test</dc:identifier><dc:language>zh</dc:language></metadata><manifest><item id="one" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="star" href="{image}" media-type="image/png"/></manifest><spine><itemref idref="one"/></spine></package>"#
+    );
+    let chapter = format!(
+        r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>星夜</title></head><body><p>{quote}<img src="{image}" alt=""/></p></body></html>"#
+    );
+    let image_member = format!("OPS/{image}");
+    for (name, bytes) in [
+        ("mimetype", b"application/epub+zip".as_slice()),
+        ("META-INF/container.xml", br#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.as_slice()),
+        ("OPS/book.opf", package.as_bytes()),
+        ("OPS/chapter.xhtml", chapter.as_bytes()),
+        (image_member.as_str(), PNG_1X1),
+    ] {
+        epub.start_file(name, stored).expect("create EPUB member");
+        epub.write_all(bytes).expect("write EPUB member");
+    }
+    epub.finish().expect("finish fixture EPUB");
 }
 
 #[test]

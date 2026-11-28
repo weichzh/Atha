@@ -1,4 +1,5 @@
 import {
+  isReadingMemoryRecentQuery,
   messageClient as tauriMessageClient,
   readingMemoryClient as tauriReadingMemoryClient,
   type ConversationView,
@@ -447,7 +448,8 @@ const demoMessageClient: MessageClient = {
 const demoReadingMemoryClient: ReadingMemoryClient = {
   async search(query: string): Promise<ReadingMemoryHit[]> {
     const store = loadStore();
-    const q = query.trim().toLocaleLowerCase();
+    const recentQuery = isReadingMemoryRecentQuery(query);
+    const q = recentQuery ? "" : query.trim().toLocaleLowerCase();
     const hits: ReadingMemoryHit[] = [];
     for (const conv of store.conversations) {
       const root = conv.messages[0];
@@ -460,7 +462,7 @@ const demoReadingMemoryClient: ReadingMemoryClient = {
       for (const msg of conv.messages) {
         if (msg.deleted) continue;
         const haystack = `${edition.title}\n${edition.authors.join(" ")}\n${root.source.selectedText}\n${msg.text}`.toLocaleLowerCase();
-        if (!q || haystack.includes(q)) {
+        if (recentQuery || (q.length > 0 && haystack.includes(q))) {
           hits.push({
             messageId: msg.id,
             rootMessageId: root.id,
@@ -477,7 +479,11 @@ const demoReadingMemoryClient: ReadingMemoryClient = {
         }
       }
     }
-    return hits.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 200);
+    return hits.sort((a, b) => {
+      const byTime = b.updatedAt - a.updatedAt;
+      if (byTime || !recentQuery || a.messageId === b.messageId) return byTime;
+      return a.messageId < b.messageId ? -1 : 1;
+    }).slice(0, 200);
   },
 
   async sourceCaptures(rootMessageId: string): Promise<SourceCaptureView[]> {

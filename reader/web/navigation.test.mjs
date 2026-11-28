@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createLocator } from "./locator.mjs";
 import { createNavigation } from "./navigation.mjs";
 
 test("explicit note targets use the declared URL, including WebView custom schemes", async () => {
@@ -40,4 +41,83 @@ test("explicit note targets use the declared URL, including WebView custom schem
     assert.equal(index, 1);
     assert.equal(shownOffset, 42);
   }
+});
+
+test("workspace reflow keeps the exact jump until a later page, section, or scroll takes over", async () => {
+  const sections = ["one", "two"].map(id => ({
+    id, href: `${id}.xhtml`, url: `https://atha-book.localhost/${id}.xhtml`,
+  }));
+  const book = { contentVersion: "a".repeat(64), sections, toc: [] };
+  let index = 0;
+  let page = 0;
+  let visible = true;
+  let scrolling = false;
+  let scrollTop = 0;
+  let columnSize = 10;
+  let resizeTo = 10;
+  const reflows = [];
+  const locator = createLocator({ assert: assert.ok });
+  const navigation = createNavigation({
+    session: {
+      describe: () => book,
+      snapshot: () => ({ currentIndex: index, currentSection: sections[index].id, sections: sections.length }),
+      async open(nextIndex) { index = nextIndex; return true; },
+    },
+    pagination: {
+      snapshot: () => ({ page, pages: 10 }),
+      captureOffset: () => page * columnSize + scrollTop,
+      isScrolled: () => scrolling,
+      scrollPosition: () => scrollTop,
+      async showOffset(offset) { page = Math.floor(offset / 10); return true; },
+      async show(target) { page = target; },
+      async move(delta) { page += delta; return true; },
+      async resizeViewport(offset) {
+        reflows.push(offset);
+        if (resizeTo !== columnSize) {
+          columnSize = resizeTo;
+          page = Math.floor(offset / columnSize);
+        }
+      },
+    },
+    locator,
+    canResizeViewport: () => visible,
+    toc: {},
+    chapterLabel: {},
+    progressChapter: {},
+    progressBook: {},
+    progressPosition: {},
+    progressRange: new EventTarget(),
+    previous: {},
+    next: {},
+    onFallback: assert.fail,
+    onStable() {},
+    assert: assert.ok,
+    fail: assert.fail,
+  });
+
+  await navigation.goTo(locator.point(book, "one", 43));
+  assert.equal(navigation.current().start.offset, 40, "progress still reports the live page's start");
+  const gated = navigation.resize();
+  visible = false; // The body disappears after enqueue, before the resize reads its geometry.
+  assert.equal(await gated, null);
+  assert.deepEqual(reflows, []);
+
+  visible = true;
+  await navigation.resize();
+  await navigation.next();
+  resizeTo = 12;
+  await navigation.resize();
+  assert.equal(navigation.current().start.offset, 48, "the narrower workspace projects an earlier page start");
+  resizeTo = 10;
+  await navigation.resize();
+  assert.equal(navigation.current().start.offset, 50, "opening and closing a pane must preserve the later reading point");
+  await navigation.goToHref(sections[1].url);
+  await navigation.resize(43, 0, 4); // A late image from the previous section cannot resize this one.
+  await navigation.resize();
+  scrolling = true;
+  await navigation.goTo(locator.point(book, "two", 28));
+  await navigation.resize();
+  scrollTop = 35;
+  await navigation.resize();
+  assert.deepEqual(reflows, [43, 50, 50, 0, 28, 55]);
 });

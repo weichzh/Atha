@@ -13,6 +13,73 @@ export async function verifyConversationEditor(browser, previewUrl, screenshotDi
     path: path.join(screenshotDir, name),
     animations: "disabled",
   });
+  const medium = await browser.newPage({
+    viewport: { width: 1000, height: 713 }, colorScheme: "dark", reducedMotion: "reduce",
+  });
+  try {
+    await openNotes(medium);
+    await medium.locator(".note-index-row", { hasText: rootExcerpt }).click();
+    const thread = medium.getByRole("region", { name: "当前消息线程" });
+    const visual = thread.getByRole("textbox", { name: "写下笔记或回复…" });
+    const send = thread.getByRole("button", { name: "发送", exact: true });
+    const reader = medium.getByRole("region", { name: "正文阅读区" });
+    const ordinary = "短回复仍可发送。";
+    await send.waitFor();
+    const normalPane = await thread.boundingBox();
+    await visual.fill(ordinary);
+    await send.click();
+    await thread.locator(".msg-content").getByText(ordinary, { exact: true }).waitFor();
+    await snapshot(medium, "conversation-medium-normal.png");
+
+    // Author in the fixed-width wide pane, then lay out the saved reply in B+C.
+    await medium.setViewportSize({ width: 1440, height: 900 });
+    await reader.waitFor();
+    const longReply = `单段开头 ${"风穿过回廊，纸页轻响。".repeat(132)} ${"BookSpan".repeat(18)} 单段末尾`;
+    await visual.fill(longReply);
+    await send.click();
+    const paragraph = thread.locator(".msg-content p").filter({ hasText: "单段开头" });
+    await paragraph.waitFor();
+    assert.deepEqual(await paragraph.allTextContents(), [longReply]);
+
+    await medium.setViewportSize({ width: 1000, height: 713 });
+    await reader.waitFor({ state: "hidden" });
+    const notes = medium.getByRole("complementary", { name: "笔记列表" });
+    await notes.waitFor();
+    await snapshot(medium, "conversation-medium-long-reply.png");
+    const pane = await thread.boundingBox();
+    const button = await send.boundingBox();
+    assert.ok(button.x >= pane.x && button.x + button.width <= Math.min(pane.x + pane.width, 1000),
+      `Send must fit in the visible conversation pane: ${JSON.stringify({ pane, button })}`);
+    assert.ok(button.y >= pane.y && button.y + button.height <= Math.min(pane.y + pane.height, 713));
+    const list = await notes.boundingBox();
+    assert.ok(list.x >= 0 && list.x + list.width <= pane.x && pane.x + pane.width <= 1000,
+      "both B and C must fit in order without panning the workspace");
+    assert.ok(normalPane.x + normalPane.width <= 1000, "ordinary replies must also fit in B+C");
+
+    assert.ok(await paragraph.evaluate(el => {
+      const scroller = el.closest(".thread-scroll");
+      const scrollbox = scroller.getBoundingClientRect();
+      if (scroller.scrollWidth > scroller.clientWidth + 1) return false;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const lines = [...range.getClientRects()];
+      if (lines.length < 2 ||
+          lines.some(line => line.left < scrollbox.left - 1 || line.right > scrollbox.right + 1)) {
+        return false;
+      }
+      scroller.scrollTop = scroller.scrollHeight;
+      const last = [...range.getClientRects()].at(-1);
+      return last.top >= scrollbox.top && last.bottom <= scrollbox.bottom;
+    }), "the complete paragraph must wrap in the thread and its last line must be reachable");
+
+    const followup = "长回复之后继续发送。";
+    await visual.fill(followup);
+    await send.click();
+    await thread.locator(".msg-content").getByText(followup, { exact: true }).waitFor();
+  } finally {
+    await medium.close();
+  }
+
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   try {
     await openNotes(desktop);

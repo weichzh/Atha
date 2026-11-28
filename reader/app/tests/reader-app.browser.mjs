@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { preview as startPreview } from "vite";
 import { verifyConversationEditor } from "./conversation-editor.browser.mjs";
+import { verifyReaderWorkspaceNavigation } from "./reader-workspace-navigation.browser.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -643,6 +644,108 @@ async function verifyCompactShelfToolbar(browser, previewUrl) {
   }
 }
 
+async function verifyReadingMemoryRecent(browser, previewUrl) {
+  const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  // Install the IPC seam before app startup so both shelf and memory use native adapters.
+  await page.addInitScript(() => {
+    const editionId = "e".repeat(64);
+    const locator = JSON.stringify({
+      schema: 1, contentVersion: editionId,
+      start: { section: "ch1", offset: 0 }, end: { section: "ch1", offset: 4 },
+    });
+    const root = {
+      messageId: "a".repeat(32), rootMessageId: "a".repeat(32),
+      conversationId: "c".repeat(32), editionId, title: "隔离记忆夹具", authors: [],
+      section: "ch1", selectedText: "原文摘录", text: "", canonicalLocator: locator,
+      updatedAt: 1_700_000_000_000,
+    };
+    const reply = {
+      ...root, messageId: "b".repeat(32), text: "跨书检索夹具", updatedAt: root.updatedAt + 60_000,
+    };
+    let recent = [];
+    window.seedTestMemory = () => { recent = [reply, root]; };
+    window.testMemoryQueries = [];
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+      transformCallback: () => 1,
+      unregisterCallback() {},
+      async invoke(command, args) {
+        switch (command) {
+          case "pending_library_book_deletions":
+          case "list_library_books":
+            return [];
+          case "pending_local_data_restore":
+          case "take_startup_import":
+          case "plugin:event|unlisten":
+            return null;
+          case "plugin:event|listen":
+            return 1;
+          case "reading_memory_search":
+            window.testMemoryQueries.push(args.query);
+            if (!/\P{White_Space}/u.test(args.query)) return recent;
+            if (args.query === "跨书检索") return [reply];
+            throw "invalid-message-input";
+          default:
+            throw new Error(`Unexpected invoke: ${command}`);
+        }
+      },
+    };
+  });
+  try {
+    const tab = page.getByRole("tab", { name: "阅读记忆" });
+    const search = page.getByRole("searchbox", { name: "搜索笔记与回复" });
+    const results = page.getByRole("region", { name: "记忆检索结果" });
+    const ready = page.locator('.memory-hits[aria-busy="false"]');
+    const recentTitle = results.getByRole("heading", { name: "最近记忆片段" });
+    const notes = results.locator(".hit-note");
+    const recentNotes = ["跨书检索夹具", "纯原文标注，尚无后续回应"];
+
+    await page.goto(previewUrl);
+    await tab.click();
+    await ready.waitFor();
+    assert.equal(await recentTitle.count(), 1, "empty queries are labeled as recent memory");
+    await results.getByText("还没有阅读记忆。").waitFor();
+    assert.equal(await results.getByRole("button", { name: "重试" }).count(), 0);
+
+    await page.evaluate(() => {
+      window.seedTestMemory();
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await notes.nth(1).waitFor();
+    assert.deepEqual(await notes.allTextContents(), recentNotes);
+    await page.screenshot({
+      path: path.join(screenshotDir, "06-memory-recent-ipc-1100.png"),
+      animations: "disabled",
+    });
+
+    await search.fill("跨书检索");
+    await ready.waitFor();
+    await results.getByRole("heading", { name: "搜索笔记与回复" }).waitFor();
+    assert.deepEqual(await notes.allTextContents(), ["跨书检索夹具"]);
+    await page.getByRole("button", { name: "清空搜索" }).click();
+    await ready.waitFor();
+    await recentTitle.waitFor();
+    assert.deepEqual(await notes.allTextContents(), recentNotes);
+    assert.equal(await search.inputValue(), "");
+
+    const whitespace = "\u0085\u3000";
+    await search.fill(whitespace);
+    await ready.waitFor();
+    assert.equal(await recentTitle.count(), 1);
+    assert.deepEqual(await notes.allTextContents(), recentNotes);
+    assert.deepEqual(await page.evaluate(() => window.testMemoryQueries), [
+      "", "", "跨书检索", "", whitespace,
+    ]);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
 async function run() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -667,6 +770,8 @@ async function run() {
       args: ["--no-sandbox", "--disable-gpu"],
     });
 
+    await verifyReadingMemoryRecent(browser, previewUrl);
+    await verifyReaderWorkspaceNavigation(browser, previewUrl);
     await verifyConversationEditor(browser, previewUrl, screenshotDir);
 
     const context = await browser.newContext({

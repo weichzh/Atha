@@ -835,6 +835,8 @@
   .workspace-overlay {
     display: flex;
     height: 100%;
+    /* A flexible thread can contribute its longest paragraph to the preferred width. */
+    max-inline-size: 100%;
     gap: 12px;
     padding: 14px 14px 14px 0;
     z-index: 40;

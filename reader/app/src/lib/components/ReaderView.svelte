@@ -222,19 +222,21 @@
     if (document.activeElement === document.body) readerShell?.focus({ preventScroll: true });
   });
 
-  // Re-measure A whenever C1 panes alter A's width
-  let prevWorkspaceSig = "";
+  // Observe the frame, including when outro panes are removed after the Svelte update.
   $effect(() => {
-    const sig = `${notesMode}:${focusThread}:${hideReaderA}:${viewportWidth}:${viewportHeight}`;
-    if (!engine.ready || sig === prevWorkspaceSig) return;
-    prevWorkspaceSig = sig;
-    if (!hideReaderA) {
-      void tick().then(() => {
-        requestAnimationFrame(() => {
-          void engine.resizeLayout();
-        });
+    if (!engine.ready || hideReaderA || !frameEl) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!hideReaderA) void engine.resizeLayout();
       });
-    }
+    });
+    observer.observe(frameEl);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   });
 
   onMount(() => {
@@ -268,6 +270,7 @@
           page: pageEl,
           host: hostEl,
           bridgeRoot: bridgeEl,
+          isBodyVisible: () => !hideReaderA,
           manifestPath,
           initialJump,
         });
@@ -513,7 +516,7 @@
 >
   <div class="reader-workspace-layout">
     <!-- Region A: Reading Surface -->
-    <section class="region-a" class:hidden-a={hideReaderA} aria-label="正文阅读区">
+    <section class="region-a" class:hidden-a={hideReaderA} inert={hideReaderA} aria-label="正文阅读区">
       <div class="reader-frame" bind:this={frameEl}>
         <div class="reader" style:--pull-translation={`${Math.min(96, Math.max(0, swipeY) * 0.58)}px`}
           class:pulling={swipeY > 0} bind:this={readerEl}>
@@ -1016,6 +1019,7 @@
   }
 
   .reader-workspace-layout {
+    position: relative;
     display: flex;
     width: 100%;
     height: 100%;
@@ -1167,7 +1171,13 @@
   }
 
   .region-a.hidden-a {
-    display: none;
+    /* Give B+C the whole workspace without destroying A's columns or scroll position.
+       Explicit source jumps can still resolve against the last visible pagination. */
+    position: absolute;
+    inset: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
+    height: auto;
+    visibility: hidden;
+    opacity: 0;
   }
 
   .error-overlay {

@@ -1,15 +1,25 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
-const url = process.argv[2];
-if (!url) throw new Error("Pass the local Vite production preview URL.");
+let url = process.argv[2];
+let preview;
+let browser;
 
-const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
 let page;
 try {
+  if (!url) {
+    const { preview: startPreview } = await import("vite");
+    preview = await startPreview({
+      root: fileURLToPath(new URL("../", import.meta.url)),
+      preview: { host: "127.0.0.1", port: 0, strictPort: true },
+    });
+    url = `http://127.0.0.1:${preview.httpServer.address().port}/`;
+  }
+  browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
   page = await browser.newPage({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
@@ -193,5 +203,6 @@ try {
   }
   throw error;
 } finally {
-  await browser.close();
+  await browser?.close();
+  if (preview) await new Promise(resolve => preview.httpServer.close(resolve));
 }

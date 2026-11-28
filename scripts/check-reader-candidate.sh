@@ -7,7 +7,6 @@ script_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 readonly script_root
 repo_root=$(cd -- "$script_root/.." && pwd -P)
 readonly repo_root
-bundle_root=$repo_root/target/release/bundle/appimage
 
 die() {
   printf 'check-reader-candidate: %s\n' "$1" >&2
@@ -24,7 +23,7 @@ done
 [[ $(uname -s) == Linux ]] || die 'this gate requires Linux'
 
 cd -- "$repo_root"
-mkdir -p .tmp
+mkdir -p .tmp artifacts/local/reader-candidates
 run_root=$(mktemp -d -p "$repo_root/.tmp" reader-candidate.XXXXXXXX)
 cleanup() {
   local status=$?
@@ -32,10 +31,10 @@ cleanup() {
   rm -rf -- "$run_root"
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-say 'building a clean AppImage candidate'
-rm -rf -- "$bundle_root"
 if ! command -v patchelf >/dev/null; then
   linuxdeploy=${TAURI_LINUXDEPLOY:-$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage}
   [[ -x $linuxdeploy ]] || die 'patchelf or a cached linuxdeploy AppImage is required'
@@ -58,14 +57,33 @@ if [[ -f /usr/lib/gstreamer-1.0/libgstpython.so ]]; then
   done
   export GSTREAMER_PLUGINS_DIR=$filtered_plugins
 fi
+say 'building the release application without writing bundles'
+mise exec -- pnpm --dir reader/app tauri build --no-bundle --ci -- --locked >&2
+cargo_target=$(mise exec -- cargo metadata --locked --no-deps --format-version 1 | jq -er .target_directory)
+release_application=$cargo_target/release/atha-reader-app
+[[ -s $release_application && -x $release_application ]] || die 'the release application was not built'
+
+# Tauri bundle resolves its output via Cargo metadata. Stage only the completed
+# release binary in a fresh target directory; no previous bundle can be reused
+# or overwritten, including when linuxdeploy fails.
+bundle_target=$run_root/target
+mkdir -p -- "$bundle_target/release"
+cp --reflink=auto -p -- "$release_application" "$bundle_target/release/"
+say 'packaging the release application in an isolated target directory'
 # linuxdeploy's bundled strip predates the RELR sections used by rolling-release system libraries.
-NO_STRIP=1 mise exec -- pnpm --dir reader/app tauri build --bundles appimage --ci >&2
+CARGO_TARGET_DIR="$bundle_target" NO_STRIP=1 \
+  mise exec -- pnpm --dir reader/app tauri bundle --bundles appimage --ci >&2
+bundle_root=$bundle_target/release/bundle/appimage
 
 shopt -s nullglob
 artifacts=("$bundle_root"/*.AppImage)
 (( ${#artifacts[@]} == 1 )) || die 'the build did not produce exactly one AppImage'
 artifact=${artifacts[0]}
 [[ -s $artifact && -x $artifact ]] || die 'the AppImage is empty or not executable'
+candidate_root=$(mktemp -d -p "$repo_root/artifacts/local/reader-candidates" candidate.XXXXXXXX)
+mv -- "$artifact" "$candidate_root/"
+artifact=$candidate_root/$(basename -- "$artifact")
+say "retained the newly built candidate: $artifact"
 artifact_sha=$(sha256sum -- "$artifact" | awk '{print $1}')
 artifact_size=$(stat -c '%s' -- "$artifact")
 artifact_relative=$(realpath --relative-to="$repo_root" -- "$artifact")
@@ -107,7 +125,7 @@ jq -e '.bundle.fileAssociations? == null' reader/app/src-tauri/tauri.android.con
   die 'Android must not inherit desktop file associations'
 
 say 'running the complete Linux gate against the extracted candidate launcher'
-reader_evidence=$(ATHA_GDK_BACKEND=x11 bash scripts/check-reader-linux.sh \
+reader_evidence=$(bash scripts/check-reader-linux.sh \
   --application "$launcher" \
   --association-launch)
 jq -e '

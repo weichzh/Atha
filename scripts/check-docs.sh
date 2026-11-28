@@ -8,5 +8,5 @@ repo_root="$(cd -- "$script_dir/.." && pwd -P)"
 
 cd "$repo_root"
 
-mise exec -- python3 scripts/doc_guard.py
+mise exec -- python3 scripts/doc_guard.py "$@"
 mise exec -- python3 scripts/doc_length_check.py

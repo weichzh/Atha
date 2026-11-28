@@ -803,6 +803,115 @@ fn search_indexes_only_current_undeleted_revisions_and_filters_sections() {
 }
 
 #[test]
+fn reading_memory_recent_accepts_empty_and_whitespace_in_an_empty_store() {
+    let root = TestRoot::new("reading-memory-empty");
+    let store = MessageStore::open(&root.0).expect("open store");
+    for query in ["", " \t\n\u{0085}\u{3000}"] {
+        assert!(
+            store
+                .reading_memory_search(query)
+                .expect("recent memory")
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn reading_memory_recent_limits_and_orders_only_visible_messages_with_a_root_anchor() {
+    let root = TestRoot::new("reading-memory-recent");
+    let store = MessageStore::open(&root.0).expect("open store");
+    let source = anchor();
+    let create_root = || {
+        store
+            .create_root(RootMessageDraft {
+                edition: edition(),
+                anchor: source.clone(),
+                snapshot: snapshot(),
+                text: None,
+            })
+            .expect("create source-only root")
+    };
+    let reply_to = |root: &atha_backend::messages::CreatedRoot| {
+        store
+            .reply(ReplyDraft {
+                conversation_id: root.conversation_id.clone(),
+                reply_to_message_id: root.message_id.clone(),
+                text: "一条回复".into(),
+                rich_text: None,
+                reference_ids: Vec::new(),
+            })
+            .expect("create reply")
+    };
+    let visible = create_root();
+    let older = reply_to(&visible);
+    let mut tied_ids: Vec<_> = (0..200).map(|_| reply_to(&visible).message_id).collect();
+    let deleted_reply = reply_to(&visible);
+    store
+        .delete(&deleted_reply.message_id, &deleted_reply.revision_id)
+        .expect("delete reply");
+    let deleted_root = create_root();
+    let _ = reply_to(&deleted_root);
+    store
+        .delete(&deleted_root.message_id, &deleted_root.revision_id)
+        .expect("delete root with a visible reply");
+    let missing_anchor = create_root();
+    let _ = reply_to(&missing_anchor);
+
+    let connection = rusqlite::Connection::open(root.0.join("Messages/Messages.sqlite3"))
+        .expect("open isolated fixture database");
+    // Control ties and make excluded rows newer than every visible row.
+    let fixture_time: i64 = connection
+        .query_row("SELECT max(updated_at_ms) + 10 FROM message", [], |row| {
+            row.get(0)
+        })
+        .expect("get fixture timestamp");
+    connection
+        .execute(
+            "UPDATE message SET updated_at_ms = ?1 + CASE
+                WHEN deleted_at_ms IS NOT NULL OR lower(hex(conversation_id)) <> ?2 THEN 3
+                WHEN lower(hex(id)) = ?3 THEN 2
+                WHEN lower(hex(id)) = ?4 THEN -1
+                ELSE 0 END,
+                deleted_at_ms = CASE WHEN deleted_at_ms IS NOT NULL THEN ?1 + 3 END",
+            rusqlite::params![
+                fixture_time,
+                visible.conversation_id,
+                visible.message_id,
+                older.message_id,
+            ],
+        )
+        .expect("set deterministic fixture times");
+    connection
+        .execute(
+            "UPDATE message SET current_source_anchor_id = NULL WHERE lower(hex(id)) = ?1",
+            [&missing_anchor.message_id],
+        )
+        .expect("remove the third conversation's current root anchor");
+
+    let recent = store.reading_memory_search("").expect("load recent memory");
+    let from_whitespace = store
+        .reading_memory_search(" \t\u{3000}")
+        .expect("load recent memory for whitespace");
+    assert_eq!(recent, from_whitespace);
+    tied_ids.sort_unstable();
+    assert_eq!(recent.len(), 200);
+    assert_eq!(recent[0].message_id, visible.message_id);
+    assert!(recent[0].text.is_empty(), "include source-only markings");
+    assert_eq!(
+        recent[1..]
+            .iter()
+            .map(|hit| &hit.message_id)
+            .collect::<Vec<_>>(),
+        tied_ids[..199].iter().collect::<Vec<_>>(),
+    );
+    assert!(recent[1..].iter().all(|hit| {
+        hit.root_message_id == visible.message_id
+            && hit.canonical_locator == source.canonical_locator
+            && hit.updated_at < recent[0].updated_at
+    }));
+}
+
+#[test]
 fn reading_memory_search_projects_cross_book_results_and_excludes_tombstones() {
     let root = TestRoot::new("reading-memory-search");
     let store = MessageStore::open(&root.0).expect("open store");
@@ -811,7 +920,7 @@ fn reading_memory_search_projects_cross_book_results_and_excludes_tombstones() {
             edition: edition(),
             anchor: anchor(),
             snapshot: snapshot(),
-            text: Some("共同记忆的第一条笔记".into()),
+            text: Some("共同记忆的第一条笔记：100%_完成".into()),
         })
         .expect("create first root");
     let reply = store
@@ -823,7 +932,6 @@ fn reading_memory_search_projects_cross_book_results_and_excludes_tombstones() {
             reference_ids: Vec::new(),
         })
         .expect("create reply");
-    std::thread::sleep(std::time::Duration::from_millis(2));
     let other_edition = EditionInput {
         content_version: "22".repeat(32),
         title: "另一本文集".into(),
@@ -840,6 +948,14 @@ fn reading_memory_search_projects_cross_book_results_and_excludes_tombstones() {
             text: Some("共同记忆的第二条笔记".into()),
         })
         .expect("create other root");
+    rusqlite::Connection::open(root.0.join("Messages/Messages.sqlite3"))
+        .expect("open isolated fixture database")
+        .execute(
+            "UPDATE message SET updated_at_ms = (SELECT max(created_at_ms) + 1 FROM message)
+             WHERE lower(hex(id)) = ?1",
+            [&other.message_id],
+        )
+        .expect("make the other edition most recent");
 
     let hits = store
         .reading_memory_search("共同记忆")
@@ -856,6 +972,25 @@ fn reading_memory_search_projects_cross_book_results_and_excludes_tombstones() {
         .expect("reply hit");
     assert_eq!(reply_hit.root_message_id, first.message_id);
     assert_eq!(reply_hit.conversation_id, first.conversation_id);
+    let recent = store
+        .reading_memory_search("")
+        .expect("recent across editions");
+    assert_eq!(recent.len(), 3);
+    assert_eq!(recent[0].edition_id, other_edition.content_version);
+    assert!(
+        recent[1..]
+            .iter()
+            .all(|hit| hit.edition_id == edition().content_version)
+    );
+
+    let short_hits = store.reading_memory_search(" \t共 ").expect("short search");
+    assert_eq!(short_hits.len(), 3);
+    assert_eq!(short_hits[0].message_id, other.message_id);
+    let escaped_hits = store
+        .reading_memory_search("%_")
+        .expect("literal short search");
+    assert_eq!(escaped_hits.len(), 1);
+    assert_eq!(escaped_hits[0].message_id, first.message_id);
 
     store
         .delete(&other.message_id, &other.revision_id)
@@ -878,8 +1013,27 @@ fn reading_memory_search_projects_cross_book_results_and_excludes_tombstones() {
         .expect("search after reply deletion");
     assert_eq!(after_reply_delete.len(), 1);
     assert_eq!(after_reply_delete[0].message_id, first.message_id);
+    let recent = store
+        .reading_memory_search(" ")
+        .expect("load recent memory after deletion");
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].message_id, first.message_id);
+    assert!(
+        store
+            .reading_memory_search(&"界".repeat(256))
+            .expect("accept 256 characters")
+            .is_empty()
+    );
     assert_eq!(
-        store.reading_memory_search(" "),
+        store.reading_memory_search(&"界".repeat(257)),
+        Err(atha_backend::messages::MessageError::InvalidInput)
+    );
+    assert_eq!(
+        store.search(MessageSearch {
+            edition_id: edition().content_version,
+            text: " ".into(),
+            section: None,
+        }),
         Err(atha_backend::messages::MessageError::InvalidInput)
     );
 }

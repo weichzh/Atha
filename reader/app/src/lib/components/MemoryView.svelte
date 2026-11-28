@@ -5,7 +5,7 @@
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import type { LibraryBook, ReadingMemoryJump } from "../../library.ts";
-  import type { ReadingMemoryHit, SourceCaptureView } from "../../messages.ts";
+  import { isReadingMemoryRecentQuery, type ReadingMemoryHit, type SourceCaptureView } from "../../messages.ts";
   import { readShelfReading } from "../../shelf-reading.ts";
   import { indexShelf, recentShelf } from "../../shelf-browse.ts";
   import { openFailureMessage } from "../../library.ts";
@@ -35,6 +35,7 @@
   let activeHit = $state<ReadingMemoryHit | null>(null);
   let activeCaptures = $state<SourceCaptureView[]>([]);
 
+  const recentQuery = $derived(isReadingMemoryRecentQuery(query));
   const readingMap = $derived(readShelfReading(books));
   const recentBooks = $derived(recentShelf(indexShelf(books, readingMap)));
   const bookMap = $derived(new Map(books.map((b) => [b.id, b])));
@@ -164,7 +165,7 @@
   </header>
   {#if jumpError}<p role="alert">{jumpError}</p>{/if}
 
-  {#if recentBooks.length > 0 && !query.trim()}
+  {#if recentBooks.length > 0 && recentQuery}
     <section class="memory-recent" aria-label="最近阅读">
       <div class="section-head">
         <h2>最近翻阅</h2>
@@ -190,7 +191,7 @@
 
   <section class="memory-hits" aria-label="记忆检索结果" aria-busy={loading}>
     <div class="section-head">
-      <h2>{query.trim() ? "搜索笔记与回复" : "全部记忆片段"}</h2>
+      <h2>{recentQuery ? "最近记忆片段" : "搜索笔记与回复"}</h2>
       {#if !loadError && resultQuery === query}
         <span class="section-count tabular">{hits.length} 条</span>
       {/if}
@@ -206,7 +207,7 @@
     {:else if hits.length === 0}
       <div class="empty-memory">
         <Sparkles size={24} strokeWidth={1.6} />
-        <p>没有找到匹配的笔记或摘录。</p>
+        <p>{recentQuery ? "还没有阅读记忆。" : "没有找到匹配的笔记或摘录。"}</p>
       </div>
     {:else}
       <div class="hits-stream">

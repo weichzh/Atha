@@ -27,7 +27,7 @@
 - 版本事实：`reader/app/src-tauri/Cargo.toml` 与 `Cargo.lock` 中的 `tauri-plugin-log` / `log`。
 - 官方入口：[Tauri Logging](https://v2.tauri.app/plugin/logging/)、[`tauri-plugin-log` Rust API](https://docs.rs/tauri-plugin-log/latest/tauri_plugin_log/)。
 - 项目快速用法：产品 Rust 日志只使用 `atha::` target 和固定 operation / event、stage、code、耗时与计数；Info 以上写 stdout 与平台 AppLog，单文件 1 MiB，保留当前文件和最近两个归档。不得记录书名、路径、正文、笔记、查询、提示词或内容哈希。
-- 最短检查：运行 `bash scripts/check-reader-linux.sh` 后检查平台 AppLog 同时包含启动、打开和 reader 固定阶段事件，并确认不含 fixture 路径或内容。
+- 最短检查：根据 [Linux 专项入口](#linux-gnome-目标测试)复验后，检查平台 AppLog 同时包含启动、打开和 reader 固定阶段事件，并确认不含 fixture 路径或内容。
 - 必须重查：插件 release line、Android 日志目录 / logcat 行为、target filter、轮转语义和敏感字段。
 
 ## Web 页面生命周期与单调计时
@@ -43,7 +43,7 @@
 - 版本事实：`reader/app/package.json`、`reader/app/src-tauri/Cargo.toml`、`Cargo.lock`、`reader/app/src-tauri/tauri.android.conf.json` 与 `reader/app/src-tauri/gen/android/`；本项目 Android 门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36、min SDK 26，当前默认目标为 API 36 x86_64 16 KiB AVD。
 - 官方入口：[Tauri Android 前置条件](https://v2.tauri.app/start/prerequisites/#android)、[Tauri Dialog](https://v2.tauri.app/plugin/dialog/)、[`FilePath` Rust API](https://docs.rs/tauri-plugin-dialog/latest/tauri_plugin_dialog/enum.FilePath.html)、[Tauri File System](https://v2.tauri.app/plugin/file-system/)、[`FsExt` Rust API](https://docs.rs/tauri-plugin-fs/latest/tauri_plugin_fs/trait.FsExt.html)、[Android 16 KiB page size](https://developer.android.com/guide/practices/page-sizes)、[Android Auto Backup](https://developer.android.com/identity/data/autobackup)。
 - 项目快速用法：`tauri-plugin-dialog` 只选择文件；`platform_file::PickerInput` / `PickerOutput` 对普通路径直接转发，对 Android content URI 使用官方 fs plugin 流式复制到应用 `cache/Picker`。书籍 picker 先用 Tauri 内置 `app.path().file_name(content://...)` 经 PathPlugin / `ContentResolver` 取得显示文件名，只保留 `.epub` / `.cbz` / `.fb2` / `.fbz` / `.mobi` / `.azw` / `.azw3` / `.md` / `.markdown` / `.txt` 后缀；不得从 URI 字符串或正文猜格式。输入复用领域上限：单次至多 32 本书、archive / TXT 源文件至多 512 MiB、直接 FB2 至多 64 MiB、Kindle 源文件至多 256 MiB、Markdown 至多 16 MiB、恢复制品至多 8 GiB。临时目录独占创建并由 RAII 与启动清理回收，路径、URI、标题和内容不得进入日志。
-- 最短检查：日常行为先运行 `bash scripts/check-reader-linux.sh`；PCT-AL10 候选运行 `bash scripts/check-pct-reader.sh build` 与 `verify`，获准更新时再以显式 serial 运行 `install --device <serial>`。旧 AVD PowerShell 门只保留历史证据，不作为当前 Linux / PCT 入口；真机功能、触摸和性能仍按活动 change 独立验收。
+- 最短检查：书架到阅读再返回用 `bash scripts/check-reader-linux.sh --shelf`；其他场景按影响选择浏览器或目标平台检查。PCT-AL10 候选运行 `bash scripts/check-pct-reader.sh build` 与 `verify`，获准更新时再以显式 serial 运行 `install --device <serial>`。旧 AVD PowerShell 门只保留历史证据，不作为当前 Linux / PCT 入口；真机功能、触摸和性能仍按活动 change 独立验收。
 - 必须重查：Tauri mobile / plugin release line、Android Gradle Plugin 与 SDK / NDK 兼容、SAF provider 的 open / truncate / failure 语义、release 签名、实体 ARM 设备的 I/O / 内存 / WebView 性能，以及 API 31+ `dataExtractionRules` 与设备厂商的备份 / 迁移行为。
 
 ## PCT-AL10 真机与 ADB 取证
@@ -117,7 +117,7 @@ adb -s "$serial" logcat --pid="$pid" -d
 - 官方入口：[Tauri WebDriver](https://v2.tauri.app/develop/tests/webdriver/)、[Tauri WebDriver 手动配置](https://v2.tauri.app/develop/tests/webdriver/manual-setup/)、[WebDriver Actions](https://www.w3.org/TR/webdriver2/#actions)、[Pointer Events 3 的兼容鼠标事件](https://www.w3.org/TR/pointerevents3/#compatibility-mapping-with-mouse-events)、[`WebviewWindowBuilder::use_https_scheme`](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewWindowBuilder.html#method.use_https_scheme)。
 - 项目快速用法：SSH 中的 CLI 构建直接运行；需要在远程 GNOME / RDP 桌面显示并在 SSH 断开后保留的 GUI 使用 `systemd-run --user --collect --unit=<唯一名> <program>`，例如 `systemd-run --user --collect --unit=gui-code code ~/Code/Atha`。不得用 `sudo` 启动 GUI，也不得依赖 SSH shell 临时导出的 Wayland 变量。
 - 测试策略：日常格式与 GUI 开发直接使用 Linux Tauri / WebKitGTK；Android 模拟器只在发布前或移动端专项验收时启动，Windows 只在用户明确要求时使用。用户已批准通过安全通道把私有 `fixtures/local` 复制到目标仓库的忽略目录；样本仍只用于本地 opt-in，不提交、不写日志、不进入公开证据或分发包。
-- 最短检查：`systemctl --user show-environment | rg '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)='`；安装一次 `cargo install tauri-driver --version 2.0.6 --locked` 后运行 `bash scripts/check-reader-linux.sh`。入口用唯一 transient unit 启动真实 Tauri 壳并隔离 XDG 应用数据；测试专用 `ATHA_READER_GUI_VIEWPORT` 只接受仓库声明的五个启动尺寸，避免把当前不生效的 WebDriver resize 当作多视口证据。WebKitGTK 2.52.5 的 touch Actions 当前会挂起，正式 Linux 门因此明确请求并记录可信 `mouse` PointerEvent，不能把它称为真机 touch。
+- 最短检查：`systemctl --user show-environment | rg '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR)='`；安装一次 `cargo install tauri-driver --version 2.0.6 --locked` 后运行 `bash scripts/check-reader-linux.sh` 做全量验收；只检查书架往返加 `--shelf`。Svelte 界面走产品壳，内核分页与手势阈值在同一 WebView 的独立测试层验证。入口用唯一 transient unit 启动真实 Tauri 壳并隔离 XDG 应用数据；测试专用 `ATHA_READER_GUI_VIEWPORT` 只接受仓库声明的五个启动尺寸，避免把当前不生效的 WebDriver resize 当作多视口证据。WebKitGTK 2.52.5 的 touch Actions 当前会挂起，正式 Linux 门因此明确请求并记录可信 `mouse` PointerEvent，不能把它称为真机 touch。
 - 必须重查：SSH 别名、GNOME 会话是否仍存活、systemd user 环境、KVM / emulator、Rust Android targets、JDK / SDK / NDK、Linux WebKitGTK / Tauri prerequisites 与私有样本是否已显式放置。
 
 ## Markdown / TXT
@@ -133,7 +133,7 @@ adb -s "$serial" logcat --pid="$pid" -d
 - 版本事实：`backend/atha-backend/Cargo.toml` 与 `Cargo.lock` 固定 `quick-xml 0.41`（`encoding` feature）、`base64 0.22.1`、`zip 8.6` 和 `imagesize 0.15.0`。
 - 官方入口：[`quick-xml` 0.41](https://docs.rs/quick-xml/0.41.0/quick_xml/)、[`base64` 0.22.1](https://docs.rs/base64/0.22.1/base64/)、[`zip` 8.6](https://docs.rs/zip/8.6.0/zip/)。
 - 项目快速用法：`reader::fb2` 对直接 FB2 或单根成员 FBZ 做两遍有界流式解析，只投影受支持正文、目录、内部链接和 JPEG / PNG binary，不解释源 stylesheet，不加载外部资源。同一 XML 的 FB2 / FBZ 共享固定格式域身份；picker 只按后缀分派，不嗅探正文。
-- 最短检查：`mise exec -- cargo test --locked -p atha-backend --test fb2_import`；Linux 真实 GUI 使用 `bash scripts/check-reader-linux.sh`。
+- 最短检查：`mise exec -- cargo test --locked -p atha-backend --test fb2_import`；Linux WebView 打开公开 FB2 用 `bash scripts/check-reader-linux.sh --shelf`。
 - 必须重查：FB2 schema / encoding 语料、未知元素策略、binary 图片类型、FBZ 单成员大小、依赖许可证和 Android ARM 真机内存。
 
 ## MOBI / AZW / AZW3、`boko`
@@ -203,7 +203,7 @@ adb -s "$serial" logcat --pid="$pid" -d
 
 - 官方入口：[MDN Visual Viewport API](https://developer.mozilla.org/en-US/docs/Web/API/Visual_Viewport_API)、[MDN Touch events](https://developer.mozilla.org/en-US/docs/Web/API/Touch_events/Using_Touch_Events)、[MDN wheel event](https://developer.mozilla.org/en-US/docs/Web/API/Element/wheel_event)。
 - 项目快速用法：软键盘适配只在 `window.visualViewport` 可用时监听 `resize` / `scroll` 并把可视高度与顶部偏移投影为消息层变量；不可用时保留既有 `dvh` 布局。预览缩放只在图片、公式或表格 dialog 内拦截双指 `touchmove` 和桌面 `wheel`，监听器必须显式 `passive: false`，单指滚动与阅读正文输入不受影响。
-- 最短检查：Svelte check / build 后在 Linux WebKitGTK 运行 `scripts/check-reader-linux.sh`；Android 软键盘遮挡仍需 PCT-AL10 或等价系统 WebView 真机验证。
+- 最短检查：Svelte check / build 后按受影响场景做 Linux WebKitGTK 验证；Android 软键盘遮挡仍需 PCT-AL10 或等价系统 WebView 真机验证。
 - 必须重查：VisualViewport 在目标 WebView 的 offset、缩放、键盘 resize / overlay 行为，touch cancellation、桌面触控板 wheel 粒度，以及输入法候选栏和横屏安全区。
 
 ## Tiptap 3
@@ -219,6 +219,13 @@ adb -s "$serial" logcat --pid="$pid" -d
 - 版本事实：Windows 目标机的 Evergreen WebView2 Runtime；产品入口由 Tauri 2 承载，`reader/atha-reader-host` 只保留为性能和安全基线。
 - 官方入口：[WebView2 文档](https://learn.microsoft.com/en-us/microsoft-edge/webview2/)。
 - 项目快速用法：书籍内容保持脚本、网络、路径和未知资源隔离；真实交互回归使用 `scripts/check-reader-samples.ps1`，Tauri 产品入口使用 `scripts/check-tauri-reader.ps1`。
+- Windows 书架检查：在已配置 `env/local.ps1` 和 `agent-browser` 的 Windows 交互桌面运行下列命令。它在隔离目录驱动原生选择器和 WebView2 验证导入、搜索、排序、收藏、多选、移出及阅读返回；Chromium 夹具的结果单独记录。
+
+  ```powershell
+  cargo test --locked -p atha-backend --test epub_import writes_epub2_gate_fixture -- --ignored --exact
+  pwsh -NoProfile -File .\scripts\check-library-shelf.ps1 -BookPath .\.tmp\epub2-ncx-gate.epub
+  ```
+
 - 必须重查：runtime 分发、浏览器能力差异、窗口缩放、输入事件、进程模型、安全边界和性能诊断。
 
 ## CSS 渲染与资源边界

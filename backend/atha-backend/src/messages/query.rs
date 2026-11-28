@@ -270,59 +270,53 @@ impl MessageStore {
         &self,
         query: &str,
     ) -> Result<Vec<ReadingMemoryHit>, MessageError> {
-        let text = validate_search_text(query)?;
-        let connection = self.connect()?;
-        let (sql, term) = if text.chars().count() < 3 {
-            (
-                "SELECT lower(hex(m.id)), lower(hex(root.id)), lower(hex(c.id)),
-                        lower(hex(e.id)), e.title, e.authors_json, anchor.section_id,
-                        anchor.selected_text, revision.plain_text,
-                        anchor.current_locator_json, m.updated_at_ms
-                 FROM message_search
-                 JOIN message m ON lower(hex(m.id)) = message_search.message_id
-                 JOIN message_revision revision
-                   ON revision.id = m.current_revision_id AND revision.message_id = m.id
-                 JOIN conversation c ON c.id = m.conversation_id
-                 JOIN edition e ON e.id = c.edition_id
-                 JOIN message root
-                   ON root.id = c.root_message_id AND root.conversation_id = c.id
-                 JOIN source_anchor anchor
-                   ON anchor.id = root.current_source_anchor_id AND anchor.message_id = root.id
-                 WHERE m.deleted_at_ms IS NULL AND root.deleted_at_ms IS NULL
-                   AND (message_search.selected_text LIKE ?1 ESCAPE '\\'
-                     OR message_search.plain_text LIKE ?1 ESCAPE '\\')
-                 ORDER BY m.updated_at_ms DESC, message_search.message_id
-                 LIMIT 200",
-                format!("%{}%", escape_like(text)),
-            )
+        let (source, filter, order, term) = if query.trim().is_empty() {
+            ("message m", "", "m.updated_at_ms DESC, m.id", None)
         } else {
-            (
-                "SELECT lower(hex(m.id)), lower(hex(root.id)), lower(hex(c.id)),
-                        lower(hex(e.id)), e.title, e.authors_json, anchor.section_id,
-                        anchor.selected_text, revision.plain_text,
-                        anchor.current_locator_json, m.updated_at_ms
-                 FROM message_search
-                 JOIN message m ON lower(hex(m.id)) = message_search.message_id
-                 JOIN message_revision revision
-                   ON revision.id = m.current_revision_id AND revision.message_id = m.id
-                 JOIN conversation c ON c.id = m.conversation_id
-                 JOIN edition e ON e.id = c.edition_id
-                 JOIN message root
-                   ON root.id = c.root_message_id AND root.conversation_id = c.id
-                 JOIN source_anchor anchor
-                   ON anchor.id = root.current_source_anchor_id AND anchor.message_id = root.id
-                 WHERE message_search MATCH ?1
-                   AND m.deleted_at_ms IS NULL AND root.deleted_at_ms IS NULL
-                 ORDER BY rank, m.updated_at_ms DESC, message_search.message_id
-                 LIMIT 200",
-                format!("\"{}\"", text.replace('"', "\"\"")),
-            )
+            let text = validate_search_text(query)?;
+            let source = "message_search
+                          JOIN message m ON lower(hex(m.id)) = message_search.message_id";
+            if text.chars().count() < 3 {
+                (
+                    source,
+                    "AND (message_search.selected_text LIKE ?1 ESCAPE '\\'
+                       OR message_search.plain_text LIKE ?1 ESCAPE '\\')",
+                    "m.updated_at_ms DESC, message_search.message_id",
+                    Some(format!("%{}%", escape_like(text))),
+                )
+            } else {
+                (
+                    source,
+                    "AND message_search MATCH ?1",
+                    "rank, m.updated_at_ms DESC, message_search.message_id",
+                    Some(format!("\"{}\"", text.replace('"', "\"\""))),
+                )
+            }
         };
+        let sql = format!(
+            "SELECT lower(hex(m.id)), lower(hex(root.id)), lower(hex(c.id)),
+                    lower(hex(e.id)), e.title, e.authors_json, anchor.section_id,
+                    anchor.selected_text, revision.plain_text,
+                    anchor.current_locator_json, m.updated_at_ms
+             FROM {source}
+             JOIN message_revision revision
+               ON revision.id = m.current_revision_id AND revision.message_id = m.id
+             JOIN conversation c ON c.id = m.conversation_id
+             JOIN edition e ON e.id = c.edition_id
+             JOIN message root
+               ON root.id = c.root_message_id AND root.conversation_id = c.id
+             JOIN source_anchor anchor
+               ON anchor.id = root.current_source_anchor_id AND anchor.message_id = root.id
+             WHERE m.deleted_at_ms IS NULL AND root.deleted_at_ms IS NULL {filter}
+             ORDER BY {order}
+             LIMIT 200"
+        );
+        let connection = self.connect()?;
         let mut statement = connection
-            .prepare(sql)
+            .prepare(&sql)
             .map_err(|_| MessageError::Database)?;
         let rows = statement
-            .query_map(params![term], |row| {
+            .query_map(rusqlite::params_from_iter(term), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
