@@ -10,21 +10,33 @@ export interface SystemBarsPort {
   onmessage: ((event: MessageEvent<string>) => void) | null;
 }
 
-function parseWindowGeometry(raw: string): WindowGeometry | null {
-  try {
-    const value = JSON.parse(raw) as WindowGeometry | null;
-    if (value && typeof value.imeVisible === "boolean" &&
-        safeEdges.every((edge) => Number.isFinite(value[edge]) && value[edge] >= 0)) {
-      return value;
-    }
-  } catch {
-    // A malformed message does not change the last known geometry.
-  }
-  return null;
+function isWindowGeometry(value: unknown): value is WindowGeometry {
+  if (!value || typeof value !== "object" || !("imeVisible" in value) || typeof value.imeVisible !== "boolean") return false;
+  return safeEdges.every((edge) => {
+    const inset: unknown = (value as Record<string, unknown>)[edge];
+    return typeof inset === "number" && Number.isFinite(inset) && inset >= 0;
+  });
 }
 
 let barsMode: string | undefined;
 let bodySelection = false;
+let batteryPercent: number | null = null;
+
+/** Only the Android app-origin port can supply a percentage. */
+export function watchReaderBattery(onRead: (percent: number | null) => void): () => void {
+  const port = window.AthaSystemBars;
+  if (!port) return () => {};
+  const update = () => onRead(batteryPercent);
+  const request = () => port.postMessage("battery:read");
+  window.addEventListener("atha-reader-battery", update);
+  update();
+  request();
+  const timer = window.setInterval(request, 60_000);
+  return () => {
+    window.clearInterval(timer);
+    window.removeEventListener("atha-reader-battery", update);
+  };
+}
 
 export function bindSystemBarsListeners(): void {
   const port = window.AthaSystemBars;
@@ -51,8 +63,21 @@ export function bindSystemBarsListeners(): void {
   };
 
   port.onmessage = ({ data }) => {
-    const next = parseWindowGeometry(data);
-    if (!next) return;
+    let next: unknown;
+    try {
+      next = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (next && typeof next === "object" && "batteryPercent" in next) {
+      const level = next.batteryPercent;
+      if (level === null || (typeof level === "number" && Number.isInteger(level) && level >= 0 && level <= 100)) {
+        batteryPercent = level;
+        window.dispatchEvent(new Event("atha-reader-battery"));
+      }
+      return;
+    }
+    if (!isWindowGeometry(next)) return;
     const imeHidden = geometry?.imeVisible === true && !next.imeVisible;
     geometry = next;
     sync();

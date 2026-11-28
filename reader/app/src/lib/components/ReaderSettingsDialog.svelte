@@ -2,6 +2,7 @@
   import { Check, Code2, RotateCcw, SlidersHorizontal, Sun, X } from "@lucide/svelte";
   import { Dialog, Slider, Switch } from "bits-ui";
   import { fade, scale } from "svelte/transition";
+  import { prefersReducedMotion as reducedMotion } from "svelte/motion";
   import { cubicOut } from "svelte/easing";
   import { uiPrefs, type PageTurnStyle } from "../data/ui-prefs.svelte.ts";
   import type { ReaderEngine } from "../engine/reader-engine.svelte.ts";
@@ -19,10 +20,11 @@
     open: boolean;
     engine: ReaderEngine;
     bookTitle: string;
+    portalTarget?: HTMLElement;
     onClosed?: () => void;
   }
 
-  let { open = $bindable(false), engine, bookTitle, onClosed }: Props = $props();
+  let { open = $bindable(false), engine, bookTitle, portalTarget, onClosed }: Props = $props();
 
   let activeTab = $state<"global" | "book" | "css">("global");
   let confirmResetBook = $state(false);
@@ -74,11 +76,11 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(nextOpen) => { if (!nextOpen) onClosed?.(); }}>
-  <Dialog.Portal>
+  <Dialog.Portal to={portalTarget}>
     <Dialog.Overlay forceMount>
       {#snippet child({ props, open: isOpen })}
         {#if isOpen}
-          <div {...props} class="atha-dialog-overlay" transition:fade={{ duration: 150 }}></div>
+          <div {...props} class="atha-dialog-overlay" transition:fade={{ duration: reducedMotion.current ? 0 : 150 }}></div>
         {/if}
       {/snippet}
     </Dialog.Overlay>
@@ -87,8 +89,8 @@
         {#if isOpen}
           <div
             {...props}
-            class="atha-dialog-content wide reader-settings-dialog"
-            transition:scale={{ start: 0.96, duration: 190, easing: cubicOut }}
+            class="atha-dialog-content wide reader-sheet reader-settings-dialog"
+            transition:scale={{ start: 0.96, duration: reducedMotion.current ? 0 : 190, easing: cubicOut }}
             onpointerdown={(e) => e.stopPropagation()}
           >
             <div class="rs-head">
@@ -147,6 +149,17 @@
 
             {#if activeTab === "global"}
               <div class="settings-grid">
+                <div class="setting-block">
+                  <div class="setting-label">阅读控件</div>
+                  <div class="pill-group" role="group" aria-label="阅读控件">
+                    <button type="button" class="pill-btn chrome-choice" class:active={uiPrefs.state.readerChromeStyle === "classic"}
+                      aria-pressed={uiPrefs.state.readerChromeStyle === "classic"}
+                      onclick={() => uiPrefs.update({ readerChromeStyle: "classic" })}>经典</button>
+                    <button type="button" class="pill-btn chrome-choice" class:active={uiPrefs.state.readerChromeStyle === "minimal"}
+                      aria-pressed={uiPrefs.state.readerChromeStyle === "minimal"}
+                      onclick={() => uiPrefs.update({ readerChromeStyle: "minimal" })}>极简</button>
+                  </div>
+                </div>
                 <div class="setting-block">
                   <div class="setting-label">书页色调</div>
                   <div class="theme-dots" role="radiogroup" aria-label="书页色调">
@@ -387,11 +400,18 @@
 />
 
 <style>
-  .reader-settings-dialog {
-    left: 50%;
-    top: 50%;
-    transform: none;
-    translate: -50% -50%;
+  .rs-head .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .chrome-choice {
+    min-height: 44px;
+  }
+
+  .chrome-choice.active {
+    background: var(--accent-soft);
+    color: var(--accent);
   }
 
   .rs-head {
@@ -403,8 +423,9 @@
   }
 
   .scope-tabs {
-    display: flex;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 3px;
     padding: 5px;
     border-radius: var(--radius-pill);
     background: var(--bg-well);
@@ -412,13 +433,12 @@
   }
 
   .scope-tab {
-    flex: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 36px;
-    padding: 0 12px;
+    min-height: 44px;
+    padding: 0 2px;
     border-radius: var(--radius-pill);
     font-size: 13px;
     font-weight: 500;
@@ -431,6 +451,12 @@
     color: var(--ink-primary);
     font-weight: 600;
     box-shadow: var(--shadow-xs);
+  }
+
+  @media (max-width: 480px) {
+    .scope-tab :global(svg) {
+      display: none;
+    }
   }
 
   .settings-grid {

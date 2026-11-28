@@ -23,7 +23,7 @@ class Surface {
   }
   emit(type, event) { for (const fn of this.listeners.get(type) || []) fn(event); }
 }
-async function run(steps) {
+async function run(steps, verticalSwipe = false) {
   let now = 0, selected = false, timerId = 0;
   const timers = new Map(), actions = [];
   const book = new Surface(), reader = new Surface();
@@ -45,7 +45,9 @@ async function run(steps) {
     reader, content: { book, selectionRange: () => selected ? {} : null },
     navigation: { previous: () => actions.push('previous'), next: () => actions.push('next') },
     pagination: { cancelSwipe() {}, previewSwipe: () => actions.push('preview'), finishSwipe() {} },
-    onCenter: () => actions.push('center'), assert: (v) => assert.ok(v), fail: (e) => { throw Error(e); },
+    onCenter: () => actions.push('center'),
+    beginVerticalSwipe: verticalSwipe ? () => (phase, distance) => actions.push(`${phase}:${distance}`) : undefined,
+    assert: (v) => assert.ok(v), fail: (e) => { throw Error(e); },
   });
   interaction.bind();
   for (const step of steps) {
@@ -106,6 +108,24 @@ const cases = [
   { name: 'slow continuous swipe', steps: [down, move(30, 280), move(600, 240), up(1500, 220)], want: ['next'] },
   { name: 'reverse horizontal swipe', steps: [{ ...down, x: 40 }, move(30, 60), up(100, 120)], want: ['previous'] },
   { name: 'vertical movement', steps: [down, move(30, 301, { y: 240 }), up(100, 302, { y: 280 })], want: [], noPreview: true },
+  { name: 'vertical chrome drag follows final displacement on release', verticalSwipe: true,
+    steps: [down, move(30, 300, { y: 340 }), move(80, 300, { y: 210 }), up(100)],
+    want: ['move:140', 'move:10', 'end:0'], noPreview: true },
+  { name: 'cancelled vertical chrome drag never commits after touchend', verticalSwipe: true,
+    steps: [down, move(30, 300, { y: 340 }), { at: 40, type: 'pointercancel' }, { at: 60, type: 'touchend', y: 340 }, { at: 61 }],
+    want: ['move:140', 'cancel:0'], noPreview: true },
+  { name: 'selection takes ownership from a vertical drag', verticalSwipe: true,
+    steps: [down, move(30, 300, { y: 340 }), { at: 40, selected: true }, { at: 50, selected: false }, up(60, 300, { y: 340 })],
+    want: ['move:140', 'cancel:0'], noPreview: true },
+  { name: 'second finger cancels an armed vertical drag', verticalSwipe: true,
+    steps: [down, move(30, 300, { y: 340 }), { ...down, at: 50, id: 2, primary: false }, up(80, 300, { y: 340 })],
+    want: ['move:140', 'cancel:0'], noPreview: true },
+  { name: 'structured content does not start a vertical chrome drag', verticalSwipe: true,
+    steps: [{ ...down, overflow: true }, move(30, 300, { y: 340 }), up(50, 300, { y: 340 })],
+    want: [], noPreview: true },
+  { name: 'a horizontal swipe stays with the page-turn renderer', verticalSwipe: true,
+    steps: [down, move(30, 240), move(50, 240, { y: 320 }), up(60, 210)],
+    want: ['next'] },
   { name: 'selected during movement', steps: [down, { at: 300, selected: true }, move(350, 285), up(400, 285)], want: [], noPreview: true },
   { name: 'selection transient before movement', steps: [down, { at: 200, selected: true }, { at: 250, selected: false }, move(300, 280), up(400, 220)], want: [], noPreview: true },
   { name: 'selection transient after preview', steps: [down, move(30, 280), { at: 50, selected: true }, { at: 70, selected: false }, up(100, 220)], want: [] },
@@ -160,7 +180,7 @@ for (const scenario of cases) {
     const names = ["Element", "window", "document", "performance", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"];
     const descriptors = names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
     try {
-      const { actions, counts } = await run(scenario.steps);
+      const { actions, counts } = await run(scenario.steps, scenario.verticalSwipe);
       assert.deepEqual(actions.filter(action => action !== "preview"), scenario.want);
       for (const [name, count] of Object.entries(scenario.counts || {})) assert.equal(counts[name], count, name);
       if (scenario.noPreview) assert.ok(!actions.includes("preview"), "selection/hold must not preview a turn");

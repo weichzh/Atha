@@ -551,22 +551,26 @@ export function createPagination({
     throw new Error("unstable-layout");
   }
 
-  async function relayoutAtOffset(anchor, operationStage) {
+  async function relayoutAtOffset(anchor, operationStage, stillMounted = () => true) {
     await document.fonts.ready;
+    if (!stillMounted()) return false;
     layout();
     await waitForStableLayout(operationStage);
+    if (!stillMounted()) return false;
     if (isScrolled()) {
       ensure(restoreScrollOffset(anchor), "locator-offset");
       await nextFrame();
+      if (!stillMounted()) return false;
       syncScrollPage();
       updatePosition();
-      return;
+      return true;
     }
     const target = pageForOffset(anchor);
     ensure(target.exact, "locator-offset");
     state.page = target.page;
     showPage();
     await nextFrame();
+    return stillMounted();
   }
 
   async function renderFromStart() {
@@ -691,20 +695,21 @@ export function createPagination({
   }
 
   async function resizeViewport(anchor) {
+    // A pane relayout can still be awaiting stable frames when the reader closes.
+    // Its anchor belongs to the detached book, not the next document.
+    const stillMounted = () => reader.isConnected;
+    if (!stillMounted()) return false;
     syncViewportDeviceSize();
-    await relayoutAtOffset(anchor, "窗口尺寸重排");
-    if (
-      (
-        await onPageShown(true, () => ({
-          offset: anchor,
-          pageIndex: state.page,
-          scrollTop: reader.scrollTop,
-        }))
-      ).layoutChanged
-    ) {
-      await waitForStableLayout("窗口尺寸重排");
-      await relayoutAtOffset(anchor, "窗口尺寸重排");
-    }
+    if (!(await relayoutAtOffset(anchor, "窗口尺寸重排", stillMounted))) return false;
+    const { layoutChanged } = await onPageShown(true, () => ({
+      offset: anchor,
+      pageIndex: state.page,
+      scrollTop: reader.scrollTop,
+    }));
+    if (!stillMounted()) return false;
+    if (!layoutChanged) return true;
+    await waitForStableLayout("窗口尺寸重排");
+    return relayoutAtOffset(anchor, "窗口尺寸重排", stillMounted);
   }
 
   async function verifySizes() {
@@ -962,10 +967,12 @@ export function createPagination({
         Promise.resolve()
           .then(onResize)
           .then(() => {
-            document.documentElement.dataset.viewportStable = `${reader.clientWidth}x${reader.clientHeight}`;
+            if (reader.isConnected) {
+              document.documentElement.dataset.viewportStable = `${reader.clientWidth}x${reader.clientHeight}`;
+            }
           })
           .catch((error) => {
-            if (!document.documentElement.dataset.error) {
+            if (reader.isConnected && !document.documentElement.dataset.error) {
               fail(error instanceof Error ? error.message : "layout-cut");
             }
           });

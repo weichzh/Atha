@@ -33,6 +33,7 @@ import { createReaderPreferences, DEFAULT_APPLICATION_PREFS, DEFAULT_BOOK_PREFS 
 
 export interface ReaderEngineCallbacks {
   getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "cancel" | "stop"> | undefined;
+  beginVerticalSwipe?: () => ((phase: "move" | "end" | "cancel", deltaY: number) => void) | undefined;
   onToggleChrome: () => void;
   onOpenNoteThread: (rootId: string) => void;
   onOpenLightbox: (target: HTMLElement) => void;
@@ -653,6 +654,7 @@ export class ReaderEngine {
       navigation: this.navigation,
       pagination: this.pagination,
       onCenter: handleCenterTap,
+      beginVerticalSwipe: this.callbacks.beginVerticalSwipe,
       assert,
       fail,
     });
@@ -1204,6 +1206,14 @@ export class ReaderEngine {
 
   async goToToc(index: number) {
     await this.navigation.goToToc(index);
+    this.syncSnapshots();
+  }
+
+  async goToAdjacentSection(direction: -1 | 1) {
+    const index = this.session.snapshot().currentIndex + direction;
+    const target = this.session.describe().sections[index];
+    if (!target) return;
+    await this.navigation.goToHref(target.url);
     this.syncSnapshots();
   }
 
