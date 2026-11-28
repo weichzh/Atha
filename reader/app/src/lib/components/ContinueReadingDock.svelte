@@ -130,8 +130,8 @@
   .resume-dock {
     position: fixed;
     z-index: 38;
-    right: 24px;
-    bottom: 24px;
+    right: calc(24px + var(--safe-area-right));
+    bottom: calc(24px + var(--safe-area-bottom));
   }
 
   .resume-bar {
@@ -166,7 +166,7 @@
 
   .recent-drawer {
     position: fixed;
-    inset: auto 0 max(16px, env(safe-area-inset-bottom));
+    inset: auto 0 max(16px, var(--safe-area-bottom));
     width: min(640px, calc(100% - 24px));
     margin: 0 auto;
     padding: 16px;
@@ -197,7 +197,19 @@
   }
 
   @media (max-width: 899px) {
-    .resume-dock { right: 16px; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 62px); }
-    .recent-drawer { inset: auto 0 0; width: 100%; max-width: none; padding-bottom: max(16px, env(safe-area-inset-bottom)); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+    .resume-dock {
+      right: calc(16px + var(--safe-area-right));
+      bottom: calc(max(14px, var(--safe-area-bottom)) + 62px);
+    }
+    .resume-bar {
+      width: min(356px, calc(100vw - 32px - var(--safe-area-left) - var(--safe-area-right)));
+    }
+    .recent-drawer {
+      inset: auto 0 0;
+      width: 100%;
+      max-width: none;
+      padding: 16px calc(16px + var(--safe-area-right)) max(16px, var(--safe-area-bottom)) calc(16px + var(--safe-area-left));
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
   }
 </style>

@@ -32,7 +32,14 @@ present
 
 ## Approval
 
-用户授权拆分和本地验证；此切片不安装、不推送、不改原工作区。
+用户授权拆分、验证和按流程交付；此切片不安装、不改原工作区。
+
+## Iteration Control
+
+- Mode: `iterative`
+- Maximum repair iterations: `2`
+- Unchanged-delta limit: `1`
+- Human stop: 需要安装、操作实体设备或改变数据边界时停止。
 
 ## Checks
 
@@ -47,6 +54,8 @@ present
 - 安全区在显示或隐藏状态栏时采用同一份稳定 inset；IME 上升时宿主缩短 WebView，并扣除已由 IME 避让的底部 inset。开书返回、书架、阅读框、脚注及选区定位共享 CSS 边界。Svelte 正文分页用真实阅读框高度；独立静态阅读入口继续使用原默认高度。
 - 原版的减少动态样式给所有元素设置了非零过渡时间，导致高 DPR 开书时阅读框在图片自检期间改变尺寸。在 390 px、DPR 2 下复现 `image-load` 后，将 CSS 过渡时间改为 0；同一开书、脚注和返回链路通过。
 - WebView 将正文选区交给 Atha 菜单时，只暂时隐藏属于该 WebView 的浮动 ActionMode 的菜单项；保留 callback、选区生命周期和原生手柄。输入或移出正文时恢复。状态栏与选区命令分开，正文之外不主动静默原生菜单。
+- 接入已合并书架时，续读条和批量操作底栏也改为读取同一组安全区。390px Chromium 模拟带左右与底部 inset 的 Android 桥，验证续读条不压导航、抽屉操作位于安全区、返回优先关闭抽屉和书架多选。
+- 在已合并笔记界面的 `a971772` 基底重新构建并通过完整 Chromium；后续 #16 只增加验证工具，阅读器范围未变。
 
 ## Review
 

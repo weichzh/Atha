@@ -65,6 +65,18 @@ try {
   await send({ ...safe, left: -2 });
   await withinSafeArea(".search-pill");
   await withinSafeArea(".nav-shell");
+  await withinSafeArea(".resume-dock");
+  const dock = await page.locator(".resume-dock").boundingBox();
+  const nav = await page.locator(".nav-shell").boundingBox();
+  assert.ok(dock.y + dock.height <= nav.y, "recent reading must stay above navigation");
+  await page.getByRole("button", { name: "展开最近在读" }).click();
+  await withinSafeArea(".recent-drawer .drawer-head");
+  assert.equal(await page.evaluate(() => window.__athaHandleBack()), true);
+  await page.getByRole("dialog", { name: "最近在读" }).waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "选择", exact: true }).click();
+  await withinSafeArea(".shelf-actions");
+  assert.equal(await page.evaluate(() => window.__athaHandleBack()), true);
+  await page.locator(".shelf-actions").waitFor({ state: "hidden" });
   const shelfSearch = page.getByRole("searchbox");
   await shelfSearch.fill("阅读");
   await send({ ...safe, bottom: 0, imeVisible: true });
