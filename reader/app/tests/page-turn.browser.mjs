@@ -209,7 +209,27 @@ async function verifyFacingPages(browser, base) {
     await advance(page, -1, "spread");
     await settled(page);
 
-    const release = await mouseGutterDrag(page, 1);
+    const beforeDrag = await page.evaluate(() => window.turnRenderers.length);
+    const drag = await mouseGutterDrag(page, 1);
+    await drag();
+    await settled(page);
+    assert.equal(await position(page), 1, "mouse gutter drag must not turn the page");
+    assert.equal(await page.evaluate(() => window.turnRenderers.length), beforeDrag, "mouse gutter drag must not preview a turn");
+    // The browser may extend a text selection from the gutter onto the page.
+    await page.keyboard.press("Escape");
+    await page.locator(".selection-capsule").waitFor({ state: "hidden" });
+
+    const frame = await page.locator(".reader-frame").boundingBox();
+    await page.mouse.click(frame.x + frame.width * 0.9, frame.y + frame.height * 0.68);
+    await stage(page, "spread").waitFor();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    await settled(page);
+    await page.mouse.wheel(0, -120);
+    await stage(page, "spread").waitFor();
+    await page.waitForFunction(() => /page 1 \/ /.test(document.title));
+    await settled(page);
+
+    const release = await touchDrag(page, -415);
     await stage(page, "spread").waitFor();
     assert.equal(await position(page), 1, "preview does not change navigation");
     const faces = await stage(page, "spread").evaluate(root => {
@@ -229,10 +249,7 @@ async function verifyFacingPages(browser, base) {
     await settled(page);
     const second = await facingText(page);
     assert.ok(second[0][0] >= opening[1].at(-1));
-    const rewind = await mouseGutterDrag(page, -1);
-    await stage(page, "spread").waitFor();
-    await rewind();
-    await page.waitForFunction(() => /page 1 \/ /.test(document.title));
+    await advance(page, -1, "spread");
     await settled(page);
     assert.deepEqual(await facingText(page), opening);
 
@@ -265,8 +282,10 @@ async function verifyFacingPages(browser, base) {
     const before = await saved(page);
     await page.setViewportSize({ width: 1240, height: 1030 });
     await spread.waitFor({ state: "detached" });
+    await page.locator('html[data-viewport-stable^="1240x"]').waitFor({ state: "attached" });
     await page.setViewportSize(viewport);
     await spread.waitFor();
+    await page.locator('html[data-viewport-stable^="1500x"]').waitFor({ state: "attached" });
     assert.equal(await saved(page), before);
     const lost = await touchDrag(page, -415);
     await stage(page, "spread").waitFor();

@@ -661,7 +661,6 @@ export class ReaderEngine {
 
     this.interaction = createInteraction({
       reader,
-      mousePage: page,
       content: this.content,
       navigation: this.navigation,
       pagination: this.pagination,

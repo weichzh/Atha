@@ -299,7 +299,6 @@ button:disabled {
 }
 
 .reader {
-  --reader-aperture-w: var(--reader-col-w, min(calc(var(--reader-width, 100vw) - var(--reader-pad-x, 32px) * 2), var(--reader-content-max-width, 760px)));
   position: relative;
   width: var(--reader-width, 100%);
   height: var(--reader-height, 100%);
@@ -325,30 +324,19 @@ button:disabled {
     calc(562px * var(--reader-dpr, 1))
   );
   --reader-spread-w: calc(2 * var(--reader-col-w) + var(--reader-column-gap));
-  --reader-aperture-w: var(--reader-spread-w);
 }
 
 .page {
   position: relative;
-  width: var(--reader-aperture-w);
+  width: var(--reader-col-w, min(calc(var(--reader-width, 100vw) - var(--reader-pad-x, 32px) * 2), var(--reader-content-max-width, 760px)));
   height: 100%;
   /* Long chapters still use scrollLeft, but only pagination moves the page. */
   overflow: hidden;
   flex: none;
 }
 
-@media (any-pointer: fine) {
-  .reader[data-reading-mode="paged"]::before,
-  .reader[data-reading-mode="paged"]::after {
-    content: "";
-    position: absolute;
-    inset-block: 0;
-    width: max(0px, calc((100% - var(--reader-aperture-w)) / 2));
-    cursor: grab;
-  }
-
-  .reader[data-reading-mode="paged"]::before { left: 0; }
-  .reader[data-reading-mode="paged"]::after { right: 0; }
+.reader[data-reader-spread] > .page {
+  width: var(--reader-spread-w);
 }
 
 .reader[data-reader-spread] > .page::after {
