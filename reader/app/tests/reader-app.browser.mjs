@@ -207,6 +207,122 @@ async function verifyFootnotePreview(browser) {
   }
 }
 
+async function verifyShelfSelection(browser) {
+  const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const group = (page) => page.getByRole("group", { name: "选中书籍操作" });
+  const card = (page, title) => page.locator(`.shelf-catalog button[title="${title}"]`);
+  const primary = "潮汐与纸页：数字阅读中的对话形态";
+  const first = "宋版书刻与江南纸坊考";
+  const second = "建筑的现象学与安静空间";
+  const third = "海风集：二十四节气散文选";
+  const selectionCount = (page, count) => group(page).getByText(`已选 ${count} 册`, { exact: true }).waitFor();
+  const booksAt = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("atha.demo.books.v1")));
+
+  try {
+    await desktop.goto(PREVIEW_URL);
+    await card(desktop, first).click({ button: "right" });
+    await selectionCount(desktop, 1);
+    assert.equal(await card(desktop, first).getAttribute("aria-pressed"), "true");
+    await desktop.keyboard.press("Escape");
+    await group(desktop).waitFor({ state: "hidden" });
+    await card(desktop, first).press("Shift+F10");
+    await selectionCount(desktop, 1);
+    await card(desktop, second).click();
+    await selectionCount(desktop, 2);
+    assert.equal(await group(desktop).getByRole("button", { name: "换封面" }).count(), 0);
+    await desktop.screenshot({ path: path.join(screenshotDir, "15-shelf-selection-desktop.png") });
+    const search = desktop.getByRole("searchbox");
+    await search.fill("江南纸坊");
+    await selectionCount(desktop, 1);
+    await search.fill("");
+    assert.equal(await card(desktop, second).getAttribute("aria-pressed"), "false");
+    await group(desktop).getByRole("button", { name: "换封面" }).click();
+    assert.ok((await booksAt(desktop)).find(book => book.title === first).hasCustomCover);
+    await group(desktop).getByRole("button", { name: "编辑信息" }).click();
+    const edit = desktop.getByRole("dialog");
+    await edit.getByRole("button", { name: "恢复默认封面" }).click();
+    assert.equal((await booksAt(desktop)).find(book => book.title === first).hasCustomCover, false);
+    await desktop.keyboard.press("Escape");
+    await edit.waitFor({ state: "hidden" });
+    await selectionCount(desktop, 1);
+    await card(desktop, second).click();
+    await group(desktop).getByRole("button", { name: "收藏", exact: true }).click();
+    await group(desktop).waitFor({ state: "hidden" });
+    assert.ok((await booksAt(desktop)).filter(book => [first, second].includes(book.title)).every(book => book.favorite));
+
+    await desktop.getByRole("button", { name: "清单列表" }).click();
+    await desktop.getByRole("button", { name: "选择", exact: true }).click();
+    for (const title of [first, second, third]) await card(desktop, title).click();
+    await selectionCount(desktop, 3);
+    await group(desktop).getByRole("button", { name: "删除", exact: true }).click();
+    const confirm = desktop.getByRole("alertdialog");
+    await confirm.getByRole("button", { name: "取消", exact: true }).click();
+    await confirm.waitFor({ state: "hidden" });
+    await selectionCount(desktop, 3);
+    assert.ok((await booksAt(desktop)).filter(book => [first, second, third].includes(book.title)).length === 3);
+
+    // Reject the second removal. The third must not run and both must remain selected.
+    await desktop.evaluate(() => {
+      const write = Storage.prototype.setItem;
+      let attempts = 0;
+      Storage.prototype.setItem = function(key, value) {
+        if (key === "atha.demo.books.v1" && ++attempts === 2) {
+          Storage.prototype.setItem = write;
+          throw new DOMException("Injected storage failure", "QuotaExceededError");
+        }
+        return write.call(this, key, value);
+      };
+    });
+    await group(desktop).getByRole("button", { name: "移出", exact: true }).click();
+    await confirm.getByRole("button", { name: "移出书架" }).click();
+    await desktop.getByText("已移出 1 册，剩余未处理。请重试。").waitFor();
+    await selectionCount(desktop, 2);
+    assert.equal((await booksAt(desktop)).filter(book => [first, second, third].includes(book.title)).length, 2);
+    await group(desktop).getByRole("button", { name: "删除", exact: true }).click();
+    await confirm.getByRole("button", { name: "删除本地数据" }).click();
+    await group(desktop).waitFor({ state: "hidden" });
+    assert.equal((await booksAt(desktop)).filter(book => [first, second, third].includes(book.title)).length, 0);
+
+    await phone.goto(PREVIEW_URL);
+    await card(phone, primary).scrollIntoViewIfNeeded();
+    const bounds = await card(phone, primary).boundingBox();
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    const touch = await phone.context().newCDPSession(phone);
+    const deliver = (type, points) => touch.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+    await deliver("touchStart", [{ x, y }]);
+    await deliver("touchMove", [{ x, y: y - 50 }]);
+    await phone.waitForTimeout(475);
+    await deliver("touchEnd", []);
+    assert.equal(await group(phone).count(), 0, "Scrolling must not activate multi-select");
+    await card(phone, primary).scrollIntoViewIfNeeded();
+    const moved = await card(phone, primary).boundingBox();
+    await deliver("touchStart", [{ x: moved.x + moved.width / 2, y: moved.y + moved.height / 2 }]);
+    await selectionCount(phone, 1);
+    await deliver("touchEnd", []);
+    assert.equal(await card(phone, primary).getAttribute("aria-pressed"), "true");
+    assert.equal(await phone.locator(".reader-root").count(), 0);
+    await assertNoHorizontalOverflow(phone, "shelf-selection-mobile-390");
+    const shelfNav = phone.getByRole("navigation", { name: "主导航" });
+    assert.equal(await shelfNav.isVisible(), false, "The action bar replaces mobile navigation while selecting");
+    await phone.screenshot({ path: path.join(screenshotDir, "16-shelf-selection-mobile-390.png") });
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await group(phone).waitFor({ state: "hidden" });
+    await shelfNav.waitFor();
+    await phone.getByRole("button", { name: "选择", exact: true }).click();
+    await group(phone).getByRole("button", { name: "退出选择" }).click();
+    await shelfNav.waitFor();
+    await card(phone, primary).tap();
+    await waitForReaderEntry(phone);
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await card(phone, primary).waitFor();
+  } finally {
+    await desktop.close();
+    await phone.close();
+  }
+}
+
 async function run() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -756,7 +872,8 @@ async function run() {
     assert.equal(pageErrors.length, 0, `Page errors found: ${pageErrors.join(" | ")}`);
 
     await verifyFootnotePreview(browser);
-    console.log("ALL BROWSER CHECKS PASSED! 14 screenshots saved to:", screenshotDir);
+    await verifyShelfSelection(browser);
+    console.log("ALL BROWSER CHECKS PASSED! 16 screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();
     preview.kill("SIGTERM");

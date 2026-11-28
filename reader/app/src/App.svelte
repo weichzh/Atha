@@ -53,6 +53,7 @@
   let activeRoute = $state<AppRoute>(initialReaderLaunch ? "reader" : "library");
   let activeTab = $state<Exclude<AppRoute, "reader">>("library");
   let bookCount = $state(isTauriRuntime() ? 0 : DEMO_BOOKS.length);
+  let shelfSelecting = $state(false);
   let libraryViewRef = $state<Pick<LibraryView, "rememberOpenOrigin" | "restoreOpenFocus" | "refreshSilent"> | null>(null);
   let savedScrollY = 0;
   let shelfReturn: { origin: ShelfOrigin; trigger?: HTMLElement } | null = null;
@@ -399,7 +400,7 @@
 <svelte:window bind:innerWidth={viewportWidth} bind:innerHeight={viewportHeight} />
 
 {#if !tauriOnReader}
-  <div class="app-frame" class:behind-opening={entryActive} hidden={activeRoute === "reader" && !entryActive} inert={entryActive || activeRoute === "reader"}>
+  <div class="app-frame" class:shelf-selecting={activeRoute === "library" && shelfSelecting} class:behind-opening={entryActive} hidden={activeRoute === "reader" && !entryActive} inert={entryActive || activeRoute === "reader"}>
     <NavRail {activeTab} {bookCount} onSelect={switchTab} />
 
     {#if activeTab === "library"}
@@ -408,6 +409,7 @@
         active={!entryActive && activeRoute === "library"}
         onOpenReader={openShelfBook}
         onBooksUpdated={(list) => (bookCount = list.length)}
+        onSelectingChange={(selecting) => (shelfSelecting = selecting)}
       />
     {:else if activeTab === "memory"}
       <MemoryView
@@ -489,6 +491,12 @@
 
   .app-frame.behind-opening {
     isolation: isolate;
+  }
+
+  @media (max-width: 899px) {
+    .app-frame.shelf-selecting :global(.nav-shell) {
+      display: none;
+    }
   }
 
   .reader-route, .opening-veil, .opening-art {

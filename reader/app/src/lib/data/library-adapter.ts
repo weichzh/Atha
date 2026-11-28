@@ -30,6 +30,7 @@ import {
   readAppTheme,
   readStorageUsage as tauriReadStorageUsage,
   removeBook as tauriRemoveBook,
+  removeBooksSerially,
   replaceLocalDataState,
   resetBookCover as tauriResetBookCover,
   resetReaderApplicationPreferences,
@@ -38,6 +39,7 @@ import {
   updateBookOrganization as tauriUpdateBookOrganization,
   writeAppTheme,
   type AppTheme,
+  type BatchRemoveResult,
   type BookOrganization,
   type ImportReport,
   type LibraryBook,
@@ -192,11 +194,13 @@ export async function removeLibraryBook(id: string): Promise<LibraryBook[]> {
   return updated;
 }
 
-export async function deleteLibraryBookData(id: string): Promise<LibraryBook[]> {
-  if (isTauriRuntime() && libraryAvailable) {
-    const result = await deleteBooksSerially([id]);
-    return result.books ?? (await tauriListBooks());
-  }
+export function applyShelfRemoval(ids: string[], mode: "remove" | "delete"): Promise<BatchRemoveResult> {
+  if (mode === "remove") return removeBooksSerially(ids, removeLibraryBook);
+  if (isTauriRuntime() && libraryAvailable) return deleteBooksSerially(ids);
+  return removeBooksSerially(ids, deleteDemoBookData);
+}
+
+async function deleteDemoBookData(id: string): Promise<LibraryBook[]> {
   try {
     const state = captureLocalDataState(window.localStorage);
     applyBookLocalStateDeletion(state, id, window.localStorage);
