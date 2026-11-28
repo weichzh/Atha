@@ -35,6 +35,7 @@
     type LibraryBook,
   } from "../../library.ts";
   import { registerBackHandler } from "../data/back-stack.ts";
+  import type { DesktopMenuItem } from "../data/desktop-edit-menu.ts";
   import { isTauriRuntime } from "../data/runtime.ts";
   import {
     browseShelf,
@@ -78,11 +79,12 @@
   interface Props {
     active: boolean;
     onOpenReader: (book: LibraryBook, origin: ShelfOrigin, trigger?: HTMLElement) => Promise<void>;
+    onBookMenu?: (event: MouseEvent | KeyboardEvent, actions: DesktopMenuItem[]) => void;
     onBooksUpdated?: (books: LibraryBook[]) => void;
     onSelectingChange: (selecting: boolean) => void;
   }
 
-  let { active, onOpenReader, onBooksUpdated, onSelectingChange }: Props = $props();
+  let { active, onOpenReader, onBookMenu, onBooksUpdated, onSelectingChange }: Props = $props();
 
   let books = $state<LibraryBook[]>([]);
   let loading = $state(true);
@@ -485,6 +487,23 @@
     if (press?.target === target) {
       ignoreClick = target;
       cancelHold();
+    }
+    if (onBookMenu && (!(event instanceof PointerEvent) || event.pointerType !== "touch")) {
+      const entry = filteredEntries.find((entry) => entry.book.id === book.id);
+      if (!entry) return;
+      const selected = selectedIds.has(book.id);
+      onBookMenu(event, [
+        ...(selecting ? [] : [{ label: "打开阅读", select: () => handleOpenBook(entry, "catalog", target) }]),
+        {
+          label: selected ? "取消选中" : "选中此书",
+          select: () => {
+            if (selecting) selectBook(book.id);
+            else enterSelection(book, target);
+          },
+        },
+        { label: "编辑分类", select: () => openEditDialog(book), separate: true },
+      ]);
+      return;
     }
     enterSelection(book, target);
   }

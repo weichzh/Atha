@@ -5,11 +5,14 @@
   import type { ShelfOrigin } from "./shelf-session.ts";
   import AppSettingsView from "./lib/components/AppSettingsView.svelte";
   import BookOpeningCover from "./lib/components/BookOpeningCover.svelte";
+  import DesktopContextMenu from "./lib/components/DesktopContextMenu.svelte";
   import LibraryView from "./lib/components/LibraryView.svelte";
   import MemoryView from "./lib/components/MemoryView.svelte";
   import NavRail from "./lib/components/NavRail.svelte";
   import { registerBackHandler, installGlobalBackDispatcher } from "./lib/data/back-stack.ts";
   import { DEMO_BOOKS, DEMO_PRIMARY_BOOK_ID } from "./lib/data/demo-seed.ts";
+  import { usesDesktopAppMenu } from "./lib/data/desktop-clipboard.ts";
+  import type { DesktopMenuItem } from "./lib/data/desktop-edit-menu.ts";
   import {
     activateShelfReader,
     applyAppThemeToDocument,
@@ -35,6 +38,11 @@
   const initialReaderLaunch = hasReaderLaunchParams();
   const initialParams = initialReaderLaunch ? new URLSearchParams(window.location.search) : null;
   const tauriOnReader = isTauriRuntime() && initialReaderLaunch;
+  const desktopMenus = usesDesktopAppMenu();
+  let desktopMenu = $state<DesktopContextMenu>();
+  function showBookMenu(event: MouseEvent | KeyboardEvent, items: DesktopMenuItem[]) {
+    desktopMenu?.show(event, items);
+  }
 
   function parseInitialJump(params: URLSearchParams | null, editionId: string): ReadingMemoryTarget | null {
     if (!params) return null;
@@ -380,6 +388,10 @@
 
 <svelte:window bind:innerWidth={viewportWidth} bind:innerHeight={viewportHeight} />
 
+{#if desktopMenus}
+  <DesktopContextMenu bind:this={desktopMenu} />
+{/if}
+
 {#if !tauriOnReader}
   <div class="app-frame" class:shelf-selecting={activeRoute === "library" && shelfSelecting} class:behind-opening={entryActive} hidden={activeRoute === "reader" && !entryActive} inert={entryActive || activeRoute === "reader"}>
     <NavRail {activeTab} {bookCount} onSelect={switchTab} />
@@ -389,6 +401,7 @@
         bind:this={libraryViewRef}
         active={!entryActive && activeRoute === "library"}
         onOpenReader={openShelfBook}
+        onBookMenu={desktopMenus ? showBookMenu : undefined}
         onBooksUpdated={(list) => (bookCount = list.length)}
         onSelectingChange={(selecting) => (shelfSelecting = selecting)}
       />

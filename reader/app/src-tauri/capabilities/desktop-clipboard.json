@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-clipboard",
+  "description": "Atha 桌面主窗的纯文本剪贴板操作。",
+  "windows": ["main"],
+  "platforms": ["linux", "windows"],
+  "permissions": [
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text"
+  ]
+}

@@ -20,6 +20,7 @@
   } from "@lucide/svelte";
   import { Dialog, Popover, Slider } from "bits-ui";
   import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { copyAppText } from "../data/desktop-clipboard.ts";
   import { fade, scale } from "svelte/transition";
   import { prefersReducedMotion as reducedMotion } from "svelte/motion";
   import { cubicOut } from "svelte/easing";
@@ -400,7 +401,7 @@
     if (!sel || copyingSelection) return;
     copyingSelection = true;
     try {
-      await navigator.clipboard.writeText(sel.text);
+      await copyAppText(sel.text);
       if (engine.selection === sel) engine.clearSelection();
       engine.showToast("已复制");
     } catch {

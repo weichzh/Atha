@@ -8,36 +8,36 @@ Atha 是本地优先的高保真个人阅读系统，Windows 是当前稳定基�
 
 ## 架构驱动与质量场景
 
-| ID | 优先级 | 质量属性 | 场景与成功标准 |
-| --- | --- | --- | --- |
-| ASR-SEC-01 | P0 | 内容安全 | 不可信 EPUB / CBZ 提交脚本、事件属性、外部资源、越界路径、ZIP 歧义或未声明资源时，在进入书籍 Shadow DOM 或发出外部网络 / 宿主 command 请求前明确拒绝；正式安全探针保持零外联。 |
-| ASR-DATA-01 | P0 | 数据完整性 | 消息、修订、引用、快照与 Outbox 任一步失败或进程中止时，不留下部分消息事实；重开后外键、schema、已引用资产与完整性检查通过。快照资产具备进程中止安全发布和孤儿清理；完整 MessageStore 可由一致、可验证制品备份，并在失败时保留原事实。 |
-| ASR-REF-01 | P0 | 引用保真 | 同一内容版本重开、重排或重新导入后，`SourceAnchor` 能回到原文，`SourceSnapshot` 保留当时呈现；无法唯一恢复时显式回落，不静默改写历史。 |
-| ASR-PERF-01 | P1 | 性能 | 正式困难样本的冷启动、首个稳定页、热打开、翻页与字号重排 P95 继续低于阅读内核规定的固定门槛；没有测量证据时不增加缓存、worker 或虚拟化。 |
-| ASR-MOD-01 | P1 | 可修改性 | 新用例修改拥有规则的 deep module 及一个真实边界 adapter；composition root 只增加装配或注册，不复制验证、数据或阅读算法。 |
-| ASR-PRIV-01 | P1 | 隐私与可诊断性 | 诊断只记录固定事件、阶段和数值，不记录书名、路径、原文、笔记、查询或提示词；失败保留稳定错误代码和证据等级。 |
+| ID          | 优先级 | 质量属性       | 场景与成功标准                                                                                                                                                                                                                         |
+| ----------- | ------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ASR-SEC-01  | P0     | 内容安全       | 不可信 EPUB / CBZ 提交脚本、事件属性、外部资源、越界路径、ZIP 歧义或未声明资源时，在进入书籍 Shadow DOM 或发出外部网络 / 宿主 command 请求前明确拒绝；正式安全探针保持零外联。                                                         |
+| ASR-DATA-01 | P0     | 数据完整性     | 消息、修订、引用、快照与 Outbox 任一步失败或进程中止时，不留下部分消息事实；重开后外键、schema、已引用资产与完整性检查通过。快照资产具备进程中止安全发布和孤儿清理；完整 MessageStore 可由一致、可验证制品备份，并在失败时保留原事实。 |
+| ASR-REF-01  | P0     | 引用保真       | 同一内容版本重开、重排或重新导入后，`SourceAnchor` 能回到原文，`SourceSnapshot` 保留当时呈现；无法唯一恢复时显式回落，不静默改写历史。                                                                                                 |
+| ASR-PERF-01 | P1     | 性能           | 正式困难样本的冷启动、首个稳定页、热打开、翻页与字号重排 P95 继续低于阅读内核规定的固定门槛；没有测量证据时不增加缓存、worker 或虚拟化。                                                                                               |
+| ASR-MOD-01  | P1     | 可修改性       | 新用例修改拥有规则的 deep module 及一个真实边界 adapter；composition root 只增加装配或注册，不复制验证、数据或阅读算法。                                                                                                               |
+| ASR-PRIV-01 | P1     | 隐私与可诊断性 | 诊断只记录固定事件、阶段和数值，不记录书名、路径、原文、笔记、查询或提示词；失败保留稳定错误代码和证据等级。                                                                                                                           |
 
 ## 架构选择
 
-| 候选 | 收益 | 代价与风险 | 结论 |
-| --- | --- | --- | --- |
-| 保持现状，只补文档 | 零代码迁移，现有行为最稳定 | Tauri composition root 继续同时拥有平台启动、协议、书架与消息 IPC；command 与 capability 漂移仍靠脆弱文本检查发现 | 不选 |
-| 模块化单体 + 显式 adapter | 保留单产品部署单元、SQLite、WebView2 和现有 deep module；只在真实信任 / 平台边界形成窄 adapter，可逐片迁移 | 需要少量源码移动和边界回归 | 采用 |
-| 全面 Ports and Adapters、repository trait 或拆服务 | 理论上可替换平台、存储或部署 | 当前没有第二实现、独立部署或伸缩场景，会增加 DTO、trait、网络和一致性成本 | 拒绝；出现真实第二实现后重评 |
+| 候选                                               | 收益                                                                                                       | 代价与风险                                                                                                        | 结论                         |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| 保持现状，只补文档                                 | 零代码迁移，现有行为最稳定                                                                                 | Tauri composition root 继续同时拥有平台启动、协议、书架与消息 IPC；command 与 capability 漂移仍靠脆弱文本检查发现 | 不选                         |
+| 模块化单体 + 显式 adapter                          | 保留单产品部署单元、SQLite、WebView2 和现有 deep module；只在真实信任 / 平台边界形成窄 adapter，可逐片迁移 | 需要少量源码移动和边界回归                                                                                        | 采用                         |
+| 全面 Ports and Adapters、repository trait 或拆服务 | 理论上可替换平台、存储或部署                                                                               | 当前没有第二实现、独立部署或伸缩场景，会增加 DTO、trait、网络和一致性成本                                         | 拒绝；出现真实第二实现后重评 |
 
 采用方案见 `docs/decisions/ADR-0004-modular-monolith-adapters.md`。微服务、事件总线、命令总线、插件注册表、通用多格式工厂和单实现 repository 均不属于当前目标架构。
 
 ## Module 视图
 
-| Module | 责任 | 公开 Interface | 依赖限制 |
-| --- | --- | --- | --- |
-| Svelte 产品壳 `reader/app/src/` | 书架、工具栏、面板、dialog 与受信任用户操作 | `library.ts`、`messages.ts` 的受限 Tauri client | 不拥有书籍 DOM、分页热状态、SQL 或消息事实 |
-| 浏览器阅读内核 `reader/web/` | 内容校验、会话、Locator、分页、导航、偏好、状态、搜索、标注 / 消息投影与诊断 | 各 `create*` 返回的冻结小对象；`app.mjs` 只组合 | 不访问文件系统、SQLite 或任意宿主 API；书内文档没有 command interface |
-| Tauri 平台 adapter `reader/app/src-tauri/` | 桌面 / mobile 启动、窗口、应用目录、受控协议、dialog、SAF cache bridge、capability、固定字段本地日志与 IPC DTO 映射；离线词典、阅读消息与全库消息维护分别由 `dictionary_commands`、`message_commands`、`message_maintenance` 集中，library / telemetry / protocol adapter 暂仍与 composition root 同文件 | 已注册的 Tauri command、`atha-book` / `atha-cover` 与 `platform_file::PickerInput` / `PickerOutput` | 不实现消息、书籍格式、Locator 或分页不变量；新增规则不再进入 `lib.rs` |
-| 阅读应用模块 `backend::reader` | EPUB / CBZ 导入、共享 ZIP 信任边界、受控书根、本地书架和遥测输入校验 | `import_epub`、`import_cbz`、`LocalLibrary`、`BookRoot`、`parse_reader_event` | 不依赖 Tauri、Svelte 或 WebView 对象 |
-| 消息事实模块 `backend::messages` | schema、迁移、事务、查询、修订、引用、快照资产恢复、Outbox、交换导出与全库备份 / 恢复 | concrete `MessageStore` 及领域 DTO / 稳定错误 | 唯一 SQLite / 快照资产所有者；调用方不得复制消息事实或拼接 SQL |
-| Windows 验证 host `reader/atha-reader-host` | 两个 host 共用的启动、窗口尺寸和诊断；保留直接 Wry/Tao 回归 adapter | `launch`、`diagnostics` 与旧 `run` | 不接受新产品能力；Tauri 达到等价覆盖后单独评估删除 |
-| 数据 `Messages.sqlite3`、`Assets/`、`Library/`、`ImportedBooks/` | 消息事实、内容寻址快照资源、书目记录与导入缓存；Windows 位于 `%LOCALAPPDATA%\Atha`，Android 位于应用私有 `app_local_data_dir` | 只经所属 backend Module 访问 | UI、reader kernel 与平台 adapter 不直接读写 |
+| Module                                                           | 责任                                                                                                                                                                                                                                                                                                     | 公开 Interface                                                                                      | 依赖限制                                                              |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Svelte 产品壳 `reader/app/src/`                                  | 书架、工具栏、面板、dialog 与受信任用户操作                                                                                                                                                                                                                                                              | `library.ts`、`messages.ts` 的受限 Tauri client                                                     | 不拥有书籍 DOM、分页热状态、SQL 或消息事实                            |
+| 浏览器阅读内核 `reader/web/`                                     | 内容校验、会话、Locator、分页、导航、偏好、状态、搜索、标注 / 消息投影与诊断                                                                                                                                                                                                                             | 各 `create*` 返回的冻结小对象；`app.mjs` 只组合                                                     | 不访问文件系统、SQLite 或任意宿主 API；书内文档没有 command interface |
+| Tauri 平台 adapter `reader/app/src-tauri/`                       | 桌面 / mobile 启动、窗口、应用目录、受控协议、dialog、SAF cache bridge、capability、固定字段本地日志与 IPC DTO 映射；离线词典、阅读消息与全库消息维护分别由 `dictionary_commands`、`message_commands`、`message_maintenance` 集中，library / telemetry / protocol adapter 暂仍与 composition root 同文件 | 已注册的 Tauri command、`atha-book` / `atha-cover` 与 `platform_file::PickerInput` / `PickerOutput` | 不实现消息、书籍格式、Locator 或分页不变量；新增规则不再进入 `lib.rs` |
+| 阅读应用模块 `backend::reader`                                   | EPUB / CBZ 导入、共享 ZIP 信任边界、受控书根、本地书架和遥测输入校验                                                                                                                                                                                                                                     | `import_epub`、`import_cbz`、`LocalLibrary`、`BookRoot`、`parse_reader_event`                       | 不依赖 Tauri、Svelte 或 WebView 对象                                  |
+| 消息事实模块 `backend::messages`                                 | schema、迁移、事务、查询、修订、引用、快照资产恢复、Outbox、交换导出与全库备份 / 恢复                                                                                                                                                                                                                    | concrete `MessageStore` 及领域 DTO / 稳定错误                                                       | 唯一 SQLite / 快照资产所有者；调用方不得复制消息事实或拼接 SQL        |
+| Windows 验证 host `reader/atha-reader-host`                      | 两个 host 共用的启动、窗口尺寸和诊断；保留直接 Wry/Tao 回归 adapter                                                                                                                                                                                                                                      | `launch`、`diagnostics` 与旧 `run`                                                                  | 不接受新产品能力；Tauri 达到等价覆盖后单独评估删除                    |
+| 数据 `Messages.sqlite3`、`Assets/`、`Library/`、`ImportedBooks/` | 消息事实、内容寻址快照资源、书目记录与导入缓存；Windows 位于 `%LOCALAPPDATA%\Atha`，Android 位于应用私有 `app_local_data_dir`                                                                                                                                                                            | 只经所属 backend Module 访问                                                                        | UI、reader kernel 与平台 adapter 不直接读写                           |
 
 依赖方向为产品壳 / reader kernel → Tauri adapter → backend deep module → SQLite / 本地资产。`atha-reader-host` 是迁移期验证 adapter，不是领域层；不得因复用其 Windows 启动代码而把 Wry/Tao 类型带入 backend。
 
@@ -58,6 +58,8 @@ Windows as-built 运行拓扑由一个原生 Tauri host 进程和 WebView2 管�
 
 书籍内容是敌对输入；Svelte 应用壳是受信任但仍受 capability 和 DTO 限制的调用方；Tauri command 是平台信任 seam；backend 是不变量的最终执行者。XHTML、图片、任意文件路径和原始数据库连接均不得跨 IPC。
 
+桌面主窗用独立 capability 为 Atha 菜单读写系统纯文本剪贴板；书籍资源、Android 和 WebView 的剪贴板策略不变。
+
 ## Interface、Seam 与 Adapter 清单
 
 - `BookRoot::read` 是书根到字节资源的 Interface；`atha-book` 是 WebView2 protocol Adapter；路径、MIME、大小与书根是安全 Seam。
@@ -74,14 +76,14 @@ Windows as-built 运行拓扑由一个原生 Tauri host 进程和 WebView2 管�
 
 消息 IPC 边界、快照资产中止恢复和完整 MessageStore 备份已分别由 ADR-0004、ADR-0005 与 ADR-0006 固化，并进入正式检查。下表只保留仍开放的结构风险。
 
-| 风险 | 当前控制与触发条件 |
-| --- | --- |
-| Tauri 产品入口仍依赖保留的 Wry / Tao host crate，并维护两份 runtime 交付清单 | 旧 host 不增加产品能力；当 Tauri gate 覆盖其全部独有证据时，再用独立 ADR 决定删除或重命名 |
-| reader runtime 通过固定顺序拼成单 bundle，依赖不是显式 import | production build、语法检查和多入口继续防止顺序漂移；只有出现真实加载、调试或顺序故障时才改为显式模块图 |
-| Android `ACTION_CREATE_DOCUMENT` 先由 provider 创建目标；cache 中的完整制品向 content URI 复制时若 I/O 失败或进程中止，系统文档可能留下不完整文件 | 当前明确返回稳定失败并清理 Atha cache；只有真实 provider 测试证明可移植的 replace / delete 协议时才增强，用户在此之前可删除失败目标并重试 |
-| `zip 8.6` 在构造 `ZipArchive` 时会按中央目录记录数预分配，但没有 pre-allocation `max_entries` API | 打开前用标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，打开后再校验 `archive.len() <= 10000`；该 hint 不是完整 ZIP parser，fallback / ZIP64 触发的最坏预分配仍是受 512 MiB 源文件上限约束的残余风险，上游提供入口数上限时替换 hint |
-| Android 证据来自 API 35 x86_64 16 KiB 模拟器 | 功能纵切与 16 KiB 对齐可由正式 gate 约束；内存、I/O、WebView 和词典性能必须在 ARM 实体机单独 benchmark，不用模拟器数字调参 |
-| 内容安全和引用保真具有最高影响 | 保持多层校验与真实 WebView2 gate；不以结构整洁为由削弱边界或批量重写 |
+| 风险                                                                                                                                              | 当前控制与触发条件                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tauri 产品入口仍依赖保留的 Wry / Tao host crate，并维护两份 runtime 交付清单                                                                      | 旧 host 不增加产品能力；当 Tauri gate 覆盖其全部独有证据时，再用独立 ADR 决定删除或重命名                                                                                                                                                                             |
+| reader runtime 通过固定顺序拼成单 bundle，依赖不是显式 import                                                                                     | production build、语法检查和多入口继续防止顺序漂移；只有出现真实加载、调试或顺序故障时才改为显式模块图                                                                                                                                                                |
+| Android `ACTION_CREATE_DOCUMENT` 先由 provider 创建目标；cache 中的完整制品向 content URI 复制时若 I/O 失败或进程中止，系统文档可能留下不完整文件 | 当前明确返回稳定失败并清理 Atha cache；只有真实 provider 测试证明可移植的 replace / delete 协议时才增强，用户在此之前可删除失败目标并重试                                                                                                                             |
+| `zip 8.6` 在构造 `ZipArchive` 时会按中央目录记录数预分配，但没有 pre-allocation `max_entries` API                                                 | 打开前用标准 terminal EOCD hint 拒绝超过 10000 项、trailing garbage 与歧义 terminal EOCD，打开后再校验 `archive.len() <= 10000`；该 hint 不是完整 ZIP parser，fallback / ZIP64 触发的最坏预分配仍是受 512 MiB 源文件上限约束的残余风险，上游提供入口数上限时替换 hint |
+| Android 证据来自 API 35 x86_64 16 KiB 模拟器                                                                                                      | 功能纵切与 16 KiB 对齐可由正式 gate 约束；内存、I/O、WebView 和词典性能必须在 ARM 实体机单独 benchmark，不用模拟器数字调参                                                                                                                                            |
+| 内容安全和引用保真具有最高影响                                                                                                                    | 保持多层校验与真实 WebView2 gate；不以结构整洁为由削弱边界或批量重写                                                                                                                                                                                                  |
 
 本表不是产品 backlog。只有风险阻塞路线图中的获批场景，或重复证据达到处理阈值时，才创建架构 change；产品方向由 `docs/roadmap/ROADMAP.md` 决定。每个迁移切片必须保持行为与依赖不变、更新 as-built 地图、运行所属 Module 的最小检查，再运行 required gate。
 

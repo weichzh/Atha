@@ -163,6 +163,8 @@ fn try_run() -> Result<(), Box<dyn Error>> {
     let builder = tauri::Builder::default();
     #[cfg(any(windows, target_os = "linux"))]
     let (builder, endpoint_startup) = desktop_open::register_first(builder, &context)?;
+    #[cfg(any(windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     let app = builder
         .plugin(
             tauri_plugin_log::Builder::new()
