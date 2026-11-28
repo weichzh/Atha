@@ -42,11 +42,13 @@ schema 1 `.atha-data` 已组合规范化书架、全部耐久书源、离线词�
 
 Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联、重复关联、普通启动与完整多视口真壳回归；PCT-AL10 内部候选已通过同包同签名非降级覆盖安装、16 KiB、首次安装时间保持和启动烟测。Windows 仍只有打包配置静态检查，这些内部候选均未发布，也不等同于生产签名验收。
 
-## Now：UI / UX 整理
+## Now：阅读体验与真实书库验收
 
 当前阶段不扩展功能清单，而是让已经存在的阅读、消息和词典形成清楚的产品构图。阅读版面切片已经让 24 / 32 / 48 左右边距按视觉 CSS px 跨 DPR 生效，并把分页与滚动正文限制为约 760 CSS px 的居中单栏。笔记切片已经按 Telegram 的成熟层级整理为竖屏同一悬浮窗口中的 `B → C → B` 两页；横屏从左到右显示 `A+B`、`B+C` 或 `A+B+C`，其中 `A` 是正文、`B` 是笔记 / 对话列表、`C` 是当前消息线程。用户术语切片进一步固定“笔记 / 标注 / 对话 / 消息 / 原文引用”的层级，并把技术存储名称从资料库界面移除。
 
-术语判断优先降低用户在阅读语言与实现语言之间的翻译成本：入口叫“笔记”，无正文的原文记录才叫“标注”，线程叫“对话”，单项才叫“消息”。短标签“当前 / 本章 / 本书”依赖同屏的“对话范围”可访问名称，不脱离该控件单独复用。下一步先对默认阅读、列表和线程做一次跨视口整体复核，再决定是否存在新的实现切片。
+术语判断优先降低用户在阅读语言与实现语言之间的翻译成本：入口叫“笔记”，无正文的原文记录才叫“标注”，线程叫“对话”，单项才叫“消息”。短标签“当前 / 本章 / 本书”依赖同屏的“对话范围”可访问名称，不脱离该控件单独复用。
+
+书架、开书、笔记、设置与阅读控件的拆分已合入，最终组合通过 Chromium 回归。下一步按[当前工作](../ACTIVE.md)验收目标 WebView 的真实阅读链路和隔离书库的备份恢复，再据实际失败选择新的最小切片。
 
 本阶段以微信读书式安静阅读和 Telegram 式稳定消息流为参照，但只复用适合 Atha 主循环的设计判断，不照搬品牌外观。数据丢失、内容安全、引用错位和 Android 性能回归仍高于视觉扩展；每次只关闭一个可验证切片，不预建新框架、设置项、社区服务或同步 schema。内部候选的平台补证保留为后续交付条件，不与当前视觉判断混为一项。
 
@@ -62,29 +64,29 @@ Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联
 
 ## Done
 
-| 阶段 | 已交付能力 | 当前事实所有者 |
-| --- | --- | --- |
-| M0 | 项目记忆、任务路由、检查入口与事实所有权 | `AGENTS.md`、`docs/agents/workflow.md` |
-| M1 | Windows Rust workspace、正式后端与基础数据边界 | `docs/codebase/MAP.md`、`docs/codebase/DATABASE.md` |
-| M2 | WebView2 阅读内核：会话、Locator、排版、交互、恢复、书签、搜索、标注与困难样本门槛 | `docs/architecture/READER-CORE.md` |
-| M3 | EPUB3 导入、受控书根、稳定内容身份与真实书籍入口 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
-| M4 | Tauri / Svelte 产品壳、本地书架、消息式阅读、快照资产恢复、导出和消息数据库备份 | `docs/product/OVERVIEW.md`、`docs/architecture/MESSAGE-READING.md`、相关 ADR |
-| Android EPUB 纵切 | Tauri Android 工程、系统 picker / content URI 桥、EPUB 导入阅读、持久恢复与正式模拟器门禁 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
-| EPUB2 / NCX 子集 | OPF2 `spine@toc`、有界 NCX 前序目录、legacy cover、XHTML 1.1 与 Android 目录 / 位置恢复 | `docs/architecture/READER-CORE.md` |
-| CBZ JPEG / PNG | 自然序图片 section、ComicInfo 基础元数据、坏页继续、Windows WebView2 与 Android 16 KiB picker / 恢复 / PSS 门禁 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
-| 离线书架体验 | 本地标题 / 作者搜索、严格进度二态、稳定排序、显式批量选择、响应式三列与 Windows / Android 正式门 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
-| Markdown / TXT | 安全 Markdown 投影、遗留编码 TXT 章节、分组 sections、Android picker / 目录 / 搜索 / 恢复与十样本模拟器基线 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md` |
-| Linux Tauri 目标 | Tauri / WebKitGTK 日常 GUI 门、平台协议 URL、WebDriver 截图与日志隐私检查；Android 改为发布前或移动专项门 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md` |
-| FB2 / FBZ | 有界流式 XML、单根成员 FBZ、metadata / 封面 / 目录 / 内部链接投影、稳定内容身份与 Linux Tauri GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md` |
-| MOBI / AZW / AZW3 | 固定 `boko 0.5.0` 的有界 adapter、PalmDOC / MOBI6 / 纯 KF8、图片 / 唯一目录投影、词典早拒绝、十次 release benchmark 与 Linux 真 GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md` |
-| CSS 编辑与模块管理 | 可视排版、按需 CodeMirror 6、实时预览、32 个有界模块、筛选 / 排序 / 批量启停 / JSON 交换、旧状态迁移、失败回退与 Linux 真 GUI 门 | `docs/architecture/READER-CORE.md` |
-| CSS 社区模块边界 | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md` |
-| 本地阅读统计 | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门 | `reader/web/reader-state.mjs`、`docs/architecture/READER-CORE.md` |
-| 完整本地数据生命周期 | `.atha-data` 完整备份 / 恢复、恢复日志、分类占用、两级删除和 Linux 真壳管理界面 | `docs/decisions/ADR-0010-local-data-lifecycle.md`、`docs/architecture/READER-CORE.md` |
-| 跨书阅读记忆中心 | 最近阅读、跨书笔记与回复搜索、有书安全跳回、缺书及历史 Snapshot | `docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md` |
-| 桌面阅读工作区 | 横屏目录 / 搜索侧栏，笔记 `A+B` / `B+C` / `A+B+C` 投影，键鼠焦点、真实 frame 分页与窄屏回归 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
-| 日常入口与内部候选 | 桌面拖放、网格 / 列表、冷启动文件关联、Linux AppImage 与 PCT-AL10 内部候选门 | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md` |
-| 阅读操控与排版设置 | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势 | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md` |
-| 性能切片 | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护 | `docs/architecture/READER-CORE.md` |
+| 阶段                 | 已交付能力                                                                                                                               | 当前事实所有者                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| M0                   | 项目记忆、任务路由、检查入口与事实所有权                                                                                                 | `AGENTS.md`、`docs/agents/workflow.md`                                                |
+| M1                   | Windows Rust workspace、正式后端与基础数据边界                                                                                           | `docs/codebase/MAP.md`、`docs/codebase/DATABASE.md`                                   |
+| M2                   | WebView2 阅读内核：会话、Locator、排版、交互、恢复、书签、搜索、标注与困难样本门槛                                                       | `docs/architecture/READER-CORE.md`                                                    |
+| M3                   | EPUB3 导入、受控书根、稳定内容身份与真实书籍入口                                                                                         | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
+| M4                   | Tauri / Svelte 产品壳、本地书架、消息式阅读、快照资产恢复、导出和消息数据库备份                                                          | `docs/product/OVERVIEW.md`、`docs/architecture/MESSAGE-READING.md`、相关 ADR          |
+| Android EPUB 纵切    | Tauri Android 工程、系统 picker / content URI 桥、EPUB 导入阅读、持久恢复与正式模拟器门禁                                                | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
+| EPUB2 / NCX 子集     | OPF2 `spine@toc`、有界 NCX 前序目录、legacy cover、XHTML 1.1 与 Android 目录 / 位置恢复                                                  | `docs/architecture/READER-CORE.md`                                                    |
+| CBZ JPEG / PNG       | 自然序图片 section、ComicInfo 基础元数据、坏页继续、Windows WebView2 与 Android 16 KiB picker / 恢复 / PSS 门禁                          | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
+| 离线书架体验         | 本地标题 / 作者搜索、严格进度二态、稳定排序、显式批量选择、响应式三列与 Windows / Android 正式门                                         | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
+| Markdown / TXT       | 安全 Markdown 投影、遗留编码 TXT 章节、分组 sections、Android picker / 目录 / 搜索 / 恢复与十样本模拟器基线                              | `docs/architecture/READER-CORE.md`、`docs/agents/references.md`                       |
+| Linux Tauri 目标     | Tauri / WebKitGTK 日常 GUI 门、平台协议 URL、WebDriver 截图与日志隐私检查；Android 改为发布前或移动专项门                                | `docs/architecture/READER-CORE.md`、`docs/agents/references.md`                       |
+| FB2 / FBZ            | 有界流式 XML、单根成员 FBZ、metadata / 封面 / 目录 / 内部链接投影、稳定内容身份与 Linux Tauri GUI 纵切                                   | `docs/architecture/READER-CORE.md`、`docs/agents/references.md`                       |
+| MOBI / AZW / AZW3    | 固定 `boko 0.5.0` 的有界 adapter、PalmDOC / MOBI6 / 纯 KF8、图片 / 唯一目录投影、词典早拒绝、十次 release benchmark 与 Linux 真 GUI 纵切 | `docs/architecture/READER-CORE.md`、`docs/agents/references.md`                       |
+| CSS 编辑与模块管理   | 可视排版、按需 CodeMirror 6、实时预览、32 个有界模块、筛选 / 排序 / 批量启停 / JSON 交换、旧状态迁移、失败回退与 Linux 真 GUI 门         | `docs/architecture/READER-CORE.md`                                                    |
+| CSS 社区模块边界     | schema 1 模块包的独立解析、序列化、字段 / 大小 / 重复 ID / CSSOM 校验接口；没有网络、GitHub、登录或社区 UI                               | `reader/web/style-module-package.mjs`、`docs/architecture/READER-CORE.md`             |
+| 本地阅读统计         | 稳定 / 沉浸 / 可见 / 聚焦 / 活动计时、跨日本地聚合、今日 / 近 7 天 / 本书 / 连续阅读投影，以及 Linux 真 GUI 生命周期与性能门             | `reader/web/reader-state.mjs`、`docs/architecture/READER-CORE.md`                     |
+| 完整本地数据生命周期 | `.atha-data` 完整备份 / 恢复、恢复日志、分类占用、两级删除和 Linux 真壳管理界面                                                          | `docs/decisions/ADR-0010-local-data-lifecycle.md`、`docs/architecture/READER-CORE.md` |
+| 跨书阅读记忆中心     | 最近阅读、跨书笔记与回复搜索、有书安全跳回、缺书及历史 Snapshot                                                                          | `docs/architecture/MESSAGE-READING.md`、`docs/codebase/DATABASE.md`                   |
+| 桌面阅读工作区       | 横屏目录 / 搜索侧栏，笔记 `A+B` / `B+C` / `A+B+C` 投影，键鼠焦点、真实 frame 分页与窄屏回归                                              | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
+| 日常入口与内部候选   | 桌面拖放、网格 / 列表、冷启动文件关联、Linux AppImage 与 PCT-AL10 内部候选门                                                             | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
+| 阅读操控与排版设置   | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势                            | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md`               |
+| 性能切片             | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护                                                                                 | `docs/architecture/READER-CORE.md`                                                    |
 
 实施和验收证据见对应 change、PR 或 Git 历史；跨会话待办与下一步由关联 Issue 交接。

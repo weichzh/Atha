@@ -1,13 +1,8 @@
 # 当前工作
 
-本页指向当前工作的入口。
+本轮书架、阅读器和验证工具的实现已合入；后续按以下入口验收：
 
-- `change`：石墨暗色应用壳 → `docs/changes/graphite-app-shell.md`
-- `now`：继续拆分尚未交付的阅读交互和验证工具。
-- `change`：UI 重设计 → `docs/changes/ui-redesign.md`
-- `change`：阅读控件与沉浸状态 → `docs/changes/reader-chrome-v2.md`
-- `previous`：`docs/changes/uiux-document-evidence-restructure.md`、`docs/changes/ui-constraint-ablation.md`。
-- `next`：验证阅读控件和全局入口，核对剩余本地差异。完整阅读链路见 [Issue #1](https://github.com/weichzh/Atha/issues/1)，真实书库与跨端验收见 [Issue #2](https://github.com/weichzh/Atha/issues/2)；`H1-H4` 保持未决。
-- UI 重设计的 Context Bundle：`docs/changes/ui-redesign.md`、`docs/product/OVERVIEW.md`、`docs/codebase/READER-MOBILE-UI.md`、`docs/architecture/MESSAGE-READING.md`、`docs/agents/references.md`。
+- [Issue #1：完整阅读体验](https://github.com/weichzh/Atha/issues/1) — 用同一原创 EPUB 在目标 WebView 串起导入、找书、阅读、选区、笔记和原文回跳。当前实现见 [阅读界面代码地图](codebase/READER-MOBILE-UI.md)；[产品假设](product/OVERVIEW.md)中的 `H1-H4` 仍未决。
+- [Issue #2：真实书库与阅读资产耐久性](https://github.com/weichzh/Atha/issues/2) — 用隔离资料目录验证锚点、笔记及快照在重启和备份恢复后仍可回到原文，按平台记录覆盖。
 
-- `change`：紧凑书架工具栏 → `docs/changes/shelf-toolbar.md`
+各任务的最小阅读范围见[文档索引](INDEX.md#context-bundles)。
