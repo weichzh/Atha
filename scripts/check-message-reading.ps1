@@ -95,10 +95,10 @@ function Assert-MessageMaintenanceCommandsEnabled {
         }
     }
 
-    $libraryView = Get-Content -LiteralPath 'reader/app/src/components/LibraryView.svelte' -Raw
-    foreach ($message in '已取消消息备份。', '已取消消息恢复。') {
-        if (-not $libraryView.Contains($message)) {
-            throw "Library maintenance cancellation status is missing: $message"
+    $libraryAdapter = Get-Content -LiteralPath 'reader/app/src/lib/data/library-adapter.ts' -Raw
+    foreach ($message in '已取消备份', '已取消恢复') {
+        if (-not $libraryAdapter.Contains($message)) {
+            throw "Local data maintenance cancellation status is missing: $message"
         }
     }
 }
@@ -109,7 +109,7 @@ try {
     Assert-MessageMaintenanceCommandsEnabled
     Invoke-Checked $env:ATHA_CARGO @('fmt', '--all', '--check')
     Invoke-Checked $env:ATHA_CARGO @('test', '-p', 'atha-backend', '--test', 'message_reading')
-    Invoke-Checked $env:ATHA_NODE @('reader/web/conversations.test.mjs')
+    Invoke-Checked $env:ATHA_NODE @('--test', 'reader/web/conversations.test.mjs', 'reader/web/message-store.test.mjs')
     Push-Location 'reader/app'
     try {
         Invoke-Checked $env:ATHA_PNPM @('test:markdown')
