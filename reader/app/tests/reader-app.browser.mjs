@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { preview as startPreview } from "vite";
 import { verifyConversationEditor } from "./conversation-editor.browser.mjs";
+import { verifyReaderWorkspaceNavigation } from "./reader-workspace-navigation.browser.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -770,6 +771,7 @@ async function run() {
     });
 
     await verifyReadingMemoryRecent(browser, previewUrl);
+    await verifyReaderWorkspaceNavigation(browser, previewUrl);
     await verifyConversationEditor(browser, previewUrl, screenshotDir);
 
     const context = await browser.newContext({

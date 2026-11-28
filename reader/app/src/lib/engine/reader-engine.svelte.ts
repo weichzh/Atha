@@ -423,6 +423,7 @@ export class ReaderEngine {
     page: HTMLElement;
     host: HTMLElement;
     bridgeRoot: HTMLElement;
+    isBodyVisible: () => boolean;
     manifestPath: string;
     initialJump?: ReadingMemoryTarget | null;
   }) {
@@ -437,7 +438,7 @@ export class ReaderEngine {
       if (!cond) fail(code);
     };
 
-    const { frame, reader, page, host, bridgeRoot, manifestPath, initialJump } = elements;
+    const { frame, reader, page, host, bridgeRoot, isBodyVisible, manifestPath, initialJump } = elements;
     this.mountReaderEl = reader;
 
     // Build hidden bridge elements required by pure kernel modules
@@ -521,9 +522,7 @@ export class ReaderEngine {
       readerStyleSource: { href: new URL(bookReaderCssUrl, location.href).href },
       onLateLayout: (anchor: { offset: number; pageIndex: number | null; scrollTop: number | null }) => {
         if (this.disposed) return;
-        void this.navigation.resize(anchor.offset, null, anchor.pageIndex, anchor.scrollTop).then(() => {
-          this.syncSnapshots();
-        });
+        void this.navigation.resize(anchor.offset, this.session.snapshot().currentIndex, anchor.pageIndex, anchor.scrollTop);
       },
     });
 
@@ -600,6 +599,7 @@ export class ReaderEngine {
       pagination: this.pagination,
       locator: this.locator,
       preferences: this.prefController,
+      canResizeViewport: () => !this.disposed && isBodyVisible(),
       toc,
       chapterLabel,
       progressChapter,
@@ -801,7 +801,7 @@ export class ReaderEngine {
       });
 
       this.captureDomBindings(() => this.navigation.bindControls());
-      this.captureDomBindings(() => this.pagination.bindResize(() => this.navigation.resize()));
+      this.cleanups.push(this.pagination.bindResize(() => this.navigation.resize()));
       this.captureDomBindings(() => this.interaction.bind(), true);
       this.captureDomBindings(() => this.readerState.bind());
       this.captureDomBindings(() => this.statistics!.bind());
@@ -1284,7 +1284,6 @@ export class ReaderEngine {
   async resizeLayout() {
     if (this.disposed || !this.ready) return;
     await this.navigation.resize();
-    this.syncSnapshots();
   }
 
   validateCss(css: string): { valid: boolean; error: string | null } {
