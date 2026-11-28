@@ -94,11 +94,20 @@ try {
     document.querySelector(".reader-root")?.dataset.screenReady === "true" &&
     !document.querySelector(".opening-back, .opening-cover"));
   await waitForMode("bars:immersive");
-  const initialHeight = (844 - 48 - 24) * 2;
+  const frame = await page.locator(".reader-frame").boundingBox();
+  const initialHeight = frame.height * 2;
   assert.equal(await viewportHeight(), initialHeight, "pagination must fit the inset frame, not crop the page");
+  assert.ok(frame.y > 48 && frame.y + frame.height < 844 - 24, "reader rails stay within all insets");
+  await page.waitForFunction(() => window.systemBarsMessages.includes("battery:read"));
+  await send({ batteryPercent: 67 });
+  await page.locator(".battery-status").getByText("67%").waitFor();
+  await send({ batteryPercent: 101 });
+  assert.equal(await page.locator(".battery-status").textContent(), "67%");
+  await send({ batteryPercent: null });
+  await page.locator(".battery-status").waitFor({ state: "detached" });
   await send({ ...safe, top: 104 });
-  await page.waitForFunction(() =>
-    document.documentElement.style.getPropertyValue("--reader-height") === "1536px");
+  await page.waitForFunction((height) =>
+    document.documentElement.style.getPropertyValue("--reader-height") === height + "px", initialHeight - 8);
   await send(safe);
   await page.waitForFunction((height) =>
     document.documentElement.style.getPropertyValue("--reader-height") === height + "px", initialHeight);
@@ -137,8 +146,12 @@ try {
     await page.screenshot({ path: process.env.ATHA_INSETS_SCREENSHOT, animations: "disabled" });
   }
   assert.equal(await viewportHeight(), initialHeight);
+  const upper = await page.locator(".top-island").boundingBox();
+  const lower = await page.locator(".bottom-island").boundingBox();
+  assert.ok(upper.y + upper.height <= frame.y && lower.y >= frame.y + frame.height, "chrome must not cover body");
   await page.keyboard.press("Control+f");
   const bookSearch = page.getByRole("searchbox", { name: "搜索本书正文" });
+  await withinSafeArea(".directory-dialog");
   await bookSearch.fill("正文");
   await send({ ...safe, bottom: 0, imeVisible: true });
   await send(safe);

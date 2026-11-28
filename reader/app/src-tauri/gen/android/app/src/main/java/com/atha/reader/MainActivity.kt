@@ -2,6 +2,7 @@ package com.atha.reader
 
 import android.content.Context
 import android.graphics.Rect
+import android.os.BatteryManager
 import android.os.Bundle
 import android.view.ActionMode
 import android.view.Menu
@@ -38,6 +39,12 @@ private class SystemBarsBridge(private val activity: MainActivity, private val h
       }
       "selection:body" -> host.setBodySelection(true)
       "selection:none" -> host.setBodySelection(false)
+      "battery:read" -> {
+        val level = activity.getSystemService(BatteryManager::class.java)
+          ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+          ?.takeIf { it in 0..100 }
+        proxy.postMessage("""{"batteryPercent":$level}""")
+      }
       "bars:visible:light", "bars:visible:dark",
       "bars:immersive:light", "bars:immersive:dark" -> {
         val immersive = message.startsWith("bars:immersive:")

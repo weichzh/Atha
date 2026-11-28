@@ -1,19 +1,23 @@
 <script lang="ts">
   import {
     ArrowLeft,
+    Battery,
     Bookmark,
     ChevronLeft,
     ChevronRight,
     ListTree,
+    Lightbulb,
     MessageSquare,
+    Ellipsis,
     Search,
     Trash2,
     Type,
     X,
   } from "@lucide/svelte";
-  import { Dialog, Slider } from "bits-ui";
+  import { Dialog, Popover, Slider } from "bits-ui";
   import { onDestroy, onMount, tick, untrack } from "svelte";
-  import { fade, fly, scale } from "svelte/transition";
+  import { fade, scale } from "svelte/transition";
+  import { prefersReducedMotion as reducedMotion } from "svelte/motion";
   import { cubicOut } from "svelte/easing";
   import type { DictionaryFontScale, DictionaryLookup } from "../../dictionary.ts";
   import type { LibraryBook, ReadingMemoryTarget } from "../../library.ts";
@@ -25,7 +29,8 @@
   import { registerBackHandler, type BackSource } from "../data/back-stack.ts";
   import type { OpeningPaperMeasure } from "../data/open-transition.ts";
   import { resolveEffectiveTheme } from "../engine/preferences.ts";
-  import { setNativeSelectionSuppressed, syncSystemBarsMode } from "../data/system-bars.ts";
+  import { setNativeSelectionSuppressed, syncSystemBarsMode, watchReaderBattery } from "../data/system-bars.ts";
+  import { uiPrefs } from "../data/ui-prefs.svelte.ts";
   import { ReaderEngine } from "../engine/reader-engine.svelte.ts";
   import type { LightboxPayload } from "../types.ts";
   import ConfirmDialog from "./ConfirmDialog.svelte";
@@ -61,6 +66,14 @@
   let viewportHeight = $state(typeof window !== "undefined" ? window.innerHeight : 900);
 
   let chromeOpen = $state(false);
+  let quickActionsOpen = $state(false);
+  let runningChapter = $state<HTMLButtonElement>();
+  let clockText = $state("");
+  let batteryPercent = $state<number | null>(null);
+  let swipeY = $state(0);
+  const pullThreshold = 104;
+  const notesThreshold = 84;
+  let copyingSelection = false;
   let lastOverlayClosedAt = 0;
   let settingsOpen = $state(false);
   let directoryOpen = $state(false);
@@ -95,11 +108,11 @@
     bookTitle: untrack(() => book.title),
     callbacks: {
       getPageTurnStage: () => pageTurnStage,
-      onToggleChrome: () => {
-        chromeOpen = !chromeOpen;
-      },
+      beginVerticalSwipe,
+      onToggleChrome: toggleChrome,
       onOpenNoteThread: (rootId: string) => {
         selectedRootId = rootId;
+        hideChrome();
         notesMode = "thread";
       },
       onOpenLightbox: (target: HTMLElement) => {
@@ -135,6 +148,34 @@
       ? systemDark ? "dark" : "light"
       : resolveEffectiveTheme(engine.preferences.effective.theme));
   let readerShell: HTMLElement;
+  let readerRoot = $state<HTMLDivElement>();
+  const minimalChrome = $derived(uiPrefs.state.readerChromeStyle === "minimal");
+  const notesGestureAvailable = $derived(minimalChrome && uiPrefs.state.gestureSwipeUpNotes &&
+    engine.preferences.book.readingMode === "paged");
+  const readerOverlayOpen = $derived(settingsOpen || directoryOpen || dictOpen ||
+    Boolean(engine.activeFootnote || engine.footnotePending || lightboxPayload || pendingDeleteRootId));
+  const quiet = $derived(!entryBlocked && engine.firstScreenReady && !engine.error &&
+    !chromeOpen && !readerOverlayOpen && notesMode === "closed");
+  const pullArmed = $derived(swipeY >= pullThreshold);
+  const swipeUpArmed = $derived(-swipeY >= notesThreshold);
+  const lampOn = $derived(engine.isBookmarked !== pullArmed);
+
+  $effect(() => {
+    if (!quiet) return;
+    const format = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    let timer: number;
+    const update = () => {
+      const now = new Date();
+      clockText = format.format(now);
+      timer = window.setTimeout(update, 60_000 - now.getTime() % 60_000);
+    };
+    update();
+    const stopBattery = watchReaderBattery((percent) => { batteryPercent = percent; });
+    return () => {
+      window.clearTimeout(timer);
+      stopBattery();
+    };
+  });
 
   $effect(() => {
     const bodyReady = !entryBlocked && engine.firstScreenReady && !engine.error &&
@@ -289,6 +330,7 @@
   async function handleDiscussSelection() {
     const sel = engine.selection;
     if (!sel) return;
+    hideChrome();
     if (sel.existingRootId) {
       pendingDraft = null;
       selectedRootId = sel.existingRootId;
@@ -310,17 +352,55 @@
 
   async function handleCopySelection() {
     const sel = engine.selection;
-    if (!sel) return;
+    if (!sel || copyingSelection) return;
+    copyingSelection = true;
     try {
-      await navigator.clipboard?.writeText(sel.text);
+      await navigator.clipboard.writeText(sel.text);
+      if (engine.selection === sel) engine.clearSelection();
+      engine.showToast("已复制");
     } catch {
-      // Clipboard may be unavailable in restricted contexts
+      engine.showToast("未能复制，请重试");
+    } finally {
+      copyingSelection = false;
     }
-    engine.clearSelection();
+  }
+
+  function hideChrome() {
+    quickActionsOpen = false;
+    chromeOpen = false;
+    scrubbingValue = null;
+  }
+
+  function toggleChrome() {
+    if (readerOverlayOpen || entryBlocked) return;
+    if (quickActionsOpen) quickActionsOpen = false;
+    else if (chromeOpen) hideChrome();
+    else chromeOpen = true;
+  }
+
+  function beginVerticalSwipe() {
+    const eligible = () => quiet && !engine.selection && engine.sessionState === "layout-stable" &&
+      engine.preferences.book.readingMode === "paged";
+    if (!eligible() || (!uiPrefs.state.gesturePullBookmark && !notesGestureAvailable)) return;
+    return (phase: "move" | "end" | "cancel", deltaY: number) => {
+      if (phase === "cancel" || !eligible()) {
+        swipeY = 0;
+        return;
+      }
+      const pull = deltaY > 0 && uiPrefs.state.gesturePullBookmark;
+      const notes = deltaY < 0 && notesGestureAvailable;
+      if (phase === "move") {
+        swipeY = pull || notes ? deltaY : 0;
+      } else {
+        swipeY = 0;
+        if (pull && deltaY >= pullThreshold) void engine.toggleBookmark();
+        if (notes && -deltaY >= notesThreshold) openNotesList();
+      }
+    };
   }
 
   function openNotesList() {
-    chromeOpen = false;
+    hideChrome();
     if (notesMode === "closed") {
       notesMode = "list";
     } else {
@@ -333,7 +413,12 @@
   function openDirectory(tab: "toc" | "bookmarks" | "search") {
     directoryTab = tab;
     directoryOpen = true;
-    chromeOpen = false;
+    hideChrome();
+  }
+
+  function openReaderSettings() {
+    quickActionsOpen = false;
+    settingsOpen = true;
   }
 
   function handleBackAction(source: BackSource): boolean {
@@ -361,6 +446,8 @@
       lastOverlayClosedAt = Date.now();
     } else if (dictOpen) {
       dictOpen = false;
+    } else if (quickActionsOpen) {
+      quickActionsOpen = false;
     } else if (engine.selection) {
       engine.clearSelection();
     } else if (notesMode !== "closed") {
@@ -373,7 +460,7 @@
         pendingDraft = null;
       }
     } else if (chromeOpen) {
-      chromeOpen = false;
+      hideChrome();
     } else if (source === "back" || (!engine.firstScreenReady && !engine.error)) {
       onBackToShelf();
     } else {
@@ -383,7 +470,7 @@
   }
 
   function handleGlobalKeydown(event: KeyboardEvent) {
-    if (entryBlocked || !engine.firstScreenReady || engine.activeFootnote || event.defaultPrevented) return;
+    if (entryBlocked || !engine.firstScreenReady || readerOverlayOpen || event.defaultPrevented) return;
     const target = event.target as Element | null;
     const isEditing = Boolean(
       target?.closest("input, textarea, select, [contenteditable], .ProseMirror, .cm-editor"),
@@ -398,7 +485,7 @@
     if (!isEditing && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (event.key.toLowerCase() === "h") {
         event.preventDefault();
-        chromeOpen = !chromeOpen;
+        toggleChrome();
       } else if (event.key.toLowerCase() === "n") {
         event.preventDefault();
         openNotesList();
@@ -418,6 +505,7 @@
 >
 <div
   class="reader-root"
+  bind:this={readerRoot}
   data-reader-theme={resolvedTheme}
   data-app-theme={resolvedTheme === "dark" ? "dark" : "light"}
   data-opening-theme={resolvedTheme}
@@ -427,7 +515,8 @@
     <!-- Region A: Reading Surface -->
     <section class="region-a" class:hidden-a={hideReaderA} aria-label="正文阅读区">
       <div class="reader-frame" bind:this={frameEl}>
-        <div class="reader" bind:this={readerEl}>
+        <div class="reader" style:--pull-translation={`${Math.min(96, Math.max(0, swipeY) * 0.58)}px`}
+          class:pulling={swipeY > 0} bind:this={readerEl}>
           <div class="page" bind:this={pageEl}>
             <div class="reader-content-host" bind:this={hostEl}></div>
           </div>
@@ -447,157 +536,145 @@
         </div>
       {/if}
 
-      {#if engine.statusToast && !settingsOpen && !directoryOpen && !lightboxPayload}
-        <div
-          class="reader-toast"
-          class:above-chrome={chromeOpen}
-          role="status"
-          transition:fade={{ duration: 150 }}
-        >
-          {engine.statusToast}
+      {#if quiet}
+        <header class="running-head">
+          <button bind:this={runningChapter} type="button" class="running-chapter"
+            aria-label={`${engine.chapterLabel}，打开目录`} onclick={() => openDirectory("toc")}>
+            <span>{engine.chapterLabel}</span>
+            <ListTree size={14} aria-hidden="true" />
+          </button>
+          {#if engine.isBookmarked}
+            <Bookmark size={14} fill="currentColor" aria-label="当前页已加书签" />
+          {/if}
+        </header>
+        <footer class="running-foot tabular">
+          <div class="running-power">
+            <time>{clockText}</time>
+            {#if batteryPercent !== null}
+              <span class="battery-status" aria-label={`电量 ${batteryPercent}%`}>
+                <Battery size={15} aria-hidden="true" />{batteryPercent}%
+              </span>
+            {/if}
+          </div>
+          <span>本节 {engine.page + 1}/{engine.pages} 页 <span class="dot-sep">·</span> {engine.percent ?? 0}%</span>
+        </footer>
+      {/if}
+
+      {#if swipeY > 0}
+        <div class="bookmark-lamp" class:lit={lampOn} aria-hidden="true">
+          <span class="lamp-cord" style:height={`${Math.min(108, 10 + swipeY * 0.65)}px`}></span>
+          <span class="lamp-bulb"><Lightbulb size={21} /></span>
+          <span class="gesture-caption">
+            {pullArmed
+              ? engine.isBookmarked ? "松开取消书签" : "松开添加书签"
+              : "下拉书签"}
+          </span>
+        </div>
+      {:else if swipeY < 0}
+        <div class="notes-swipe" aria-hidden="true" style:translate={`-50% ${Math.max(-30, swipeY * 0.26)}px`}>
+          <MessageSquare size={16} />
+          {swipeUpArmed ? "松开打开笔记" : "上滑打开笔记"}
         </div>
       {/if}
 
-      <!-- Top & Bottom Floating Frosted Glass Islands -->
-      <div
-        class="reader-controls"
-        style={chromeOpen ? "visibility: visible; opacity: 1;" : "visibility: hidden; opacity: 0; pointer-events: none;"}
-      >
+      <div class="reader-toast" class:above-chrome={chromeOpen} role="status">
+        {#if engine.statusToast && !readerOverlayOpen}
+          <span>{engine.statusToast}</span>
+        {/if}
+      </div>
+
       {#if chromeOpen}
-        <header
-          class="top-island glass-island"
-          transition:fly={{ y: -18, duration: 220, easing: cubicOut }}
-        >
-          <div class="island-left">
-            <button
-              id="reader-back"
-              type="button"
-              class="island-btn back-btn"
-              aria-label="返回书架"
-              onclick={onBackToShelf}
-            >
-              <ArrowLeft size={17} />
+        <div class="reader-controls" data-chrome={minimalChrome ? "minimal" : "classic"}>
+          <header class="top-island glass-island">
+            <button id="reader-back" type="button" class="island-btn" aria-label="返回书架" onclick={onBackToShelf}>
+              <ArrowLeft size={18} />
               <span class="btn-text">书架</span>
             </button>
-          </div>
-
-          <div class="island-title">
-            <span class="island-chapter">{engine.chapterLabel}</span>
-            <span class="island-book">{engine.bookTitle || book.title}</span>
-          </div>
-
-          <div class="island-right">
-            <button
-              type="button"
-              class="island-icon-btn"
-              class:active-tint={engine.isBookmarked}
-              aria-label={engine.isBookmarked ? "取消当前页书签" : "添加当前页书签"}
-              aria-pressed={engine.isBookmarked}
-              onclick={() => void engine.toggleBookmark()}
-            >
-              <Bookmark size={17} fill={engine.isBookmarked ? "currentColor" : "none"} />
+            <button type="button" class="island-title" aria-label={`${engine.chapterLabel}，打开目录`}
+              onclick={() => openDirectory("toc")}>
+              <span class="island-chapter">{engine.chapterLabel}</span>
+              {#if !minimalChrome}<span class="island-book">{engine.bookTitle || book.title}</span>{/if}
             </button>
-            <button
-              type="button"
-              class="island-icon-btn"
-              aria-label="目录与全书搜索"
-              onclick={() => openDirectory("toc")}
-            >
-              <ListTree size={17} />
-            </button>
-            <button
-              type="button"
-              class="island-icon-btn notes-btn"
-              class:active-tint={notesMode !== "closed"}
-              aria-label="打开笔记与对话"
-              onclick={openNotesList}
-            >
-              <MessageSquare size={17} />
-              {#if engine.roots.length > 0}
-                <span class="notes-badge tabular">{engine.roots.length}</span>
+            <div class="island-right">
+              {#if !minimalChrome}
+                <button type="button" class="island-icon-btn" class:active-tint={engine.isBookmarked}
+                  aria-label={engine.isBookmarked ? "取消当前页书签" : "添加当前页书签"}
+                  aria-pressed={engine.isBookmarked} onclick={() => void engine.toggleBookmark()}>
+                  <Bookmark size={18} fill={engine.isBookmarked ? "currentColor" : "none"} />
+                </button>
               {/if}
-            </button>
-            <button
-              type="button"
-              class="island-icon-btn"
-              aria-label="排版与主题设置"
-              onclick={() => {
-                settingsOpen = true;
-              }}
-            >
-              <Type size={17} />
-            </button>
-          </div>
-        </header>
-
-        <!-- Bottom Floating Frosted Glass Island -->
-        <footer
-          class="bottom-island glass-island"
-          transition:fly={{ y: 20, duration: 220, easing: cubicOut }}
-        >
-          <div class="scrub-row">
-            <button
-              type="button"
-              class="island-icon-btn"
-              aria-label="上一页"
-              disabled={!engine.canPrev}
-              onclick={() => void engine.previousPage()}
-            >
-              <ChevronLeft size={18} />
-            </button>
-
-            <div class="scrubber-wrap">
-              {#if scrubbingValue !== null}
-                <div class="scrub-callout glass-popover tabular">
-                  {engine.chapterLabel} · {scrubbingValue}%
-                </div>
+              <button type="button" class="island-icon-btn" aria-label="目录与全书搜索" onclick={() => openDirectory("toc")}>
+                <ListTree size={18} />
+              </button>
+              {#if minimalChrome}
+                <Popover.Root bind:open={quickActionsOpen} onOpenChange={(next) => {
+                  if (!next) lastOverlayClosedAt = Date.now();
+                }}>
+                  <Popover.Trigger class="island-icon-btn" aria-label="更多阅读操作">
+                    <Ellipsis size={20} />
+                  </Popover.Trigger>
+                  <Popover.Content sideOffset={8} align="end" class="reader-quick-actions glass-popover"
+                    aria-label="更多阅读操作">
+                    <button type="button" onclick={openNotesList}><MessageSquare size={17} />笔记与对话</button>
+                    <button type="button" onclick={() => { quickActionsOpen = false; void engine.toggleBookmark(); }}>
+                      <Bookmark size={17} fill={engine.isBookmarked ? "currentColor" : "none"} />
+                      {engine.isBookmarked ? "取消当前页书签" : "添加当前页书签"}
+                    </button>
+                    <button type="button" onclick={openReaderSettings}><Type size={17} />排版与主题设置</button>
+                  </Popover.Content>
+                </Popover.Root>
+              {:else}
+                <button type="button" class="island-icon-btn" class:active-tint={notesMode !== "closed"}
+                  aria-label="打开笔记与对话" onclick={openNotesList}>
+                  <MessageSquare size={18} />
+                  {#if engine.roots.length > 0}<span class="notes-badge tabular">{engine.roots.length}</span>{/if}
+                </button>
+                <button type="button" class="island-icon-btn" aria-label="排版与主题设置" onclick={openReaderSettings}>
+                  <Type size={18} />
+                </button>
               {/if}
-              <Slider.Root
-                type="single"
-                min={0}
-                max={100}
-                step={1}
-                value={displayPercent}
-                onValueChange={(v) => (scrubbingValue = v)}
-                onValueCommit={(v) => {
-                  scrubbingValue = null;
-                  void engine.goToProgressPercent(v);
-                }}
-                class="atha-slider"
-                aria-label="全书阅读进度"
-              >
-                <span class="atha-slider-track">
-                  <Slider.Range class="atha-slider-range" />
-                </span>
-                <Slider.Thumb index={0} class="atha-slider-thumb" />
-              </Slider.Root>
             </div>
-
-            <button
-              type="button"
-              class="island-icon-btn"
-              aria-label="下一页"
-              disabled={!engine.canNext}
-              onclick={() => void engine.nextPage()}
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
-
-          <div class="stats-strip tabular">
-            <span>{engine.progressPosition}</span>
-            <span class="dot-sep" aria-hidden="true">·</span>
-            <span>约 {engine.percent ?? 0}%</span>
-            <span class="dot-sep" aria-hidden="true">·</span>
-            <span>今日 {formatShortDuration(engine.stats.todayMs)}</span>
-            <span class="dot-sep hide-xs" aria-hidden="true">·</span>
-            <span class="hide-xs">本书 {formatShortDuration(engine.stats.bookMs)}</span>
-            <span class="dot-sep hide-xs" aria-hidden="true">·</span>
-            <span class="hide-xs">连续 {engine.stats.streakDays} 天</span>
-          </div>
-        </footer>
+          </header>
+          <footer class="bottom-island glass-island">
+            <div class="scrub-row">
+              <button type="button" class="island-icon-btn" aria-label={minimalChrome ? "上一章" : "上一页"}
+                disabled={minimalChrome ? engine.sectionIndex <= 0 : !engine.canPrev}
+                onclick={() => void (minimalChrome ? engine.goToAdjacentSection(-1) : engine.previousPage())}>
+                <ChevronLeft size={18} />
+              </button>
+              <div class="scrubber-wrap">
+                {#if scrubbingValue !== null}
+                  <div class="scrub-callout glass-popover tabular">{scrubbingValue}%</div>
+                {/if}
+                <Slider.Root type="single" min={0} max={100} step={1} value={displayPercent}
+                  onValueChange={(v) => (scrubbingValue = v)}
+                  onValueCommit={(v) => { scrubbingValue = null; void engine.goToProgressPercent(v); }}
+                  class="atha-slider" aria-label="全书阅读进度">
+                  <span class="atha-slider-track"><Slider.Range class="atha-slider-range" /></span>
+                  <Slider.Thumb index={0} class="atha-slider-thumb" />
+                </Slider.Root>
+              </div>
+              <button type="button" class="island-icon-btn" aria-label={minimalChrome ? "下一章" : "下一页"}
+                disabled={minimalChrome ? engine.sectionIndex + 1 >= engine.sectionCount : !engine.canNext}
+                onclick={() => void (minimalChrome ? engine.goToAdjacentSection(1) : engine.nextPage())}>
+                <ChevronRight size={18} />
+              </button>
+            </div>
+            <div class="stats-strip tabular">
+              <span>{engine.progressPosition} <span class="dot-sep" aria-hidden="true">·</span> {engine.percent ?? 0}%</span>
+              {#if minimalChrome}
+                {#if notesGestureAvailable}
+                  <span class="notes-hint">上滑打开笔记</span>
+                {/if}
+              {:else}
+                <span class="hide-xs">今日 {formatShortDuration(engine.stats.todayMs)}</span>
+                <span class="hide-xs">本书 {formatShortDuration(engine.stats.bookMs)}</span>
+                <span class="hide-xs">连续 {engine.stats.streakDays} 天</span>
+              {/if}
+            </div>
+          </footer>
+        </div>
       {/if}
-      </div>
     </section>
 
     <!-- Regions B & C: C1 Conversation Workspace -->
@@ -691,26 +768,31 @@
     onClosed={() => (lastOverlayClosedAt = Date.now())}
     {engine}
     bookTitle={book.title}
+    portalTarget={readerRoot}
   />
 
   <!-- Directory / Bookmarks / Search Dialog -->
   <Dialog.Root bind:open={directoryOpen}>
-    <Dialog.Portal>
+    <Dialog.Portal to={readerRoot}>
       <Dialog.Overlay forceMount>
         {#snippet child({ props, open: isOpen })}
           {#if isOpen}
-            <div {...props} class="atha-dialog-overlay" transition:fade={{ duration: 150 }}></div>
+            <div {...props} class="atha-dialog-overlay" transition:fade={{ duration: reducedMotion.current ? 0 : 150 }}></div>
           {/if}
         {/snippet}
       </Dialog.Overlay>
-      <Dialog.Content forceMount>
+      <Dialog.Content forceMount onCloseAutoFocus={(event) => {
+        if (!quiet) return;
+        event.preventDefault();
+        void tick().then(() => (runningChapter ?? readerShell)?.focus({ preventScroll: true }));
+      }}>
         {#snippet child({ props, open: isOpen })}
           {#if isOpen}
             <div
               {...props}
-              class="atha-dialog-content wide directory-dialog"
+              class="atha-dialog-content wide reader-sheet directory-dialog"
               aria-label="目录、书签与全书搜索"
-              transition:scale={{ start: 0.96, duration: 190, easing: cubicOut }}
+              transition:scale={{ start: 0.96, duration: reducedMotion.current ? 0 : 190, easing: cubicOut }}
               onpointerdown={(e) => e.stopPropagation()}
             >
               <div class="dir-head">
@@ -896,8 +978,7 @@
     pointer-events: none;
   }
 
-  .reader-controls :global(.top-island),
-  .reader-controls :global(.bottom-island) {
+  .reader-controls :is(.top-island, .bottom-island) {
     pointer-events: auto;
   }
 
@@ -943,10 +1024,146 @@
   }
 
   .region-a {
+    /* Rails stay the same height from opening through both chrome modes.
+       Pagination measures the frame inside them, never the sheet or chrome. */
+    --reader-head: 68px;
+    --reader-foot: 88px;
     position: relative;
+    padding-block: var(--reader-head) var(--reader-foot);
     flex: 1;
     min-width: 0;
     height: 100%;
+  }
+
+  .reader-frame > .reader:not([data-reading-mode="scroll"]) {
+    padding-block: max(0px, calc(var(--reader-pad-y, 48px) - 36px * var(--reader-dpr, 1)));
+    touch-action: pan-x pinch-zoom;
+    translate: 0 var(--pull-translation);
+    transition: translate 230ms var(--ease-spring);
+  }
+
+  .reader-frame > .reader.pulling {
+    transition: none;
+  }
+
+  .running-head,
+  .running-foot {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: calc(100% - 40px);
+    max-width: 760px;
+    left: 50%;
+    translate: -50% 0;
+    color: var(--ink-muted);
+    font-size: 12px;
+  }
+
+  .running-head {
+    bottom: calc(100% - var(--reader-head));
+  }
+
+  .running-chapter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    min-width: 44px;
+    max-width: 100%;
+    font-weight: 500;
+  }
+
+  .running-chapter span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .running-chapter :global(svg) {
+    flex-shrink: 0;
+  }
+
+  .running-chapter:is(:hover, :focus-visible) {
+    color: var(--ink-primary);
+  }
+
+  .running-foot {
+    top: calc(100% - var(--reader-foot) + 14px);
+    min-height: 22px;
+  }
+
+  .running-power,
+  .battery-status {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .battery-status {
+    gap: 4px;
+  }
+
+  .bookmark-lamp {
+    position: absolute;
+    z-index: 40;
+    top: 0;
+    right: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 132px;
+    pointer-events: none;
+  }
+
+  .lamp-cord {
+    width: 2px;
+    background: var(--ink-muted);
+  }
+
+  .lamp-bulb {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--bg-surface);
+    color: var(--ink-secondary);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .lit .lamp-bulb {
+    color: var(--warning);
+    background: var(--bg-elevated);
+    box-shadow: 0 3px 18px var(--warning-soft);
+  }
+
+  .gesture-caption,
+  .notes-swipe {
+    color: var(--ink-primary);
+    background: var(--bg-surface);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-sm);
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .gesture-caption {
+    margin-top: 8px;
+  }
+
+  .notes-swipe {
+    position: absolute;
+    z-index: 40;
+    bottom: 20px;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    pointer-events: none;
   }
 
   .region-a.hidden-a {
@@ -973,35 +1190,40 @@
 
   .reader-toast {
     position: absolute;
-    bottom: 24px;
+    bottom: 14px;
     left: 50%;
     translate: -50% 0;
     z-index: 55;
-    padding: 8px 18px;
-    border-radius: var(--radius-pill);
-    background: var(--bg-selection-pill);
-    color: var(--ink-selection-pill);
-    box-shadow: var(--shadow-island);
-    font-size: 12.5px;
+    max-width: calc(100% - 24px);
+    font-size: 13px;
     font-weight: 500;
     pointer-events: none;
   }
 
+  .reader-toast span {
+    display: block;
+    padding: 7px 14px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-selection-pill);
+    color: var(--ink-selection-pill);
+    box-shadow: var(--shadow-island);
+  }
+
   .reader-toast.above-chrome {
-    bottom: 118px;
+    bottom: var(--reader-foot);
   }
 
   /* Floating Top & Bottom Islands */
   .top-island {
     position: absolute;
-    top: 16px;
+    top: 10px;
     left: 20px;
     right: 20px;
     z-index: 35;
     margin: 0 auto;
     max-width: 960px;
-    min-height: 54px;
-    padding: 6px 10px 6px 8px;
+    min-height: 52px;
+    padding: 4px 8px;
     border-radius: var(--radius-pill);
     display: flex;
     align-items: center;
@@ -1009,7 +1231,6 @@
     gap: 12px;
   }
 
-  .island-left,
   .island-right {
     display: flex;
     align-items: center;
@@ -1021,7 +1242,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 40px;
+    min-height: 44px;
     padding: 0 14px;
     border-radius: var(--radius-pill);
     font-size: 13.5px;
@@ -1039,8 +1260,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 40px;
-    min-height: 40px;
+    min-width: 44px;
+    min-height: 44px;
     border-radius: var(--radius-pill);
     color: var(--ink-secondary);
     transition: background-color 160ms var(--ease-smooth), color 160ms var(--ease-smooth);
@@ -1080,6 +1301,35 @@
     flex-direction: column;
     align-items: center;
     text-align: center;
+    justify-content: center;
+    min-height: 44px;
+    border-radius: var(--radius-sm);
+  }
+
+  .island-title:hover {
+    background: var(--bg-well);
+  }
+
+  .reader-controls :global(.reader-quick-actions) {
+    padding: 6px;
+    border-radius: var(--radius-md);
+    min-width: 172px;
+  }
+
+  .reader-controls :global(.reader-quick-actions button) {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: var(--radius-xs);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .reader-controls :global(.reader-quick-actions button:hover) {
+    background: var(--bg-well);
   }
 
   .island-chapter {
@@ -1103,13 +1353,13 @@
 
   .bottom-island {
     position: absolute;
-    bottom: 18px;
+    bottom: 6px;
     left: 20px;
     right: 20px;
     z-index: 35;
     margin: 0 auto;
     max-width: 720px;
-    padding: 10px 16px 11px;
+    padding: 5px 12px 7px;
     border-radius: var(--radius-xl);
     display: flex;
     flex-direction: column;
@@ -1125,6 +1375,10 @@
   .scrubber-wrap {
     position: relative;
     flex: 1;
+  }
+
+  .scrubber-wrap :global(.atha-slider) {
+    height: 44px;
   }
 
   .scrub-callout {
@@ -1143,47 +1397,73 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    font-size: 11.5px;
+    gap: 12px;
+    min-height: 18px;
+    font-size: 12px;
     color: var(--ink-muted);
+    white-space: nowrap;
+  }
+
+  .stats-strip :is(span, button) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .notes-hint {
+    color: var(--accent);
   }
 
   .dot-sep {
     opacity: 0.45;
   }
 
-  /* Directory Dialog */
-  .directory-dialog {
-    left: 50%;
-    top: 50%;
+  :global(.atha-dialog-content.reader-sheet) {
+    inset: calc(var(--safe-area-top) + 16px) calc(var(--safe-area-right) + 16px)
+      calc(var(--safe-area-bottom) + 16px) calc(var(--safe-area-left) + 16px);
+    margin: auto;
     transform: none;
-    translate: -50% -50%;
+    width: min(640px, calc(100% - var(--safe-area-left) - var(--safe-area-right) - 32px));
+    height: fit-content;
+    max-height: calc(100vh - var(--safe-area-top) - var(--safe-area-bottom) - 32px);
+    max-height: calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 32px);
+    background: var(--bg-surface);
+    color: var(--ink-primary);
   }
 
   .dir-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    gap: 6px;
     margin-bottom: 16px;
   }
 
+  .dir-head .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .dir-tabs {
-    display: inline-flex;
-    padding: 4px;
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 3px;
     border-radius: var(--radius-pill);
     background: var(--bg-well);
-    gap: 4px;
+    gap: 3px;
   }
 
   .dir-tab {
-    height: 34px;
-    padding: 0 14px;
+    min-height: 44px;
+    padding: 0 2px;
     border-radius: var(--radius-pill);
     font-size: 13px;
     font-weight: 500;
     color: var(--ink-secondary);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
   }
 
   .dir-tab.active {
@@ -1235,6 +1515,7 @@
 
   .dir-search-input {
     flex: 1;
+    min-width: 0;
     height: 40px;
     padding: 0 14px;
     display: flex;
@@ -1287,16 +1568,28 @@
   }
 
   @media (max-width: 640px) {
+    :global(.atha-dialog-content.reader-sheet) {
+      top: auto;
+      bottom: var(--safe-area-bottom);
+      left: var(--safe-area-left);
+      right: var(--safe-area-right);
+      margin: 0;
+      transform-origin: center bottom;
+      width: auto;
+      height: 70vh;
+      height: 70dvh;
+      padding: 18px 14px;
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    }
+
     .top-island {
       left: 10px;
       right: 10px;
-      top: 10px;
     }
 
     .bottom-island {
       left: 10px;
       right: 10px;
-      bottom: 12px;
     }
 
     .btn-text,
@@ -1311,9 +1604,12 @@
       justify-content: center;
     }
 
-    .island-icon-btn {
-      min-width: 44px;
-      min-height: 44px;
+    .top-island {
+      gap: 4px;
+    }
+
+    .island-right {
+      gap: 0;
     }
   }
 </style>

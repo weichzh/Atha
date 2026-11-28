@@ -632,9 +632,12 @@ async function run() {
     await page.waitForTimeout(200);
 
     // 5. Real text selection inside closed Shadow DOM + Floating Pill + Dictionary
-    await page.mouse.move(460, 292);
+    // This fixture's first ordinary paragraph starts about 230px below the
+    // page top; anchor the real mouse drag to the paper, not the window.
+    const paper = await page.locator(".page").boundingBox();
+    await page.mouse.move(paper.x + 120, paper.y + 242);
     await page.mouse.down();
-    await page.mouse.move(660, 292, { steps: 12 });
+    await page.mouse.move(paper.x + 320, paper.y + 242, { steps: 12 });
     await page.mouse.up();
     await page.waitForSelector(".selection-capsule", { timeout: 5000 });
     await page.waitForTimeout(250);

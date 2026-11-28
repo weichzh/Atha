@@ -1,6 +1,7 @@
 <script lang="ts">
   import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
   import { BookOpen, Copy, Highlighter, MessageSquarePlus, RefreshCw, Trash2 } from "@lucide/svelte";
+  import { prefersReducedMotion as reducedMotion } from "svelte/motion";
   import { scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import type { ActiveSelectionState } from "../types.ts";
@@ -63,7 +64,7 @@
   role="toolbar"
   tabindex="-1"
   aria-label="选区操作"
-  transition:scale={{ start: 0.94, duration: 150, easing: cubicOut }}
+  transition:scale={{ start: 0.94, duration: reducedMotion.current ? 0 : 150, easing: cubicOut }}
 >
   {#if selection.existingRootId}
     <button type="button" class="cap-btn" onclick={onDiscuss}>
@@ -99,7 +100,8 @@
       <BookOpen size={15} />
       <span>查词</span>
     </button>
-    <button type="button" class="cap-btn" onclick={onCopy}>
+    <button type="button" class="cap-btn" onclick={onCopy}
+      onpointerdown={(event) => { if (event.pointerType === "mouse") event.preventDefault(); }}>
       <Copy size={15} />
       <span>复制</span>
     </button>
@@ -153,5 +155,12 @@
 
   .cap-btn.danger {
     color: #f48c84;
+  }
+
+  @media (pointer: coarse) {
+    .cap-btn {
+      min-height: 44px;
+      padding-inline: 8px;
+    }
   }
 </style>

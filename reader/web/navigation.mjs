@@ -120,7 +120,13 @@ export function createNavigation({
     next.disabled = state.currentIndex + 1 === state.sections && page.page + 1 === page.pages;
     const index = currentTocIndex(preferredTocIndex, contentOffset);
     if (index >= 0) toc.value = String(index);
-    const label = book().toc[index]?.label || `第 ${state.currentIndex + 1} 节`;
+    // At a chapter opening, the first linked fragment can still be ahead.
+    // Use its label without selecting the TOC entry or moving the anchor.
+    const description = book();
+    const sectionHref = description.sections[state.currentIndex]?.href;
+    const label = (description.toc[index] ??
+      description.toc.find((item) => item.href.split("#", 1)[0] === sectionHref))?.label ||
+      `第 ${state.currentIndex + 1} 节`;
     const ratio = encodeProgress(state.currentIndex, state.sections, page.page, page.pages);
     const percent = readingPercent(state.currentIndex, state.sections, page.page, page.pages);
     chapterLabel.textContent = label;
@@ -315,10 +321,8 @@ export function createNavigation({
     expectedPageIndex = null,
     expectedScrollTop = null,
   ) {
-    if (
-      expectedSectionIndex !== null &&
-      session.snapshot().currentIndex !== expectedSectionIndex
-    ) {
+    const sectionIndex = session.snapshot().currentIndex;
+    if (sectionIndex < 0 || (expectedSectionIndex !== null && sectionIndex !== expectedSectionIndex)) {
       return null;
     }
     const anchor = current();
@@ -327,9 +331,10 @@ export function createNavigation({
     const scrollChanged =
       expectedScrollTop !== null &&
       Math.abs(pagination.scrollPosition() - expectedScrollTop) > 1;
-    await pagination.resizeViewport(
+    const resized = await pagination.resizeViewport(
       pageChanged || scrollChanged ? anchor.start.offset : (offset ?? anchor.start.offset),
     );
+    if (resized === false) return null;
     syncControls();
     return anchor;
   }

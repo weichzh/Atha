@@ -47,7 +47,13 @@ function scrollSwipeDirection(startY, endY, atStart, atEnd) {
   return 0;
 }
 
-export function createInteraction({ reader, content, navigation, pagination, onCenter, assert, fail }) {
+/**
+ * @typedef {(phase: "move" | "end" | "cancel", deltaY: number) => void} VerticalSwipe
+ * @param {{reader: any, content: any, navigation: any, pagination: any,
+ *   onCenter: () => void, beginVerticalSwipe?: () => VerticalSwipe | undefined,
+ *   assert: (condition: boolean, code: string) => void, fail: (code: string) => void}} options
+ */
+export function createInteraction({ reader, content, navigation, pagination, onCenter, beginVerticalSwipe, assert, fail }) {
   const wheel = createWheelDetector();
   const counts = {
     keyboard: 0,
@@ -163,10 +169,16 @@ export function createInteraction({ reader, content, navigation, pagination, onC
 
   function cancelPointer(pointerState = pointer) {
     pointer = null;
+    cancelVerticalSwipe(pointerState);
     if (pointerState?.holdTimer) clearTimeout(pointerState.holdTimer);
     if (pointerState?.cancelTimer) clearTimeout(pointerState.cancelTimer);
     if (pointerState?.scrollFrame) cancelAnimationFrame(pointerState.scrollFrame);
     pagination.cancelSwipe();
+  }
+
+  function cancelVerticalSwipe(start) {
+    if (start?.owner === "vertical") start.verticalSwipe?.("cancel", 0);
+    if (start) start.verticalSwipe = null;
   }
 
   function suppressCompatibilityClick(event, anywhere = false) {
@@ -182,6 +194,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     if ((!pointer && !touch) || !hasSelection()) return;
     if (touch) touch.selection = true;
     if (!pointer || pointer.owner === "selection") return;
+    cancelVerticalSwipe(pointer);
     pointer.owner = "selection";
     if (pointer.holdTimer) clearTimeout(pointer.holdTimer);
     if (pointer.scrollFrame) {
@@ -328,6 +341,11 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       startedAt: performance.now(),
       maxDistance: 0,
       owner: selected ? "selection" : null,
+      verticalSwipe:
+        event.pointerType === "touch" && !selected && !scrollMode() && !protectedTarget(event) &&
+        !overflowElement && !matchingPath(event, "img, svg")
+          ? beginVerticalSwipe?.()
+          : null,
       media,
       table,
       overflow,
@@ -382,6 +400,11 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       previewOverflow(pointer, deltaX);
       return;
     }
+    if (pointer.owner === "vertical" && pointer.verticalSwipe) {
+      event.preventDefault();
+      pointer.verticalSwipe("move", deltaY);
+      return;
+    }
     if (pointer.owner !== "page") return;
     event.preventDefault();
     pagination.previewSwipe(deltaX, pointer.y);
@@ -419,6 +442,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       return;
     }
     if (scrollMode()) {
+      cancelVerticalSwipe(start);
       const deltaY = event.clientY - start.y;
       if (start.type !== "touch" && Math.hypot(event.clientX - start.x, deltaY) <= CLICK_DRIFT) {
         onCenter();
@@ -437,6 +461,11 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       return;
     }
     if (start.owner === "overflow") {
+      suppressCompatibilityClick(event);
+      return;
+    }
+    if (start.owner === "vertical") {
+      start.verticalSwipe?.("end", event.clientY - start.y);
       suppressCompatibilityClick(event);
       return;
     }
@@ -559,6 +588,9 @@ export function createInteraction({ reader, content, navigation, pagination, onC
   function onPointerCancel(event) {
     const start = pointer;
     if (!start || start.id !== event.pointerId) return;
+    // The horizontal touch fallback may still finish a page drag. A cancelled
+    // vertical gesture must never save a bookmark or open the notes workspace.
+    cancelVerticalSwipe(start);
     if (start.type !== "touch") {
       cancelPointer(start);
       return;
