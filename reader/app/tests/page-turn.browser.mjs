@@ -58,7 +58,7 @@ async function advance(page, direction, renderer, button = false) {
   if (!renderer) await settled(page);
 }
 
-async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference" } = {}) {
+async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference", prefix = "", inspectClones = false } = {}) {
   const page = await browser.newPage({
     viewport: mobile ? { width: 390, height: 844 } : { width: 1120, height: 820 },
     deviceScaleFactor: mobile ? 2 : 1,
@@ -77,6 +77,15 @@ async function prepare(browser, base, { mobile = false, noGl = false, complex = 
     }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-page-turn-renderer"] });
   });
   page.on("pageerror", error => errors.push(error.stack));
+  if (inspectClones) {
+    await page.addInitScript(() => {
+      const attach = Element.prototype.attachShadow;
+      Element.prototype.attachShadow = function (options) {
+        return attach.call(this, this.classList.contains("reader-content-host")
+          ? { ...options, mode: "open" } : options);
+      };
+    });
+  }
   if (noGl) {
     await page.addInitScript(() => {
       const get = HTMLCanvasElement.prototype.getContext;
@@ -96,7 +105,7 @@ async function prepare(browser, base, { mobile = false, noGl = false, complex = 
       const source = body(pathname.match(/ch(\d)/)[1], paragraphs);
       await route.fulfill({
         contentType: "application/xhtml+xml",
-        body: complex ? source.replace("<h1>", "<blockquote><p>原样保留的引文</p></blockquote><h1>") : source,
+        body: source.replace("<h1>", `${complex ? "<blockquote><p>原样保留的引文</p></blockquote>" : ""}${prefix}<h1>`),
       });
     } else {
       await route.continue();
@@ -246,6 +255,50 @@ try {
   await advance(complex.page, 1, "cover");
   await settled(complex.page);
   assert.deepEqual(complex.errors, []);
+
+  const lists = await prepare(browser, base, {
+    mobile: true,
+    inspectClones: true,
+    prefix: '<ol start="3"><li>第一项</li><li>第二项</li></ol><ul><li>一条说明</li></ul>',
+  });
+  await open(lists.page, base);
+  await mode(lists.page, "卷页");
+  const cancelListTurn = await touchDrag(lists.page, -32);
+  await stage(lists.page, "cover").waitFor();
+  assert.equal(await stage(lists.page, "cover").locator(".cover ol").getAttribute("start"), "3");
+  assert.equal(await stage(lists.page, "cover").locator(".cover ul li").textContent(), "一条说明");
+  await cancelListTurn();
+  await settled(lists.page);
+  assert.equal(await position(lists.page), 1);
+  assert.deepEqual(lists.errors, []);
+  await lists.page.close();
+
+  const scrolled = await prepare(browser, base, {
+    mobile: true,
+    inspectClones: true,
+    prefix: `<pre><code>${"one long code line; ".repeat(40)}</code></pre>`,
+  });
+  await open(scrolled.page, base);
+  const originalFrame = scrolled.page.locator(".reader-frame .atha-structured-overflow");
+  for (const style of ["覆盖", "卷页"]) {
+    await mode(scrolled.page, style);
+    const scrolledX = await originalFrame.evaluate((element) => {
+      element.scrollLeft = 120;
+      return element.scrollLeft;
+    });
+    assert.ok(scrolledX > 0, "fixture must scroll horizontally");
+    const cancelCodeTurn = await touchDrag(scrolled.page, -32);
+    await stage(scrolled.page, "cover").waitFor();
+    const cloneOffsets = await stage(scrolled.page, "cover").locator(".atha-structured-overflow")
+      .evaluateAll((elements) => elements.map((element) => element.scrollLeft));
+    assert.deepEqual(cloneOffsets, [scrolledX, scrolledX], "both mounted clone frames preserve live scroll");
+    await cancelCodeTurn();
+    await settled(scrolled.page);
+    assert.equal(await originalFrame.evaluate((element) => element.scrollLeft), scrolledX);
+    assert.equal(await position(scrolled.page), 1);
+  }
+  assert.deepEqual(scrolled.errors, []);
+  await scrolled.page.close();
 
   const reduced = await prepare(browser, base, { reducedMotion: "reduce" });
   await open(reduced.page, base);

@@ -68,15 +68,15 @@ export function rasterizeReaderPage(
   }
 
   // The DOM cover preserves material a Canvas2D text/image pass cannot faithfully paint.
-  for (const element of book.querySelectorAll("svg, math, ruby, .atha-structured-overflow, blockquote, hr, img")) {
-    const rect = element.getBoundingClientRect();
-    if (!visible(rect)) continue;
+  for (const element of book.querySelectorAll("svg, math, ruby, .atha-structured-overflow, blockquote, hr, li, img")) {
+    if (![...element.getClientRects()].some(visible)) continue;
     const style = getComputedStyle(element);
     const opacity = effectiveOpacity(element);
     if (style.visibility !== "visible" || opacity === 0) continue;
+    if (element.localName === "li" && style.display !== "list-item") continue;
     if (!(element instanceof HTMLImageElement) || !element.complete || !element.naturalWidth ||
       opacity !== 1 || style.objectFit !== "fill" || style.transform !== "none") return null;
-    const area = project(rect, projection);
+    const area = project(element.getBoundingClientRect(), projection);
     try {
       ctx.drawImage(element, area.x, area.y, area.w, area.h);
     } catch (error) {

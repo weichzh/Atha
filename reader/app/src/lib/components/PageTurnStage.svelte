@@ -77,6 +77,12 @@
     readerCopy.append(pageCopy);
     mount.style.backgroundColor = paper;
     mount.replaceChildren(readerCopy);
+    // cloneNode copies markup, not the visual position within a table or a code frame.
+    const originalFrames = book.querySelectorAll<HTMLElement>(".atha-structured-overflow");
+    article.querySelectorAll<HTMLElement>(".atha-structured-overflow").forEach((copy, index) => {
+      copy.scrollLeft = originalFrames[index].scrollLeft;
+      copy.scrollTop = originalFrames[index].scrollTop;
+    });
   }
 
   function pose(p: number, y: number, w: number, h: number): CurlPose {
@@ -231,21 +237,22 @@
     visibility: visible;
   }
 
-  canvas,
-  .cover {
-    display: none;
-  }
-
   canvas {
+    display: none;
     width: 100%;
     height: 100%;
   }
 
-  .visible {
+  canvas.visible {
     display: block;
   }
 
+  .cover {
+    opacity: 0;
+  }
+
   .cover.visible {
+    opacity: 1;
     will-change: transform;
     box-shadow: 8px 0 22px var(--shadow-ink, rgb(0 0 0 / 18%));
   }
