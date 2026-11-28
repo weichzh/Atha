@@ -291,19 +291,33 @@ fn nested_sections_without_ids_keep_unique_toc_targets() {
 #[ignore = "writes the deterministic fixture consumed by the formal platform gates"]
 fn writes_fb2_gate_fixture() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let source = repository.join(".tmp/fb2-gate.fb2");
-    let imports = repository.join(".tmp/fb2-gate-imports");
-    if source.exists() {
-        fs::remove_file(&source).expect("remove old FB2 fixture");
-    }
-    if imports.exists() {
-        fs::remove_dir_all(&imports).expect("remove old FB2 imports");
+    let temporary = fs::canonicalize(repository.join(".tmp")).expect("resolve .tmp root");
+    let isolated = std::env::var_os("ATHA_FB2_GATE_OUTPUT");
+    let output = isolated
+        .as_ref()
+        .map(PathBuf::from)
+        .map(|path| fs::canonicalize(path).expect("resolve FB2 gate output"))
+        .unwrap_or_else(|| temporary.clone());
+    assert!(output.starts_with(&temporary), "FB2 gate output escaped .tmp");
+    let source = output.join("fb2-gate.fb2");
+    let imports = output.join("fb2-gate-imports");
+    if isolated.is_some() {
+        assert!(
+            !source.exists() && !imports.exists(),
+            "isolated FB2 gate output already exists"
+        );
+    } else {
+        if source.exists() {
+            fs::remove_file(&source).expect("remove old FB2 fixture");
+        }
+        if imports.exists() {
+            fs::remove_dir_all(&imports).expect("remove old FB2 imports");
+        }
     }
     fs::write(&source, sample_fb2()).expect("write deterministic FB2 fixture");
     import_fb2(&source, &imports).expect("prepare deterministic FB2 fixture");
     if let Some(root) = std::env::var_os("ATHA_FB2_GATE_LIBRARY_ROOT") {
         let root = PathBuf::from(root);
-        let temporary = fs::canonicalize(repository.join(".tmp")).expect("resolve .tmp root");
         let resolved = fs::canonicalize(&root).unwrap_or_else(|_| {
             fs::canonicalize(root.parent().expect("FB2 gate library parent"))
                 .expect("resolve FB2 gate library parent")
