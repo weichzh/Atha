@@ -48,6 +48,7 @@ export function createReadingScrollWitness(
  *   effect: () => PageTurnEffect | null,
  *   preview: (step: number, from: number, pages: number, dx: number, effect: PageTurnEffect, y?: number) => void,
  *   commit: (step: number, from: number, direction: 1 | -1, effect: PageTurnEffect) => void,
+ *   captureNativeSpread?: (step: number, from: number, direction: 1 | -1, advance: () => Promise<void>) => Promise<void>,
  *   cancel: () => void,
  *   stop: () => void,
  * }} PageTurn
@@ -837,6 +838,14 @@ export function createPagination({
     if (target < 0 || target >= state.pages) {
       pageTurn?.stop();
       return false;
+    }
+    // Keep the native long-chapter scroll position; only its visual transition is
+    // replaced. An in-progress touch drag still settles in the native scrollport.
+    if (nativePagedScroll && !isScrolled() && Math.abs(delta) === 1 &&
+      reader.hasAttribute("data-reader-spread") && !book.hasAttribute("data-swipe-dragging") &&
+      pageTurn?.captureNativeSpread && pageTurn.effect() === "curl") {
+      await pageTurn.captureNativeSpread(pageStep, state.page, delta, () => show(target, undefined, undefined, true));
+      return true;
     }
     const customEffect = turnEffect();
     const animate = customEffect && Math.abs(delta) === 1;

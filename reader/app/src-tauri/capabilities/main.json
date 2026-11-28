@@ -7,6 +7,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-reader-event",
+    "allow-linux-page-curl-frame",
     "allow-library-commands",
     "allow-desktop-library-path-import",
     "allow-dictionary-commands",

@@ -71,3 +71,9 @@ commands.allow = [
   "message_import_legacy",
   "message_export",
 ]
+
+[[permission]]
+identifier = "allow-linux-page-curl-frame"
+description = "仅 Linux 主阅读窗可为卷页取当前可见阅读框。"
+platforms = ["linux"]
+commands.allow = ["page_curl_frame"]

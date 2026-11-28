@@ -31,6 +31,8 @@ mod desktop_files;
 mod desktop_open;
 mod dictionary_commands;
 mod library_commands;
+#[cfg(target_os = "linux")]
+mod page_curl_capture;
 mod local_data_maintenance;
 mod message_commands;
 mod message_maintenance;
@@ -186,6 +188,8 @@ fn try_run() -> Result<(), Box<dyn Error>> {
         })
         .invoke_handler(tauri::generate_handler![
             telemetry::reader_event,
+            #[cfg(target_os = "linux")]
+            page_curl_capture::page_curl_frame,
             library_commands::list_library_books,
             library_commands::import_library_books,
             #[cfg(desktop)]
@@ -515,7 +519,9 @@ fn build_main_window(
         window
     };
 
-    window.build()?;
+    let _window = window.build()?;
+    #[cfg(target_os = "linux")]
+    page_curl_capture::install(&_window)?;
     Ok(())
 }
 

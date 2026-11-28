@@ -302,6 +302,10 @@ export class PageCurlRenderer {
     }
   }
 
+  canCurlSpread(): boolean {
+    return Boolean(this.gl && !this.gl.isContextLost() && this.texture);
+  }
+
   renderSpread(pose: CurlPose, leaf: SpreadLeaf): boolean {
     if (!this.gpuSurface || !this.gl || this.gl.isContextLost()) return false;
     this.renderWebGL(pose, leaf);

@@ -33,7 +33,7 @@ import { ensureKernelGlobals } from "./kernel-globals.ts";
 import { createReaderPreferences, DEFAULT_APPLICATION_PREFS, DEFAULT_BOOK_PREFS } from "./preferences.ts";
 
 export interface ReaderEngineCallbacks {
-  getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "cancel" | "stop"> | undefined;
+  getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "captureNativeSpread" | "cancel" | "stop"> | undefined;
   allowsPageTurnEffect: () => boolean;
   wantsFacingPages?: () => boolean;
   beginVerticalSwipe?: () => ((phase: "move" | "end" | "cancel", deltaY: number) => void) | undefined;
@@ -558,6 +558,12 @@ export class ReaderEngine {
           stage()?.preview({ frame, reader, page, book: this.content.book, pageStep }, from, pages, dx, style, y),
         commit: (pageStep: number, from: number, dir: 1 | -1, style: "cover" | "curl") =>
           stage()?.commit({ frame, reader, page, book: this.content.book, pageStep }, from, dir, style),
+        captureNativeSpread: isWebKitGtkRuntime()
+          ? (pageStep: number, from: number, dir: 1 | -1, advance: () => Promise<void>) => {
+            const active = stage();
+            return active ? active.captureNativeSpread({ frame, reader, page, book: this.content.book, pageStep }, from, dir, advance) : advance();
+          }
+          : undefined,
         cancel: () => stage()?.cancel(),
         stop: () => stage()?.stop(),
       },
