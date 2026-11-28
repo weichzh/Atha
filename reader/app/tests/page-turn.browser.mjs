@@ -198,8 +198,10 @@ try {
   await page.keyboard.press("ArrowRight");
   await page.waitForFunction(() => /page 3 \/ /.test(document.title));
   for (let i = 3; i < count; i++) await advance(page, 1, "cover");
-  await page.keyboard.press("ArrowRight");
-  await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "2 / 3");
+  const finishChapter = await touchDrag(page, -440);
+  await finishChapter();
+  await page.waitForFunction(() => document.documentElement.dataset.sectionPosition === "2 / 3" &&
+    /page 1 \/ /.test(document.title));
   await settled(page);
   assert.equal(await position(page), 1);
   await page.keyboard.press("ArrowLeft");
@@ -245,9 +247,50 @@ try {
   await mode(long.page, "卷页");
   assert.equal(await long.page.locator(".reader").evaluate(el => el.hasAttribute("data-native-page-scroll")), true);
   await advance(long.page, 1, null);
-  assert.ok(await long.page.locator(".page").evaluate(el => el.scrollLeft > 0));
+  const longViewport = long.page.locator(".page");
+  const scrollLeft = () => longViewport.evaluate(el => el.scrollLeft);
+  const pageStep = await scrollLeft();
+  assert.ok(pageStep > 0);
+  for (const [dx, expectedPage] of [[-300, 3], [300, 2], [-32, 2]]) {
+    const release = await touchDrag(long.page, dx);
+    await release();
+    // Sample after both the reader's settle and any native inertial motion.
+    await long.page.evaluate(() => new Promise(resolve => setTimeout(resolve, 500)));
+    assert.deepEqual({ page: await position(long.page), scrollLeft: await scrollLeft() }, {
+      page: expectedPage, scrollLeft: (expectedPage - 1) * pageStep,
+    }, `one touch drag (${dx}px) must settle with the visible and logical page in sync`);
+  }
+  // Shift+wheel bypasses Interaction. The browser must not scroll the page itself.
+  await long.page.mouse.move(200, 440);
+  await long.page.keyboard.down("Shift");
+  await long.page.mouse.wheel(0, 2100);
+  await long.page.keyboard.up("Shift");
+  assert.equal(await longViewport.evaluate(async el => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return el.scrollLeft;
+  }), pageStep, "direct horizontal scrolling must not bypass pagination");
   assert.deepEqual(await long.page.evaluate(() => window.turnRenderers), []);
   assert.deepEqual(long.errors, []);
+
+  const wide = await prepare(browser, base, { touch: true, inspectClones: true });
+  await wide.page.setViewportSize({ width: 1740, height: 820 });
+  await open(wide.page, base);
+  const releaseWide = await touchDrag(wide.page, -1230);
+  const drag = await wide.page.locator(".reader-frame .book").evaluate(async el => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const style = getComputedStyle(el);
+    return {
+      shift: -new DOMMatrixReadOnly(style.transform).m41,
+      step: parseFloat(style.width) + parseFloat(style.columnGap),
+    };
+  });
+  assert.ok(drag.step < 1230, "gesture must be longer than one page step");
+  assert.equal(drag.shift, drag.step, "drag preview must stop at the adjacent page");
+  await wide.page.screenshot({ path: fileURLToPath(new URL("slide-drag-adjacent.png", artifacts)) });
+  await releaseWide();
+  await wide.page.waitForFunction(() => /page 2 \/ /.test(document.title));
+  assert.deepEqual(wide.errors, []);
+  await wide.page.close();
 
   const complex = await prepare(browser, base, { complex: true });
   await open(complex.page, base);
@@ -306,7 +349,7 @@ try {
   await advance(reduced.page, 1, null);
   assert.deepEqual(await reduced.page.evaluate(() => window.turnRenderers), []);
   assert.deepEqual(reduced.errors, []);
-  console.log("Page turns passed: WebGL, Canvas2D, DOM cover, slide, scroll, cross-section and Locator restore.");
+  console.log("Page turns passed: one-page swipes, WebGL, Canvas2D, DOM cover, slide, scroll, cross-section and Locator restore.");
 } finally {
   await browser?.close();
   await new Promise(resolve => preview.httpServer.close(resolve));
