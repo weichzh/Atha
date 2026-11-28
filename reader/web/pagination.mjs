@@ -42,6 +42,16 @@ export function createReadingScrollWitness(
   };
 }
 
+/**
+ * @typedef {"cover" | "curl"} PageTurnEffect
+ * @typedef {{
+ *   effect: () => PageTurnEffect | null,
+ *   preview: (step: number, from: number, pages: number, dx: number, effect: PageTurnEffect, y?: number) => void,
+ *   commit: (step: number, from: number, direction: 1 | -1, effect: PageTurnEffect) => void,
+ *   cancel: () => void,
+ *   stop: () => void,
+ * }} PageTurn
+ */
 export function createPagination({
   book,
   reader,
@@ -55,6 +65,7 @@ export function createPagination({
   onPageShown,
   assert,
   fail,
+  pageTurn = /** @type {PageTurn | null} */ (null),
 }) {
   function ensure(condition, code) {
     if (!condition) throw new Error(code);
@@ -399,6 +410,7 @@ export function createPagination({
   }
 
   function layout() {
+    pageTurn?.stop();
     readingScroll.reset();
     offsetCache = null;
     fragmentOffsetCache.clear();
@@ -704,7 +716,8 @@ export function createPagination({
     fontSizeControl.value = "19";
   }
 
-  async function show(index, anchor, operationStage = "翻页与公式加载") {
+  async function show(index, anchor, operationStage = "翻页与公式加载", preserveTurn = false) {
+    if (!preserveTurn) pageTurn?.stop();
     state.page = Math.max(0, Math.min(index, state.pages - 1));
     showPage();
     await nextFrame();
@@ -806,8 +819,14 @@ export function createPagination({
       return false;
     }
     const target = state.page + delta;
-    if (target < 0 || target >= state.pages) return false;
-    await show(target);
+    if (target < 0 || target >= state.pages) {
+      pageTurn?.stop();
+      return false;
+    }
+    const customEffect = turnEffect();
+    const animate = customEffect && Math.abs(delta) === 1;
+    if (animate) pageTurn.commit(pageStep, state.page, delta, customEffect);
+    await show(target, undefined, undefined, Boolean(animate));
     return true;
   }
 
@@ -833,8 +852,19 @@ export function createPagination({
     }
   }
 
-  function previewSwipe(deltaX) {
+  function turnEffect() {
+    // Very long chapters use the native horizontal scroll path to avoid WebView transform limits.
+    return !isScrolled() && !nativePagedScroll ? pageTurn?.effect() : null;
+  }
+
+  function previewSwipe(deltaX, clientY) {
     if (isScrolled()) return;
+    const effect = turnEffect();
+    if (effect && !book.hasAttribute("data-swipe-dragging")) {
+      pageTurn.preview(pageStep, state.page, state.pages, deltaX, effect, clientY);
+      return;
+    }
+    pageTurn?.stop();
     if (!book.hasAttribute("data-swipe-dragging")) {
       stopSettle();
       swipeOrigin = nativePagedScroll ? page.scrollLeft : state.page * pageStep;
@@ -849,8 +879,12 @@ export function createPagination({
     });
   }
 
-  function finishSwipe(deltaX) {
-    if (!book.hasAttribute("data-swipe-dragging")) return;
+  function finishSwipe(deltaX, clientY) {
+    if (!book.hasAttribute("data-swipe-dragging")) {
+      const effect = turnEffect();
+      if (effect) pageTurn.preview(pageStep, state.page, state.pages, deltaX, effect, clientY);
+      return;
+    }
     swipeDelta = deltaX;
     if (swipeFrame) cancelAnimationFrame(swipeFrame);
     swipeFrame = 0;
@@ -859,6 +893,7 @@ export function createPagination({
   }
 
   function cancelSwipe() {
+    pageTurn?.cancel();
     if (book.hasAttribute("data-swipe-dragging")) showPage();
   }
 

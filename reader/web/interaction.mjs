@@ -384,7 +384,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     }
     if (pointer.owner !== "page") return;
     event.preventDefault();
-    pagination.previewSwipe(deltaX);
+    pagination.previewSwipe(deltaX, pointer.y);
   }
 
   function onPointerUp(event) {
@@ -426,7 +426,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       return;
     }
     if (start.owner === "page") {
-      pagination.finishSwipe(event.clientX - start.x);
+      pagination.finishSwipe(event.clientX - start.x, start.y);
       const direction = swipeDirection(start, event);
       suppressCompatibilityClick(event);
       if (direction) {

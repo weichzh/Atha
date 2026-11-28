@@ -34,6 +34,7 @@
   import NotesWorkspace from "./NotesWorkspace.svelte";
   import ReaderDirectoryToc from "./ReaderDirectoryToc.svelte";
   import ReaderSettingsDialog from "./ReaderSettingsDialog.svelte";
+  import PageTurnStage from "./PageTurnStage.svelte";
   import SelectionPill from "./SelectionPill.svelte";
   import StructuredLightbox from "./StructuredLightbox.svelte";
 
@@ -54,6 +55,7 @@
   let pageEl = $state<HTMLDivElement | null>(null);
   let hostEl = $state<HTMLDivElement | null>(null);
   let bridgeEl = $state<HTMLDivElement | null>(null);
+  let pageTurnStage = $state<PageTurnStage>();
 
   let viewportWidth = $state(typeof window !== "undefined" ? window.innerWidth : 1440);
   let viewportHeight = $state(typeof window !== "undefined" ? window.innerHeight : 900);
@@ -92,6 +94,7 @@
     contentVersion: untrack(() => book.id),
     bookTitle: untrack(() => book.title),
     callbacks: {
+      getPageTurnStage: () => pageTurnStage,
       onToggleChrome: () => {
         chromeOpen = !chromeOpen;
       },
@@ -429,6 +432,7 @@
             <div class="reader-content-host" bind:this={hostEl}></div>
           </div>
         </div>
+        <PageTurnStage bind:this={pageTurnStage} />
       </div>
 
       <div class="kernel-bridge" bind:this={bridgeEl} hidden aria-hidden="true"></div>
