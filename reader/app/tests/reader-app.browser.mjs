@@ -393,6 +393,10 @@ async function verifySettingsSections(browser, previewUrl) {
   const index = phone.getByRole("navigation", { name: "设置项目" });
   const search = phone.getByRole("searchbox", { name: "搜索设置" });
   try {
+    await phone.addInitScript(() => {
+      const key = "atha.ui.prefs.v1";
+      if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ pageTurnStyle: "scroll" }));
+    });
     await phone.goto(previewUrl);
     await phone.getByRole("tab", { name: "设置" }).click();
     await index.waitFor();
@@ -437,6 +441,41 @@ async function verifySettingsSections(browser, previewUrl) {
     const storage = phone.getByRole("region", { name: "本地资料与完整备份" });
     await storage.getByRole("button", { name: "从备份文件恢复" }).waitFor();
     await storage.getByRole("button", { name: /导出 .*完整备份/ }).waitFor();
+
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await search.fill("手势");
+    await index.getByRole("button", { name: /阅读与翻页/ }).click();
+    const reading = phone.getByRole("region", { name: "阅读与翻页" });
+    const chrome = reading.getByRole("combobox", { name: "阅读控件" });
+    const turn = reading.getByRole("combobox", { name: "分页动效" });
+    const pull = reading.getByRole("checkbox", { name: "下拉书签" });
+    const swipe = reading.getByRole("checkbox", { name: "上滑打开笔记" });
+    assert.equal(await turn.inputValue(), "slide", "legacy scroll token is not a global layout choice");
+    assert.equal(await turn.getByRole("option").count(), 3);
+    await chrome.selectOption("minimal");
+    await turn.selectOption("cover");
+    await pull.uncheck();
+    await swipe.uncheck();
+    await assertNoHorizontalOverflow(phone, "reading-controls-390");
+    await phone.screenshot({ path: path.join(screenshotDir, "reading-controls-mobile-390.png"), animations: "disabled" });
+
+    await phone.reload();
+    await phone.getByRole("tab", { name: "设置" }).click();
+    await index.getByRole("button", { name: /阅读与翻页/ }).click();
+    assert.equal(await chrome.inputValue(), "minimal");
+    assert.equal(await turn.inputValue(), "cover");
+    assert.equal(await pull.isChecked(), false);
+    assert.equal(await swipe.isChecked(), false);
+    await phone.getByRole("tab", { name: "书架" }).click();
+    await phone.locator(".book-open-trigger").first().click();
+    await waitForReaderEntry(phone);
+    await phone.keyboard.press("h");
+    await phone.getByRole("button", { name: "更多阅读操作" }).click();
+    await phone.getByRole("button", { name: "排版与主题设置" }).click();
+    const readerSettings = phone.getByRole("dialog", { name: "阅读排版设置" });
+    await readerSettings.getByRole("tab", { name: "本书覆盖" }).click();
+    assert.equal(await readerSettings.getByRole("button", { name: "覆盖", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await phone.locator(".reader").getAttribute("data-reading-mode"), "paged");
   } finally {
     await phone.close();
   }

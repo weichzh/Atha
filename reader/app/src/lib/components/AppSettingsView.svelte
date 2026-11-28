@@ -2,6 +2,7 @@
   import {
     ArrowLeft,
     BookMarked,
+    BookOpen,
     ChevronRight,
     Database,
     Download,
@@ -37,7 +38,13 @@
   } from "../data/library-adapter.ts";
   import { registerBackHandler } from "../data/back-stack.ts";
   import { isTauriRuntime } from "../data/runtime.ts";
-  import { uiPrefs, type ShelfDesktopDensity, type ShelfMobileColumns } from "../data/ui-prefs.svelte.ts";
+  import {
+    uiPrefs,
+    type PageTurnStyle,
+    type ReaderChromeStyle,
+    type ShelfDesktopDensity,
+    type ShelfMobileColumns,
+  } from "../data/ui-prefs.svelte.ts";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
   let appTheme = $state<AppTheme>(getAppTheme());
@@ -59,7 +66,7 @@
     { value: "dark", label: "黑曜石暗色", icon: Moon },
   ];
 
-  type Section = "appearance" | "shelf" | "typography" | "dictionary" | "storage";
+  type Section = "appearance" | "shelf" | "reading" | "typography" | "dictionary" | "storage";
 
   let width = $state(window.innerWidth);
   let section = $state<Section | null>(window.innerWidth >= 900 ? "appearance" : null);
@@ -70,6 +77,7 @@
   let lastSection: Section | null = null;
   let indexScroll = 0;
   const wide = $derived(width >= 900);
+  const pageTurnStyle = $derived(uiPrefs.state.pageTurnStyle === "scroll" ? "slide" : uiPrefs.state.pageTurnStyle);
   const groups = $derived([
     {
       title: "界面与书架",
@@ -83,6 +91,8 @@
     {
       title: "阅读体验",
       items: [
+        { id: "reading", label: "阅读与翻页", keywords: "控件 手势 经典 极简 书签 笔记 动效 滑动 覆盖 卷页", icon: BookOpen,
+          detail: uiPrefs.state.readerChromeStyle === "minimal" ? "极简" : "经典" },
         { id: "typography", label: "全书阅读默认", keywords: "排版 字号 行距 亮度 恢复 重置", icon: Type, detail: "" },
       ],
     },
@@ -364,7 +374,7 @@
               <h2 id="current-setting-heading">书架布局</h2>
               <span class="scope-tag">仅此设备</span>
             </div>
-            <div class="shelf-display-settings">
+            <div class="preference-rows">
               <label>
                 <span>手机封面列数</span>
                 <select
@@ -403,6 +413,60 @@
                   onchange={(event) => uiPrefs.update({ shelfDockCollapsed: event.currentTarget.checked })}
                 />
               </label>
+            </div>
+          </section>
+
+        {:else if section === "reading"}
+          <section class="settings-block">
+            <div class="block-head">
+              <h2 id="current-setting-heading">阅读与翻页</h2>
+            </div>
+            <div class="preference-rows">
+              <label for="app-reader-chrome">
+                <span>阅读控件</span>
+                <select
+                  id="app-reader-chrome"
+                  value={uiPrefs.state.readerChromeStyle}
+                  onchange={(event) => uiPrefs.update({ readerChromeStyle: event.currentTarget.value as ReaderChromeStyle })}
+                >
+                  <option value="classic">经典</option>
+                  <option value="minimal">极简</option>
+                </select>
+              </label>
+              <label for="app-reader-turn">
+                <span>分页动效</span>
+                <select
+                  id="app-reader-turn"
+                  value={pageTurnStyle}
+                  aria-describedby="app-reader-turn-hint"
+                  onchange={(event) => uiPrefs.update({ pageTurnStyle: event.currentTarget.value as Exclude<PageTurnStyle, "scroll"> })}
+                >
+                  <option value="slide">滑动</option>
+                  <option value="cover">覆盖</option>
+                  <option value="curl">卷页</option>
+                </select>
+              </label>
+              <p class="preference-hint" id="app-reader-turn-hint">仅影响分页的书；连续滚动在书内设置。</p>
+              <label for="app-reader-pull">
+                <span>下拉书签</span>
+                <input
+                  id="app-reader-pull"
+                  type="checkbox"
+                  checked={uiPrefs.state.gesturePullBookmark}
+                  onchange={(event) => uiPrefs.update({ gesturePullBookmark: event.currentTarget.checked })}
+                />
+              </label>
+              <label for="app-reader-swipe">
+                <span>上滑打开笔记</span>
+                <input
+                  id="app-reader-swipe"
+                  type="checkbox"
+                  checked={uiPrefs.state.gestureSwipeUpNotes}
+                  aria-describedby="app-reader-swipe-hint"
+                  onchange={(event) => uiPrefs.update({ gestureSwipeUpNotes: event.currentTarget.checked })}
+                />
+              </label>
+              <p class="preference-hint" id="app-reader-swipe-hint">仅在极简分页模式下生效。</p>
             </div>
           </section>
 
@@ -661,13 +725,13 @@
     gap: 12px;
   }
 
-  .shelf-display-settings {
+  .preference-rows {
     display: grid;
     gap: 8px;
     max-width: 500px;
   }
 
-  .shelf-display-settings label {
+  .preference-rows label {
     min-height: 44px;
     display: flex;
     align-items: center;
@@ -676,7 +740,7 @@
     font-size: 14px;
   }
 
-  .shelf-display-settings select {
+  .preference-rows select {
     min-height: 44px;
     padding: 0 12px;
     border-radius: var(--radius-md);
@@ -684,11 +748,17 @@
     color: var(--ink-primary);
   }
 
-  .shelf-display-settings input {
+  .preference-rows input {
     width: 22px;
     height: 22px;
     margin: 0 10px;
     accent-color: var(--accent);
+  }
+
+  .preference-hint {
+    margin: -4px 0 8px;
+    color: var(--ink-secondary);
+    font-size: 13px;
   }
 
   .block-head {
