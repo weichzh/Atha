@@ -712,21 +712,22 @@ return {source: document.querySelector(".pane-c .source-quote")?.textContent.inc
   editor: Boolean(document.querySelector(".pane-c .ProseMirror"))};' \
     '.source and .editor' 'conversation draft did not capture the selected source text' >/dev/null
   quote=$(execute_sync 'return document.querySelector(".pane-c .source-quote p").textContent;')
-  webdriver_send_keys '.pane-c .ProseMirror' "$marker" || die 'could not enter the synthetic note'
+  # WebKitWebDriver maps typed punctuation differently in packaged and
+  # unpackaged runtime environments. Fill the deterministic public text via
+  # the actual Markdown input; the source selection remains a trusted drag.
+  open_markdown_editor
+  set_text_input '.pane-c .markdown-textarea' "$marker"
   click_label_or_aria_send '创建对话'
   wait_for_script '
 return {messages: document.querySelectorAll(".pane-c .message-node").length,
   editor: Boolean(document.querySelector(".pane-c .ProseMirror"))};' \
     '.messages == 1 and .editor' 'source-linked note did not save' >/dev/null
-  webdriver_click_element '.pane-c button[aria-label="排版工具"]' || die 'could not open reply format tools'
-  webdriver_click_element '.pane-c button[aria-label="切换 Markdown 源码模式"]' || die 'could not switch the reply to Markdown'
-  wait_for_script 'return {input: Boolean(document.querySelector(".pane-c .markdown-textarea"))};' \
-    '.input' 'the Markdown reply editor did not appear' >/dev/null
+  open_markdown_editor
   set_text_input '.pane-c .markdown-textarea' "$reply"
   click_label_or_aria_send '发送'
   wait_for_script '
 const messages = [...document.querySelectorAll(".pane-c .msg-content")];
-return {messages:messages.length, long: messages.some(el => el.textContent.length > 1500)};' \
+return {messages:messages.length, long: messages.some(el => el.textContent.length > 1500 && el.querySelectorAll("p").length >= 40)};' \
     '.messages == 2 and .long' 'long reply did not save' >/dev/null
   webdriver_click_element '.pane-c button[aria-label="关闭笔记工作区"]' || die 'could not close source discussion'
   reader_back
@@ -791,6 +792,16 @@ return {memory: Boolean(document.querySelector(".memory-shell")), results: docum
   authoring_cycle_evidence=$(jq -cn --argjson viewports "$viewports" \
     '{fixture:"original EPUB", imagePreview:true, trustedMouseSelection:true, noteSaved:true, replySent:true, reopened:true,
       searchHits:2, jumpToSource:true, sameEdition:true, sameSection:true, viewports:$viewports}')
+}
+
+open_markdown_editor() {
+  [[ $(execute_sync 'return Boolean(document.querySelector(".pane-c .markdown-textarea"));') == true ]] && return
+  if [[ $(execute_sync 'return Boolean(document.querySelector(".pane-c .format-toggle[aria-expanded=false]"));') == true ]]; then
+    webdriver_click_element '.pane-c button[aria-label="排版工具"]' || die 'could not open the format tools'
+  fi
+  webdriver_click_element '.pane-c button[aria-label="切换 Markdown 源码模式"]' || die 'could not switch the message to Markdown'
+  wait_for_script 'return {input: Boolean(document.querySelector(".pane-c .markdown-textarea"))};' \
+    '.input' 'the Markdown message editor did not appear' >/dev/null
 }
 
 click_label_or_aria_send() {
