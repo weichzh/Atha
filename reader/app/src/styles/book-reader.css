@@ -101,6 +101,16 @@
   cursor: pointer;
 }
 
+/* Keep the sized image box in the column without painting native fallback. */
+.book img.atha-resource-pending {
+  visibility: hidden !important;
+}
+
+:where(.book img.atha-resource-pending) {
+  contain: size;
+  contain-intrinsic-size: var(--atha-pending-formula-size, none);
+}
+
 :where(.book img.math-display) {
   display: block;
   margin: var(--atha-display-formula-margin, 1em) auto;
@@ -191,6 +201,15 @@
   background: var(--book-quote-bg);
   color: var(--book-muted);
   font-size: 0.85em;
+}
+
+.atha-image-error[data-label] {
+  padding: 0;
+  overflow: clip;
+}
+
+.atha-image-error[data-label]::after {
+  content: "⚠";
 }
 
 /* Custom Highlight API styling inside the closed ShadowRoot */

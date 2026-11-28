@@ -10,6 +10,7 @@ import { createReaderState, createReadingStatistics } from "../../../../web/read
 import { createReadingSession } from "../../../../web/session.mjs";
 import { createSearch } from "../../../../web/search.mjs";
 import { annotationTextHash, createAnnotationStore } from "../../../../web/annotation-store.mjs";
+import formulaPlaceholderUrl from "../../assets/formula-placeholder.svg?no-inline";
 import type { ReadingMemoryTarget } from "../../library.ts";
 import type { ConversationView, RichTextInput, SourceAnchorInput, SourceSnapshotInput } from "../../messages.ts";
 import bookReaderCssUrl from "../../styles/book-reader.css?url";
@@ -524,6 +525,7 @@ export class ReaderEngine {
         /\bLinux\b/.test(navigator.userAgent) && !/\bAndroid\b/.test(navigator.userAgent),
       themeStyleSource: { href: new URL(bookThemeCssUrl, location.href).href },
       readerStyleSource: { href: new URL(bookReaderCssUrl, location.href).href },
+      formulaPlaceholderUrl: new URL(formulaPlaceholderUrl, location.href).href,
       onLateLayout: (anchor: { offset: number; pageIndex: number | null; scrollTop: number | null }) => {
         if (this.disposed) return;
         void this.navigation.resize(anchor.offset, this.session.snapshot().currentIndex, anchor.pageIndex, anchor.scrollTop);

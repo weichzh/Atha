@@ -123,7 +123,7 @@ export function createBookSelection(book, root) {
   });
 }
 
-export function createContent({ host, reader, themeStyleSource, readerStyleSource, onLateLayout, projectSvgColorScheme = false }) {
+export function createContent({ host, reader, themeStyleSource, readerStyleSource, onLateLayout, projectSvgColorScheme = false, formulaPlaceholderUrl = "" }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const nativeImageStyle = document.createElement("style");
   const bookStyle = document.createElement("style");
@@ -134,6 +134,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
   shadow.append(nativeImageStyle, bookStyle, readerStyle, userStyle, book);
   const bookSelection = createBookSelection(book, shadow);
+  const formulaPlaceholder = formulaPlaceholderUrl ? new Image() : null;
 
   let bookUrl;
   let declaredResources;
@@ -340,7 +341,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       if (sourceStyles) element.setAttribute("style", style);
       else element.removeAttribute("style");
     }
-    applyPendingFormulaAspectRatios();
+    applyPendingFormulaSizes();
   }
 
   function setImageInteraction(image) {
@@ -431,6 +432,8 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       boundedImageSize(image, "width", "height");
     const width = image.offsetWidth || fallbackSize?.width || 0;
     const height = image.offsetHeight || fallbackSize?.height || 0;
+    // Keep the measured box, but copy the author's visibility rather than the loader's.
+    image.classList.remove("atha-resource-pending");
     const layout = image.isConnected ? getComputedStyle(image) : null;
     const alternative = image.getAttribute("alt");
     const label = (alternative === null ? "图片无法显示" : alternative.trim()).slice(0, 160);
@@ -574,12 +577,16 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     return Boolean(stableImageSize(image));
   }
 
-  function applyPendingFormulaAspectRatios() {
+  function applyPendingFormulaSizes() {
     for (const image of book.querySelectorAll(
       "img.atha-resource-pending[data-atha-resource].math-inline, img.atha-resource-pending[data-atha-resource].math-display",
     )) {
       const size = stableImageSize(image);
-      if (size) image.style.setProperty("aspect-ratio", `${size.width} / ${size.height}`);
+      if (!size) continue;
+      image.style.setProperty("aspect-ratio", `${size.width} / ${size.height}`);
+      if (formulaPlaceholder) {
+        image.style.setProperty("--atha-pending-formula-size", `${size.width}px ${size.height}px`);
+      }
     }
   }
 
@@ -590,6 +597,12 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       source?.toLowerCase().endsWith(".svg") &&
       hasStableImageBox(image)
     );
+  }
+
+  function clearPendingFormula(image) {
+    image.classList.remove("atha-resource-pending");
+    image.removeAttribute("aria-busy");
+    delete image.dataset.athaResource;
   }
 
   function isSvgImage(image) {
@@ -879,7 +892,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     lateLayoutTimer = 0;
   }
 
-  function waitForImage(image, onLateSettle, timeoutMs = IMAGE_SETTLE_TIMEOUT_MS, signal) {
+  function waitForImage(image, onLateSettle, timeoutMs = IMAGE_SETTLE_TIMEOUT_MS, signal, ignoredSource = "") {
     return new Promise((resolve) => {
       let returned = false;
       let settled = false;
@@ -897,10 +910,13 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
           resolve(outcome);
         }
       };
-      const loaded = () => finish("loaded");
+      const isPlaceholder = () => ignoredSource && image.currentSrc === ignoredSource;
+      const loaded = () => {
+        if (!isPlaceholder()) finish("loaded");
+      };
       const failed = () => finish("failed");
       const aborted = () => finish("aborted");
-      image.addEventListener("load", loaded, { once: true });
+      image.addEventListener("load", loaded);
       image.addEventListener("error", failed, { once: true });
       signal?.addEventListener("abort", aborted, { once: true });
       if (signal?.aborted) {
@@ -911,7 +927,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       if (Number.isFinite(timeoutMs)) {
         timer = setTimeout(() => {
           if (returned) return;
-          if (image.complete) {
+          if (image.complete && !isPlaceholder()) {
             finish(image.naturalWidth > 0 ? "loaded" : "failed");
             return;
           }
@@ -1009,18 +1025,13 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
         applySvgVariant(image, url);
         image.src = url;
-        const reveal = () => {
-          image.classList.remove("atha-resource-pending");
-          image.removeAttribute("aria-busy");
-          delete image.dataset.athaResource;
-        };
         const outcome = await waitForImage(image, (lateOutcome) => {
           const late = lateImages.get(image);
           lateImages.delete(image);
           if (generation !== renderGeneration || image.src !== url || !book.contains(image)) return;
           if (lateOutcome === "loaded") {
             readySvg.add(url);
-            reveal();
+            clearPendingFormula(image);
           }
           else replaceFailed(image, false);
           if (
@@ -1029,7 +1040,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
           ) {
             scheduleLateLayout(late?.anchor);
           }
-        });
+        }, IMAGE_SETTLE_TIMEOUT_MS, undefined, formulaPlaceholderUrl);
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
         if (outcome === "failed") {
           replaceFailed(image);
@@ -1047,7 +1058,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
             layout: imageLayoutSignature([image]),
           });
         }
-        if (outcome === "loaded") reveal();
+        if (outcome === "loaded") clearPendingFormula(image);
         forgetPendingImage(image);
         if (outcome === "loaded" && batch) batch.success += 1;
       }),
@@ -1693,13 +1704,16 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   }
 
   async function initialize() {
-    const responses = await Promise.all(
-      [themeStyleSource, readerStyleSource].map((source) => fetch(source.href)),
-    );
-    ensure(responses.every((response) => response.ok), "reader-style-load");
-    readerStyle.textContent = (await Promise.all(responses.map((response) => response.text()))).join(
-      "\n",
-    );
+    if (formulaPlaceholder) formulaPlaceholder.srcset = formulaPlaceholderUrl;
+    const loadStyle = async ({ href }) => {
+      const response = await fetch(href);
+      ensure(response.ok, "reader-style-load");
+      return response.text();
+    };
+    const [theme, styles] = await Promise.all([
+      loadStyle(themeStyleSource), loadStyle(readerStyleSource), formulaPlaceholder?.decode(),
+    ]);
+    readerStyle.textContent = `${theme}\n${styles}`;
   }
 
   function pruneAdaptiveSvg() {
@@ -1929,11 +1943,12 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       if (readySvg.has(url)) {
         applySvgVariant(image, url);
         image.src = url;
-        image.classList.remove("atha-resource-pending");
-        image.removeAttribute("aria-busy");
-        delete image.dataset.athaResource;
+        clearPendingFormula(image);
         continue;
       }
+      // Use a decoded app-owned image to get native replaced-element sizing
+      // without exposing a book src or putting alt fallback into the columns.
+      if (formulaPlaceholder) image.srcset = formulaPlaceholderUrl;
       pendingImages.set(image, url);
     }
     book.replaceChildren(...imported.childNodes);
@@ -2043,6 +2058,21 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
         "script,iframe,object,embed,form,input,button,select,textarea,video,audio,source,track,style,link,meta,base",
       )
       .forEach((element) => element.remove());
+    // Freeze the book image, not the transient loader state. A formula
+    // selected before it has a src still needs the normal SVG validation.
+    await Promise.all(
+      [...wrapper.querySelectorAll("img.atha-resource-pending[data-atha-resource]")].map(async (image) => {
+        const url = localBookUrl(image.dataset.athaResource);
+        try {
+          await validateSvgOnce(url);
+        } catch {
+          replaceFailedImage(image);
+          return;
+        }
+        image.setAttribute("src", url);
+        clearPendingFormula(image);
+      }),
+    );
     for (const element of wrapper.querySelectorAll("*")) {
       for (const attribute of [...element.attributes]) {
         const name = attribute.name.toLowerCase();
