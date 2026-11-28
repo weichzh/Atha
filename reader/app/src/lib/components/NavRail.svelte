@@ -54,9 +54,9 @@
 <style>
   .nav-shell {
     position: fixed;
-    left: 20px;
-    top: 24px;
-    bottom: 24px;
+    left: calc(20px + var(--safe-area-left));
+    top: calc(24px + var(--safe-area-top));
+    bottom: calc(24px + var(--safe-area-bottom));
     width: 196px;
     z-index: 30;
     display: flex;
@@ -160,9 +160,10 @@
     .nav-shell {
       left: 50%;
       top: auto;
-      bottom: max(14px, env(safe-area-inset-bottom));
+      bottom: max(14px, var(--safe-area-bottom));
+      margin-left: calc((var(--safe-area-left) - var(--safe-area-right)) / 2);
       translate: -50% 0;
-      width: min(calc(100vw - 28px), 348px);
+      width: min(calc(100vw - 28px - var(--safe-area-left) - var(--safe-area-right)), 348px);
       height: auto;
       flex-direction: row;
       padding: 6px;

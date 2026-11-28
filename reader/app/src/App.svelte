@@ -157,27 +157,9 @@
       if (readerScreen === "ready") finishEntry();
     };
     motionQuery.addEventListener("change", onMotionChange);
-    const syncOpeningInsets = () => {
-      const raw = window.AthaSystemBars?.getSafeAreaInsets?.();
-      if (!raw) return;
-      try {
-        const insets = JSON.parse(raw) as { top?: number; left?: number };
-        for (const edge of ["top", "left"] as const) {
-          const inset = insets?.[edge];
-          if (typeof inset === "number" && Number.isFinite(inset) && inset >= 0) {
-            document.documentElement.style.setProperty(`--opening-safe-${edge}`, `${inset / window.devicePixelRatio}px`);
-          }
-        }
-      } catch {
-        // Fall back to CSS safe-area insets if the host has not reported them yet.
-      }
-    };
-    syncOpeningInsets();
-    window.addEventListener("atha-safe-area-change", syncOpeningInsets);
-
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
     const onSystemChange = () => {
-      if (!hasReaderLaunchParams() && getAppTheme() === "system") {
+      if (activeRoute !== "reader" && getAppTheme() === "system") {
         applyAppThemeToDocument("system");
       }
     };
@@ -205,7 +187,6 @@
 
     return () => {
       motionQuery.removeEventListener("change", onMotionChange);
-      window.removeEventListener("atha-safe-area-change", syncOpeningInsets);
       mq?.removeEventListener("change", onSystemChange);
       unregisterRootBack();
       uninstallBack();
@@ -485,8 +466,15 @@
 <style>
   .app-frame {
     min-height: 100vh;
+    padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
     background: var(--bg-canvas);
     color: var(--ink-primary);
+  }
+
+  .app-frame :global(.library-shell),
+  .app-frame :global(.memory-shell),
+  .app-frame :global(.settings-shell) {
+    min-height: calc(100vh - var(--safe-area-top) - var(--safe-area-bottom));
   }
 
   .app-frame.behind-opening {
@@ -532,8 +520,8 @@
 
   .opening-back {
     position: fixed;
-    top: calc(var(--opening-safe-top, env(safe-area-inset-top, 0px)) + 12px);
-    left: calc(var(--opening-safe-left, env(safe-area-inset-left, 0px)) + 12px);
+    top: calc(var(--safe-area-top) + 12px);
+    left: calc(var(--safe-area-left) + 12px);
     z-index: 99;
     width: 44px;
     height: 44px;

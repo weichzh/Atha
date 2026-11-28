@@ -91,7 +91,8 @@
 <style>
   .footnote-popover {
     position: fixed;
-    inset: auto 12px calc(12px + env(safe-area-inset-bottom, 0px)) 12px;
+    inset: auto calc(12px + var(--safe-area-right)) calc(12px + var(--safe-area-bottom))
+      calc(12px + var(--safe-area-left));
     width: auto;
     margin: 0;
     max-width: none;

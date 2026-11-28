@@ -51,6 +51,7 @@ export function createPagination({
   previous,
   next,
   fontSizeControl,
+  measureViewportHeight = () => innerHeight,
   onPageShown,
   assert,
   fail,
@@ -295,7 +296,7 @@ export function createPagination({
   function syncViewportDeviceSize() {
     visualScale = 1 / devicePixelRatio;
     const width = Math.max(1, Math.round(frame.clientWidth * devicePixelRatio));
-    const height = Math.max(1, Math.round(innerHeight * devicePixelRatio));
+    const height = Math.max(1, Math.round(measureViewportHeight() * devicePixelRatio));
     document.documentElement.style.setProperty("--page-scale", String(visualScale));
     document.documentElement.style.setProperty("--reader-width", `${width}px`);
     document.documentElement.style.setProperty("--reader-height", `${height}px`);
@@ -634,13 +635,13 @@ export function createPagination({
     assert(Math.abs(readerRect.left - frameRect.left) <= 1, "layout-cut");
     assert(Math.abs(readerRect.top - frameRect.top) <= 1, "layout-cut");
     assert(Math.abs(readerRect.width - frameRect.width) <= 1, "layout-cut");
-    assert(Math.abs(readerRect.height - innerHeight) <= 1, "layout-cut");
+    assert(Math.abs(readerRect.height - measureViewportHeight()) <= 1, "layout-cut");
     assert(
       Math.abs(reader.clientWidth - Math.round(frame.clientWidth * devicePixelRatio)) <= 1,
       "layout-cut",
     );
     assert(
-      Math.abs(reader.clientHeight - Math.round(innerHeight * devicePixelRatio)) <= 1,
+      Math.abs(reader.clientHeight - Math.round(measureViewportHeight() * devicePixelRatio)) <= 1,
       "layout-cut",
     );
     const progress = previous.closest("details");
@@ -919,7 +920,7 @@ export function createPagination({
 
   function bindResize(onResize) {
     let timer;
-    window.addEventListener("resize", () => {
+    const scheduleResize = () => {
       clearTimeout(timer);
       delete document.documentElement.dataset.viewportStable;
       timer = setTimeout(() => {
@@ -934,7 +935,9 @@ export function createPagination({
             }
           });
       }, 120);
-    });
+    };
+    window.addEventListener("resize", scheduleResize);
+    window.addEventListener("atha-safe-area-change", scheduleResize);
   }
 
   return Object.freeze({

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { computePosition, flip, offset, shift } from "@floating-ui/dom";
+  import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
   import { BookOpen, Copy, Highlighter, MessageSquarePlus, RefreshCw, Trash2 } from "@lucide/svelte";
   import { scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -29,18 +29,31 @@
 
   $effect(() => {
     const rect = selection.rect;
-    if (!pillEl) return;
-    const virtualEl = {
-      getBoundingClientRect: () => rect,
+    const element = pillEl;
+    if (!element) return;
+    const virtualEl = { getBoundingClientRect: () => rect };
+    let active = true;
+    const update = () => {
+      const style = getComputedStyle(document.documentElement);
+      const inset = (edge: string) => Math.max(14, parseFloat(style.getPropertyValue(`--safe-area-${edge}`)) || 0);
+      const padding = { top: inset("top"), right: inset("right"), bottom: inset("bottom"), left: inset("left") };
+      void computePosition(virtualEl, element, {
+        placement: "top",
+        strategy: "fixed",
+        middleware: [offset(12), flip({ padding }), shift({ padding, crossAxis: true })],
+      }).then(({ x, y }) => {
+        if (!active) return;
+        element.style.left = `${x}px`;
+        element.style.top = `${y}px`;
+      });
     };
-    void computePosition(virtualEl, pillEl, {
-      placement: "top",
-      middleware: [offset(12), flip({ padding: 14 }), shift({ padding: 14 })],
-    }).then(({ x, y }) => {
-      if (!pillEl) return;
-      pillEl.style.left = `${x}px`;
-      pillEl.style.top = `${y}px`;
-    });
+    const stop = autoUpdate(virtualEl, element, update);
+    window.addEventListener("atha-safe-area-change", update);
+    return () => {
+      active = false;
+      stop();
+      window.removeEventListener("atha-safe-area-change", update);
+    };
   });
 </script>
 
@@ -107,7 +120,7 @@
     backdrop-filter: blur(22px) saturate(160%);
     -webkit-backdrop-filter: blur(22px) saturate(160%);
     box-shadow: var(--shadow-popover);
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - max(14px, var(--safe-area-left)) - max(14px, var(--safe-area-right)));
     overflow-x: auto;
   }
 

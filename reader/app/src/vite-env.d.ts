@@ -7,7 +7,7 @@ declare global {
     __athaFlushOnExit?: () => void;
     __athaHandleBack?: () => boolean;
     athaMessages?: unknown;
-    AthaSystemBars?: { getSafeAreaInsets?: () => string };
+    AthaSystemBars?: import("./lib/data/system-bars.ts").SystemBarsPort;
   }
 
   var readerPixels: ((value: number) => number) | undefined;

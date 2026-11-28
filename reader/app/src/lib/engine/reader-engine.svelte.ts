@@ -535,6 +535,7 @@ export class ReaderEngine {
 
     this.pagination = createPagination({
       book: this.content.book,
+      measureViewportHeight: () => frame.clientHeight,
       reader,
       page,
       position,
