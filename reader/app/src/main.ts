@@ -3,6 +3,7 @@ import "./styles/app.css";
 import { mount } from "svelte";
 import App from "./App.svelte";
 import { hasReaderLaunchParams, installDemoFetchBridge, isTauriRuntime } from "./lib/data/runtime.ts";
+import { bindSystemBarsListeners, syncSystemBarsMode } from "./lib/data/system-bars.ts";
 import { readAppTheme, readReaderAppearance } from "./library.ts";
 import { messageClient } from "./messages.ts";
 
@@ -79,6 +80,9 @@ if (readerRoute) {
   root.dataset.appTheme = tone;
   root.dataset.appTone = tone;
 }
+
+bindSystemBarsListeners();
+syncSystemBarsMode(false, tone === "dark");
 
 const app = mount(App, {
   target: document.getElementById("app")!,

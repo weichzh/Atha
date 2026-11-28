@@ -55,6 +55,7 @@ import {
   seedDemoLocalStorageIfEmpty,
 } from "./demo-seed.ts";
 import { isTauriRuntime } from "./runtime.ts";
+import { syncSystemBarsMode } from "./system-bars.ts";
 
 const DEMO_BOOKS_KEY = "atha.demo.books.v1";
 const DEMO_DICT_KEY = "atha.demo.dictionaries.v1";
@@ -213,7 +214,8 @@ async function deleteDemoBookData(id: string): Promise<LibraryBook[]> {
 }
 
 function isAndroidAppShell(): boolean {
-  return typeof window !== "undefined" && Boolean(window.AthaSystemBars);
+  // Same-document navigation does not require the optional AndroidX WebView bridge.
+  return typeof window !== "undefined" && (Boolean(window.AthaSystemBars) || /\bAndroid\b/.test(window.navigator.userAgent));
 }
 
 function normalizeAppHref(href: string): string {
@@ -287,6 +289,7 @@ export function applyAppThemeToDocument(theme: AppTheme): void {
         : "light"
       : theme;
   document.documentElement.dataset.appTheme = resolved;
+  syncSystemBarsMode(false, resolved === "dark");
 }
 
 export function resetGlobalReaderDefaults(): boolean {

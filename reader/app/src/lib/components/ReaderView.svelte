@@ -25,6 +25,7 @@
   import { registerBackHandler, type BackSource } from "../data/back-stack.ts";
   import type { OpeningPaperMeasure } from "../data/open-transition.ts";
   import { resolveEffectiveTheme } from "../engine/preferences.ts";
+  import { setNativeSelectionSuppressed, syncSystemBarsMode } from "../data/system-bars.ts";
   import { ReaderEngine } from "../engine/reader-engine.svelte.ts";
   import type { LightboxPayload } from "../types.ts";
   import ConfirmDialog from "./ConfirmDialog.svelte";
@@ -123,8 +124,25 @@
     },
   });
 
-  const resolvedTheme = $derived(engine.firstScreenReady ? resolveEffectiveTheme(engine.preferences.effective.theme) : openingTheme);
+  const systemTheme = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  let systemDark = $state(systemTheme?.matches ?? false);
+  const resolvedTheme = $derived(!engine.firstScreenReady
+    ? openingTheme
+    : engine.preferences.effective.theme === "system"
+      ? systemDark ? "dark" : "light"
+      : resolveEffectiveTheme(engine.preferences.effective.theme));
   let readerShell: HTMLElement;
+
+  $effect(() => {
+    const bodyReady = !entryBlocked && engine.firstScreenReady && !engine.error &&
+      !settingsOpen && !directoryOpen && !dictOpen && !engine.activeFootnote && !lightboxPayload &&
+      !pendingDeleteRootId;
+    syncSystemBarsMode(bodyReady && !chromeOpen && notesMode === "closed", resolvedTheme === "dark");
+    // A stored highlight is an Atha affordance, not an active WebView text selection.
+    setNativeSelectionSuppressed(
+      bodyReady && !hideReaderA && !pendingDraft && Boolean(engine.selection && !engine.selection.existingRootId),
+    );
+  });
 
   const isCompact = $derived(viewportWidth < 800 || viewportHeight > viewportWidth);
   const isMediumLandscape = $derived(!isCompact && viewportWidth < 1440);
@@ -177,6 +195,8 @@
 
   onMount(() => {
     const unregisterBack = registerBackHandler(handleBackAction);
+    const onSystemThemeChange = (event: MediaQueryListEvent) => { systemDark = event.matches; };
+    systemTheme?.addEventListener("change", onSystemThemeChange);
     const onResize = () => {
       viewportWidth = window.innerWidth;
       viewportHeight = window.innerHeight;
@@ -186,6 +206,14 @@
     };
     window.__athaFlushOnExit = () => engine.flushOnExit();
     window.addEventListener("resize", onResize);
+    const onOutsideBody = (event: Event) => {
+      if (!hostEl || !event.composedPath().includes(hostEl)) setNativeSelectionSuppressed(false);
+    };
+    // An input or another surface may start its native menu before selectionchange arrives.
+    if (window.AthaSystemBars) {
+      window.addEventListener("pointerdown", onOutsideBody, true);
+      window.addEventListener("focusin", onOutsideBody, true);
+    }
     window.addEventListener("pagehide", onPageHide);
 
     void (async () => {
@@ -209,10 +237,14 @@
 
     return () => {
       unregisterBack();
+      systemTheme?.removeEventListener("change", onSystemThemeChange);
       if (window.__athaFlushOnExit) {
         delete window.__athaFlushOnExit;
       }
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("pointerdown", onOutsideBody, true);
+      window.removeEventListener("focusin", onOutsideBody, true);
+      setNativeSelectionSuppressed(false);
       window.removeEventListener("pagehide", onPageHide);
     };
   });
@@ -903,6 +935,7 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
+    padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
   }
 
   .region-a {
