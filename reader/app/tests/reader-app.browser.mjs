@@ -501,6 +501,49 @@ async function verifySettingsRemovalDuringBack(browser, previewUrl) {
   }
 }
 
+async function verifyCompactShelfToolbar(browser, previewUrl) {
+  const phone = await browser.newPage({ viewport: { width: 360, height: 760 }, hasTouch: true });
+  const order = phone.getByRole("group", { name: "书架排序" });
+  const search = phone.getByRole("searchbox");
+  const filters = phone.getByRole("button", { name: "筛选藏书" });
+  try {
+    await phone.goto(previewUrl);
+    await phone.locator(".book-grid .cover-art img.loaded").first().waitFor();
+    await assertNoHorizontalOverflow(phone, "compact-shelf-360");
+    const searchBox = await search.boundingBox();
+    const selectBox = await phone.getByRole("button", { name: "选择", exact: true }).boundingBox();
+    assert.ok(Math.abs(searchBox.y + searchBox.height / 2 - selectBox.y - selectBox.height / 2) < 2);
+    await phone.getByRole("button", { name: "导入", exact: true }).waitFor();
+    assert.ok(await order.evaluate((el) => el.scrollWidth > el.clientWidth));
+    await phone.screenshot({ path: path.join(screenshotDir, "shelf-toolbar-360.png"), animations: "disabled" });
+
+    const cards = phone.locator(".shelf-catalog [data-shelf-open]");
+    const first = await cards.first().getAttribute("title");
+    await order.getByRole("button", { name: "书名 Z–A" }).press("Enter");
+    assert.equal(await order.getByRole("button", { name: "书名 Z–A" }).getAttribute("aria-pressed"), "true");
+    assert.notEqual(await cards.first().getAttribute("title"), first);
+    await order.getByRole("button", { name: "书名 A–Z" }).click();
+    assert.equal(await cards.first().getAttribute("title"), first);
+    await order.getByRole("button", { name: "收藏", exact: true }).tap();
+    await filters.click();
+    assert.equal(await phone.getByRole("switch").getAttribute("aria-checked"), "true");
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    await phone.locator(".filter-popover").waitFor({ state: "hidden" });
+    await order.getByRole("button", { name: "收藏", exact: true }).tap();
+    await search.fill("潮汐");
+    assert.equal(await cards.count(), 1);
+    assert.equal(await phone.evaluate(() => window.__athaHandleBack()), true);
+    assert.equal(await search.inputValue(), "");
+    assert.ok(await cards.count() > 1);
+    await phone.getByRole("button", { name: "清单列表" }).click();
+    await phone.locator(".book-list").waitFor();
+    await phone.getByRole("button", { name: "封面网格" }).click();
+    await phone.locator(".book-grid").waitFor();
+  } finally {
+    await phone.close();
+  }
+}
+
 async function run() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -1054,6 +1097,7 @@ async function run() {
     await verifyShelfResumeAndLayout(browser, previewUrl);
     await verifySettingsSections(browser, previewUrl);
     await verifySettingsRemovalDuringBack(browser, previewUrl);
+    await verifyCompactShelfToolbar(browser, previewUrl);
     console.log("ALL BROWSER CHECKS PASSED! Screenshots saved to:", screenshotDir);
   } finally {
     if (browser) await browser.close();
