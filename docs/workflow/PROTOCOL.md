@@ -10,7 +10,7 @@
 
 ### fast
 
-适用于可回滚的局部维护，维持既有依赖、公开接口、数据、安全、信任边界和长期验收规则。按[仓库协作规则](../agents/workflow.md)在短期分支上实施，更新受影响的事实所有者和 `ACTIVE`，并在 PR 中记录范围和验证结果。
+适用于可回滚的局部维护，包括恢复既有约定的局部修复。维持既有依赖、公开接口、数据、安全、信任边界和长期验收规则。按[仓库协作规则](../agents/workflow.md#工作路径)在短期分支上实施，更新受影响的事实所有者，按需调整 `ACTIVE`，并在 PR 中记录范围和验证结果。
 
 ### change
 
@@ -29,7 +29,7 @@
 
 ## Change 记录
 
-状态只使用 `proposed`、`accepted`、`implemented`。一份 change 至少保存 Problem、Scope、Acceptance Criteria、Files And Steps、Checks、Result、Review 与 Evidence And Residual Risks；有实际风险时，记录风险与回滚步骤。
+一份 change 对应一个实施范围，状态只使用 `proposed`、`accepted`、`implemented`。至少保存 Problem、Scope、Acceptance Criteria、Files And Steps、Checks、Result、Review 与 Evidence And Residual Risks；有实际风险时，记录风险与回滚步骤。
 
 每份新 change 必须包含 `Architecture Impact`，值只使用 `none` 或 `present`：
 
