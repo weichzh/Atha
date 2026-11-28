@@ -25,11 +25,15 @@ const section = (page) => page.locator("html").getAttribute("data-section-positi
 const stage = (page, mode) => page.locator(`[data-page-turn-renderer="${mode}"]`);
 const settled = (page) => page.locator("[data-page-turn-renderer]").waitFor({ state: "detached" });
 
+async function setToolbar(page, open) {
+  const toolbar = page.locator(".reader-controls");
+  await page.locator(".reader-shell").focus();
+  if (await toolbar.isVisible() !== open) await page.keyboard.press("h");
+  await toolbar.waitFor({ state: open ? "visible" : "detached" });
+}
+
 async function mode(page, name) {
-  if (!await page.getByRole("button", { name: "排版与主题设置" }).isVisible()) {
-    const rect = await page.locator(".reader-frame").boundingBox();
-    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
-  }
+  await setToolbar(page, true);
   await page.getByRole("button", { name: "排版与主题设置" }).click();
   await page.getByRole("tab", { name: "本书覆盖" }).click();
   const option = page.getByRole("group", { name: "阅读方式" }).getByRole("button", { name, exact: true });
@@ -38,7 +42,7 @@ async function mode(page, name) {
     .some((button) => button.textContent.trim() === label && button.getAttribute("aria-pressed") === "true"), name);
   await page.keyboard.press("Escape");
   await page.getByRole("dialog", { name: "阅读排版设置" }).waitFor({ state: "hidden" });
-  await page.locator(".reader-shell").focus();
+  await setToolbar(page, false);
 }
 
 async function advance(page, direction, renderer, button = false) {
@@ -60,6 +64,7 @@ async function advance(page, direction, renderer, button = false) {
   if (!renderer) await settled(page);
   if (button) {
     await page.getByRole("button", { name: "关闭阅读进度" }).click();
+    await page.locator(".reader-progress-panel").waitFor({ state: "hidden" });
     await settled(page);
   }
 }
@@ -179,6 +184,18 @@ async function verifyFacingPages(browser, base) {
     await capture("facing-pages-desktop.png");
 
     await mode(page, "卷页");
+    await setToolbar(page, true);
+    await advance(page, 1, null);
+    await advance(page, -1, null, true);
+    const fast = await touchDrag(page, -415);
+    await fast();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    assert.equal(await page.locator(".reader-controls").isVisible(), true);
+    assert.deepEqual(await page.evaluate(() => window.turnRenderers), [], "open toolbar always uses the default turn");
+    await setToolbar(page, false);
+    await advance(page, -1, "spread");
+    await settled(page);
+
     const release = await touchDrag(page, -415);
     await stage(page, "spread").waitFor();
     assert.equal(await position(page), 1, "preview does not change navigation");
@@ -192,6 +209,7 @@ async function verifyFacingPages(browser, base) {
       return { pinned: Math.abs(read("u_spine") - spine) <= 1, folded: read("u_radius") > 0, back: read("u_incoming") };
     });
     assert.deepEqual(faces, { pinned: true, folded: true, back: 1 });
+    assert.equal(await page.locator(".reader-controls").count(), 0, "curl does not reveal the toolbar");
     await capture("facing-pages-turn.png");
     await release();
     await page.waitForFunction(() => /page 2 \/ /.test(document.title));
@@ -203,9 +221,12 @@ async function verifyFacingPages(browser, base) {
     assert.deepEqual(await facingText(page), opening);
     const cancel = await touchDrag(page, -36);
     await stage(page, "spread").waitFor();
+    await setToolbar(page, true);
+    await settled(page);
     await cancel();
     await settled(page);
     assert.equal(await position(page), 1);
+    await setToolbar(page, false);
 
     const before = await saved(page);
     await page.setViewportSize({ width: 1240, height: 1030 });
@@ -293,9 +314,9 @@ async function verifyTurns(browser, base) {
   await advance(page, -1, "canvas2d");
   await settled(page);
   await mode(page, "覆盖");
-  await advance(page, 1, "cover", true);
+  await advance(page, 1, "cover");
   await page.screenshot({ path: fileURLToPath(new URL("cover-desktop.png", artifacts)) });
-  await advance(page, -1, "cover", true);
+  await advance(page, -1, "cover");
   await page.locator(".reader-shell").focus();
   await advance(page, 1, "cover");
   await settled(page);
@@ -305,6 +326,7 @@ async function verifyTurns(browser, base) {
   assert.equal(await page.evaluate(() => document.querySelector(".reader").scrollTop > 0), true);
   await mode(page, "覆盖");
   assert.equal(await saved(page), beforeScroll, "mode round trip reopens the same paged Locator");
+  await setToolbar(page, true);
   await page.getByRole("button", { name: "返回书架" }).click();
   await page.locator(".reader-root").waitFor({ state: "detached" });
   await open(page, base, true);

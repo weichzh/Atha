@@ -34,6 +34,7 @@ import { createReaderPreferences, DEFAULT_APPLICATION_PREFS, DEFAULT_BOOK_PREFS 
 
 export interface ReaderEngineCallbacks {
   getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "cancel" | "stop"> | undefined;
+  allowsPageTurnEffect: () => boolean;
   wantsFacingPages?: () => boolean;
   beginVerticalSwipe?: () => ((phase: "move" | "end" | "cancel", deltaY: number) => void) | undefined;
   onToggleChrome: () => void;
@@ -551,7 +552,7 @@ export class ReaderEngine {
       pageTurn: {
         effect: () => {
           const style = uiPrefs.state.pageTurnStyle;
-          return stage() && (style === "cover" || style === "curl") &&
+          return stage() && this.callbacks.allowsPageTurnEffect() && (style === "cover" || style === "curl") &&
               !reducePageMotion.matches
             ? style : null;
         },

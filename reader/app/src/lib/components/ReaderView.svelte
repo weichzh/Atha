@@ -119,6 +119,7 @@
     bookTitle: untrack(() => book.title),
     callbacks: {
       getPageTurnStage: () => pageTurnStage,
+      allowsPageTurnEffect: () => !chromeOpen,
       wantsFacingPages: () => !android && usesFacingPages(frameEl?.clientWidth ?? 0, window.innerWidth, window.innerHeight),
       beginVerticalSwipe,
       onToggleChrome: toggleChrome,
@@ -399,7 +400,10 @@
     if (readerOverlayOpen || entryBlocked) return;
     if (quickActionsOpen) quickActionsOpen = false;
     else if (chromeOpen) hideChrome();
-    else chromeOpen = true;
+    else {
+      pageTurnStage?.stop();
+      chromeOpen = true;
+    }
   }
 
   function beginVerticalSwipe() {
