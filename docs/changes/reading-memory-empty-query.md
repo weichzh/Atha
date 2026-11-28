@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -49,7 +49,7 @@ present
 
 ## Review
 
-核对空查询和正文搜索的分流、结果规模、删除过滤、排序和既有 IPC 来源校验。
+独立审查已核对空查询与正文搜索分流、限量、墓碑过滤、排序及既有 IPC 来源校验，未发现阻塞。
 
 ## Evidence And Residual Risks
 

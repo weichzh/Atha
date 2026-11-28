@@ -898,11 +898,51 @@ return {width:innerWidth, edition: saved?.contentVersion, section: loc?.start?.s
 return {memory: Boolean(document.querySelector(".memory-shell")), results: document.querySelectorAll(".hit-row").length};' \
       '.memory and .results == 2' 'source return did not restore the results list' >/dev/null
   done
+  verify_single_paragraph_reply "$marker"
   authoring_cycle_evidence=$(jq -cn --argjson viewports "$viewports" --argjson selectedPage "$(jq .page <<<"$source_position")" \
     --argjson wrongPageRejected "$wrong_page_rejected" \
     '{fixture:"original EPUB", imagePreview:true, trustedMouseSelection:true, noteSaved:true, replySent:true, reopened:true,
       freshMemoryEmpty:true, selectedPage:$selectedPage, wrongPageRejected:$wrongPageRejected,
-      searchHits:2, jumpToSource:true, sameEdition:true, sameSection:true, viewports:$viewports}')
+      searchHits:2, jumpToSource:true, sameEdition:true, sameSection:true, viewports:$viewports,
+      mediumSingleParagraphReply:true, followUpSent:true}')
+}
+
+verify_single_paragraph_reply() {
+  local marker=$1 stress followup
+  stress="$marker-单段 $(printf '长内容片段。长内容片段。长内容片段。长内容片段。%.0s' {1..67})"
+  followup="$marker-继续发送"
+  open_library "$expected_books"
+  set_window_size 1000 760
+  nav_tab '阅读记忆'
+  set_text_input '.memory-shell input[type=search]' "$marker"
+  wait_for_script 'return {hits: document.querySelectorAll(".hit-row .jump-btn").length};' \
+    '.hits == 2' 'the single-reply stress case could not find its two saved messages' >/dev/null
+  webdriver_click_element '.hit-row .jump-btn' || die 'could not open the thread for the single-paragraph stress case'
+  reader_ready
+  open_markdown_editor
+  set_text_input '.pane-c .markdown-textarea' "$stress"
+  click_label_or_aria_send '发送'
+  wait_for_script '
+const thread = document.querySelector(".pane-c");
+const reply = [...thread?.querySelectorAll(".msg-content") ?? []].find(el => el.textContent === arguments[0]);
+const box = thread?.getBoundingClientRect();
+const send = thread?.querySelector(".send-btn")?.getBoundingClientRect();
+return {width: innerWidth, threadWidth: box?.width, threadRight: box?.right,
+  paragraphs: reply?.querySelectorAll("p").length, messageLength: reply?.textContent.length,
+  wrap: Boolean(reply && reply.scrollWidth <= reply.clientWidth + 1),
+  send: Boolean(send && send.width > 0 && send.left >= 0 && send.right <= innerWidth + 1 && send.bottom <= innerHeight + 1)};' \
+    '.width == 1000 and .threadRight <= .width + 1 and .paragraphs == 1 and .messageLength > 1500 and .wrap and .send' \
+    'a single long reply obscured the send control or overflowed its message box' \
+    "$(jq -cn --arg stress "$stress" '[$stress]')" >/dev/null
+  capture_public_ui authoring-single-reply
+  open_markdown_editor
+  set_text_input '.pane-c .markdown-textarea' "$followup"
+  click_label_or_aria_send '发送'
+  wait_for_script '
+return {sent: [...document.querySelectorAll(".pane-c .msg-content")].some(el => el.textContent === arguments[0])};' \
+    '.sent' 'the user could not send another reply after the long paragraph' \
+    "$(jq -cn --arg followup "$followup" '[$followup]')" >/dev/null
+  say 'a single long native reply fit the medium conversation and a follow-up was sent'
 }
 
 open_markdown_editor() {
