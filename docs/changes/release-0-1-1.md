@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted
+implemented
 
 ## Problem
 
@@ -46,9 +46,11 @@ none
 
 首份正式版本以上一公开主线 `a4523be` 为基底；无上一公开标签。
 
+候选 `1b779a6` 的版本均为 0.1.1，Linux 锁定依赖解析与候选文档门通过。由该候选构建的 `Atha_0.1.1_amd64.AppImage` 在 GNOME Wayland／WebKitGTK 通过完整包装器和同包直启书架。文件关联冷启、重复投递与普通启动均通过。原创 EPUB 在 360、1000 和 1600 CSS px 回到实际原文，排除同章错页；阅读记忆新库、首次进入及清空搜索、长单段回复和继续发送通过。独立内核诊断完成默认 220 次测量，产品日志隐私检查通过。发包使用这份原始制品，标签和状态以 GitHub Release 为准。
+
 ## Review
 
-先验包，再按 PR 实际 head 提审。
+基线已处理独立审查发现，见[正式开发基线](repository-readiness.md)。发版元数据、发布范围和最终 head 在同一 PR 审查。
 
 ## Evidence And Residual Risks
 

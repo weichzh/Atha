@@ -1,7 +1,6 @@
 # 当前工作
 
 - `change`：正式开发基线收尾 → `docs/changes/repository-readiness.md`
-- `change`：0.1.1 发版验收 → `docs/changes/release-0-1-1.md`
 
 本轮书架、阅读器和验证工具的实现已合入；后续按以下入口验收：
 
