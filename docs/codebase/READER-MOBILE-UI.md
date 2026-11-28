@@ -88,5 +88,5 @@ tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换�
   - 本地快速门：`bash scripts/check-fast.sh` 通过（145/145 Node 测试、`svelte-check` 0 errors/0 warnings、Cargo workspace 测试、`vite build`、CSP 无内联脚本检查）；
   - Chromium Playwright：`node reader/app/tests/reader-app.browser.mjs` 通过，11 张全端截图存 `artifacts/local/audits/borderless-reader-20261126/`；
   - 隔离 Xvfb Linux Tauri release 真壳：256 本合成书架 `bench-library-shelf.py native --samples 2` 四轮均 `books: 256`、`history_same_document: true`（`startup_usable_observed_ms` 684.35–713.34 ms、`return_usable_observed_ms` 170–185 ms），`check-tauri-hot-open.py` 全项通过（`tauri_hot_open=passed`），收据存 `artifacts/local/audits/borderless-reader-20261126/{native-replay.log,hot-open/}`。
-  - Linux 全量：`scripts/check-reader-linux.sh` 在 GNOME Wayland 真壳覆盖当前书架和阅读工作区。同一本原创 EPUB 完成导入、查找、鼠标选区、保存笔记和回复，再在 360、1000、1707 CSS px 下跳回同版同章并恢复对话。Windows WebView2、Android PCT-AL10、自然手指触摸与真实输入法分开验收；1000 CSS px 的约 1600 字单段回复会把发送按钮挤出屏幕，多段回复的通过不覆盖此缺陷。
+  - Linux 全量：实际 AppImage 以原创 EPUB 验证导入、查找、鼠标选区、保存笔记及回复。360、1000、1600 CSS px 回跳后都能在正文看见原文高亮，并拒绝同章错页。1000 CSS px 约 1600 字的单段回复在栏内换行，能继续发送。Windows WebView2、Android PCT-AL10、自然触摸和真实输入法分开验收。
 - 旧版各轮专项截图与真机历史收据保留于 `artifacts/local/audits/` 与 Git 历史。
