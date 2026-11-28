@@ -2,6 +2,7 @@
 
 - `change`：本地提审检查与发版验收 → `docs/changes/local-ci.md`
 - `change`：正式开发基线收尾 → `docs/changes/repository-readiness.md`
+- `change`：阅读记忆空查询 → `docs/changes/reading-memory-empty-query.md`
 
 本轮书架、阅读器和验证工具的实现已合入；后续按以下入口验收：
 
