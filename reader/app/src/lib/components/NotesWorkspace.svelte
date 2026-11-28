@@ -24,6 +24,7 @@
     SourceCaptureView,
   } from "../../messages.ts";
   import { renderSafeMessageHtml } from "../data/message-doc.ts";
+  import { readerWorkspaceLayout } from "../data/reader-layout.ts";
   import { getMessageClient } from "../data/message-adapter.ts";
   import type { ReaderEngine } from "../engine/reader-engine.svelte.ts";
   import type { ComposerSubmitPayload, RootNoteItem } from "../types.ts";
@@ -95,19 +96,45 @@
     isRoot: boolean;
   }>({ open: false, message: null, isRoot: false });
 
-  // C1 exact layout rules: B and C are NEVER separated by A!
-  const isCompact = $derived(viewportWidth < 800 || viewportHeight > viewportWidth);
-  const isMediumLandscape = $derived(!isCompact && viewportWidth < 1440);
-  const isWideLandscape = $derived(!isCompact && viewportWidth >= 1440);
+  // Keep the list and conversation beside each other in every layout.
+  const workspaceLayout = $derived(readerWorkspaceLayout(viewportWidth, viewportHeight));
+  const isCompact = $derived(workspaceLayout === "compact");
+  const isMediumLandscape = $derived(workspaceLayout === "split");
+  const isWideLandscape = $derived(workspaceLayout === "three");
+  let workspaceEl = $state<HTMLDivElement>();
+  let listEl = $state<HTMLElement>();
 
   const showPaneB = $derived(
     mode !== "closed" &&
       (isCompact ? mode === "list" : true),
   );
-  const showPaneC = $derived(
-    mode === "thread" &&
-      (isCompact || isMediumLandscape || isWideLandscape),
-  );
+  const showPaneC = $derived(mode === "thread");
+
+  // A conversation changes the list's slot. Move it visually without resizing
+  // the reading frame every animation tick, including after the thread's outro.
+  $effect(() => {
+    const workspace = workspaceEl;
+    const list = listEl;
+    if (!workspace || !list || isCompact || reducedMotion.current) return;
+    let left = list.offsetLeft;
+    let motion: Animation | undefined;
+    const observer = new ResizeObserver(() => {
+      const next = list.offsetLeft;
+      if (left === next) return;
+      const displacement = Number.parseFloat(getComputedStyle(list).translate) || 0;
+      motion?.cancel();
+      motion = list.animate([{ translate: `${left + displacement - next}px` }, { translate: "0px" }], {
+        duration: 220,
+        easing: "cubic-bezier(0.2, 0.65, 0.3, 1)",
+      });
+      left = next;
+    });
+    observer.observe(workspace);
+    return () => {
+      observer.disconnect();
+      motion?.cancel();
+    };
+  });
 
   // Sync active highlight in book whenever thread root changes
   $effect(() => {
@@ -374,12 +401,15 @@
     class:compact={isCompact}
     class:medium={isMediumLandscape}
     class:wide={isWideLandscape}
+    bind:this={workspaceEl}
   >
     {#if showPaneB}
       <aside
-        class="pane-b glass-popover"
+        class="pane-b"
+        class:glass-popover={isCompact}
+        bind:this={listEl}
         aria-label="笔记列表"
-        transition:fly={{ x: isCompact ? -24 : 24, duration: reducedMotion.current ? 0 : 220, easing: cubicOut }}
+        transition:fly={{ x: isCompact ? 0 : 14, y: isCompact ? 20 : 0, duration: reducedMotion.current ? 0 : 220, easing: cubicOut }}
       >
         <div class="pane-head">
           <div class="pane-title-group">
@@ -494,9 +524,10 @@
     {#if showPaneC}
       <section
         id="message-conversation"
-        class="pane-c glass-popover"
+        class="pane-c"
+        class:glass-popover={isCompact}
         aria-label="当前消息线程"
-        transition:fly={{ x: 24, duration: reducedMotion.current ? 0 : 220, easing: cubicOut }}
+        transition:fly={{ x: isCompact ? 0 : 18, y: isCompact ? 20 : 0, duration: reducedMotion.current ? 0 : 240, easing: cubicOut }}
       >
         <div class="pane-head">
           <div class="pane-title-group">
@@ -837,8 +868,6 @@
     height: 100%;
     /* A flexible thread can contribute its longest paragraph to the preferred width. */
     max-inline-size: 100%;
-    gap: 12px;
-    padding: 14px 14px 14px 0;
     z-index: 40;
   }
 
@@ -853,7 +882,6 @@
   }
 
   .workspace-overlay.medium {
-    padding: 14px;
     flex: none;
   }
 
@@ -862,20 +890,28 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    border-radius: var(--radius-xl);
     overflow: hidden;
   }
 
   .pane-b {
-    width: 320px;
+    width: clamp(244px, 18vw, 312px);
     flex: none;
     padding: 18px 16px;
   }
 
   .pane-c {
-    width: 400px;
+    width: clamp(330px, 23vw, 414px);
     flex: none;
     padding: 18px 18px 16px;
+  }
+
+  .workspace-overlay:not(.compact) :is(.pane-b, .pane-c) {
+    background: color-mix(in srgb, var(--bg-canvas) 92%, var(--ink-muted));
+    border-inline-start: 1px solid color-mix(in srgb, var(--ink-muted) 28%, transparent);
+  }
+
+  .workspace-overlay:not(.compact) .pane-c {
+    background: color-mix(in srgb, var(--bg-canvas) 97%, var(--bg-elevated));
   }
 
   .workspace-overlay.medium .pane-b {

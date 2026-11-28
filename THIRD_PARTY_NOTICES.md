@@ -2,6 +2,10 @@
 
 Atha 包含以下第三方资产。它们保留各自的版权与许可证，不因 Atha 采用 AGPL-3.0-or-later 而被重新许可。
 
+## Readest 对页卷曲
+
+- `reader/app/src/lib/engine/spread-fold.ts` 和 `webgl-page-curl.ts` 的对页着色分支改编自 [Readest `pageCurl.ts`](https://github.com/readest/readest/blob/c3a95ba7b35c013baa644358669d28bd55efaba8/apps/readest-app/src/utils/pageCurl.ts)（Readest 贡献者，AGPL-3.0-only，许可全文见根目录 `LICENSE`）。Atha 将其折线、半径和背面映射接入自己的绘制、导航和降级逻辑；未引入 Readest 应用或运行时依赖。
+
 ## Kindle 直接依赖
 
 - `boko 0.5.0`：GPL-3.0-or-later；上游：<https://crates.io/crates/boko/0.5.0>；固定源码：<https://github.com/zacharydenton/boko/tree/8f412fb1a507399bce320d591feb517467cdb5f7>

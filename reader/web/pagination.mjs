@@ -48,6 +48,7 @@ export function createReadingScrollWitness(
  *   effect: () => PageTurnEffect | null,
  *   preview: (step: number, from: number, pages: number, dx: number, effect: PageTurnEffect, y?: number) => void,
  *   commit: (step: number, from: number, direction: 1 | -1, effect: PageTurnEffect) => void,
+ *   captureNativeSpread?: (step: number, from: number, direction: 1 | -1, advance: () => Promise<void>) => Promise<void>,
  *   cancel: () => void,
  *   stop: () => void,
  * }} PageTurn
@@ -62,6 +63,7 @@ export function createPagination({
   next,
   fontSizeControl,
   measureViewportHeight = () => innerHeight,
+  wantsFacingPages = () => false,
   onPageShown,
   assert,
   fail,
@@ -319,7 +321,9 @@ export function createPagination({
 
   function applyFormulaScale() {
     const fontScale = readerPixels(state.fontSize) / SOURCE_FONT_SIZE;
-    const contentWidth = book.clientWidth;
+    const contentWidth = reader.hasAttribute("data-reader-spread")
+      ? parseFloat(getComputedStyle(book).columnWidth)
+      : book.clientWidth;
     for (const formula of book.querySelectorAll("img.math-inline, img.math-display")) {
       if (!formula.dataset.sourceWidth) {
         const width = Number(formula.getAttribute("width"));
@@ -421,8 +425,11 @@ export function createPagination({
     stopSettle();
     nativePagedScroll = false;
     reader.removeAttribute("data-native-page-scroll");
+    reader.style.removeProperty("--reader-scroll-end");
     page.scrollLeft = 0;
     book.style.transform = "none";
+    const spread = !isScrolled() && !book.classList.contains("atha-cbz-section") && wantsFacingPages();
+    reader.toggleAttribute("data-reader-spread", spread);
     applyFormulaScale();
     if (isScrolled()) {
       syncScrollPage();
@@ -439,6 +446,10 @@ export function createPagination({
     state.page = Math.min(state.page, state.pages - 1);
     nativePagedScroll = book.scrollWidth * visualScale > MAX_TRANSFORM_WIDTH;
     reader.toggleAttribute("data-native-page-scroll", nativePagedScroll);
+    if (spread && nativePagedScroll) {
+      // An odd final leaf still needs a full, spine-aligned spread viewport.
+      reader.style.setProperty("--reader-scroll-end", `${(state.pages - 1) * pageStep + width - 1}px`);
+    }
     reader.dataset.pageColumns = "paged";
     reader.dataset.scrollable = "false";
     showPage();
@@ -606,7 +617,7 @@ export function createPagination({
     const fitScale = page.getBoundingClientRect().width / page.clientWidth;
     const bookRect = book.getBoundingClientRect();
     const style = getComputedStyle(book);
-    const columnWidth = parseFloat(style.width);
+    const columnWidth = parseFloat(reader.hasAttribute("data-reader-spread") ? style.columnWidth : style.width);
     const columnStep = columnWidth + parseFloat(style.columnGap);
     try {
       for (const formula of formulas) {
@@ -721,13 +732,13 @@ export function createPagination({
     fontSizeControl.value = "19";
   }
 
-  async function show(index, anchor, operationStage = "翻页与公式加载", preserveTurn = false) {
+  async function show(index, anchor, operationStage = "翻页与公式加载", preserveTurn = false, includeNext = true) {
     if (!preserveTurn) pageTurn?.stop();
     state.page = Math.max(0, Math.min(index, state.pages - 1));
     showPage();
     await nextFrame();
     let restoreOffset = anchor ?? null;
-    const shown = await onPageShown(true, () => {
+    const shown = await onPageShown(includeNext, () => {
       if (restoreOffset === null) restoreOffset = captureOffset();
       return { offset: restoreOffset, pageIndex: state.page, scrollTop: reader.scrollTop };
     });
@@ -815,7 +826,7 @@ export function createPagination({
     return pointForOffset(offset).exact;
   }
 
-  async function move(delta) {
+  async function move(delta, onShown = () => {}) {
     if (
       isScrolled() &&
       ((delta < 0 && reader.scrollTop <= 0) ||
@@ -828,10 +839,24 @@ export function createPagination({
       pageTurn?.stop();
       return false;
     }
+    // Keep the native long-chapter scroll position; only its visual transition is
+    // replaced. An in-progress touch drag still settles in the native scrollport.
+    if (nativePagedScroll && !isScrolled() && Math.abs(delta) === 1 &&
+      reader.hasAttribute("data-reader-spread") && !book.hasAttribute("data-swipe-dragging") &&
+      pageTurn?.captureNativeSpread && pageTurn.effect() === "curl") {
+      await pageTurn.captureNativeSpread(pageStep, state.page, delta, async () => {
+        // The following spread can warm in the background. Only resources on
+        // the destination sheet may hold up the curl.
+        await show(target, undefined, undefined, true, false);
+        onShown();
+      });
+      return true;
+    }
     const customEffect = turnEffect();
     const animate = customEffect && Math.abs(delta) === 1;
     if (animate) pageTurn.commit(pageStep, state.page, delta, customEffect);
     await show(target, undefined, undefined, Boolean(animate));
+    onShown();
     return true;
   }
 

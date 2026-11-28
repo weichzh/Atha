@@ -33,7 +33,9 @@ import { ensureKernelGlobals } from "./kernel-globals.ts";
 import { createReaderPreferences, DEFAULT_APPLICATION_PREFS, DEFAULT_BOOK_PREFS } from "./preferences.ts";
 
 export interface ReaderEngineCallbacks {
-  getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "cancel" | "stop"> | undefined;
+  getPageTurnStage?: () => Pick<PageTurnStage, "preview" | "commit" | "captureNativeSpread" | "cancel" | "stop"> | undefined;
+  allowsPageTurnEffect: () => boolean;
+  wantsFacingPages?: () => boolean;
   beginVerticalSwipe?: () => ((phase: "move" | "end" | "cancel", deltaY: number) => void) | undefined;
   onToggleChrome: () => void;
   onOpenNoteThread: (rootId: string) => void;
@@ -271,8 +273,6 @@ export class ReaderEngine {
   private activeSectionRanges: { rootId: string; range: Range }[] = [];
   private searchHighlightRange: Range | null = null;
   private activeRootHighlightId: string | null = null;
-  private lastPointerDownPoint: { x: number; y: number } | null = null;
-  private lastPointerDownInteractive = false;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private telemetryChain = Promise.resolve();
   private telemetryStage: "initialization" | "opening" | "content-loaded" | "layout-stable" | "layout" =
@@ -550,7 +550,7 @@ export class ReaderEngine {
       pageTurn: {
         effect: () => {
           const style = uiPrefs.state.pageTurnStyle;
-          return stage() && (style === "cover" || style === "curl") &&
+          return stage() && this.callbacks.allowsPageTurnEffect() && (style === "cover" || style === "curl") &&
               !reducePageMotion.matches
             ? style : null;
         },
@@ -558,11 +558,24 @@ export class ReaderEngine {
           stage()?.preview({ frame, reader, page, book: this.content.book, pageStep }, from, pages, dx, style, y),
         commit: (pageStep: number, from: number, dir: 1 | -1, style: "cover" | "curl") =>
           stage()?.commit({ frame, reader, page, book: this.content.book, pageStep }, from, dir, style),
+        captureNativeSpread: isWebKitGtkRuntime()
+          ? (pageStep: number, from: number, dir: 1 | -1, advance: () => Promise<void>) => {
+            const active = stage();
+            return active
+              ? active.captureNativeSpread({ frame, reader, page, book: this.content.book, pageStep }, from, dir, async () => {
+                await advance();
+                // Capture the destination with its own running head, bookmark and folio.
+                this.syncSnapshots();
+              })
+              : advance();
+          }
+          : undefined,
         cancel: () => stage()?.cancel(),
         stop: () => stage()?.stop(),
       },
       book: this.content.book,
       measureViewportHeight: () => frame.clientHeight,
+      wantsFacingPages: this.callbacks.wantsFacingPages,
       reader,
       page,
       position,
@@ -637,23 +650,10 @@ export class ReaderEngine {
       fail,
     });
 
-    const handleCenterTap = () => {
-      if (this.lastPointerDownInteractive) return;
-      const hitRootId = this.findHighlightAtPoint(this.lastPointerDownPoint);
-      if (hitRootId) {
-        const root = this.roots.find((r) => r.id === hitRootId);
-        const match = this.activeSectionRanges.find((item) => item.rootId === hitRootId);
-        if (root && match) {
-          this.selection = {
-            text: root.sourceAnchor.selectedText,
-            rect: match.range.getBoundingClientRect(),
-            range: match.range,
-            existingRootId: root.id,
-          };
-          return;
-        }
+    const handleCenterTap = (point: { clientX: number; clientY: number }, contentAction: boolean) => {
+      if (!contentAction && !this.showStoredHighlightAt(point.clientX, point.clientY)) {
+        this.callbacks.onToggleChrome();
       }
-      this.callbacks.onToggleChrome();
     };
 
     this.interaction = createInteraction({
@@ -734,14 +734,7 @@ export class ReaderEngine {
       locator: this.locator,
     });
 
-    // Pointer + Selection + Lightbox tracking inside book content
-    const onBookPointerDown = (event: PointerEvent) => {
-      this.lastPointerDownPoint = { x: event.clientX, y: event.clientY };
-      const target = event.target;
-      this.lastPointerDownInteractive =
-        target instanceof Element &&
-        Boolean(target.closest("img[role='button'], table, pre, svg"));
-    };
+    // Selection + Lightbox tracking inside book content
     const onBookPointerUp = () => {
       requestAnimationFrame(() => this.refreshSelectionState());
     };
@@ -776,12 +769,10 @@ export class ReaderEngine {
       requestAnimationFrame(() => this.refreshSelectionState());
     };
 
-    this.content.book.addEventListener("pointerdown", onBookPointerDown);
     this.content.book.addEventListener("pointerup", onBookPointerUp);
     this.content.book.addEventListener("click", onBookClick);
     document.addEventListener("selectionchange", onSelectionChange);
     this.cleanups.push(() => {
-      this.content.book.removeEventListener("pointerdown", onBookPointerDown);
       this.content.book.removeEventListener("pointerup", onBookPointerUp);
       this.content.book.removeEventListener("click", onBookClick);
       document.removeEventListener("selectionchange", onSelectionChange);
@@ -868,21 +859,37 @@ export class ReaderEngine {
     }
   }
 
-  private findHighlightAtPoint(point: { x: number; y: number } | null): string | null {
-    if (!point) return null;
-    for (const item of this.activeSectionRanges) {
-      for (const rect of item.range.getClientRects()) {
-        if (
-          point.x >= rect.left - 4 &&
-          point.x <= rect.right + 4 &&
-          point.y >= rect.top - 4 &&
-          point.y <= rect.bottom + 4
-        ) {
-          return item.rootId;
-        }
-      }
+  private rangeContainsPoint(range: Range, x: number, y: number): boolean {
+    return Array.from(range.getClientRects()).some(rect =>
+      rect.width > 0 && rect.height > 0 && rect.left <= x && x <= rect.right && rect.top <= y && y <= rect.bottom);
+  }
+
+  private showStoredHighlightAt(x: number, y: number): boolean {
+    const match = this.activeSectionRanges.find(({ range }) => this.rangeContainsPoint(range, x, y));
+    const root = match && this.roots.find(({ id }) => id === match.rootId);
+    if (!match || !root) return false;
+    this.selection = {
+      text: root.sourceAnchor.selectedText,
+      rect: match.range.getBoundingClientRect(),
+      range: match.range,
+      existingRootId: root.id,
+    };
+    return true;
+  }
+
+  dismissStoredHighlightOutside(x: number, y: number) {
+    const selection = this.selection;
+    if (selection?.existingRootId && !this.rangeContainsPoint(selection.range, x, y)) this.selection = null;
+  }
+
+  openSelectionActionsAt(x: number, y: number) {
+    const range = this.content?.selectionRange();
+    if (range && this.rangeContainsPoint(range, x, y)) {
+      this.refreshSelectionState();
+      return;
     }
-    return null;
+    this.clearSelection();
+    this.showStoredHighlightAt(x, y);
   }
 
   refreshSelectionState() {

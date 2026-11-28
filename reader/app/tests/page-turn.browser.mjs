@@ -25,11 +25,15 @@ const section = (page) => page.locator("html").getAttribute("data-section-positi
 const stage = (page, mode) => page.locator(`[data-page-turn-renderer="${mode}"]`);
 const settled = (page) => page.locator("[data-page-turn-renderer]").waitFor({ state: "detached" });
 
+async function setToolbar(page, open) {
+  const toolbar = page.locator(".reader-controls");
+  await page.locator(".reader-shell").focus();
+  if (await toolbar.isVisible() !== open) await page.keyboard.press("h");
+  await toolbar.waitFor({ state: open ? "visible" : "detached" });
+}
+
 async function mode(page, name) {
-  if (!await page.getByRole("button", { name: "排版与主题设置" }).isVisible()) {
-    const rect = await page.locator(".reader-frame").boundingBox();
-    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
-  }
+  await setToolbar(page, true);
   await page.getByRole("button", { name: "排版与主题设置" }).click();
   await page.getByRole("tab", { name: "本书覆盖" }).click();
   const option = page.getByRole("group", { name: "阅读方式" }).getByRole("button", { name, exact: true });
@@ -38,7 +42,7 @@ async function mode(page, name) {
     .some((button) => button.textContent.trim() === label && button.getAttribute("aria-pressed") === "true"), name);
   await page.keyboard.press("Escape");
   await page.getByRole("dialog", { name: "阅读排版设置" }).waitFor({ state: "hidden" });
-  await page.locator(".reader-shell").focus();
+  await setToolbar(page, false);
 }
 
 async function advance(page, direction, renderer, button = false) {
@@ -60,13 +64,14 @@ async function advance(page, direction, renderer, button = false) {
   if (!renderer) await settled(page);
   if (button) {
     await page.getByRole("button", { name: "关闭阅读进度" }).click();
+    await page.locator(".reader-progress-panel").waitFor({ state: "hidden" });
     await settled(page);
   }
 }
 
-async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference", prefix = "", inspectClones = false } = {}) {
+async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference", prefix = "", inspectClones = false, viewport } = {}) {
   const page = await browser.newPage({
-    viewport: mobile ? { width: 390, height: 844 } : { width: 1120, height: 820 },
+    viewport: viewport ?? (mobile ? { width: 390, height: 844 } : { width: 1120, height: 820 }),
     deviceScaleFactor: mobile ? 2 : 1,
     hasTouch: touch,
     reducedMotion,
@@ -147,15 +152,273 @@ async function touchDrag(page, dx) {
   };
 }
 
-const preview = await startPreview({ root: appRoot, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
-const base = `http://127.0.0.1:${preview.httpServer.address().port}/`;
-let browser;
-try {
-  await mkdir(artifacts, { recursive: true });
-  browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH,
-    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+async function mouseGutterDrag(page, direction) {
+  const frame = await page.locator(".reader-frame").boundingBox();
+  const paper = await page.locator(".page").boundingBox();
+  const x = direction > 0
+    ? (frame.x + frame.width + paper.x + paper.width) / 2
+    : (frame.x + paper.x) / 2;
+  const y = frame.y + frame.height * 0.68;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - direction * 415, y, { steps: 8 });
+  return () => page.mouse.up();
+}
+
+async function facingText(page) {
+  return page.evaluate(() => {
+    const aperture = document.querySelector(".page").getBoundingClientRect();
+    const spine = (aperture.left + aperture.right) / 2;
+    const book = document.querySelector(".reader-content-host").shadowRoot.querySelector(".book");
+    const text = [new Set(), new Set()];
+    for (const paragraph of book.querySelectorAll("p")) {
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      for (const rect of range.getClientRects()) {
+        if (rect.width < 1 || rect.left < aperture.left - 1 || rect.right > aperture.right + 1) continue;
+        text[rect.left < spine ? 0 : 1].add(Number(paragraph.textContent.match(/第 (\d+) 段/)?.[1]));
+      }
+    }
+    return text.map(side => [...side]);
   });
+}
+
+async function verifyFacingPages(browser, base) {
+  const viewport = { width: 1500, height: 900 };
+  const { page, errors } = await prepare(browser, base, { viewport, touch: true, inspectClones: true, paragraphs: 93 });
+  const spread = page.locator(".reader[data-reader-spread]");
+  const capture = name => page.screenshot({ path: fileURLToPath(new URL(name, artifacts)) });
+  try {
+    await open(page, base);
+    await spread.waitFor();
+    const opening = await facingText(page);
+    assert.equal(opening[0][0], 1);
+    assert.ok(opening[1][0] >= opening[0].at(-1), "the right leaf continues the left");
+    await capture("facing-pages-desktop.png");
+
+    await mode(page, "卷页");
+    await setToolbar(page, true);
+    await advance(page, 1, null);
+    await advance(page, -1, null, true);
+    const fast = await touchDrag(page, -415);
+    await fast();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    assert.equal(await page.locator(".reader-controls").isVisible(), true);
+    assert.deepEqual(await page.evaluate(() => window.turnRenderers), [], "open toolbar always uses the default turn");
+    await setToolbar(page, false);
+    await advance(page, -1, "spread");
+    await settled(page);
+
+    const beforeDrag = await page.evaluate(() => window.turnRenderers.length);
+    const drag = await mouseGutterDrag(page, 1);
+    await drag();
+    await settled(page);
+    assert.equal(await position(page), 1, "mouse gutter drag must not turn the page");
+    assert.equal(await page.evaluate(() => window.turnRenderers.length), beforeDrag, "mouse gutter drag must not preview a turn");
+    // The browser may extend a text selection from the gutter onto the page.
+    await page.keyboard.press("Escape");
+    await page.locator(".selection-capsule").waitFor({ state: "hidden" });
+
+    const frame = await page.locator(".reader-frame").boundingBox();
+    await page.mouse.click(frame.x + frame.width * 0.9, frame.y + frame.height * 0.68);
+    await stage(page, "spread").waitFor();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    await settled(page);
+    await page.mouse.wheel(0, -120);
+    await stage(page, "spread").waitFor();
+    await page.waitForFunction(() => /page 1 \/ /.test(document.title));
+    await settled(page);
+
+    const release = await touchDrag(page, -415);
+    await stage(page, "spread").waitFor();
+    assert.equal(await position(page), 1, "preview does not change navigation");
+    const faces = await stage(page, "spread").evaluate(root => {
+      const canvas = root.querySelector("canvas.visible");
+      const gl = canvas.getContext("webgl");
+      const program = gl.getParameter(gl.CURRENT_PROGRAM);
+      const read = name => gl.getUniform(program, gl.getUniformLocation(program, name));
+      const paper = root.closest(".reader-frame").querySelector(".page").getBoundingClientRect();
+      const spine = (paper.left + paper.right) / 2 - root.getBoundingClientRect().left;
+      return { pinned: Math.abs(read("u_spine") - spine) <= 1, folded: read("u_radius") > 0, back: read("u_incoming") };
+    });
+    assert.deepEqual(faces, { pinned: true, folded: true, back: 1 });
+    assert.equal(await page.locator(".reader-controls").count(), 0, "curl does not reveal the toolbar");
+    await capture("facing-pages-turn.png");
+    await release();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    await settled(page);
+    const second = await facingText(page);
+    assert.ok(second[0][0] >= opening[1].at(-1));
+    await advance(page, -1, "spread");
+    await settled(page);
+    assert.deepEqual(await facingText(page), opening);
+
+    const line = await page.locator(".reader-content-host").evaluate(host => {
+      const text = host.shadowRoot.querySelector(".book p").firstChild;
+      const range = document.createRange();
+      range.setStart(text, 2);
+      range.setEnd(text, 14);
+      return range.getBoundingClientRect().toJSON();
+    });
+    await page.mouse.move(line.left + 1, line.top + line.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(line.right - 1, line.top + line.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.locator(".selection-capsule").waitFor();
+    await settled(page);
+    assert.equal(await position(page), 1, "dragging on printed text selects instead of turning");
+    await page.keyboard.press("Escape");
+    await page.locator(".selection-capsule").waitFor({ state: "hidden" });
+
+    const cancel = await touchDrag(page, -36);
+    await stage(page, "spread").waitFor();
+    await setToolbar(page, true);
+    await settled(page);
+    await cancel();
+    await settled(page);
+    assert.equal(await position(page), 1);
+    await setToolbar(page, false);
+
+    const before = await saved(page);
+    await page.setViewportSize({ width: 1240, height: 1030 });
+    await spread.waitFor({ state: "detached" });
+    await page.locator('html[data-viewport-stable^="1240x"]').waitFor({ state: "attached" });
+    await page.setViewportSize(viewport);
+    await spread.waitFor();
+    await page.locator('html[data-viewport-stable^="1500x"]').waitFor({ state: "attached" });
+    assert.equal(await saved(page), before);
+    const lost = await touchDrag(page, -415);
+    await stage(page, "spread").waitFor();
+    await stage(page, "spread").locator("canvas.visible").evaluate(canvas => {
+      canvas.getContext("webgl").getExtension("WEBGL_lose_context").loseContext();
+    });
+    await stage(page, "cover").waitFor();
+    await lost();
+    await page.waitForFunction(() => /page 2 \/ /.test(document.title));
+    await settled(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await advance(page, -1, null);
+    await mode(page, "连续滚动");
+    await spread.waitFor({ state: "detached" });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
+async function verifyOddLongSpread(browser, base) {
+  const { page, errors } = await prepare(browser, base, {
+    viewport: { width: 1500, height: 900 },
+    inspectClones: true,
+    paragraphs: 35,
+    reducedMotion: "reduce",
+  });
+  try {
+    await open(page, base);
+    // Give each original paragraph a leaf to make the final blank leaf independent of fonts.
+    await page.locator(".reader-content-host").evaluate(host => {
+      const style = document.createElement("style");
+      style.textContent = ".book p + p { break-before: column; }";
+      host.shadowRoot.append(style);
+    });
+    await page.setViewportSize({ width: 1502, height: 900 });
+    await page.waitForFunction(() => /page 1 \/ 18$/.test(document.title) &&
+      document.querySelector(".reader").hasAttribute("data-native-page-scroll"));
+    for (let i = 1; i < 18; ++i) await advance(page, 1, null);
+    assert.deepEqual(await facingText(page), [[35], []], "the odd final leaf stays on its side of the spine");
+    const geometry = await page.locator(".page").evaluate(page => ({
+      left: page.scrollLeft,
+      step: page.clientWidth + parseFloat(getComputedStyle(page).getPropertyValue("--reader-column-gap")),
+    }));
+    assert.ok(Math.abs(geometry.left - 17 * geometry.step) <= 1);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
+async function verifyDesktopSelection(browser, base) {
+  const { page, errors } = await prepare(browser, base, {
+    viewport: { width: 1500, height: 900 }, inspectClones: true, paragraphs: 93,
+  });
+  try {
+    await open(page, base);
+    const pill = page.locator(".selection-capsule");
+    const { line, blank } = await page.locator(".reader-content-host").evaluate(host => {
+      const book = host.shadowRoot.querySelector(".book");
+      const frame = host.closest(".reader-frame").getBoundingClientRect();
+      const paper = host.getBoundingClientRect();
+      const range = document.createRange();
+      for (const p of book.querySelectorAll("p")) {
+        const node = p.firstChild;
+        range.setStart(node, 2);
+        range.setEnd(node, 14);
+        const rect = range.getBoundingClientRect();
+        if (rect.left > frame.left + frame.width * 0.35 && rect.right < frame.left + frame.width * 0.65 &&
+          rect.top >= paper.top && rect.bottom <= paper.bottom && rect.width > 10) {
+          return { line: rect.toJSON(), blank: { x: frame.left + frame.width / 2, y: (frame.top + paper.top) / 2 } };
+        }
+      }
+      throw new Error("No text in the center click zone");
+    });
+    const x = line.left + line.width / 2;
+    const y = line.top + line.height / 2;
+    await page.evaluate(() => {
+      window.readerContextMenus = [];
+      window.addEventListener("contextmenu", event => window.readerContextMenus.push(event.defaultPrevented));
+    });
+
+    await page.mouse.click(blank.x, blank.y);
+    await page.locator(".reader-controls").waitFor();
+    assert.equal(await pill.count(), 0, "plain click must not open a selection toolbar");
+    await setToolbar(page, false);
+
+    await page.mouse.click(x, y, { button: "right" });
+    assert.equal(await pill.count(), 0, "right clicking unselected text must not create a selection");
+    const selectText = async () => {
+      await page.mouse.move(line.left + 1, y);
+      await page.mouse.down();
+      await page.mouse.move(line.right - 1, y, { steps: 8 });
+      await page.mouse.up();
+      await pill.getByRole("button", { name: "复制" }).waitFor();
+    };
+    await selectText();
+    await page.mouse.click(blank.x, blank.y);
+    await pill.waitFor({ state: "hidden" });
+    await selectText();
+    await page.mouse.click(x, y, { button: "right" });
+    await pill.getByRole("button", { name: "标注" }).click();
+    await page.getByText("已高亮原文", { exact: true }).waitFor();
+    await pill.waitFor({ state: "hidden" });
+
+    await page.mouse.click(x, y);
+    await pill.getByRole("button", { name: "删除" }).waitFor();
+    await page.mouse.click(blank.x, blank.y);
+    await pill.waitFor({ state: "hidden" });
+    await page.mouse.click(blank.x, blank.y, { button: "right" });
+    await page.waitForFunction(() => window.readerContextMenus.length === 3);
+    assert.deepEqual(await page.evaluate(() => window.readerContextMenus), [true, true, true],
+      "right clicks do not open WebView menus");
+    await pill.waitFor({ state: "hidden" });
+    assert.equal(await position(page), 1);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
+async function verifyTurns(browser, base) {
+  if (process.argv.includes("--selection-only")) {
+    await verifyDesktopSelection(browser, base);
+    console.log("Desktop selection and context menu passed.");
+    return;
+  }
+  await verifyFacingPages(browser, base);
+  if (process.argv.includes("--spread-only")) {
+    console.log("Facing pages: curl, return, cancellation, resize and reduced motion passed.");
+    return;
+  }
+  await verifyOddLongSpread(browser, base);
 
   const desktop = await prepare(browser, base, { touch: true });
   const { page } = desktop;
@@ -179,9 +442,9 @@ try {
   await advance(page, -1, "canvas2d");
   await settled(page);
   await mode(page, "覆盖");
-  await advance(page, 1, "cover", true);
+  await advance(page, 1, "cover");
   await page.screenshot({ path: fileURLToPath(new URL("cover-desktop.png", artifacts)) });
-  await advance(page, -1, "cover", true);
+  await advance(page, -1, "cover");
   await page.locator(".reader-shell").focus();
   await advance(page, 1, "cover");
   await settled(page);
@@ -191,6 +454,7 @@ try {
   assert.equal(await page.evaluate(() => document.querySelector(".reader").scrollTop > 0), true);
   await mode(page, "覆盖");
   assert.equal(await saved(page), beforeScroll, "mode round trip reopens the same paged Locator");
+  await setToolbar(page, true);
   await page.getByRole("button", { name: "返回书架" }).click();
   await page.locator(".reader-root").waitFor({ state: "detached" });
   await open(page, base, true);
@@ -356,6 +620,18 @@ try {
   assert.deepEqual(await reduced.page.evaluate(() => window.turnRenderers), []);
   assert.deepEqual(reduced.errors, []);
   console.log("Page turns passed: one-page swipes, WebGL, Canvas2D, DOM cover, slide, scroll, cross-section and Locator restore.");
+}
+
+const preview = await startPreview({ root: appRoot, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
+const base = `http://127.0.0.1:${preview.httpServer.address().port}/`;
+let browser;
+try {
+  await mkdir(artifacts, { recursive: true });
+  browser = await chromium.launch({
+    executablePath: process.env.CHROMIUM_PATH,
+    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+  });
+  await verifyTurns(browser, base);
 } finally {
   await browser?.close();
   await new Promise(resolve => preview.httpServer.close(resolve));

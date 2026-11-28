@@ -20,6 +20,7 @@
   } from "@lucide/svelte";
   import { Dialog, Popover, Slider } from "bits-ui";
   import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { copyAppText } from "../data/desktop-clipboard.ts";
   import { fade, scale } from "svelte/transition";
   import { prefersReducedMotion as reducedMotion } from "svelte/motion";
   import { cubicOut } from "svelte/easing";
@@ -32,6 +33,7 @@
   } from "../data/library-adapter.ts";
   import { registerBackHandler, type BackSource } from "../data/back-stack.ts";
   import type { OpeningPaperMeasure } from "../data/open-transition.ts";
+  import { readerWorkspaceLayout, usesFacingPages } from "../data/reader-layout.ts";
   import { resolveEffectiveTheme } from "../engine/preferences.ts";
   import { setNativeSelectionSuppressed, syncSystemBarsMode, watchReaderBattery } from "../data/system-bars.ts";
   import { uiPrefs } from "../data/ui-prefs.svelte.ts";
@@ -59,6 +61,7 @@
 
   let { book, manifestPath, initialJump = null, onBackToShelf, entryBlocked, openingTheme, onScreenState }: Props = $props();
 
+  let paperEl = $state<HTMLElement | null>(null);
   let frameEl = $state<HTMLDivElement | null>(null);
   let readerEl = $state<HTMLDivElement | null>(null);
   let pageEl = $state<HTMLDivElement | null>(null);
@@ -68,6 +71,7 @@
 
   let viewportWidth = $state(typeof window !== "undefined" ? window.innerWidth : 1440);
   let viewportHeight = $state(typeof window !== "undefined" ? window.innerHeight : 900);
+  const android = typeof navigator !== "undefined" && /\bAndroid\b/.test(navigator.userAgent);
 
   let chromeOpen = $state(false);
   let quickActionsOpen = $state(false);
@@ -117,6 +121,8 @@
     bookTitle: untrack(() => book.title),
     callbacks: {
       getPageTurnStage: () => pageTurnStage,
+      allowsPageTurnEffect: () => !chromeOpen,
+      wantsFacingPages: () => !android && usesFacingPages(frameEl?.clientWidth ?? 0, window.innerWidth, window.innerHeight),
       beginVerticalSwipe,
       onToggleChrome: toggleChrome,
       onOpenNoteThread: (rootId: string) => {
@@ -204,9 +210,10 @@
     );
   });
 
-  const isCompact = $derived(viewportWidth < 800 || viewportHeight > viewportWidth);
-  const isMediumLandscape = $derived(!isCompact && viewportWidth < 1440);
-  const isWideLandscape = $derived(!isCompact && viewportWidth >= 1440);
+  const workspaceLayout = $derived(readerWorkspaceLayout(viewportWidth, viewportHeight));
+  const isCompact = $derived(workspaceLayout === "compact");
+  const isMediumLandscape = $derived(workspaceLayout === "split");
+  const isWideLandscape = $derived(workspaceLayout === "three");
 
   const hideReaderA = $derived(
     (isMediumLandscape && notesMode === "thread") ||
@@ -276,6 +283,9 @@
       window.addEventListener("pointerdown", onOutsideBody, true);
       window.addEventListener("focusin", onOutsideBody, true);
     }
+    const selectionFrame = !android ? frameEl : null;
+    selectionFrame?.addEventListener("pointerdown", handleDesktopSelectionPress, true);
+    selectionFrame?.addEventListener("contextmenu", handleReaderContextMenu);
     window.addEventListener("pagehide", onPageHide);
 
     void (async () => {
@@ -307,6 +317,8 @@
       window.removeEventListener("resize", onResize);
       window.removeEventListener("pointerdown", onOutsideBody, true);
       window.removeEventListener("focusin", onOutsideBody, true);
+      selectionFrame?.removeEventListener("pointerdown", handleDesktopSelectionPress, true);
+      selectionFrame?.removeEventListener("contextmenu", handleReaderContextMenu);
       setNativeSelectionSuppressed(false);
       window.removeEventListener("pagehide", onPageHide);
     };
@@ -323,6 +335,22 @@
     const h = Math.floor(mins / 60);
     const m = mins % 60;
     return m ? `${h}时${m}分` : `${h}时`;
+  }
+
+  function handleDesktopSelectionPress(event: PointerEvent) {
+    if (!event.isPrimary || event.pointerType !== "mouse") return;
+    if (event.button === 2) {
+      // Keep the current selection; a secondary press must not make a new one.
+      event.preventDefault();
+    } else if (event.button === 0) {
+      engine.dismissStoredHighlightOutside(event.clientX, event.clientY);
+    }
+  }
+
+  function handleReaderContextMenu(event: MouseEvent) {
+    if (event instanceof PointerEvent && event.pointerType && event.pointerType !== "mouse") return;
+    event.preventDefault();
+    engine.openSelectionActionsAt(event.clientX, event.clientY);
   }
 
   async function handleLookupSelection() {
@@ -374,7 +402,7 @@
     if (!sel || copyingSelection) return;
     copyingSelection = true;
     try {
-      await navigator.clipboard.writeText(sel.text);
+      await copyAppText(sel.text);
       if (engine.selection === sel) engine.clearSelection();
       engine.showToast("已复制");
     } catch {
@@ -395,7 +423,10 @@
     if (readerOverlayOpen || entryBlocked) return;
     if (quickActionsOpen) quickActionsOpen = false;
     else if (chromeOpen) hideChrome();
-    else chromeOpen = true;
+    else {
+      pageTurnStage?.stop();
+      chromeOpen = true;
+    }
   }
 
   function beginVerticalSwipe() {
@@ -565,7 +596,7 @@
 >
   <div class="reader-workspace-layout">
     <!-- Region A: Reading Surface -->
-    <section class="region-a" class:hidden-a={hideReaderA} inert={hideReaderA} aria-label="正文阅读区">
+    <section class="region-a" bind:this={paperEl} class:hidden-a={hideReaderA} inert={hideReaderA} aria-label="正文阅读区">
       <div class="reader-frame" bind:this={frameEl}>
         <div class="reader" style:--pull-translation={`${Math.min(96, Math.max(0, swipeY) * 0.58)}px`}
           class:pulling={swipeY > 0} bind:this={readerEl}>
@@ -573,7 +604,6 @@
             <div class="reader-content-host" bind:this={hostEl}></div>
           </div>
         </div>
-        <PageTurnStage bind:this={pageTurnStage} />
       </div>
 
       <div class="kernel-bridge" bind:this={bridgeEl} hidden aria-hidden="true"></div>
@@ -611,6 +641,8 @@
           <span>本节 {engine.page + 1}/{engine.pages} 页 <span class="dot-sep">·</span> {engine.percent ?? 0}%</span>
         </footer>
       {/if}
+
+      <PageTurnStage paper={paperEl} bind:this={pageTurnStage} />
 
       {#if swipeY > 0}
         <div class="bookmark-lamp" class:lit={lampOn} aria-hidden="true">
@@ -1139,6 +1171,10 @@
     touch-action: pan-x pinch-zoom;
     translate: 0 var(--pull-translation);
     transition: translate 230ms var(--ease-spring);
+  }
+
+  .reader-frame > .reader[data-reader-spread] {
+    padding-block: calc(24px * var(--reader-dpr, 1));
   }
 
   .reader-frame > .reader.pulling {

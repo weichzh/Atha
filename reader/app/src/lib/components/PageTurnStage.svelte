@@ -1,20 +1,24 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { rasterizeReaderPage, type PageTurnViewport } from "../engine/page-rasterizer.ts";
+  import { spreadFold, type SpreadLeaf } from "../engine/spread-fold.ts";
   import { PageCurlRenderer, type CurlPose } from "../engine/webgl-page-curl.ts";
 
   type Effect = "cover" | "curl";
   type Direction = 1 | -1;
+  let { paper }: { paper: HTMLElement | null } = $props();
   let root: HTMLDivElement;
   let under: HTMLDivElement;
   let front: HTMLDivElement;
   let webgl: HTMLCanvasElement;
   let fallback: HTMLCanvasElement;
-  let mode = $state<"cover" | "webgl" | "canvas2d" | null>(null);
+  let mode = $state<"cover" | "webgl" | "canvas2d" | "spread" | null>(null);
   let coverX = $state(0);
+  let stationaryClip = $state("");
   let renderer: PageCurlRenderer | null = null;
   let motion: MediaQueryList;
-  let turn: {
+  let turn = $state.raw<{
     effect: Effect;
     direction: Direction;
     from: number;
@@ -24,8 +28,27 @@
     progress: number;
     dragging: boolean;
     curled: boolean;
-  } | null = null;
+    leaf: SpreadLeaf | null;
+    captured?: boolean;
+  } | null>(null);
   let frameId = 0;
+  let nativeCapture: { token: number } | null = null;
+
+  function facingLeaf(view: PageTurnViewport, width: number, height: number, dir: Direction, sheet?: DOMRect): SpreadLeaf {
+    const viewport = sheet ?? view.frame.getBoundingClientRect();
+    const bounds = view.page.getBoundingClientRect();
+    const scale = width / viewport.width;
+    const spine = ((bounds.left + bounds.right) / 2 - viewport.left) * scale;
+    const leafWidth = Math.min(bounds.width / 2 * scale + 24, spine, width - spine);
+    const top = sheet ? 0 : Math.max(0, bounds.top - viewport.top - 16);
+    return {
+      left: dir === 1 ? spine : spine - leafWidth,
+      top,
+      width: leafWidth,
+      height: sheet ? height : Math.min(height - top, bounds.bottom - viewport.top + 16 - top),
+      direction: dir,
+    };
+  }
 
   function cloneColumn(mount: HTMLElement, viewport: PageTurnViewport, index: number, paper: string) {
     const { reader, page, book, pageStep } = viewport;
@@ -48,6 +71,10 @@
     const pageCopy = document.createElement("div");
     pageCopy.style.cssText = "position:relative;overflow:hidden;flex:none";
     pageCopy.style.width = getComputedStyle(page).width;
+    if (reader.hasAttribute("data-reader-spread")) {
+      readerCopy.style.setProperty("--reader-col-w", readerStyle.getPropertyValue("--reader-col-w"));
+      readerCopy.style.setProperty("--reader-spread-w", readerStyle.getPropertyValue("--reader-spread-w"));
+    }
     const host = document.createElement("div");
     host.className = oldHost.className;
     for (const attr of oldHost.attributes) {
@@ -105,6 +132,16 @@
   function draw(progress: number) {
     if (!turn) return;
     turn.progress = progress;
+    if (turn.leaf) {
+      const rendered = renderer?.renderSpread(spreadFold(turn.leaf, progress, turn.y), turn.leaf);
+      if (!rendered && turn.captured) {
+        stop();
+        return;
+      }
+      mode = rendered ? "spread" : "cover";
+      coverX = -turn.direction * turn.width * progress;
+      return;
+    }
     const fold = turn.direction === 1 ? progress : 1 - progress;
     if (turn.curled) {
       mode = renderer?.render(pose(fold, turn.y, turn.width, turn.height)) ?? "cover";
@@ -123,6 +160,24 @@
     const viewport = view.frame.getBoundingClientRect();
     const y = clientY === undefined ? height * 0.72 : (clientY - viewport.top) * height / viewport.height;
     const paper = getComputedStyle(view.frame).backgroundColor;
+    const spread = effect === "curl" && view.reader.hasAttribute("data-reader-spread");
+    if (spread) {
+      const leaf = facingLeaf(view, width, height, dir);
+      const spine = dir === 1 ? leaf.left : leaf.left + leaf.width;
+      stationaryClip = dir === 1 ? `inset(0 ${width - spine}px 0 0)` : `inset(0 0 0 ${spine}px)`;
+      cloneColumn(under, view, from + dir, paper);
+      cloneColumn(front, view, from, paper);
+      const source = rasterizeReaderPage(view, 0, width, height, paper, dir === 1 ? "right" : "left");
+      const back = source && rasterizeReaderPage(view, dir, width, height, paper, dir === 1 ? "left" : "right");
+      let curled = false;
+      if (source && back) {
+        renderer ??= new PageCurlRenderer(webgl, fallback);
+        curled = renderer.setSpreadSurface(source, back, width, height, paper);
+        if (!curled) renderer.releaseSurface();
+      }
+      turn = { effect, direction: dir, from, width, height, y, progress: 0, dragging: false, curled, leaf };
+      return true;
+    }
     const top = dir === 1 ? from : from - 1;
     const bottom = dir === 1 ? from + 1 : from;
     cloneColumn(under, view, bottom, paper);
@@ -136,7 +191,7 @@
         curled = true;
       }
     }
-    turn = { effect, direction: dir, from, width, height, y, progress: 0, dragging: false, curled };
+    turn = { effect, direction: dir, from, width, height, y, progress: 0, dragging: false, curled, leaf: null };
     return true;
   }
 
@@ -144,7 +199,7 @@
     if (!turn) return;
     if (frameId) cancelAnimationFrame(frameId);
     const start = turn.progress;
-    const duration = (turn.curled ? 380 : 250) * Math.max(0.4, Math.abs(target - start));
+    const duration = (turn.leaf && turn.curled ? 455 : turn.curled ? 380 : 250) * Math.max(0.4, Math.abs(target - start));
     const time = performance.now();
     turn.dragging = false;
     const tick = (now: number) => {
@@ -153,7 +208,7 @@
         return;
       }
       draw(start + (target - start) * (1 - (1 - (now - time) / duration) ** 3));
-      frameId = requestAnimationFrame(tick);
+      if (turn) frameId = requestAnimationFrame(tick);
     };
     frameId = requestAnimationFrame(tick);
   }
@@ -168,7 +223,7 @@
       !begin(view, from, dir, effect, clientY)) return;
     if (!turn) return;
     turn.dragging = true;
-    draw(Math.min(1, Math.abs(dx) / turn.width));
+    draw(Math.min(1, Math.abs(dx) / (turn.leaf && turn.curled ? turn.leaf.width * 2 : turn.width)));
   }
 
   export function commit(view: PageTurnViewport, from: number, dir: Direction, effect: Effect) {
@@ -179,11 +234,119 @@
     settle(1);
   }
 
+  const painted = () => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+
+  async function requestPixels(capture: { phase: "outgoing" | "incoming"; token: number; frame?: object }) {
+    try {
+      const packed = await invoke<ArrayBuffer>("page_curl_frame", { capture });
+      const decoded = new Blob([packed]).stream().pipeThrough(new DecompressionStream("deflate"));
+      return await new Response(decoded).arrayBuffer();
+    } catch {
+      return null;
+    }
+  }
+
+  function decodePixels(bytes: ArrayBuffer | null) {
+    if (!bytes || bytes.byteLength < 8 || bytes.byteLength % 4) return null;
+    const words = new Uint32Array(bytes);
+    const [width, height] = words;
+    if (!width || !height || width * height !== words.length - 2) return null;
+    const rgba = new Uint8ClampedArray(bytes, 8);
+    for (let i = 0; i < rgba.length; i += 4) {
+      const rgb = words[2 + i / 4];
+      rgba[i] = (rgb >>> 16) & 255;
+      rgba[i + 1] = (rgb >>> 8) & 255;
+      rgba[i + 2] = rgb & 255;
+      rgba[i + 3] = 255;
+    }
+    return new ImageData(rgba, width, height);
+  }
+
+  function frozenCanvas(image: ImageData) {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext("2d");
+    ctx?.putImageData(image, 0, 0);
+    return ctx ? canvas : null;
+  }
+
+  function endNativeCapture(capture: { token: number }) {
+    if (nativeCapture !== capture) return;
+    nativeCapture = null;
+    // The native watchdog also releases the cover if the document went away.
+    return invoke("page_curl_frame", { capture: { phase: "release", token: capture.token } }).catch(() => {});
+  }
+
+  export async function captureNativeSpread(
+    view: PageTurnViewport,
+    from: number,
+    dir: Direction,
+    advance: () => Promise<void>,
+  ) {
+    stop();
+    if (!paper?.isConnected) return advance();
+    const bounds = paper.getBoundingClientRect();
+    const { width, height } = bounds;
+    if (!width || !height || motion?.matches) return advance();
+    renderer ??= new PageCurlRenderer(webgl, fallback, { antialias: false });
+    if (!renderer.canCurlSpread()) return advance();
+    const leaf = facingLeaf(view, width, height, dir, bounds);
+    const capture = { token: crypto.getRandomValues(new Uint32Array(1))[0] };
+    nativeCapture = capture;
+    try {
+      const bytes = await requestPixels({ phase: "outgoing", token: capture.token, frame: {
+        x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+        viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
+      } });
+      if (!bytes) void endNativeCapture(capture);
+      if (!root?.isConnected) return;
+      await advance();
+      if (!bytes || nativeCapture !== capture) return;
+      await painted();
+      const nextBytes = await requestPixels({ phase: "incoming", token: capture.token });
+      if (!nextBytes || nativeCapture !== capture) return;
+      const source = decodePixels(bytes);
+      const incoming = decodePixels(nextBytes);
+      const outgoing = source && frozenCanvas(source);
+      if (!outgoing || !incoming) return;
+      if (!renderer.setSpreadSurface(outgoing, incoming, width, height, getComputedStyle(view.frame).backgroundColor)) {
+        renderer.releaseSurface();
+        return;
+      }
+      // A late first frame must never put the old view back after the native
+      // cover's deadline has already revealed the destination.
+      const covered = await invoke("page_curl_frame", { capture: { phase: "handoff", token: capture.token } })
+        .then(() => true, () => false);
+      if (!covered || nativeCapture !== capture) {
+        renderer.releaseSurface();
+        return;
+      }
+      const spine = dir === 1 ? leaf.left : leaf.left + leaf.width;
+      stationaryClip = dir === 1 ? `inset(0 ${width - spine}px 0 0)` : `inset(0 0 0 ${spine}px)`;
+      outgoing.style.cssText = "display:block;width:100%;height:100%";
+      front.replaceChildren(outgoing);
+      turn = { effect: "curl", direction: dir, from, width, height, y: height * 0.72, progress: 0, dragging: false, curled: true, leaf, captured: true };
+      draw(0);
+      await painted();
+      if (nativeCapture === capture) {
+        const prepared = turn;
+        await endNativeCapture(capture);
+        if (turn && turn === prepared) settle(1);
+      }
+    } finally {
+      void endNativeCapture(capture);
+    }
+  }
+
   export function cancel() {
     if (turn?.dragging) settle(0);
   }
 
   export function stop() {
+    if (nativeCapture) void endNativeCapture(nativeCapture);
     if (!turn) return;
     if (frameId) cancelAnimationFrame(frameId);
     frameId = 0;
@@ -211,12 +374,18 @@
   });
 </script>
 
-<div class="page-turn-stage" data-page-turn-renderer={mode} bind:this={root} aria-hidden="true" inert>
+<div class="page-turn-stage" class:sheet={turn?.captured} data-page-turn-renderer={mode} data-page-turn-source={mode && turn?.captured ? "viewport" : undefined} bind:this={root} aria-hidden="true" inert>
   <div class="turn-layer" bind:this={under}></div>
-  <div class="turn-layer cover" class:visible={mode === "cover"} style:transform={`translate3d(${coverX}px, 0, 0)`}>
+  <div
+    class="turn-layer cover"
+    class:visible={mode === "cover" || mode === "spread"}
+    class:stationary={mode === "spread"}
+    style:transform={mode === "spread" ? "none" : `translate3d(${coverX}px, 0, 0)`}
+    style:clip-path={mode === "spread" ? stationaryClip : undefined}
+  >
     <div class="turn-layer" bind:this={front}></div>
   </div>
-  <canvas class="turn-layer" class:visible={mode === "webgl"} bind:this={webgl}></canvas>
+  <canvas class="turn-layer" class:visible={mode === "webgl" || mode === "spread"} bind:this={webgl}></canvas>
   <canvas class="turn-layer" class:visible={mode === "canvas2d"} bind:this={fallback}></canvas>
 </div>
 
@@ -228,9 +397,15 @@
   }
 
   .page-turn-stage {
+    inset-block: var(--reader-head) var(--reader-foot);
     overflow: hidden;
     pointer-events: none;
     visibility: hidden;
+  }
+
+  .page-turn-stage.sheet {
+    inset-block: 0;
+    z-index: 1;
   }
 
   .page-turn-stage[data-page-turn-renderer] {
@@ -255,5 +430,10 @@
     opacity: 1;
     will-change: transform;
     box-shadow: 8px 0 22px var(--shadow-ink, rgb(0 0 0 / 18%));
+  }
+
+  .cover.stationary {
+    will-change: auto;
+    box-shadow: none;
   }
 </style>

@@ -1,5 +1,8 @@
 # 当前工作
 
+- `change`：桌面对页与笔记分栏试用 → `docs/changes/desktop-facing-pages.md`
+- `change`：长章节卷页 → `docs/changes/long-section-curl.md`
+- `change`：桌面右键菜单 → `docs/changes/desktop-context-menu.md`
 - `change`：本地清理与 PCT-AL10 试装入口 → `docs/changes/local-developer-commands.md`
 - `change`：恢复 V2 书架、应用设置与阅读控件 → `docs/changes/restore-reader-chrome.md`
 - `change`：阅读正文的有序列表裁切与括号编号 → `docs/changes/reader-list-marker-clipping.md`

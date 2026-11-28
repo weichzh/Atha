@@ -255,10 +255,7 @@ export function createNavigation({
   }
 
   async function previousPage() {
-    if (await pagination.move(-1)) {
-      syncControls();
-      return true;
-    }
+    if (await pagination.move(-1, syncControls)) return true;
     const index = session.snapshot().currentIndex;
     if (index === 0) return false;
     if (!(await openSection(index - 1))) return false;
@@ -268,10 +265,7 @@ export function createNavigation({
   }
 
   async function nextPage() {
-    if (await pagination.move(1)) {
-      syncControls();
-      return true;
-    }
+    if (await pagination.move(1, syncControls)) return true;
     const state = session.snapshot();
     if (state.currentIndex + 1 === state.sections) return false;
     if (!(await openSection(state.currentIndex + 1))) return false;

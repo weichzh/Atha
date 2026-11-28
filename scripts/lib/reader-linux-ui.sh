@@ -449,14 +449,18 @@ const scale = r && r.width / reader.offsetWidth;
 return {width:innerWidth, height:innerHeight, availableWidth:screen.availWidth,
   filled: a && r && Math.abs(a.width - innerWidth) <= 2 && Math.abs(r.width - a.width) <= 2,
   centered: r && p && Math.abs((p.left - r.left) - (r.right - p.right)) <= 2,
-  page: p?.width, paddingLeft: style && parseFloat(style.paddingLeft) * scale,
+  page: p?.width, spread: reader?.hasAttribute("data-reader-spread"),
+  spine: !!p && parseFloat(getComputedStyle(document.querySelector(".page"), "::after").borderInlineStartWidth) > 0,
+  paddingLeft: style && parseFloat(style.paddingLeft) * scale,
   paddingRight: style && parseFloat(style.paddingRight) * scale,
   hidden: !document.querySelector(".reader-controls,.pane-b,.pane-c"),
   overflow: document.documentElement.scrollWidth > innerWidth};'
 focus_geometry_predicate='
   .filled and .centered and (.overflow | not) and
   (.paddingLeft >= 31 and .paddingLeft <= 33) and (.paddingRight >= 31 and .paddingRight <= 33) and
-  (if .width >= 800 then .page >= 700 and .page <= 761
+  (if .width >= 1160 and .height >= 560 and .width >= .height * 1.3
+   then .spread and .spine and ((.page - ([.width - 64, 1172] | min)) | fabs) <= 2
+   elif .width >= 800 then (.spread | not) and .page >= 700 and .page <= 761
    else ((.page - (.width - 64)) | fabs) <= 2 end)'
 
 verify_desktop_workspace() {
@@ -501,9 +505,11 @@ const a = document.querySelector(".region-a");
 const b = document.querySelector(".pane-b")?.getBoundingClientRect();
 const c = document.querySelector(".pane-c")?.getBoundingClientRect();
 const send = document.querySelector(".pane-c .send-btn")?.getBoundingClientRect();
+const compact = innerWidth < 800 || innerWidth < innerHeight;
+const three = innerWidth >= 1360 && innerWidth >= innerHeight * 1.4;
 return {fit: c && c.width > 0 && c.left >= 0 && c.right <= innerWidth + 2 && c.bottom <= innerHeight + 2,
-  ordered: innerWidth < 800 ? !b : b?.right <= c?.left + 2 &&
-    (innerWidth < 1440 ? a?.classList.contains("hidden-a") : a?.getBoundingClientRect().right <= b?.left + 2),
+  ordered: compact ? !b : b?.right <= c?.left + 2 &&
+    (three ? a?.getBoundingClientRect().right <= b?.left + 2 : a?.classList.contains("hidden-a")),
   quote: Boolean(document.querySelector(".pane-c .source-quote")),
   send: send && send.width > 0 && send.bottom <= innerHeight + 1,
   overflow: document.documentElement.scrollWidth > innerWidth};' \
@@ -512,8 +518,10 @@ return {fit: c && c.width > 0 && c.left >= 0 && c.right <= innerWidth + 2 && c.b
     webdriver_click_element '.pane-c button[aria-label="返回笔记列表"], .pane-c button[aria-label="收起对话线程"]' ||
       die 'thread back control is unavailable'
     wait_for_script '
-return {list: Boolean(document.querySelector(".pane-b")), closed: !document.querySelector(".pane-c")};' \
-      '.list and .closed' 'thread back did not restore the notes list' >/dev/null
+const list = document.querySelector(".pane-b");
+return {settled: list && list.getAnimations().every(animation => animation.playState !== "running"),
+  closed: !document.querySelector(".pane-c")};' \
+      '.settled and .closed' 'thread back did not restore the notes list' >/dev/null
     webdriver_click_element '.pane-b button[aria-label="导出笔记"]' || die 'notes export menu is unavailable'
     wait_for_script '
 return {actions: document.querySelectorAll(".export-popover button").length};' \
@@ -532,7 +540,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(()
       die "switching tools changed the reading position at ${width}px (before: $(safe_wait_state "$before"); after: $(safe_wait_state "$after"))"
     dimensions=$(jq -cn --argjson previous "$dimensions" --argjson requestedWidth "$width" --argjson requestedHeight "$height" \
       --argjson actual "$geometry" --argjson position "$after" '$previous + [($actual |
-        {requestedWidth:$requestedWidth,requestedHeight:$requestedHeight,width,height,pageWidth:.page,paddingLeft,paddingRight,
+        {requestedWidth:$requestedWidth,requestedHeight:$requestedHeight,width,height,pageWidth:.page,spread,paddingLeft,paddingRight,
          locatorStable:true,section:$position.locator.start.section,offset:$position.locator.start.offset,page:$position.page})]')
   done
   desktop_workspace_evidence=$(jq -cn --argjson geometry "$geometry" --argjson dimensions "$dimensions" \
