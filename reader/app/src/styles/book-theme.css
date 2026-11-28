@@ -17,6 +17,7 @@
 }
 
 .book[data-theme="light"] {
+  color-scheme: light;
   --book-fg: #1A1916;
   --book-muted: #5C5850;
   --book-accent: #A8442C;
@@ -26,6 +27,7 @@
 }
 
 .book[data-theme="paper"] {
+  color-scheme: light;
   --book-fg: #26211A;
   --book-muted: #5E5549;
   --book-accent: #A8442C;
@@ -34,6 +36,7 @@
 }
 
 .book[data-theme="dark"] {
+  color-scheme: dark;
   --book-fg: #E8E3D9;
   --book-muted: #A69F93;
   --book-accent: #D9775F;

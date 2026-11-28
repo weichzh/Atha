@@ -11,6 +11,14 @@ const MAX_SNAPSHOT_BOOK_CSS_BYTES = 1_048_576;
 const SECTION_CACHE_LIMIT = 3;
 const SECTION_CACHE_TEXT_LIMIT = 8 * 1024 * 1024;
 const NATIVE_IMAGE_BASE_STYLE = ":where(img[data-atha-native-size]){height:auto}";
+const SVG_SCHEME_QUERY = /^\(prefers-color-scheme: (light|dark)\)$/i;
+
+function visitMediaRules(rules, visit) {
+  for (const rule of rules) {
+    if (rule instanceof CSSMediaRule) visit(rule);
+    if (rule.cssRules) visitMediaRules(rule.cssRules, visit);
+  }
+}
 
 export function parseSafeXhtml(source) {
   const declarations = [...source.matchAll(/<!DOCTYPE\b/gu)];
@@ -115,7 +123,7 @@ export function createBookSelection(book, root) {
   });
 }
 
-export function createContent({ host, reader, themeStyleSource, readerStyleSource, onLateLayout }) {
+export function createContent({ host, reader, themeStyleSource, readerStyleSource, onLateLayout, projectSvgColorScheme = false }) {
   const shadow = host.attachShadow({ mode: "closed" });
   const nativeImageStyle = document.createElement("style");
   const bookStyle = document.createElement("style");
@@ -134,12 +142,20 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   let cachedCbzPage = false;
   let cachedMarkdownSection = false;
   let sourceStyles = true;
+  let bookColorScheme = null;
+  let projectedBookCss;
   let userStylesEnabled = true;
   let userStylesheet = "";
   let inlineStyles = [];
   const validatedCss = new Map();
   const validatedSvg = new Map();
   const readySvg = new Set();
+  const adaptiveSvg = new Map();
+  const svgVariants = new Map();
+  const preparingSvgUrls = new Set();
+  let activeSvgUrls;
+  const svgSystemTheme = projectSvgColorScheme
+    ? matchMedia("(prefers-color-scheme: dark)") : null;
   const preparedSections = new Map();
   const pendingSectionMarkup = new Map();
   const sectionCacheOrder = new Map();
@@ -265,6 +281,38 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       .join("\n");
   }
 
+  function applyBookStyles() {
+    const originalCss = sourceStyles ? cachedCss || "" : "";
+    if (!bookColorScheme || !/prefers-color-scheme/i.test(originalCss)) {
+      bookStyle.textContent = originalCss;
+      return;
+    }
+    if (projectedBookCss?.source === originalCss && projectedBookCss.scheme === bookColorScheme) {
+      bookStyle.textContent = projectedBookCss.result;
+      return;
+    }
+
+    // Book CSS still sees the document preference. Project a detached copy,
+    // since mutating a live style's CSSOM can survive assigning the same text.
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(originalCss);
+    let projectedAny = false;
+    visitMediaRules(sheet.cssRules, (rule) => {
+      const original = rule.media.mediaText;
+      const projected = original.replace(
+        /\(\s*prefers-color-scheme\s*:\s*(light|dark)\s*\)/gi,
+        (_, scheme) => scheme.toLowerCase() === bookColorScheme ? "(min-width: 0px)" : "(max-width: -1px)",
+      );
+      if (projected !== original) {
+        rule.media.mediaText = projected;
+        projectedAny = true;
+      }
+    });
+    const result = projectedAny ? [...sheet.cssRules].map((rule) => rule.cssText).join("\n") : originalCss;
+    projectedBookCss = { source: originalCss, scheme: bookColorScheme, result };
+    bookStyle.textContent = result;
+  }
+
   function setStyles(value) {
     ensure(
       value &&
@@ -275,11 +323,18 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     );
     validateUserStylesheet(value.userStylesheet);
     sourceStyles = value.sourceStyles;
+    const previousScheme = bookColorScheme;
+    if (value.colorScheme !== undefined) bookColorScheme = value.colorScheme;
     userStylesEnabled = value.userStylesEnabled;
     userStylesheet = value.userStylesheet;
+    applyStyles();
+    if (previousScheme !== bookColorScheme) refreshSvgVariants();
+  }
+
+  function applyStyles() {
     pendingImageGeometry.clear();
     pendingImageLayoutSignature = "";
-    bookStyle.textContent = sourceStyles ? cachedCss || "" : "";
+    applyBookStyles();
     userStyle.textContent = userStylesEnabled ? userStylesheet : "";
     for (const [element, style] of inlineStyles) {
       if (sourceStyles) element.setAttribute("style", style);
@@ -641,12 +696,73 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     ensure(response.ok, "svg-load");
     const source = await response.text();
     ensureSectionCurrent(generation);
-    parseSvg(source);
+    const svg = parseSvg(source);
+    if (!projectSvgColorScheme || !/prefers-color-scheme/i.test(source)) return;
+    let adaptive = false;
+    let unsupported = false;
+    for (const style of svg.getElementsByTagNameNS("http://www.w3.org/2000/svg", "style")) {
+      const media = style.getAttribute("media");
+      if (media && /prefers-color-scheme/i.test(matchMedia(media).media)) return;
+      visitMediaRules(validateCss(style.textContent).cssRules, (rule) => {
+        const condition = rule.media.mediaText;
+        if (SVG_SCHEME_QUERY.test(condition)) adaptive = true;
+        else if (/prefers-color-scheme/i.test(condition)) unsupported = true;
+      });
+    }
+    if (adaptive && !unsupported) adaptiveSvg.set(url, source);
   }
 
   function validateSvgOnce(url, generation = sectionGeneration) {
     if (!validatedSvg.has(url)) validatedSvg.set(url, validateSvg(url, generation));
     return validatedSvg.get(url);
+  }
+
+  function svgVariant(url, scheme) {
+    const source = adaptiveSvg.get(url);
+    if (!source || !scheme) return null;
+    const key = `${scheme} ${url}`;
+    if (svgVariants.has(key)) return svgVariants.get(key);
+    // The original was validated before reaching this cache. Only matching
+    // media conditions change; the generated document stays an image.
+    const svg = new DOMParser().parseFromString(source, "image/svg+xml");
+    for (const style of svg.getElementsByTagNameNS("http://www.w3.org/2000/svg", "style")) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(style.textContent);
+      let changed = false;
+      visitMediaRules(sheet.cssRules, (rule) => {
+        const match = SVG_SCHEME_QUERY.exec(rule.media.mediaText);
+        if (!match) return;
+        rule.media.mediaText = match[1].toLowerCase() === scheme ? "all" : "not all";
+        changed = true;
+      });
+      if (changed) style.textContent = [...sheet.cssRules].map((rule) => rule.cssText).join("\n");
+    }
+    const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: "image/svg+xml" });
+    const variant = Object.freeze({ blob, href: URL.createObjectURL(blob) });
+    svgVariants.set(key, variant);
+    return variant;
+  }
+
+  function applySvgVariant(image, url) {
+    const variant = svgVariant(url, svgSchemeOverride());
+    // src remains the canonical declared resource for measurement and capture.
+    if (variant) image.srcset = variant.href;
+    else if (image.hasAttribute("srcset")) image.removeAttribute("srcset");
+  }
+
+  function svgSchemeOverride() {
+    const systemScheme = svgSystemTheme?.matches ? "dark" : "light";
+    return svgSystemTheme && bookColorScheme !== systemScheme ? bookColorScheme : null;
+  }
+
+  function refreshSvgVariants() {
+    if (!adaptiveSvg.size) return;
+    for (const image of book.querySelectorAll("img[src]")) applySvgVariant(image, image.src);
+  }
+
+  function clearSvgVariants() {
+    for (const { href } of svgVariants.values()) URL.revokeObjectURL(href);
+    svgVariants.clear();
   }
 
   function loadBounds(includeNextPage) {
@@ -849,6 +965,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       return false;
     }
     if (generation !== renderGeneration || signal?.aborted) return false;
+    applySvgVariant(preview, url);
     preview.src = url;
     const settle = (outcome) => {
       if (!preview.isConnected) return;
@@ -861,7 +978,10 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     };
     const outcome = await waitForImage(preview, settle, null, signal);
     if (outcome !== "timed-out") settle(outcome);
-    if (outcome === "aborted") preview.removeAttribute("src");
+    if (outcome === "aborted") {
+      preview.removeAttribute("srcset");
+      preview.removeAttribute("src");
+    }
     return !["aborted", "failed"].includes(outcome);
   }
 
@@ -887,6 +1007,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
           return;
         }
         if (generation !== renderGeneration || pendingImages.get(image) !== url) return;
+        applySvgVariant(image, url);
         image.src = url;
         const reveal = () => {
           image.classList.remove("atha-resource-pending");
@@ -1581,6 +1702,23 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     );
   }
 
+  function pruneAdaptiveSvg() {
+    if (!adaptiveSvg.size) return;
+    const retained = new Set(activeSvgUrls);
+    for (const cached of preparedSections.values()) {
+      for (const url of cached.svgUrls) retained.add(url);
+    }
+    for (const pending of preparingSvgUrls) {
+      for (const url of pending) retained.add(url);
+    }
+    for (const url of adaptiveSvg.keys()) {
+      if (retained.has(url)) continue;
+      adaptiveSvg.delete(url);
+      validatedSvg.delete(url);
+      readySvg.delete(url);
+    }
+  }
+
   function remember(cache, key, value, characters = sectionCacheOrder.get(key) || 0) {
     cache.delete(key);
     cache.set(key, value);
@@ -1590,6 +1728,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       (total, count) => total + count,
       0,
     );
+    let evictedSection = false;
     while (
       sectionCacheOrder.size > SECTION_CACHE_LIMIT ||
       (cachedCharacters > SECTION_CACHE_TEXT_LIMIT && sectionCacheOrder.size > 1)
@@ -1597,9 +1736,10 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       const oldest = sectionCacheOrder.keys().next().value;
       cachedCharacters -= sectionCacheOrder.get(oldest) || 0;
       sectionCacheOrder.delete(oldest);
-      preparedSections.delete(oldest);
+      evictedSection = preparedSections.delete(oldest) || evictedSection;
       pendingSectionMarkup.delete(oldest);
     }
+    if (evictedSection) pruneAdaptiveSvg();
     return value;
   }
 
@@ -1611,6 +1751,9 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     cachedCbzPage = section.cbz;
     cachedMarkdownSection = section.markdown;
     eagerSvgCount = section.eagerSvgCount;
+    activeSvgUrls = section.svgUrls;
+    pruneAdaptiveSvg();
+    svgSystemTheme?.addEventListener("change", refreshSvgVariants);
   }
 
   function sectionMarkup(url) {
@@ -1667,6 +1810,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       return remember(preparedSections, key, prepared, prepared.characters);
     }
     const pending = sectionMarkup(targetUrl);
+    const svgUrls = new Set();
     try {
       let markup;
       try {
@@ -1702,12 +1846,15 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       ensureSectionCurrent(generation);
       const svgImages = new Map();
       for (const image of source.querySelectorAll("img[src]")) {
-        if (!isSvgImage(image) || deferredFormula(image)) continue;
+        if (!isSvgImage(image)) continue;
+        if (projectSvgColorScheme) svgUrls.add(image.src);
+        if (deferredFormula(image)) continue;
         const images = svgImages.get(image.src);
         if (images) images.push(image);
         else svgImages.set(image.src, [image]);
       }
       const sectionEagerSvgCount = svgImages.size;
+      if (svgUrls.size) preparingSvgUrls.add(svgUrls);
       await Promise.all(
         [...svgImages].map(async ([url, images]) => {
           try {
@@ -1734,12 +1881,15 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
         cbz: isControlledCbzSection(source, targetUrl),
         markdown: isControlledMarkdownSection(source, targetUrl),
         eagerSvgCount: sectionEagerSvgCount,
+        svgUrls,
         characters: markup.length,
       });
       return remember(preparedSections, key, section, section.characters);
     } catch (error) {
       forgetPendingSection(key, pending);
       throw error;
+    } finally {
+      preparingSvgUrls.delete(svgUrls);
     }
   }
 
@@ -1760,11 +1910,13 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     });
     warmPromise = undefined;
     warmDurationMs = null;
-    bookStyle.textContent = sourceStyles ? cachedCss : "";
-    userStyle.textContent = userStylesEnabled ? userStylesheet : "";
     book.classList.toggle("atha-cbz-section", cachedCbzPage);
     book.classList.toggle("atha-markdown-section", cachedMarkdownSection);
     const imported = document.importNode(cachedBody, true);
+    clearSvgVariants();
+    if (adaptiveSvg.size) {
+      for (const image of imported.querySelectorAll("img[src]")) applySvgVariant(image, image.src);
+    }
     pendingImages.clear();
     pendingImageGeometry.clear();
     pendingImageLayoutSignature = "";
@@ -1775,6 +1927,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     for (const image of deferredImages) {
       const url = image.dataset.athaResource;
       if (readySvg.has(url)) {
+        applySvgVariant(image, url);
         image.src = url;
         image.classList.remove("atha-resource-pending");
         image.removeAttribute("aria-busy");
@@ -1789,7 +1942,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       element,
       element.getAttribute("style"),
     ]);
-    setStyles({ sourceStyles, userStylesEnabled, userStylesheet });
+    applyStyles();
     for (const image of book.querySelectorAll(
       "img[data-atha-intrinsic-width][data-atha-intrinsic-height]",
     )) {
@@ -1828,6 +1981,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   function close() {
     sectionGeneration += 1;
     renderGeneration += 1;
+    svgSystemTheme?.removeEventListener("change", refreshSvgVariants);
     resetLateImages();
     book.replaceChildren();
     nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
@@ -1837,6 +1991,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     declaredResources = undefined;
     cachedBody = undefined;
     cachedCss = undefined;
+    projectedBookCss = undefined;
     cachedCbzPage = false;
     cachedMarkdownSection = false;
     book.classList.remove("atha-cbz-section", "atha-markdown-section");
@@ -1856,6 +2011,10 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     pendingImageLayoutSignature = "";
     validatedCss.clear();
     validatedSvg.clear();
+    adaptiveSvg.clear();
+    preparingSvgUrls.clear();
+    activeSvgUrls = undefined;
+    clearSvgVariants();
     readySvg.clear();
     preparedSections.clear();
     pendingSectionMarkup.clear();
@@ -1896,13 +2055,42 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
         }
       }
     }
-    const resources = new Map();
-    for (const element of wrapper.querySelectorAll("img[src], image[href]")) {
+    const captureScheme = svgSchemeOverride();
+    const references = [...wrapper.querySelectorAll("img[src], image[href]")].map((element) => {
       const attribute = element.localName.toLowerCase() === "img" ? "src" : "href";
       const url = new URL(localBookUrl(element.getAttribute(attribute)));
       const path = url.pathname.slice(1);
+      const rendered = attribute === "src" ? svgVariant(url.href, captureScheme) : null;
+      return { element, attribute, url, path, rendered };
+    });
+    const originalPaths = new Set(references.filter(({ rendered }) => !rendered).map(({ path }) => path));
+    const reservedPaths = new Set(references.map(({ path }) => path));
+    const variantPaths = new Map();
+    const resources = new Map();
+    let nextVariant = 1;
+    for (const { element, attribute, url, path: originalPath, rendered } of references) {
+      let path = originalPath;
+      if (rendered && originalPaths.has(path)) {
+        // One capture can contain the same file both as an HTML img and as
+        // an SVG image. Keep distinct local keys only when their bytes differ.
+        if (!variantPaths.has(path)) {
+          let alias;
+          do {
+            alias = `.atha-snapshot/${nextVariant++}.svg`;
+          } while (reservedPaths.has(alias));
+          variantPaths.set(path, alias);
+        }
+        path = variantPaths.get(path);
+      }
       element.setAttribute(attribute, path);
       if (resources.has(path)) continue;
+      if (rendered) {
+        resources.set(path, {
+          path, mediaType: rendered.blob.type,
+          bytes: [...new Uint8Array(await rendered.blob.arrayBuffer())],
+        });
+        continue;
+      }
       const response = await fetch(url);
       ensure(response.ok, "image-load");
       const mediaType = (response.headers.get("content-type") || "")

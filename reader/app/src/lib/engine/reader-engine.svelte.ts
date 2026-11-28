@@ -518,6 +518,10 @@ export class ReaderEngine {
     this.content = createContent({
       host,
       reader,
+      // WebKitGTK ignores the img's color scheme for an embedded SVG.
+      // Retire this override when the native Linux mismatch case passes.
+      projectSvgColorScheme: isTauriRuntime() && location.protocol === "tauri:" &&
+        /\bLinux\b/.test(navigator.userAgent) && !/\bAndroid\b/.test(navigator.userAgent),
       themeStyleSource: { href: new URL(bookThemeCssUrl, location.href).href },
       readerStyleSource: { href: new URL(bookReaderCssUrl, location.href).href },
       onLateLayout: (anchor: { offset: number; pageIndex: number | null; scrollTop: number | null }) => {

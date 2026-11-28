@@ -128,7 +128,7 @@
             html: target.outerHTML,
           };
         } else if (tag === "img") {
-          const safeSrc = target.getAttribute("src") || "";
+          const safeSrc = (target as HTMLImageElement).currentSrc || target.getAttribute("src") || "";
           const alt = (target.getAttribute("alt") || "插图").replace(/[<>&"]/g, "");
           lightboxPayload = {
             kind: "image",
@@ -763,7 +763,11 @@
   {/if}
 
   <!-- Lightbox for SVG/Tables/Code/Images -->
-  <StructuredLightbox payload={lightboxPayload} onClose={() => (lightboxPayload = null)} />
+  <StructuredLightbox
+    payload={lightboxPayload}
+    colorScheme={resolvedTheme === "dark" ? "dark" : "light"}
+    onClose={() => (lightboxPayload = null)}
+  />
 
   <!-- C2 Reader Settings Dialog -->
   <ReaderSettingsDialog
