@@ -87,6 +87,6 @@ Linux 内部 AppImage 已由解包的 `AppRun` 通过 metadata、冷启动关联
 | 桌面阅读工作区       | 横屏目录 / 搜索侧栏，笔记 `A+B` / `B+C` / `A+B+C` 投影，键鼠焦点、真实 frame 分页与窄屏回归                                              | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
 | 日常入口与内部候选   | 桌面拖放、网格 / 列表、冷启动文件关联、Linux AppImage 与 PCT-AL10 内部候选门                                                             | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
 | 阅读操控与排版设置   | Readest 风格分层底部设置、16–40 字号滑块、DPR 设备像素换算、首行缩进、左右翻页 / 上下滚动和 PCT-AL10 真机手势                            | `docs/architecture/READER-CORE.md`、`docs/codebase/READER-MOBILE-UI.md`               |
-| 性能切片             | 公式密集章节按当前页优先加载，固定样本继续受正式门槛保护                                                                                 | `docs/architecture/READER-CORE.md`                                                    |
+| 性能切片             | 公式密集章节按当前页优先加载；样本入口及当前实际覆盖见代码地图                                                                           | `docs/architecture/READER-CORE.md`、`docs/codebase/MAP.md`                            |
 
 实施和验收证据见对应 change、PR 或 Git 历史；跨会话待办与下一步由关联 Issue 交接。
