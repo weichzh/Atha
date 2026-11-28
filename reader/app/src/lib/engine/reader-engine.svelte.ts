@@ -561,7 +561,13 @@ export class ReaderEngine {
         captureNativeSpread: isWebKitGtkRuntime()
           ? (pageStep: number, from: number, dir: 1 | -1, advance: () => Promise<void>) => {
             const active = stage();
-            return active ? active.captureNativeSpread({ frame, reader, page, book: this.content.book, pageStep }, from, dir, advance) : advance();
+            return active
+              ? active.captureNativeSpread({ frame, reader, page, book: this.content.book, pageStep }, from, dir, async () => {
+                await advance();
+                // Capture the destination with its own running head, bookmark and folio.
+                this.syncSnapshots();
+              })
+              : advance();
           }
           : undefined,
         cancel: () => stage()?.cancel(),

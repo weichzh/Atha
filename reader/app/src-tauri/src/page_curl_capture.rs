@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use gtk::{
     cairo::{Format, ImageSurface},
-    glib,
+    gio, glib,
     prelude::*,
 };
 use serde::Deserialize;
@@ -13,7 +13,33 @@ use webkit2gtk::{LoadEvent, WebView, WebViewExt};
 
 const CAPTURE_LIMIT: Duration = Duration::from_millis(1250);
 const HANDOFF_LIMIT: Duration = Duration::from_millis(700);
+const MAX_CAPTURE_PIXELS: f64 = 1_600_000.0;
 type FrameReply = tokio::sync::oneshot::Sender<Result<Vec<u8>, &'static str>>;
+
+fn pixel_reply(image: &ImageSurface) -> Option<Vec<u8>> {
+    let (width, height) = (image.width() as u32, image.height() as u32);
+    let mut pixels = Vec::with_capacity(8 + (width * height * 4) as usize);
+    pixels.extend_from_slice(&width.to_ne_bytes());
+    pixels.extend_from_slice(&height.to_ne_bytes());
+    // Cairo RGB24 stores one native-endian 0x00RRGGBB word per pixel.
+    image.with_data(|data| pixels.extend_from_slice(data)).ok()?;
+    Some(pixels)
+}
+
+fn compress_pixels(pixels: Vec<u8>) -> Result<Vec<u8>, &'static str> {
+    let output = gio::MemoryOutputStream::new_resizable();
+    let codec = gio::ZlibCompressor::new(gio::ZlibCompressorFormat::Zlib, 1);
+    let stream = gio::ConverterOutputStream::new(&output, &codec);
+    let cancel = gio::Cancellable::NONE;
+    let (_, partial_error) = stream
+        .write_all(&pixels, cancel)
+        .map_err(|_| "capture-failed")?;
+    if partial_error.is_some() {
+        return Err("capture-failed");
+    }
+    stream.close(cancel).map_err(|_| "capture-failed")?;
+    Ok(output.steal_as_bytes().as_ref().to_vec())
+}
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,10 +75,12 @@ impl Frame {
     }
 
     fn take_pixels(self, view: &WebView) -> Option<ImageSurface> {
-        let scale = f64::from(view.scale_factor().clamp(1, 2));
+        // A moving sheet doesn't need the display's HiDPI backing buffer.
+        // CSS-pixel textures also bound the fill cost of each curl frame.
+        let scale = (MAX_CAPTURE_PIXELS / (self.width * self.height)).sqrt().min(1.0);
         let width = (self.width * scale).round() as i32;
         let height = (self.height * scale).round() as i32;
-        if width < 1 || height < 1 || i64::from(width) * i64::from(height) > 9_000_000 {
+        if width < 1 || height < 1 {
             return None;
         }
         let crop = ImageSurface::create(Format::Rgb24, width, height).ok()?;
@@ -280,10 +308,7 @@ pub(crate) async fn page_curl_frame(
                 let _ = sender.send(Err("capture-failed"));
                 return;
             };
-            let Some(bytes) =
-                gtk::gdk::pixbuf_get_from_surface(&image, 0, 0, image.width(), image.height())
-                    .and_then(|im| im.save_to_bufferv("png", &[("compression", "1")]).ok())
-            else {
+            let Some(bytes) = pixel_reply(&image) else {
                 let _ = sender.send(Err("capture-failed"));
                 return;
             };
@@ -306,9 +331,17 @@ pub(crate) async fn page_curl_frame(
             }
         })
         .map_err(|_| "capture-unavailable")?;
-    tokio::time::timeout(CAPTURE_LIMIT, receiver)
+    let pixels = tokio::time::timeout(CAPTURE_LIMIT, receiver)
         .await
         .map_err(|_| "capture-expired")?
-        .map_err(|_| "capture-expired")?
+        .map_err(|_| "capture-expired")??;
+    if pixels.is_empty() {
+        return Ok(Response::new(pixels));
+    }
+    // Keep compression off the window thread. The IPC reply doesn't need to
+    // carry a full uncompressed desktop-sized bitmap.
+    tauri::async_runtime::spawn_blocking(move || compress_pixels(pixels))
+        .await
+        .map_err(|_| "capture-failed")?
         .map(Response::new)
 }

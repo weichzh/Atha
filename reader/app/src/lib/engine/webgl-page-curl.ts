@@ -203,8 +203,12 @@ export class PageCurlRenderer {
   private height = 1;
   private gpuSurface = false;
 
-  constructor(private canvas: HTMLCanvasElement, private fallback: HTMLCanvasElement) {
-    this.gl = canvas.getContext("webgl", { alpha: true, depth: true, antialias: true });
+  constructor(
+    private canvas: HTMLCanvasElement,
+    private fallback: HTMLCanvasElement,
+    { antialias = true } = {},
+  ) {
+    this.gl = canvas.getContext("webgl", { alpha: true, depth: true, antialias });
     if (this.gl && !this.initWebGL(this.gl)) this.destroy();
   }
 
@@ -279,8 +283,10 @@ export class PageCurlRenderer {
     return gl.getError() === gl.NO_ERROR;
   }
 
-  setSpreadSurface(source: HTMLCanvasElement, back: HTMLCanvasElement, w: number, h: number, paper: string) {
-    this.setPageSurface(source, w, h, paper);
+  setSpreadSurface(source: HTMLCanvasElement, back: HTMLCanvasElement | ImageData, w: number, h: number, paper: string) {
+    // A captured viewport already has its live high-resolution page underneath.
+    // Spend fewer fragments on the brief moving leaf, not on its texture.
+    this.setPageSurface(source, w, h, paper, back instanceof ImageData ? 0.85 : 1);
     const gl = this.gl;
     if (!gl || !this.gpuSurface) return false;
     this.incoming ??= gl.createTexture();
@@ -312,7 +318,7 @@ export class PageCurlRenderer {
     return true;
   }
 
-  setPageSurface(source: HTMLCanvasElement, w: number, h: number, paper: string) {
+  setPageSurface(source: HTMLCanvasElement, w: number, h: number, paper: string, drawScale = 1) {
     this.source = source;
     this.width = w;
     this.height = h;
@@ -323,8 +329,8 @@ export class PageCurlRenderer {
     const gl = this.gl;
     if (gl && !gl.isContextLost() && source.width <= gl.getParameter(gl.MAX_TEXTURE_SIZE) &&
       source.height <= gl.getParameter(gl.MAX_TEXTURE_SIZE)) {
-      this.canvas.width = source.width;
-      this.canvas.height = source.height;
+      this.canvas.width = Math.max(1, Math.round(source.width * drawScale));
+      this.canvas.height = Math.max(1, Math.round(source.height * drawScale));
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.texture);
       try {

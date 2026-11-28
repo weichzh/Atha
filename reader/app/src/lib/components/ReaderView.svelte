@@ -61,6 +61,7 @@
 
   let { book, manifestPath, initialJump = null, onBackToShelf, entryBlocked, openingTheme, onScreenState }: Props = $props();
 
+  let paperEl = $state<HTMLElement | null>(null);
   let frameEl = $state<HTMLDivElement | null>(null);
   let readerEl = $state<HTMLDivElement | null>(null);
   let pageEl = $state<HTMLDivElement | null>(null);
@@ -595,7 +596,7 @@
 >
   <div class="reader-workspace-layout">
     <!-- Region A: Reading Surface -->
-    <section class="region-a" class:hidden-a={hideReaderA} inert={hideReaderA} aria-label="正文阅读区">
+    <section class="region-a" bind:this={paperEl} class:hidden-a={hideReaderA} inert={hideReaderA} aria-label="正文阅读区">
       <div class="reader-frame" bind:this={frameEl}>
         <div class="reader" style:--pull-translation={`${Math.min(96, Math.max(0, swipeY) * 0.58)}px`}
           class:pulling={swipeY > 0} bind:this={readerEl}>
@@ -603,7 +604,6 @@
             <div class="reader-content-host" bind:this={hostEl}></div>
           </div>
         </div>
-        <PageTurnStage bind:this={pageTurnStage} />
       </div>
 
       <div class="kernel-bridge" bind:this={bridgeEl} hidden aria-hidden="true"></div>
@@ -641,6 +641,8 @@
           <span>本节 {engine.page + 1}/{engine.pages} 页 <span class="dot-sep">·</span> {engine.percent ?? 0}%</span>
         </footer>
       {/if}
+
+      <PageTurnStage paper={paperEl} bind:this={pageTurnStage} />
 
       {#if swipeY > 0}
         <div class="bookmark-lamp" class:lit={lampOn} aria-hidden="true">

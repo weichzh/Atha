@@ -7,6 +7,7 @@
 
   type Effect = "cover" | "curl";
   type Direction = 1 | -1;
+  let { paper }: { paper: HTMLElement | null } = $props();
   let root: HTMLDivElement;
   let under: HTMLDivElement;
   let front: HTMLDivElement;
@@ -33,18 +34,18 @@
   let frameId = 0;
   let nativeCapture: { token: number } | null = null;
 
-  function facingLeaf(view: PageTurnViewport, width: number, height: number, dir: Direction): SpreadLeaf {
-    const viewport = view.frame.getBoundingClientRect();
+  function facingLeaf(view: PageTurnViewport, width: number, height: number, dir: Direction, sheet?: DOMRect): SpreadLeaf {
+    const viewport = sheet ?? view.frame.getBoundingClientRect();
     const bounds = view.page.getBoundingClientRect();
     const scale = width / viewport.width;
     const spine = ((bounds.left + bounds.right) / 2 - viewport.left) * scale;
     const leafWidth = Math.min(bounds.width / 2 * scale + 24, spine, width - spine);
-    const top = Math.max(0, bounds.top - viewport.top - 16);
+    const top = sheet ? 0 : Math.max(0, bounds.top - viewport.top - 16);
     return {
       left: dir === 1 ? spine : spine - leafWidth,
       top,
       width: leafWidth,
-      height: Math.min(height - top, bounds.bottom - viewport.top + 16 - top),
+      height: sheet ? height : Math.min(height - top, bounds.bottom - viewport.top + 16 - top),
       direction: dir,
     };
   }
@@ -237,19 +238,39 @@
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   });
 
-  async function capturedCanvas(capture: { phase: string; token: number; frame?: object }) {
+  async function requestPixels(capture: { phase: "outgoing" | "incoming"; token: number; frame?: object }) {
     try {
-      const bytes = await invoke<ArrayBuffer>("page_curl_frame", { capture });
-      const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
-      const canvas = document.createElement("canvas");
-      canvas.width = image.width;
-      canvas.height = image.height;
-      canvas.getContext("2d")?.drawImage(image, 0, 0);
-      image.close();
-      return canvas;
+      const packed = await invoke<ArrayBuffer>("page_curl_frame", { capture });
+      const decoded = new Blob([packed]).stream().pipeThrough(new DecompressionStream("deflate"));
+      return await new Response(decoded).arrayBuffer();
     } catch {
       return null;
     }
+  }
+
+  function decodePixels(bytes: ArrayBuffer | null) {
+    if (!bytes || bytes.byteLength < 8 || bytes.byteLength % 4) return null;
+    const words = new Uint32Array(bytes);
+    const [width, height] = words;
+    if (!width || !height || width * height !== words.length - 2) return null;
+    const rgba = new Uint8ClampedArray(bytes, 8);
+    for (let i = 0; i < rgba.length; i += 4) {
+      const rgb = words[2 + i / 4];
+      rgba[i] = (rgb >>> 16) & 255;
+      rgba[i + 1] = (rgb >>> 8) & 255;
+      rgba[i + 2] = rgb & 255;
+      rgba[i + 3] = 255;
+    }
+    return new ImageData(rgba, width, height);
+  }
+
+  function frozenCanvas(image: ImageData) {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext("2d");
+    ctx?.putImageData(image, 0, 0);
+    return ctx ? canvas : null;
   }
 
   function endNativeCapture(capture: { token: number }) {
@@ -266,29 +287,32 @@
     advance: () => Promise<void>,
   ) {
     stop();
-    const width = root.clientWidth;
-    const height = root.clientHeight;
+    if (!paper?.isConnected) return advance();
+    const bounds = paper.getBoundingClientRect();
+    const { width, height } = bounds;
     if (!width || !height || motion?.matches) return advance();
-    renderer ??= new PageCurlRenderer(webgl, fallback);
+    renderer ??= new PageCurlRenderer(webgl, fallback, { antialias: false });
     if (!renderer.canCurlSpread()) return advance();
-    const bounds = view.frame.getBoundingClientRect();
-    const leaf = facingLeaf(view, width, height, dir);
+    const leaf = facingLeaf(view, width, height, dir, bounds);
     const capture = { token: crypto.getRandomValues(new Uint32Array(1))[0] };
     nativeCapture = capture;
     try {
-      const outgoing = await capturedCanvas({ phase: "outgoing", token: capture.token, frame: {
+      const bytes = await requestPixels({ phase: "outgoing", token: capture.token, frame: {
         x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
         viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
       } });
-      if (!outgoing) endNativeCapture(capture);
+      if (!bytes) void endNativeCapture(capture);
       if (!root?.isConnected) return;
       await advance();
-      if (!outgoing || nativeCapture !== capture) return;
+      if (!bytes || nativeCapture !== capture) return;
       await painted();
-      const incoming = await capturedCanvas({ phase: "incoming", token: capture.token });
-      if (!incoming || nativeCapture !== capture) return;
-      const paper = getComputedStyle(view.frame).backgroundColor;
-      if (!renderer.setSpreadSurface(outgoing, incoming, width, height, paper)) {
+      const nextBytes = await requestPixels({ phase: "incoming", token: capture.token });
+      if (!nextBytes || nativeCapture !== capture) return;
+      const source = decodePixels(bytes);
+      const incoming = decodePixels(nextBytes);
+      const outgoing = source && frozenCanvas(source);
+      if (!outgoing || !incoming) return;
+      if (!renderer.setSpreadSurface(outgoing, incoming, width, height, getComputedStyle(view.frame).backgroundColor)) {
         renderer.releaseSurface();
         return;
       }
@@ -350,7 +374,7 @@
   });
 </script>
 
-<div class="page-turn-stage" data-page-turn-renderer={mode} data-page-turn-source={mode && turn?.captured ? "viewport" : undefined} bind:this={root} aria-hidden="true" inert>
+<div class="page-turn-stage" class:sheet={turn?.captured} data-page-turn-renderer={mode} data-page-turn-source={mode && turn?.captured ? "viewport" : undefined} bind:this={root} aria-hidden="true" inert>
   <div class="turn-layer" bind:this={under}></div>
   <div
     class="turn-layer cover"
@@ -373,9 +397,15 @@
   }
 
   .page-turn-stage {
+    inset-block: var(--reader-head) var(--reader-foot);
     overflow: hidden;
     pointer-events: none;
     visibility: hidden;
+  }
+
+  .page-turn-stage.sheet {
+    inset-block: 0;
+    z-index: 1;
   }
 
   .page-turn-stage[data-page-turn-renderer] {

@@ -55,6 +55,8 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
   let scrollTop = 0;
   let columnSize = 10;
   let resizeTo = 10;
+  let positionBeforeCapture;
+  const progressPosition = {};
   const reflows = [];
   const locator = createLocator({ assert: assert.ok });
   const navigation = createNavigation({
@@ -70,7 +72,12 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
       scrollPosition: () => scrollTop,
       async showOffset(offset) { page = Math.floor(offset / 10); return true; },
       async show(target) { page = target; },
-      async move(delta) { page += delta; return true; },
+      async move(delta, onShown) {
+        page += delta;
+        onShown();
+        positionBeforeCapture = progressPosition.textContent;
+        return true;
+      },
       async resizeViewport(offset) {
         reflows.push(offset);
         if (resizeTo !== columnSize) {
@@ -85,7 +92,7 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
     chapterLabel: {},
     progressChapter: {},
     progressBook: {},
-    progressPosition: {},
+    progressPosition,
     progressRange: new EventTarget(),
     previous: {},
     next: {},
@@ -105,6 +112,7 @@ test("workspace reflow keeps the exact jump until a later page, section, or scro
   visible = true;
   await navigation.resize();
   await navigation.next();
+  assert.match(positionBeforeCapture, /本节 6\/10 页/, "the destination folio is set while the turn is in flight");
   resizeTo = 12;
   await navigation.resize();
   assert.equal(navigation.current().start.offset, 48, "the narrower workspace projects an earlier page start");

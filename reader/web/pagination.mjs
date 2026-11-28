@@ -732,13 +732,13 @@ export function createPagination({
     fontSizeControl.value = "19";
   }
 
-  async function show(index, anchor, operationStage = "翻页与公式加载", preserveTurn = false) {
+  async function show(index, anchor, operationStage = "翻页与公式加载", preserveTurn = false, includeNext = true) {
     if (!preserveTurn) pageTurn?.stop();
     state.page = Math.max(0, Math.min(index, state.pages - 1));
     showPage();
     await nextFrame();
     let restoreOffset = anchor ?? null;
-    const shown = await onPageShown(true, () => {
+    const shown = await onPageShown(includeNext, () => {
       if (restoreOffset === null) restoreOffset = captureOffset();
       return { offset: restoreOffset, pageIndex: state.page, scrollTop: reader.scrollTop };
     });
@@ -826,7 +826,7 @@ export function createPagination({
     return pointForOffset(offset).exact;
   }
 
-  async function move(delta) {
+  async function move(delta, onShown = () => {}) {
     if (
       isScrolled() &&
       ((delta < 0 && reader.scrollTop <= 0) ||
@@ -844,13 +844,19 @@ export function createPagination({
     if (nativePagedScroll && !isScrolled() && Math.abs(delta) === 1 &&
       reader.hasAttribute("data-reader-spread") && !book.hasAttribute("data-swipe-dragging") &&
       pageTurn?.captureNativeSpread && pageTurn.effect() === "curl") {
-      await pageTurn.captureNativeSpread(pageStep, state.page, delta, () => show(target, undefined, undefined, true));
+      await pageTurn.captureNativeSpread(pageStep, state.page, delta, async () => {
+        // The following spread can warm in the background. Only resources on
+        // the destination sheet may hold up the curl.
+        await show(target, undefined, undefined, true, false);
+        onShown();
+      });
       return true;
     }
     const customEffect = turnEffect();
     const animate = customEffect && Math.abs(delta) === 1;
     if (animate) pageTurn.commit(pageStep, state.page, delta, customEffect);
     await show(target, undefined, undefined, Boolean(animate));
+    onShown();
     return true;
   }
 
