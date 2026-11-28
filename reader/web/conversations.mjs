@@ -74,7 +74,7 @@ export function parseSnapshotPresentation(value, prefersDark = false) {
   });
 }
 
-export async function renderSnapshotElement(capture, store, toResourceUrl = resourceDataUrl) {
+export async function renderSnapshotElement(capture, store, toResourceUrl = resourceDataUrl, projectCounterCss) {
   const presentation = parseSnapshotPresentation(
     capture.snapshot.presentationJson,
     globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches,
@@ -102,7 +102,10 @@ export async function renderSnapshotElement(capture, store, toResourceUrl = reso
   const style = document.createElement("style");
   const css = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss}\n${capture.snapshot.userCss}`;
   if (!isSnapshotCssSafe(css)) throw new Error("invalid-message-snapshot");
-  style.textContent = `${capture.snapshot.bookCss}\n${capture.snapshot.readerCss.replace(/:root\b/g, ":host")}\n${capture.snapshot.userCss}`;
+  const [bookCss, userCss] = projectCounterCss
+    ? projectCounterCss(capture.snapshot.bookCss, capture.snapshot.userCss)
+    : [capture.snapshot.bookCss, capture.snapshot.userCss];
+  style.textContent = `${bookCss}\n${capture.snapshot.readerCss.replace(/:root\b/g, ":host")}\n${userCss}`;
   const book = document.createElement("article");
   book.className = "book";
   book.dataset.theme = presentation.theme;

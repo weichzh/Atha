@@ -10,14 +10,74 @@ const MAX_NATIVE_IMAGE_HINT_RULES = 512;
 const MAX_SNAPSHOT_BOOK_CSS_BYTES = 1_048_576;
 const SECTION_CACHE_LIMIT = 3;
 const SECTION_CACHE_TEXT_LIMIT = 8 * 1024 * 1024;
-const NATIVE_IMAGE_BASE_STYLE = ":where(img[data-atha-native-size]){height:auto}";
+// First, anonymous layer: the DPR-aware default must yield to all book styles,
+// including authored layers and zero-specificity selectors.
+const BOOK_LAYOUT_BASE_STYLE = `@layer {
+  :where(.book ol) { padding-inline-start: max(2.5em, calc(40px * var(--reader-dpr, 1))); }
+}
+:where(img[data-atha-native-size]) { height: auto; }`;
 const SVG_SCHEME_QUERY = /^\(prefers-color-scheme: (light|dark)\)$/i;
+const counterAliases = new WeakMap();
+
+function visitCssRules(rules, visit) {
+  for (const rule of rules) {
+    visit(rule);
+    if (rule.cssRules) visitCssRules(rule.cssRules, visit);
+  }
+}
 
 function visitMediaRules(rules, visit) {
-  for (const rule of rules) {
+  visitCssRules(rules, (rule) => {
     if (rule instanceof CSSMediaRule) visit(rule);
-    if (rule.cssRules) visitMediaRules(rule.cssRules, visit);
+  });
+}
+
+export function projectShadowCounterCss(bookCss, userCss, ownerDocument = document) {
+  const original = [bookCss, userCss];
+  if (typeof CSSCounterStyleRule === "undefined" || !original.some((css) => /@counter-style\b/i.test(css))) {
+    return original;
   }
+  const sheets = original.map((css) => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(css);
+    return sheet;
+  });
+  const counts = new Map();
+  for (const sheet of sheets) {
+    visitCssRules(sheet.cssRules, (rule) => {
+      if (rule instanceof CSSCounterStyleRule) counts.set(rule.name, (counts.get(rule.name) || 0) + 1);
+    });
+  }
+
+  // Only the measured form: one unconditional declaration that decorates
+  // decimal with parentheses. Non-equivalent or conditional definitions stay native.
+  const equivalent = new Set(sheets.flatMap((sheet) => [...sheet.cssRules]).filter((rule) =>
+    rule instanceof CSSCounterStyleRule && counts.get(rule.name) === 1 &&
+    rule.system === "extends decimal" && rule.prefix === '"("' && rule.suffix === '") "' &&
+    !["symbols", "additiveSymbols", "negative", "range", "pad", "fallback", "speakAs"]
+      .some((descriptor) => rule[descriptor]),
+  ).map((rule) => rule.name));
+  if (!equivalent.size) return original;
+
+  let alias = counterAliases.get(ownerDocument);
+  if (alias && original.some((css) => css.includes(alias))) return original;
+  const property = "list-style-type";
+  return sheets.map((sheet, i) => {
+    let changed = false;
+    visitCssRules(sheet.cssRules, (rule) => {
+      if (!(rule instanceof CSSStyleRule) || !equivalent.has(rule.style.getPropertyValue(property))) return;
+      if (!alias) {
+        alias = `atha-list-${crypto.getRandomValues(new Uint32Array(4)).join("-")}`;
+        const trusted = ownerDocument.createElement("style");
+        trusted.textContent = `@counter-style ${alias} { system: extends decimal; prefix: "("; suffix: ") "; }`;
+        ownerDocument.head.append(trusted);
+        counterAliases.set(ownerDocument, alias);
+      }
+      rule.style.setProperty(property, alias, rule.style.getPropertyPriority(property));
+      changed = true;
+    });
+    return changed ? [...sheet.cssRules].map((rule) => rule.cssText).join("\n") : original[i];
+  });
 }
 
 export function parseSafeXhtml(source) {
@@ -123,7 +183,10 @@ export function createBookSelection(book, root) {
   });
 }
 
-export function createContent({ host, reader, themeStyleSource, readerStyleSource, onLateLayout, projectSvgColorScheme = false, formulaPlaceholderUrl = "" }) {
+export function createContent({
+  host, reader, themeStyleSource, readerStyleSource, onLateLayout,
+  projectSvgColorScheme = false, projectShadowCounters = false, formulaPlaceholderUrl = "",
+}) {
   const shadow = host.attachShadow({ mode: "closed" });
   const nativeImageStyle = document.createElement("style");
   const bookStyle = document.createElement("style");
@@ -131,7 +194,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   const userStyle = document.createElement("style");
   const book = document.createElement("article");
   book.className = "book";
-  nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
+  nativeImageStyle.textContent = BOOK_LAYOUT_BASE_STYLE;
   shadow.append(nativeImageStyle, bookStyle, readerStyle, userStyle, book);
   const bookSelection = createBookSelection(book, shadow);
   const formulaPlaceholder = formulaPlaceholderUrl ? new Image() : null;
@@ -145,6 +208,8 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   let sourceStyles = true;
   let bookColorScheme = null;
   let projectedBookCss;
+  let presentedBookCss = "";
+  let counterProjection;
   let userStylesEnabled = true;
   let userStylesheet = "";
   let inlineStyles = [];
@@ -282,15 +347,12 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       .join("\n");
   }
 
-  function applyBookStyles() {
+  function themedBookCss() {
     const originalCss = sourceStyles ? cachedCss || "" : "";
-    if (!bookColorScheme || !/prefers-color-scheme/i.test(originalCss)) {
-      bookStyle.textContent = originalCss;
-      return;
-    }
+    const projectTheme = bookColorScheme && /prefers-color-scheme/i.test(originalCss);
+    if (!projectTheme) return originalCss;
     if (projectedBookCss?.source === originalCss && projectedBookCss.scheme === bookColorScheme) {
-      bookStyle.textContent = projectedBookCss.result;
-      return;
+      return projectedBookCss.result;
     }
 
     // Book CSS still sees the document preference. Project a detached copy,
@@ -311,7 +373,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     });
     const result = projectedAny ? [...sheet.cssRules].map((rule) => rule.cssText).join("\n") : originalCss;
     projectedBookCss = { source: originalCss, scheme: bookColorScheme, result };
-    bookStyle.textContent = result;
+    return result;
   }
 
   function setStyles(value) {
@@ -335,8 +397,19 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   function applyStyles() {
     pendingImageGeometry.clear();
     pendingImageLayoutSignature = "";
-    applyBookStyles();
-    userStyle.textContent = userStylesEnabled ? userStylesheet : "";
+    presentedBookCss = themedBookCss();
+    const authoredUserCss = userStylesEnabled ? userStylesheet : "";
+    if (projectShadowCounters && (
+      counterProjection?.book !== presentedBookCss || counterProjection?.user !== authoredUserCss
+    )) {
+      counterProjection = {
+        book: presentedBookCss, user: authoredUserCss,
+        styles: projectShadowCounterCss(presentedBookCss, authoredUserCss),
+      };
+    }
+    const [liveBook, liveUser] = counterProjection?.styles ?? [presentedBookCss, authoredUserCss];
+    bookStyle.textContent = liveBook;
+    userStyle.textContent = liveUser;
     for (const [element, style] of inlineStyles) {
       if (sourceStyles) element.setAttribute("style", style);
       else element.removeAttribute("style");
@@ -520,7 +593,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     const rules = [];
     let bytes = 0;
     for (const rule of [
-      NATIVE_IMAGE_BASE_STYLE,
+      BOOK_LAYOUT_BASE_STYLE,
       ...[...sizes.values()].map(
         ({ width, height }) =>
           `:where(img[data-atha-native-size][width="${width}"][height="${height}"]){contain:size;contain-intrinsic-size:${width}px ${height}px;width:auto;height:auto}`,
@@ -535,7 +608,12 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
   }
 
   function snapshotBookCss(root) {
-    const sourceRules = [...(bookStyle.sheet?.cssRules || [])];
+    let sourceSheet = bookStyle.sheet;
+    if (bookStyle.textContent !== presentedBookCss) {
+      sourceSheet = new CSSStyleSheet();
+      sourceSheet.replaceSync(presentedBookCss);
+    }
+    const sourceRules = [...(sourceSheet?.cssRules || [])];
     let namespaceCount = 0;
     while (sourceRules[namespaceCount]?.constructor?.name === "CSSNamespaceRule") {
       namespaceCount += 1;
@@ -543,7 +621,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     const namespaces = sourceRules.slice(0, namespaceCount).map((rule) => rule.cssText);
     const source = namespaceCount
       ? sourceRules.slice(namespaceCount).map((rule) => rule.cssText)
-      : [bookStyle.textContent];
+      : [presentedBookCss];
     const sourceCss = [...namespaces, ...source].filter(Boolean).join("\n");
     const available = Math.max(
       0,
@@ -1341,8 +1419,8 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       Math.abs(parseFloat(getComputedStyle(nativeImage).height) - 30) < 0.1,
       "image-load",
     );
-    const previousBookStyle = bookStyle.textContent;
-    bookStyle.textContent = '@namespace epub "urn:atha:test"; epub|img{height:30px}';
+    const previousBookStyle = presentedBookCss;
+    presentedBookCss = '@namespace epub "urn:atha:test"; epub|img{height:30px}';
     const snapshotCss = snapshotBookCss(book);
     const snapshotSheet = new CSSStyleSheet();
     snapshotSheet.replaceSync(snapshotCss);
@@ -1352,9 +1430,9 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
         new TextEncoder().encode(snapshotCss).length <= MAX_SNAPSHOT_BOOK_CSS_BYTES,
       "invalid-message-snapshot",
     );
-    bookStyle.textContent = previousBookStyle;
+    presentedBookCss = previousBookStyle;
     nativeImage.remove();
-    nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
+    nativeImageStyle.textContent = BOOK_LAYOUT_BASE_STYLE;
     userStyle.textContent = previousUserStyle;
     const structuredMarkup = new DOMParser().parseFromString(
       "<html xmlns='http://www.w3.org/1999/xhtml'><body><table aria-hidden='true'><caption>数据</caption></table><pre aria-disabled='true'>code</pre><a href='#x'><pre tabindex='0'>linked</pre></a></body></html>",
@@ -1999,7 +2077,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     svgSystemTheme?.removeEventListener("change", refreshSvgVariants);
     resetLateImages();
     book.replaceChildren();
-    nativeImageStyle.textContent = NATIVE_IMAGE_BASE_STYLE;
+    nativeImageStyle.textContent = BOOK_LAYOUT_BASE_STYLE;
     bookStyle.textContent = "";
     userStyle.textContent = "";
     bookUrl = undefined;
@@ -2007,6 +2085,8 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
     cachedBody = undefined;
     cachedCss = undefined;
     projectedBookCss = undefined;
+    presentedBookCss = "";
+    counterProjection = undefined;
     cachedCbzPage = false;
     cachedMarkdownSection = false;
     book.classList.remove("atha-cbz-section", "atha-markdown-section");
@@ -2144,7 +2224,7 @@ export function createContent({ host, reader, themeStyleSource, readerStyleSourc
       fragmentHtml: wrapper.innerHTML,
       readerCss: snapshotReaderCss(),
       bookCss: snapshotBookCss(wrapper),
-      userCss: userStyle.textContent,
+      userCss: userStylesEnabled ? userStylesheet : "",
       presentationJson: JSON.stringify({
         schema: 1,
         theme: capturedTheme,

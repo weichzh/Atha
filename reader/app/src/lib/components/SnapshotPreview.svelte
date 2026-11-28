@@ -1,6 +1,8 @@
 <script lang="ts">
   import { renderSnapshotElement } from "../../../../web/conversations.mjs";
+  import { projectShadowCounterCss } from "../../../../web/content.mjs";
   import type { MessageClient, SourceCaptureView } from "../../messages.ts";
+  import { isWebKitGtkRuntime } from "../data/runtime.ts";
 
   interface Props {
     capture: SourceCaptureView;
@@ -25,7 +27,7 @@
       const url = URL.createObjectURL(new Blob([Uint8Array.from(resource.bytes)], { type: resource.mediaType }));
       urls.push(url);
       return url;
-    }).then((snapshot) => {
+    }, isWebKitGtkRuntime() ? projectShadowCounterCss : undefined).then((snapshot) => {
       if (!disposed) element.replaceChildren(snapshot);
     }).catch(() => {
       if (!disposed) failed = true;

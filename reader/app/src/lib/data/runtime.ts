@@ -2,6 +2,11 @@ export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
+export function isWebKitGtkRuntime(): boolean {
+  return isTauriRuntime() && location.protocol === "tauri:" &&
+    /\bLinux\b/.test(navigator.userAgent) && !/\bAndroid\b/.test(navigator.userAgent);
+}
+
 let fetchBridgeInstalled = false;
 
 export function installDemoFetchBridge(): void {
