@@ -15,7 +15,12 @@ def xhtml(body):
 def write_epub(output, formulas):
     title = "Atha Linux Source Return" if not formulas else "Atha Linux Synthetic Mathematics"
     first = '<h1>卷首</h1><p>本书为 Linux 验收而原创。</p>'
-    second = '<h1>原文章节</h1>' + '<p>原文锚点，原文锚点，原文锚点，原文锚点。</p>' * 48
+    second = (
+        '<h1>原文章节</h1>'
+        + '<p>渡船沿石堤缓缓靠岸，船夫收起被晨露浸湿的绳索。</p>' * 64
+        + '<p>看，青铜钟下的一只白鹭掠过河湾。</p>'
+        + '<p>对岸的灯火渐暗，行人踏过浅滩往集市走去。</p>' * 64
+    )
     assets = {}
     if not formulas:
         first = '<p><img src="landscape.svg" width="360" height="180" alt="山景插图"/></p>' + first

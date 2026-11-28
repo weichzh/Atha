@@ -140,7 +140,7 @@ webdriver_key() {
   local key=$1 payload
   payload=$(jq -cn --arg key "$key" '{actions:[{type:"key",id:"atha-keyboard",actions:[
     {type:"keyDown",value:$key},{type:"keyUp",value:$key}]}]}')
-  webdriver_value POST "/session/$session_id/actions" "$payload" >/dev/null
+  webdriver_native_action "$payload"
 }
 
 reader_chrome() {
@@ -377,6 +377,7 @@ return {count: rows.length, jump: document.querySelectorAll(".hit-row .jump-btn"
   webdriver_click_element '.memory-shell button[aria-label="清空搜索"]' || die 'could not clear the native memory search'
   wait_for_script "$recent_state" "$recent_predicate" \
     'clearing a native search did not restore recent memory and the recent book' >/dev/null
+  say 'native reading memory showed four recent fragments on entry and after clearing search'
   set_text_input '.memory-shell input[type=search]' '公共记忆'
   wait_for_script 'return {hits: document.querySelectorAll(".hit-row").length};' \
     '.hits == 2' 'restored memory query did not produce the two seeded hits' >/dev/null
@@ -412,12 +413,44 @@ return {query: document.querySelector(".memory-shell input[type=search]")?.value
   nav_tab '书架'
 }
 
-reader_progress() {
-  execute_sync '
+reader_position_script='
 const key = "atha.reader.progress." + new URL(location.href).searchParams.get("state") + ".v1";
 const saved = JSON.parse(localStorage.getItem(key) || "null");
-return {book: saved?.contentVersion, section: JSON.parse(saved?.locator || "null")?.start?.section, locator: saved?.locator};'
+const position = document.querySelector(".running-foot, .stats-strip")?.textContent.match(/本节 (\d+)\/(\d+) 页/);
+return {book: saved?.contentVersion, locator: JSON.parse(saved?.locator || "null"),
+  page: position ? Number(position[1]) : null, pages: position ? Number(position[2]) : null};'
+valid_reader_position='
+  (.book | type == "string" and test("^[a-f0-9]{64}$")) and
+  .locator.schema == 1 and .locator.contentVersion == .book and
+  (.locator.start.section | type == "string" and length > 0) and
+  (.locator.start.offset | type == "number" and . >= 0 and floor == .) and
+  (.page | type == "number" and . >= 1) and .pages >= .page'
+
+same_reader_position() {
+  jq -e --argjson before "$1" \
+    "($valid_reader_position) and . == \$before" <<<"$2" >/dev/null
 }
+
+focus_geometry_script='
+const a = document.querySelector(".region-a")?.getBoundingClientRect();
+const reader = document.querySelector(".reader");
+const r = reader?.getBoundingClientRect();
+const p = document.querySelector(".page")?.getBoundingClientRect();
+const style = reader && getComputedStyle(reader);
+// Reader layout uses device pixels internally; the rendered rectangle is in CSS pixels.
+const scale = r && r.width / reader.offsetWidth;
+return {width:innerWidth, height:innerHeight, availableWidth:screen.availWidth,
+  filled: a && r && Math.abs(a.width - innerWidth) <= 2 && Math.abs(r.width - a.width) <= 2,
+  centered: r && p && Math.abs((p.left - r.left) - (r.right - p.right)) <= 2,
+  page: p?.width, paddingLeft: style && parseFloat(style.paddingLeft) * scale,
+  paddingRight: style && parseFloat(style.paddingRight) * scale,
+  hidden: !document.querySelector(".reader-controls,.pane-b,.pane-c"),
+  overflow: document.documentElement.scrollWidth > innerWidth};'
+focus_geometry_predicate='
+  .filled and .centered and (.overflow | not) and
+  (.paddingLeft >= 31 and .paddingLeft <= 33) and (.paddingRight >= 31 and .paddingRight <= 33) and
+  (if .width >= 800 then .page >= 700 and .page <= 761
+   else ((.page - (.width - 64)) | fabs) <= 2 end)'
 
 verify_desktop_workspace() {
   local width height geometry before after dimensions='[]'
@@ -426,19 +459,11 @@ verify_desktop_workspace() {
     height=760
     if ((width == 1280)); then height=800; elif ((width == 1600)); then height=900; fi
     set_window_size "$width" "$height"
-    geometry=$(wait_for_script '
-const a = document.querySelector(".region-a")?.getBoundingClientRect();
-const r = document.querySelector(".reader")?.getBoundingClientRect();
-const p = document.querySelector(".page")?.getBoundingClientRect();
-return {width: innerWidth, height:innerHeight, availableWidth:screen.availWidth, filled: a && Math.abs(a.width - innerWidth) <= 2,
-  centered: r && p && Math.abs((p.left - r.left) - (r.right - p.right)) <= 2,
-  page: p?.width, margin: r && p && p.left - r.left,
-  hidden: !document.querySelector(".reader-controls,.pane-b,.pane-c"), overflow: document.documentElement.scrollWidth > innerWidth};' \
-      "$(viewport_width_predicate "$width") and .filled and .centered and .page > 250 and .page <= 761 and .margin >= 30 and .hidden and (.overflow | not)" \
+    geometry=$(wait_for_script "$focus_geometry_script" \
+      "$(viewport_width_predicate "$width") and ($focus_geometry_predicate) and .hidden" \
       "focus reading did not fit at ${width}px")
-    dimensions=$(jq -cn --argjson previous "$dimensions" --argjson requestedWidth "$width" --argjson requestedHeight "$height" \
-      --argjson actual "$geometry" '$previous + [{requestedWidth:$requestedWidth,requestedHeight:$requestedHeight,width:$actual.width,height:$actual.height}]')
-    before=$(reader_progress)
+    before=$(wait_for_script "$reader_position_script" "($valid_reader_position) and .book == \"$public_id\"" \
+      "no reading position before switching tools at ${width}px")
     reader_chrome
     capture_public_ui reader-main
     webdriver_click_element 'button[aria-label="目录与全书搜索"]' || die 'directory is unavailable'
@@ -488,16 +513,25 @@ return {actions: document.querySelectorAll(".export-popover button").length};' \
       '.actions >= 1' 'notes export action did not become visible' >/dev/null
     execute_sync 'document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true})); return true;' >/dev/null
     webdriver_click_element '.pane-b button[aria-label="关闭笔记工作区"]' || die 'could not close notes'
-    wait_for_script '
-return {closed: !document.querySelector(".pane-b,.pane-c")};' \
-      '.closed' 'closing notes did not return to the reader' >/dev/null
-    after=$(reader_progress)
-    [[ $(jq -r .section <<<"$before") == "$(jq -r .section <<<"$after")" ]] ||
-      die "switching tools changed the reading section at ${width}px"
+    wait_for_script "$focus_geometry_script" \
+      "$(viewport_width_predicate "$width") and ($focus_geometry_predicate) and .hidden" \
+      'closing notes did not restore focus reading' >/dev/null
+    # Wait for the reader's re-layout scheduled on the next animation frame after closing the panes.
+    execute_async '
+const done = arguments[arguments.length - 1];
+requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => done(true))));' >/dev/null
+    after=$(execute_sync "$reader_position_script")
+    same_reader_position "$before" "$after" ||
+      die "switching tools changed the reading position at ${width}px (before: $(safe_wait_state "$before"); after: $(safe_wait_state "$after"))"
+    dimensions=$(jq -cn --argjson previous "$dimensions" --argjson requestedWidth "$width" --argjson requestedHeight "$height" \
+      --argjson actual "$geometry" --argjson position "$after" '$previous + [($actual |
+        {requestedWidth:$requestedWidth,requestedHeight:$requestedHeight,width,height,pageWidth:.page,paddingLeft,paddingRight,
+         locatorStable:true,section:$position.locator.start.section,offset:$position.locator.start.offset,page:$position.page})]')
   done
   desktop_workspace_evidence=$(jq -cn --argjson geometry "$geometry" --argjson dimensions "$dimensions" \
     '{widths:[360,600,1000,1280,1600],defaultMode:"focus-reading",workspaceMode:"explicit",tools:["directory","search","notes"],
-      viewports:$dimensions, desktopPageWidth:$geometry.page, noteLayouts:["portrait","A+B","B+C","A+B+C"], focusVerified:true, sectionStable:true, narrowRegression:true}')
+      viewports:$dimensions, desktopPageWidth:$geometry.page, noteLayouts:["portrait","A+B","B+C","A+B+C"], focusVerified:true,
+      sectionStable:true, locatorStable:true, narrowRegression:true}')
 }
 
 verify_reader_interface_navigation() {
@@ -662,17 +696,42 @@ return {x: r.left + r.width / 2, y: r.top + r.height / 2};')
     '.closed' 'lightbox backdrop did not restore reading' >/dev/null
 }
 
+# Observe the actual rendered ranges in the closed book shadow tree through the
+# product's CSS highlights. A registered range outside the page is not a hit.
+reader_highlight_script='
+const [names, text] = arguments;
+const host = document.querySelector(".reader-content-host");
+const page = host?.closest(".page")?.getBoundingClientRect();
+const ranges = names.flatMap(name => [...CSS.highlights.get(name) ?? []]).filter(range =>
+  host && range.startContainer.getRootNode().host === host && range.toString().trim() === text);
+const rects = ranges.length === 1 ? [...ranges[0].getClientRects()].filter(r => r.width && r.height) : [];
+const visible = rects.length > 0 && rects.every(r => {
+  const x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+  return r.left >= Math.max(0, page.left) - 1 && r.right <= Math.min(innerWidth, page.right) + 1 &&
+    r.top >= Math.max(0, page.top) - 1 && r.bottom <= Math.min(innerHeight, page.bottom) + 1 &&
+    document.elementFromPoint(x, y) === host;
+});
+const line = rects.length === 1 && rects[0];
+return {matches:ranges.length, visible, rectCount:rects.length,
+  point: visible && line ? {x:Math.max(page.left + 1, line.left - 1), y:(line.top + line.bottom) / 2,
+    endX:Math.min(page.right - 1, line.right + 1), endY:(line.top + line.bottom) / 2} : null};'
+visible_source_highlight='.matches == 1 and .visible and .rectCount > 0'
+
 verify_authoring_cycle() {
   local fixture="$run_root/AthaSourceReturn.epub" marker reply selector edition section point quote
-  local row width height jump viewports='[]'
+  local anchor='青铜钟下的一只白鹭' anchor_json search_args note_args start source_position restored
+  local row width height jump viewports='[]' wrong_page_rejected=false
   marker="atha-linux-original-cycle-$BASHPID-$RANDOM"
+  anchor_json=$(jq -cn --arg anchor "$anchor" '$anchor')
+  search_args=$(jq -cn --arg anchor "$anchor" '[["atha-search"],$anchor]')
+  note_args=$(jq -cn --arg anchor "$anchor" '[["atha-annotations","atha-highlights","atha-active-annotation"],$anchor]')
   # Exercise long-message scroll and composer reachability with normal
   # paragraphs. A single unbroken 1600-character paragraph is a different
   # stress case for the medium workspace's intrinsic width.
   reply="$marker-reply"$'\n\n'"$(printf '长内容片段。长内容片段。长内容片段。长内容片段。\n\n%.0s' {1..80})"
   selector='.shelf-catalog [data-shelf-open][title="Atha Linux Source Return"]'
   python3 "$script_root/tests/reader-linux-epub.py" "$fixture"
-  printf '%s\n' "$fixture" "$(basename -- "$fixture")" 'Atha Linux Source Return' '原文锚点' "$marker" >>"$privacy_file"
+  printf '%s\n' "$fixture" "$(basename -- "$fixture")" 'Atha Linux Source Return' "$anchor" "$marker" >>"$privacy_file"
   open_library "$expected_books"
   set_window_size 360 760
   nav_tab '阅读记忆'
@@ -683,6 +742,7 @@ return {heading: results?.querySelector("h2")?.textContent,
   empty: results?.querySelector(".empty-memory p")?.textContent};' \
     '.heading == "最近记忆片段" and .ready and .empty == "还没有阅读记忆。"' \
     'a fresh native message store did not show the recent-memory empty state' >/dev/null
+  say 'fresh native message store showed the recent-memory empty state'
   nav_tab '书架'
   fire_tauri_drag_event 'tauri://drag-drop' "$fixture" >/dev/null || die 'could not import the original EPUB'
   wait_for_script '
@@ -706,24 +766,37 @@ return {titles: [...document.querySelectorAll(".shelf-catalog [data-shelf-open]"
 return {chapter: document.querySelector(".island-chapter,.running-chapter span")?.textContent.trim(),
   closed: !document.querySelector(".directory-dialog")};' \
     '.chapter == "原文章节" and .closed' 'original EPUB did not navigate to its text chapter' >/dev/null
-  section=$(reader_progress | jq -er .section) || die 'could not identify the original text section'
-  # The authored fixture repeats the same public line throughout this chapter,
-  # so a real drag within the measured reading column hits selectable text.
+  start=$(wait_for_script "$reader_position_script" "($valid_reader_position) and .book == \"$edition\" and .page == 1" \
+    'could not identify the first page of the original text section')
+  section=$(jq -er .locator.start.section <<<"$start")
+  reader_chrome
+  webdriver_click_element 'button[aria-label="目录与全书搜索"]' || die 'could not reopen EPUB tools'
+  click_label '.dir-tabs button' '全书搜索'
+  set_text_input '.directory-dialog input[type=search]' "$anchor"
+  webdriver_click_element '.directory-dialog button[type=submit]' || die 'could not search for the EPUB anchor'
+  wait_for_script '
+const hits = [...document.querySelectorAll(".directory-dialog .search-hit-row")];
+return {hits: hits.map(el => el.querySelector("mark")?.textContent)};' \
+    ".hits == [$anchor_json]" 'the original EPUB anchor was not a unique book-search match' >/dev/null
+  webdriver_click_element '.directory-dialog .search-hit-row' || die 'could not follow the EPUB search result'
+  source_position=$(wait_for_script "$reader_position_script" \
+    "($valid_reader_position) and .book == \"$edition\" and .locator.start.section == \"$section\" and .page > 1" \
+    'the unique source anchor did not land beyond the first page of the same chapter')
   capture_public_ui authoring-selection-page
-  point=$(execute_sync 'const r=document.querySelector(".page").getBoundingClientRect();
-return {x:r.left+3,y:r.top+77,endX:r.left+188,endY:r.top+77};')
+  point=$(wait_for_script "$reader_highlight_script" "($visible_source_highlight) and .point != null" \
+    'the unique source anchor is not visible on the reading surface' "$search_args" | jq -ce .point)
   perform_pointer_action "$point" drag || die 'trusted mouse drag failed on the original EPUB'
-  wait_for_script 'return {actions: Boolean(document.querySelector(".selection-capsule")), selectedLength: window.getSelection()?.toString().length};' \
+  wait_for_script 'return {actions: Boolean(document.querySelector(".selection-capsule"))};' \
     '.actions' 'trusted mouse drag did not produce selection actions' >/dev/null
   click_label '.selection-capsule button' '查词'
-  wait_for_script 'return {open: Boolean(document.querySelector(".dict-card"))};' '.open' 'selection lookup did not open' >/dev/null
+  wait_for_script 'return {word: document.querySelector(".dict-body")?.textContent.trim().match(/“([^”]+)”/)?.[1]};' \
+    ".word == $anchor_json" 'trusted drag did not select the exact unique EPUB anchor' >/dev/null
   webdriver_click_element 'button[aria-label="关闭词典"]' || die 'could not dismiss lookup'
   click_label '.selection-capsule button' '对话'
-  wait_for_script '
-return {source: document.querySelector(".pane-c .source-quote")?.textContent.includes("原文锚点"),
+  quote=$(wait_for_script '
+return {source: document.querySelector(".pane-c .source-quote p")?.textContent,
   editor: Boolean(document.querySelector(".pane-c .ProseMirror"))};' \
-    '.source and .editor' 'conversation draft did not capture the selected source text' >/dev/null
-  quote=$(execute_sync 'return document.querySelector(".pane-c .source-quote p").textContent;')
+    ".source == $anchor_json and .editor" 'conversation draft did not capture the selected source text' | jq -c .source)
   # WebKitWebDriver maps typed punctuation differently in packaged and
   # unpackaged runtime environments. Fill the deterministic public text via
   # the actual Markdown input; the source selection remains a trusted drag.
@@ -757,9 +830,10 @@ return {messages:messages.length, long: messages.some(el => el.textContent.lengt
     wait_for_script '
 const rows = [...document.querySelectorAll(".hit-row")];
 return {count: rows.length, sameBook: rows.every(el => el.querySelector(".hit-book")?.textContent === "Atha Linux Source Return"),
-  quotes: rows.every(el => el.querySelector(".hit-quote")?.textContent.includes("原文锚点")),
+  quotes: rows.map(el => el.querySelector(".hit-quote")?.textContent.trim()),
   overflow: document.documentElement.scrollWidth > innerWidth};' \
-      '.count == 2 and .sameBook and .quotes and (.overflow | not)' 'memory query missed the original note or reply' >/dev/null
+      ".count == 2 and .sameBook and (.quotes | all(. == $quote)) and (.overflow | not)" \
+      'memory query missed the original note or reply' >/dev/null
     # Eliminate ordinary progress restoration as the reason the right section opens.
     execute_sync 'localStorage.removeItem(arguments[0]); return true;' \
       "$(jq -cn --arg key "atha.reader.progress.${edition:0:16}.v1" '[$key]')" >/dev/null
@@ -793,16 +867,37 @@ return {width:innerWidth, edition: saved?.contentVersion, section: loc?.start?.s
     webdriver_send_keys '.pane-c .ProseMirror' "draft-$marker" || die 'could not type in the returned composer'
     wait_for_script 'return {send: Boolean(document.querySelector(".pane-c .send-btn:not(:disabled)"))};' \
       '.send' 'returned composer did not accept a new draft' >/dev/null
-    viewports=$(jq -cn --argjson prior "$viewports" --argjson width "$(jq .width <<<"$jump")" \
-      '$prior + [{width:$width, searchHits:2, sameEdition:true, sameSection:true, sourceQuote:true, longReply:true, sendVisible:true, sendEnabled:true}]')
     webdriver_click_element '.pane-c button[aria-label="关闭笔记工作区"]' || die 'could not close restored conversation'
+    # C covers/hides the reading surface in some layouts. Dismissing it only
+    # exposes the page the memory jump returned to; there is no source navigation here.
+    restored=$(wait_for_script "$reader_position_script" \
+      "($valid_reader_position) and .book == \"$edition\" and .locator.start.section == \"$section\" and .page > 1" \
+      'memory jump did not open a non-first page of the original chapter')
+    wait_for_script "$reader_highlight_script" "$visible_source_highlight" \
+      'memory jump restored the thread but the selected original text is not on the rendered page' "$note_args" >/dev/null
+    if ((width == 360)); then
+      reader_chrome
+      webdriver_click_element 'button[aria-label="下一页"]' || die 'could not exercise the same-chapter wrong-page control'
+      wait_for_script "$reader_position_script" \
+        "($valid_reader_position) and .locator.start.section == \"$section\" and .page == $(jq '.page + 1' <<<"$restored")" \
+        'wrong-page control did not move one page within the original chapter' >/dev/null
+      wait_for_script "$reader_highlight_script" '.matches == 1 and .rectCount > 0 and (.visible | not)' \
+        'the same-chapter wrong page did not leave the registered original text off-page' "$note_args" >/dev/null
+      wrong_page_rejected=true
+    fi
+    viewports=$(jq -cn --argjson prior "$viewports" --argjson requestedWidth "$width" \
+      --argjson actualWidth "$(jq .width <<<"$jump")" --argjson page "$(jq .page <<<"$restored")" \
+      '$prior + [{requestedWidth:$requestedWidth,width:$actualWidth,sourcePage:$page,sourceVisible:true,
+        searchHits:2,sameEdition:true,sameSection:true,sourceQuote:true,longReply:true,sendVisible:true,sendEnabled:true}]')
     reader_back
     wait_for_script '
 return {memory: Boolean(document.querySelector(".memory-shell")), results: document.querySelectorAll(".hit-row").length};' \
       '.memory and .results == 2' 'source return did not restore the results list' >/dev/null
   done
-  authoring_cycle_evidence=$(jq -cn --argjson viewports "$viewports" \
+  authoring_cycle_evidence=$(jq -cn --argjson viewports "$viewports" --argjson selectedPage "$(jq .page <<<"$source_position")" \
+    --argjson wrongPageRejected "$wrong_page_rejected" \
     '{fixture:"original EPUB", imagePreview:true, trustedMouseSelection:true, noteSaved:true, replySent:true, reopened:true,
+      freshMemoryEmpty:true, selectedPage:$selectedPage, wrongPageRejected:$wrongPageRejected,
       searchHits:2, jumpToSource:true, sameEdition:true, sameSection:true, viewports:$viewports}')
 }
 

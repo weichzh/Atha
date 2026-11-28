@@ -216,7 +216,7 @@ gesture_active=0
 current_book_kind=
 diagnostics_enabled=0
 authoring_cycle_evidence=null
-pointer_action_timed_out=0
+native_action_timed_out=0
 
 webdriver_request() {
   local method=$1 path=$2 body=${3-}
@@ -242,6 +242,13 @@ webdriver_value() {
     return 1
   fi
   jq -c '.value' <<<"$response"
+}
+
+webdriver_native_action() {
+  local payload=$1 result=0
+  webdriver_value POST "/session/$session_id/actions" "$payload" >/dev/null || result=$?
+  ((result != 28)) || native_action_timed_out=1
+  return "$result"
 }
 
 execute_script() {
@@ -312,9 +319,9 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   set +e
-  # A pending native mouse command can crash WebKitWebDriver when cancelled.
+  # A pending native input command can crash WebKitWebDriver when cancelled.
   # Stop this run's unit directly after a transport timeout instead.
-  if ((pointer_action_timed_out == 0)); then
+  if ((native_action_timed_out == 0)); then
     cleanup_gesture >/dev/null 2>&1
     if [[ -n $session_id ]]; then
       webdriver_request DELETE "/session/$session_id" >/dev/null 2>&1
@@ -340,10 +347,10 @@ safe_wait_state() {
 }
 
 wait_for_script() {
-  local script=$1 predicate=$2 label=$3
+  local script=$1 predicate=$2 label=$3 script_args=${4:-[]}
   local deadline=$((SECONDS + 30)) value last_value=
   while ((SECONDS < deadline)); do
-    if value=$(execute_sync "$script" 2>/dev/null); then
+    if value=$(execute_sync "$script" "$script_args" 2>/dev/null); then
       last_value=$value
       if jq -e "$predicate" <<<"$value" >/dev/null; then
         printf '%s\n' "$value"
@@ -975,10 +982,9 @@ perform_pointer_action() {
       }]
     }')
   fi
-  webdriver_value POST "/session/$session_id/actions" "$payload" >/dev/null || result=$?
+  webdriver_native_action "$payload" || result=$?
   if ((result != 0)); then
     pointer_action_failure_diagnostic "$action" "$result"
-    ((result != 28)) || pointer_action_timed_out=1
   else
     webdriver_value DELETE "/session/$session_id/actions" >/dev/null 2>&1 || true
   fi
