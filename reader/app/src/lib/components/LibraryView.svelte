@@ -1,15 +1,14 @@
 <script lang="ts">
-  import { computePosition, flip, offset, shift } from "@floating-ui/dom";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import {
     Check,
+    CheckSquare,
     ChevronDown,
     Filter,
     Heart,
     Image,
     LayoutGrid,
     List,
-    MoreHorizontal,
     Plus,
     RotateCcw,
     Search,
@@ -36,6 +35,7 @@
     takeStartupImport,
     type LibraryBook,
   } from "../../library.ts";
+  import { registerBackHandler } from "../data/back-stack.ts";
   import { isTauriRuntime } from "../data/runtime.ts";
   import {
     browseShelf,
@@ -65,10 +65,9 @@
     type ShelfOrigin,
   } from "../../shelf-session.ts";
   import {
-    deleteLibraryBookData,
+    applyShelfRemoval,
     importLibraryBooks,
     listLibraryBooks,
-    removeLibraryBook,
     resetLibraryBookCover,
     setLibraryBookCover,
     updateLibraryBookOrganization,
@@ -80,9 +79,10 @@
     active: boolean;
     onOpenReader: (book: LibraryBook, origin: ShelfOrigin, trigger?: HTMLElement) => Promise<void>;
     onBooksUpdated?: (books: LibraryBook[]) => void;
+    onSelectingChange: (selecting: boolean) => void;
   }
 
-  let { active, onOpenReader, onBooksUpdated }: Props = $props();
+  let { active, onOpenReader, onBooksUpdated, onSelectingChange }: Props = $props();
 
   let books = $state<LibraryBook[]>([]);
   let loading = $state(true);
@@ -95,6 +95,7 @@
   let sort = $state<ShelfSort>("title");
   let layout = $state<ShelfLayout>("grid");
   let filterPopoverOpen = $state(false);
+  let sortPopoverOpen = $state(false);
   let coverRevision = $state<Record<string, number>>({});
   let statusMessage = $state<string | null>(null);
 
@@ -103,10 +104,14 @@
   let recentStripEl = $state<HTMLElement | null>(null);
   let tagsStripEl = $state<HTMLElement | null>(null);
 
-  // Floating Book Menu
-  let menuBook = $state<LibraryBook | null>(null);
-  let menuEl = $state<HTMLElement | null>(null);
-  let menuAnchorEl = $state<HTMLElement | null>(null);
+  let selecting = $state(false);
+  let selectedIds = $state<ReadonlySet<string>>(new Set());
+  let batchBusy = $state(false);
+  let selectionToggle = $state<HTMLButtonElement>();
+  let selectionOrigin: HTMLElement | undefined;
+  let press: { id: number; x: number; y: number; target: HTMLElement } | undefined;
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+  let ignoreClick: HTMLElement | undefined;
 
   // Edit Organization Dialog
   let editBook = $state<LibraryBook | null>(null);
@@ -120,14 +125,22 @@
   let confirmState = $state<{
     open: boolean;
     mode: "remove" | "delete";
-    book: LibraryBook | null;
-  }>({ open: false, mode: "remove", book: null });
+    targets: LibraryBook[];
+  }>({ open: false, mode: "remove", targets: [] });
+  const confirmTarget = $derived(confirmState.targets.length === 1
+    ? `《${confirmState.targets[0].title}》`
+    : `选中的 ${confirmState.targets.length} 册书`);
 
   const readingMap = $derived(readShelfReading(books));
   const entries = $derived(indexShelf(books, readingMap));
   const recentEntries = $derived(recentShelf(entries));
   const quickFacets = $derived(quickShelfFacets(books));
   const filteredEntries = $derived(browseShelf(entries, searchQuery, filters, sort));
+  const selectedBooks = $derived(
+    filteredEntries.filter(({ book }) => selectedIds.has(book.id)).map(({ book }) => book),
+  );
+  const singleBook = $derived(selectedBooks.length === 1 ? selectedBooks[0] : undefined);
+  const favoriteLabel = $derived(selectedBooks.every((book) => book.favorite) ? "取消收藏" : "收藏");
   const facetSummary = $derived(shelfFacetOptions(entries, searchQuery, filters));
   const activeFilterCount = $derived(filterCount(filters));
   const currentSortLabel = $derived(
@@ -272,6 +285,20 @@
       }
     };
     window.addEventListener("pageshow", onPageShow);
+    const unregisterBack = registerBackHandler((source) => {
+      if (!active || !selecting) return false;
+      if (batchBusy) return true;
+      if (confirmState.open || editDialogOpen || filterPopoverOpen || sortPopoverOpen) {
+        if (source === "escape") return false; // Let Bits UI dismiss its own top layer.
+        if (confirmState.open) confirmState.open = false;
+        else if (editDialogOpen) editDialogOpen = false;
+        else if (filterPopoverOpen) filterPopoverOpen = false;
+        else sortPopoverOpen = false;
+        return true;
+      }
+      exitSelection(true);
+      return true;
+    });
 
     if (isTauriRuntime() && libraryAvailable) {
       void getCurrentWebview()
@@ -312,6 +339,9 @@
       disposed = true;
       window.removeEventListener("pageshow", onPageShow);
       unlistenDrop?.();
+      unregisterBack();
+      cancelHold();
+      onSelectingChange(false);
     };
   });
 
@@ -358,6 +388,102 @@
     }
   }
 
+  $effect(() => {
+    if (!active) {
+      cancelHold();
+      if (selecting) exitSelection();
+    }
+  });
+
+  $effect(() => {
+    if (selectedIds.size === selectedBooks.length) return;
+    selectedIds = new Set(selectedBooks.map((book) => book.id));
+  });
+
+  function enterSelection(book?: LibraryBook, trigger?: HTMLElement) {
+    if (!selecting) {
+      selectionOrigin = trigger;
+      onSelectingChange(true);
+    }
+    selecting = true;
+    if (book) selectedIds = new Set([...selectedIds, book.id]);
+  }
+
+  function exitSelection(restoreFocus = false) {
+    selecting = false;
+    onSelectingChange(false);
+    selectedIds = new Set();
+    const origin = selectionOrigin;
+    selectionOrigin = undefined;
+    if (restoreFocus) {
+      void tick().then(() => {
+        if (active && !selecting) {
+          (origin?.isConnected ? origin : selectionToggle)?.focus({ preventScroll: true });
+        }
+      });
+    }
+  }
+
+  function selectBook(id: string) {
+    const next = new Set(selectedIds);
+    if (!next.delete(id)) next.add(id);
+    selectedIds = next;
+  }
+
+  function cancelHold() {
+    clearTimeout(holdTimer);
+    press = undefined;
+  }
+
+  function startBookHold(book: LibraryBook, event: PointerEvent) {
+    ignoreClick = undefined;
+    if (selecting || !event.isPrimary || event.button !== 0 || event.pointerType === "mouse") return;
+    cancelHold();
+    const target = event.currentTarget as HTMLElement;
+    press = { id: event.pointerId, x: event.clientX, y: event.clientY, target };
+    holdTimer = setTimeout(() => {
+      if (!active || !target.isConnected) return;
+      ignoreClick = target;
+      enterSelection(book, target);
+    }, 420);
+  }
+
+  function checkHoldMovement(event: PointerEvent) {
+    if (press?.id === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) {
+      cancelHold();
+    }
+  }
+
+  function endBookHold(event: PointerEvent) {
+    if (press?.id === event.pointerId) cancelHold();
+  }
+
+  function selectFromContext(book: LibraryBook, event: MouseEvent | KeyboardEvent) {
+    if (event instanceof KeyboardEvent && event.key !== "ContextMenu" &&
+      !(event.shiftKey && event.key === "F10")) return;
+    event.preventDefault();
+    if (batchBusy) return;
+    const target = event.currentTarget as HTMLElement;
+    if (press?.target === target) {
+      ignoreClick = target;
+      cancelHold();
+    }
+    enterSelection(book, target);
+  }
+
+  function handleCatalogClick(entry: ShelfEntry, event: MouseEvent) {
+    const target = event.currentTarget as HTMLButtonElement;
+    if (event.detail > 0 && ignoreClick === target) {
+      ignoreClick = undefined;
+      return;
+    }
+    if (selecting) {
+      if (!batchBusy) selectBook(entry.book.id);
+    } else {
+      void handleOpenBook(entry, "catalog", target);
+    }
+  }
+
   async function handleOpenBook(entry: ShelfEntry, area: "catalog" | "recent", triggerEl?: HTMLElement) {
     const origin: ShelfOrigin = {
       id: entry.book.id,
@@ -379,38 +505,29 @@
     notify(report.failures.length ? `导入完成（${report.failures.length} 本未能识别）` : "已导入新书至书架");
   }
 
-  async function openBookMenu(book: LibraryBook, anchor: HTMLElement) {
-    if (menuBook?.id === book.id) {
-      closeBookMenu();
-      return;
+  async function handleBatchFavorite() {
+    if (batchBusy || selectedBooks.length === 0) return;
+    const targets = [...selectedBooks];
+    const favorite = targets.some((book) => !book.favorite);
+    let completed = 0;
+    batchBusy = true;
+    try {
+      for (const book of targets) {
+        books = await updateLibraryBookOrganization(book.id, { favorite });
+        completed++;
+      }
+      exitSelection(true);
+      notify(favorite ? `已收藏 ${completed} 册` : `已取消收藏 ${completed} 册`);
+    } catch {
+      selectedIds = new Set(targets.slice(completed).map((book) => book.id));
+      notify(`已更新 ${completed} 册收藏状态，剩余未处理。请重试。`);
+    } finally {
+      batchBusy = false;
+      onBooksUpdated?.(books);
     }
-    menuBook = book;
-    menuAnchorEl = anchor;
-    await tick();
-    if (menuEl && menuAnchorEl) {
-      const { x, y } = await computePosition(menuAnchorEl, menuEl, {
-        placement: "bottom-end",
-        middleware: [offset(8), flip(), shift({ padding: 12 })],
-      });
-      menuEl.style.left = `${x}px`;
-      menuEl.style.top = `${y}px`;
-    }
-  }
-
-  function closeBookMenu() {
-    menuBook = null;
-    menuAnchorEl = null;
-  }
-
-  async function handleToggleFavorite(book: LibraryBook) {
-    closeBookMenu();
-    books = await updateLibraryBookOrganization(book.id, { favorite: !book.favorite });
-    onBooksUpdated?.(books);
-    notify(book.favorite ? "已取消收藏" : "已加入收藏");
   }
 
   function openEditDialog(book: LibraryBook) {
-    closeBookMenu();
     editBook = book;
     editFavorite = Boolean(book.favorite);
     editTagsText = (book.tags ?? []).join("\n");
@@ -434,7 +551,6 @@
   }
 
   async function handleSetCover(book: LibraryBook) {
-    closeBookMenu();
     const updated = await setLibraryBookCover(book.id);
     if (updated) {
       books = updated;
@@ -445,29 +561,43 @@
   }
 
   async function handleResetCover(book: LibraryBook) {
-    closeBookMenu();
     books = await resetLibraryBookCover(book.id);
     coverRevision = { ...coverRevision, [book.id]: (coverRevision[book.id] ?? 0) + 1 };
     onBooksUpdated?.(books);
+    editBook = books.find((item) => item.id === book.id) ?? book;
     notify("已恢复默认封面");
   }
 
-  function requestBookConfirm(book: LibraryBook, mode: "remove" | "delete") {
-    closeBookMenu();
-    confirmState = { open: true, mode, book };
+  function requestBookConfirm(mode: "remove" | "delete") {
+    if (batchBusy || selectedBooks.length === 0) return;
+    confirmState = { open: true, mode, targets: [...selectedBooks] };
   }
 
   async function executeBookConfirm() {
-    const target = confirmState.book;
-    if (!target) return;
-    if (confirmState.mode === "remove") {
-      books = await removeLibraryBook(target.id);
-      notify(`已将《${target.title}》移出书架`);
-    } else {
-      books = await deleteLibraryBookData(target.id);
-      notify(`已清理《${target.title}》的本地阅读记录与数据`);
+    if (batchBusy) return;
+    const { mode, targets } = confirmState;
+    if (targets.length === 0) return;
+    batchBusy = true;
+    try {
+      const result = await applyShelfRemoval(targets.map(({ id }) => id), mode);
+      if (result.books) {
+        books = result.books;
+        onBooksUpdated?.(books);
+      }
+      const verb = mode === "remove" ? "移出" : "删除";
+      if (result.pendingRecovery) {
+        exitSelection(true);
+        notify(`已${verb} ${result.removedIds.length} 册；删除未完成，请重开应用恢复后再继续。`);
+      } else if (result.remainingIds.length > 0) {
+        selectedIds = new Set(result.remainingIds);
+        notify(`已${verb} ${result.removedIds.length} 册，剩余未处理。请重试。`);
+      } else {
+        exitSelection(true);
+        notify(`已${verb} ${result.removedIds.length} 册`);
+      }
+    } finally {
+      batchBusy = false;
     }
-    onBooksUpdated?.(books);
   }
 
   function toggleFilterFacet(key: Facet, value: string) {
@@ -484,17 +614,22 @@
     return dateStr.slice(5).replace("-", "/");
   }
 
-  function handleWindowPointerDown(event: PointerEvent) {
-    if (!menuBook) return;
-    const target = event.target as Node | null;
-    if (menuEl?.contains(target) || menuAnchorEl?.contains(target)) return;
-    closeBookMenu();
-  }
 </script>
 
-<svelte:window onpointerdown={handleWindowPointerDown} onkeydown={(e) => e.key === "Escape" && closeBookMenu()} />
+<svelte:window
+  onpointermove={checkHoldMovement}
+  onpointerup={endBookHold}
+  onpointercancel={endBookHold}
+  onblur={cancelHold}
+/>
 
-<main class="library-shell" bind:this={pageEl} aria-label="书架" aria-busy={loading ? "true" : "false"}>
+<main
+  class="library-shell"
+  class:selecting
+  bind:this={pageEl}
+  aria-label="书架"
+  aria-busy={loading || batchBusy}
+>
   {#if dragActive}
     <div class="drop-scrim glass-popover" role="status">松开鼠标，立即导入书籍至书架</div>
   {/if}
@@ -596,6 +731,7 @@
 
         <Select.Root
           type="single"
+          bind:open={sortPopoverOpen}
           value={sort}
           onValueChange={(value) => {
             if (value) sort = value as ShelfSort;
@@ -647,6 +783,19 @@
           </button>
         </div>
 
+        <button
+          type="button"
+          class="pill-btn"
+          class:active-accent={selecting}
+          aria-pressed={selecting}
+          disabled={loading || batchBusy}
+          bind:this={selectionToggle}
+          onclick={() => selecting ? exitSelection() : enterSelection()}
+        >
+          {#if selecting}<X size={15} />{:else}<CheckSquare size={15} />{/if}
+          <span>{selecting ? "取消选择" : "选择"}</span>
+        </button>
+
         <button type="button" class="accent-btn import-btn" onclick={handleImport}>
           <Plus size={16} />
           <span>导入</span>
@@ -654,6 +803,45 @@
       </div>
     </div>
   </header>
+
+  {#if selecting}
+    <div class="shelf-actions glass-island" role="group" aria-label="选中书籍操作">
+      <div class="selection-summary">
+        <span class="selection-count tabular" aria-live="polite">已选 {selectedBooks.length} 册</span>
+        <button type="button" class="shelf-action selection-close" aria-label="退出选择" disabled={batchBusy} onclick={() => exitSelection(true)}>
+          <X size={17} />
+        </button>
+      </div>
+      <div class="selection-options">
+        {#if selectedBooks.length === 0}
+          <span class="selection-hint">点按书籍，可选多册</span>
+        {:else}
+          <button type="button" class="shelf-action" disabled={batchBusy} onclick={handleBatchFavorite}>
+            <Heart size={17} />
+            <span>{favoriteLabel}</span>
+          </button>
+          {#if singleBook}
+            <button type="button" class="shelf-action" disabled={batchBusy} onclick={() => openEditDialog(singleBook!)}>
+              <Tag size={17} />
+              <span>编辑信息</span>
+            </button>
+            <button type="button" class="shelf-action" disabled={batchBusy} onclick={() => void handleSetCover(singleBook!)}>
+              <Image size={17} />
+              <span>换封面</span>
+            </button>
+          {/if}
+          <button type="button" class="shelf-action" disabled={batchBusy} onclick={() => requestBookConfirm("remove")}>
+            <X size={17} />
+            <span>移出</span>
+          </button>
+          <button type="button" class="shelf-action danger" disabled={batchBusy} onclick={() => requestBookConfirm("delete")}>
+            <Trash2 size={17} />
+            <span>删除</span>
+          </button>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
   {#if activeFilterCount > 0 || searchQuery.trim()}
     <div class="active-conditions" aria-label="已选条件">
@@ -705,7 +893,7 @@
             <button
               type="button"
               class="recent-card"
-              disabled={loading}
+              disabled={loading || selecting}
               data-shelf-area="recent"
               data-book-id={entry.book.id}
               title={entry.book.title}
@@ -779,12 +967,16 @@
               <button
                 type="button"
                 class="book-open-trigger"
-                disabled={loading}
+                disabled={loading || batchBusy}
+                aria-pressed={selecting ? selectedIds.has(entry.book.id) : undefined}
                 data-shelf-area="catalog"
                 data-shelf-open={entry.book.id}
                 data-book-id={entry.book.id}
                 title={entry.book.title}
-                onclick={(e) => handleOpenBook(entry, "catalog", e.currentTarget)}
+                onclick={(e) => handleCatalogClick(entry, e)}
+                onpointerdown={(e) => startBookHold(entry.book, e)}
+                oncontextmenu={(e) => selectFromContext(entry.book, e)}
+                onkeydown={(e) => selectFromContext(entry.book, e)}
               >
                 <BookCover
                   book={entry.book}
@@ -792,14 +984,11 @@
                   percent={entry.fact?.percent ?? null}
                   coverRevision={coverRevision[entry.book.id] ?? 0}
                 />
-              </button>
-              <button
-                type="button"
-                class="book-more-btn"
-                aria-label={`更多操作：${entry.book.title}`}
-                onclick={(e) => openBookMenu(entry.book, e.currentTarget)}
-              >
-                <MoreHorizontal size={16} />
+                {#if selecting}
+                  <span class="book-selection-mark" aria-hidden="true">
+                    {#if selectedIds.has(entry.book.id)}<Check size={16} strokeWidth={2.5} />{/if}
+                  </span>
+                {/if}
               </button>
             </div>
             <div class="book-info">
@@ -816,12 +1005,16 @@
             <button
               type="button"
               class="list-open-trigger"
-              disabled={loading}
+              disabled={loading || batchBusy}
+              aria-pressed={selecting ? selectedIds.has(entry.book.id) : undefined}
               data-shelf-area="catalog"
               data-shelf-open={entry.book.id}
               data-book-id={entry.book.id}
               title={entry.book.title}
-              onclick={(e) => handleOpenBook(entry, "catalog", e.currentTarget)}
+              onclick={(e) => handleCatalogClick(entry, e)}
+              onpointerdown={(e) => startBookHold(entry.book, e)}
+              oncontextmenu={(e) => selectFromContext(entry.book, e)}
+              onkeydown={(e) => selectFromContext(entry.book, e)}
             >
               <div class="list-thumb">
                 <BookCover
@@ -848,14 +1041,11 @@
                   <span class="list-date">{formatDateBadge(entry.fact.lastReadDate)}</span>
                 {/if}
               </div>
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              aria-label={`更多操作：${entry.book.title}`}
-              onclick={(e) => openBookMenu(entry.book, e.currentTarget)}
-            >
-              <MoreHorizontal size={16} />
+              {#if selecting}
+                <span class="book-selection-mark" aria-hidden="true">
+                  {#if selectedIds.has(entry.book.id)}<Check size={16} strokeWidth={2.5} />{/if}
+                </span>
+              {/if}
             </button>
           </div>
         {/each}
@@ -863,75 +1053,6 @@
     {/if}
   </section>
 </main>
-
-{#if menuBook}
-  {@const activeMenuBook = menuBook}
-  <div
-    bind:this={menuEl}
-    class="glass-popover book-context-menu"
-    role="menu"
-    aria-label="书籍操作菜单"
-    transition:scale={{ start: 0.95, duration: 150, easing: cubicOut }}
-  >
-    <button
-      type="button"
-      role="menuitem"
-      class="menu-item"
-      onclick={() => handleToggleFavorite(activeMenuBook)}
-    >
-      <Heart size={15} fill={activeMenuBook.favorite ? "currentColor" : "none"} />
-      <span>{activeMenuBook.favorite ? "取消收藏" : "加入收藏"}</span>
-    </button>
-    <button
-      type="button"
-      role="menuitem"
-      class="menu-item"
-      onclick={() => openEditDialog(activeMenuBook)}
-    >
-      <Tag size={15} />
-      <span>编辑标签与分类</span>
-    </button>
-    <button
-      type="button"
-      role="menuitem"
-      class="menu-item"
-      onclick={() => handleSetCover(activeMenuBook)}
-    >
-      <Image size={15} />
-      <span>更换封面</span>
-    </button>
-    {#if activeMenuBook.hasCustomCover}
-      <button
-        type="button"
-        role="menuitem"
-        class="menu-item"
-        onclick={() => handleResetCover(activeMenuBook)}
-      >
-        <RotateCcw size={15} />
-        <span>恢复默认封面</span>
-      </button>
-    {/if}
-    <div class="menu-gap" role="separator"></div>
-    <button
-      type="button"
-      role="menuitem"
-      class="menu-item"
-      onclick={() => requestBookConfirm(activeMenuBook, "remove")}
-    >
-      <X size={15} />
-      <span>移出书架</span>
-    </button>
-    <button
-      type="button"
-      role="menuitem"
-      class="menu-item danger"
-      onclick={() => requestBookConfirm(activeMenuBook, "delete")}
-    >
-      <Trash2 size={15} />
-      <span>删除本地数据</span>
-    </button>
-  </div>
-{/if}
 
 <Dialog.Root bind:open={editDialogOpen}>
   <Dialog.Portal>
@@ -974,6 +1095,11 @@
                 <textarea rows="2" bind:value={editSeriesText} placeholder="例如：现代书房论集"></textarea>
               </label>
               <div class="edit-actions">
+                {#if editBook.hasCustomCover}
+                  <button type="button" class="pill-btn" onclick={() => void handleResetCover(editBook!)}>
+                    <RotateCcw size={14} /> 恢复默认封面
+                  </button>
+                {/if}
                 <button type="button" class="pill-btn" onclick={() => (editDialogOpen = false)}>
                   取消
                 </button>
@@ -991,8 +1117,8 @@
   bind:open={confirmState.open}
   title={confirmState.mode === "remove" ? "将书籍移出书架？" : "彻底删除本地阅读数据？"}
   description={confirmState.mode === "remove"
-    ? `仅将《${confirmState.book?.title ?? ""}》从书架列表移除，已生成的对话消息与历史快照仍安全保留。`
-    : `将清除《${confirmState.book?.title ?? ""}》在本机保存的书籍文件、阅读进度、书签与本地排版覆盖（消息存档保留历史快照）。`}
+    ? `从书架移出${confirmTarget}，保留对话消息和历史快照。`
+    : `删除${confirmTarget}及本机的阅读进度、书签和排版设置。对话和历史快照仍保留。`}
   confirmLabel={confirmState.mode === "remove" ? "移出书架" : "删除本地数据"}
   destructive={confirmState.mode === "delete"}
   onConfirm={executeBookConfirm}
@@ -1315,31 +1441,40 @@
     transition: transform 240ms var(--ease-spring);
   }
 
-  .book-cover-hit:hover .book-open-trigger {
+  .book-cover-hit:hover .book-open-trigger:not([aria-pressed]) {
     transform: translateY(-4px);
   }
 
-  .book-more-btn {
-    position: absolute;
-    right: 8px;
-    bottom: 16px;
-    width: 30px;
-    height: 30px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-glass-strong);
-    backdrop-filter: blur(12px);
-    color: var(--ink-primary);
-    box-shadow: var(--shadow-sm);
-    opacity: 0;
-    transition: opacity 160ms var(--ease-smooth), transform 160ms var(--ease-spring);
+  .book-open-trigger,
+  .list-open-trigger {
+    user-select: none;
+    -webkit-touch-callout: none;
   }
 
-  .book-cover-hit:hover .book-more-btn,
-  .book-cover-hit:focus-within .book-more-btn {
-    opacity: 1;
+  .book-open-trigger[aria-pressed="true"] {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  .book-selection-mark {
+    width: 26px;
+    height: 26px;
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    border: 2px solid var(--ink-secondary);
+    border-radius: 50%;
+    background: var(--bg-surface);
+    color: var(--accent);
+  }
+
+  .book-open-trigger .book-selection-mark {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+  }
+
+  [aria-pressed="true"] > .book-selection-mark {
+    border-color: var(--accent);
   }
 
   .book-info {
@@ -1463,40 +1598,54 @@
     color: var(--ink-primary);
   }
 
-  .book-context-menu {
+  .shelf-actions {
     position: fixed;
-    z-index: 70;
-    min-width: 196px;
-    padding: 6px;
-    border-radius: var(--radius-md);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .menu-item {
+    z-index: 42;
+    left: max(248px, calc((100vw - 1480px) / 2 + 248px));
+    bottom: 24px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 9px 12px;
-    border-radius: var(--radius-xs);
-    font-size: 13.5px;
-    color: var(--ink-primary);
-    text-align: left;
-    transition: background-color 140ms var(--ease-smooth);
+    gap: 4px;
+    padding: 6px 10px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-glass-strong);
   }
 
-  .menu-item:hover {
+  .selection-count,
+  .selection-hint {
+    padding: 0 8px;
+    color: var(--ink-secondary);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .selection-summary,
+  .selection-options {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .shelf-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 9px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .shelf-action:hover,
+  .shelf-action:focus-visible {
     background: var(--bg-well);
   }
 
-  .menu-item.danger {
+  .shelf-action.danger {
     color: var(--danger);
-  }
-
-  .menu-gap {
-    height: 6px;
   }
 
   /* Filter & Select Popovers (portal-rendered) */
@@ -1705,6 +1854,7 @@
 
   .edit-actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 10px;
     margin-top: 6px;
@@ -1724,8 +1874,34 @@
       gap: 20px 16px;
     }
 
-    .book-more-btn {
-      opacity: 1;
+    .library-shell.selecting {
+      padding-bottom: calc(130px + env(safe-area-inset-bottom));
+    }
+
+    .shelf-actions {
+      left: 50%;
+      translate: -50% 0;
+      bottom: max(14px, env(safe-area-inset-bottom));
+      width: min(calc(100% - 32px), 420px);
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+      padding: 5px 8px;
+    }
+
+    .selection-summary {
+      justify-content: space-between;
+    }
+
+    .selection-options {
+      justify-content: space-evenly;
+      flex-wrap: wrap;
+    }
+
+    .shelf-action {
+      flex-direction: column;
+      gap: 3px;
+      padding: 3px 4px;
     }
 
     .recent-card-wrap {
