@@ -1,9 +1,9 @@
 <script lang="ts">
   import { Editor, type JSONContent } from "@tiptap/core";
   import {
+    ArrowUp,
     Bold,
     Code2,
-    CornerDownLeft,
     Heading2,
     Italic,
     Link2,
@@ -11,6 +11,7 @@
     Maximize2,
     Minimize2,
     Quote,
+    Type,
     X,
   } from "@lucide/svelte";
   import { Dialog } from "bits-ui";
@@ -42,7 +43,7 @@
   let {
     draftKey,
     sealDraftOnSubmit = false,
-    placeholder = "写下此刻对这段文字的思考或追问…",
+    placeholder = "写下笔记或回复…",
     initialText = "",
     initialContentJson = "",
     replyChipLabel = null,
@@ -63,6 +64,10 @@
   let markdownSource = $state("");
   let markdownError = $state<string | null>(null);
   let expanded = $state(false);
+  let showFormatBar = $state(false);
+  const formatOptions = { heading: { level: 2 }, bold: undefined, italic: undefined,
+    blockquote: undefined, bulletList: undefined, link: undefined };
+  let activeFormats = $state<string[]>([]);
   let submitting = $state(false);
   let editingLocked = $state(false);
   let hasContent = $state(false);
@@ -118,6 +123,21 @@
     }
   }
 
+  function handleSubmitKey(event: KeyboardEvent, composing = false) {
+    if (event.key !== "Enter" || event.isComposing || composing || event.keyCode === 229) return false;
+    const shortcut = event.metaKey || event.ctrlKey;
+    const quickSend = mode === "visual" && !expanded && !event.shiftKey && !event.altKey &&
+      window.matchMedia("(pointer: fine)").matches;
+    if (!shortcut && !quickSend) return false;
+    event.preventDefault();
+    if (!event.repeat) void handleSend();
+    return true;
+  }
+
+  function formatActive(type: keyof typeof formatOptions) {
+    return mode === "visual" && activeFormats.includes(type);
+  }
+
   onMount(() => {
     if (!editorEl) return;
     const instance = new Editor({
@@ -127,16 +147,16 @@
       editorProps: {
         attributes: {
           class: "atha-tiptap-body",
-          "data-placeholder": placeholder,
+          role: "textbox",
+          "aria-label": placeholder,
+          "aria-multiline": "true",
         },
-        handleKeyDown: (_view, event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-            event.preventDefault();
-            void handleSend();
-            return true;
-          }
-          return false;
-        },
+        handleKeyDown: (view, event) => handleSubmitKey(event, view.composing),
+      },
+      onTransaction: ({ editor }) => {
+        activeFormats = Object.entries(formatOptions)
+          .filter(([name, attrs]) => editor.isActive(name, attrs))
+          .map(([name]) => name);
       },
       onUpdate: () => {
         updateHasContent();
@@ -155,7 +175,10 @@
     lastPropSig = sig;
     untrack(() => {
       mode = "visual";
+      markdownSource = "";
       markdownError = null;
+      expanded = false;
+      showFormatBar = false;
       ed.commands.setContent(parseInitialDoc());
       updateHasContent();
     });
@@ -264,6 +287,7 @@
       markdownSource = "";
       mode = "visual";
       expanded = false;
+      showFormatBar = false;
       updateHasContent();
     } catch {
       if (draftKey === sent.key) markdownError = "发送失败，草稿已保留";
@@ -275,7 +299,7 @@
   }
 </script>
 
-<div class="composer-card" class:expanded>
+<div class="composer-card" class:expanded aria-busy={submitting}>
   {#if editingLabel || replyChipLabel || referenceChipLabels.length > 0}
     <div class="composer-chips">
       {#if editingLabel}
@@ -311,12 +335,62 @@
     </div>
   {/if}
 
-  <div class="composer-toolbar" inert={editingLocked}>
+  {#if markdownError}
+    <div class="composer-error" role="alert">{markdownError}</div>
+  {/if}
+
+  <div class="composer-pill">
+    <button
+      type="button"
+      class="format-toggle"
+      aria-label="排版工具"
+      aria-controls="message-format-tools"
+      aria-expanded={showFormatBar}
+      disabled={editingLocked}
+      onclick={() => (showFormatBar = !showFormatBar)}
+    >
+      <Type size={19} />
+    </button>
+    <div class="editor-area">
+      {#if mode === "visual" && !hasContent}
+        <span class="composer-placeholder" aria-hidden="true">{placeholder}</span>
+      {/if}
+      <div
+        bind:this={editorEl}
+        class="tiptap-mount"
+        hidden={mode === "markdown"}
+      ></div>
+      {#if mode === "markdown"}
+        <textarea
+          class="markdown-textarea"
+          aria-label="Markdown 源码"
+          readonly={editingLocked}
+          bind:value={markdownSource}
+          oninput={updateHasContent}
+          onkeydown={(event) => handleSubmitKey(event)}
+          placeholder="支持 **粗体**、*斜体*、> 引用、## 标题、[链接](https://...)…"
+        ></textarea>
+      {/if}
+    </div>
+    <button
+      type="button"
+      class="send-btn"
+      aria-label={submitLabel}
+      title={submitting ? "发送中…" : submitLabel}
+      disabled={!hasContent || submitting}
+      onclick={() => void handleSend()}
+    >
+      <ArrowUp size={20} />
+    </button>
+  </div>
+
+  <div id="message-format-tools" class="composer-toolbar" inert={editingLocked} hidden={!showFormatBar}>
     <div class="format-tools">
       <button
         type="button"
         class="tool-btn"
-        class:active={mode === "visual" && editor?.isActive("heading", { level: 2 })}
+        class:active={formatActive("heading")}
+        aria-pressed={formatActive("heading")}
         disabled={mode === "markdown"}
         aria-label="标题"
         title="标题"
@@ -327,7 +401,8 @@
       <button
         type="button"
         class="tool-btn"
-        class:active={mode === "visual" && editor?.isActive("bold")}
+        class:active={formatActive("bold")}
+        aria-pressed={formatActive("bold")}
         disabled={mode === "markdown"}
         aria-label="粗体"
         title="粗体"
@@ -338,7 +413,8 @@
       <button
         type="button"
         class="tool-btn"
-        class:active={mode === "visual" && editor?.isActive("italic")}
+        class:active={formatActive("italic")}
+        aria-pressed={formatActive("italic")}
         disabled={mode === "markdown"}
         aria-label="斜体"
         title="斜体"
@@ -349,7 +425,8 @@
       <button
         type="button"
         class="tool-btn"
-        class:active={mode === "visual" && editor?.isActive("blockquote")}
+        class:active={formatActive("blockquote")}
+        aria-pressed={formatActive("blockquote")}
         disabled={mode === "markdown"}
         aria-label="引用"
         title="引用"
@@ -360,7 +437,8 @@
       <button
         type="button"
         class="tool-btn"
-        class:active={mode === "visual" && editor?.isActive("bulletList")}
+        class:active={formatActive("bulletList")}
+        aria-pressed={formatActive("bulletList")}
         disabled={mode === "markdown"}
         aria-label="列表"
         title="无序列表"
@@ -371,7 +449,8 @@
       <button
         type="button"
         class="tool-btn"
-        class:active={mode === "visual" && editor?.isActive("link")}
+        class:active={formatActive("link")}
+        aria-pressed={formatActive("link")}
         aria-label="插入链接"
         title="插入安全链接"
         onclick={openLinkModal}
@@ -385,6 +464,7 @@
         type="button"
         class="mode-btn"
         class:active={mode === "markdown"}
+        aria-pressed={mode === "markdown"}
         aria-label="切换 Markdown 源码模式"
         onclick={toggleMode}
       >
@@ -395,6 +475,7 @@
         type="button"
         class="tool-btn"
         aria-label={expanded ? "收起编辑器" : "展开编辑器"}
+        aria-expanded={expanded}
         onclick={() => (expanded = !expanded)}
       >
         {#if expanded}
@@ -404,50 +485,6 @@
         {/if}
       </button>
     </div>
-  </div>
-
-  {#if markdownError}
-    <div class="composer-error" role="alert">{markdownError}</div>
-  {/if}
-
-  <div class="editor-area">
-    {#if mode === "visual" && !hasContent}
-      <span class="composer-placeholder" aria-hidden="true">{placeholder}</span>
-    {/if}
-    <div
-      bind:this={editorEl}
-      class="tiptap-mount"
-      hidden={mode === "markdown"}
-    ></div>
-    {#if mode === "markdown"}
-      <textarea
-        class="markdown-textarea"
-        aria-label="Markdown 源码"
-        readonly={editingLocked}
-        bind:value={markdownSource}
-        oninput={updateHasContent}
-        onkeydown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            void handleSend();
-          }
-        }}
-        placeholder="支持 **粗体**、*斜体*、> 引用、## 标题、[链接](https://...)…"
-      ></textarea>
-    {/if}
-  </div>
-
-  <div class="composer-footer">
-    <span class="shortcut-hint">Ctrl/Cmd + Enter 发送</span>
-    <button
-      type="button"
-      class="accent-btn send-btn"
-      disabled={!hasContent || submitting}
-      onclick={() => void handleSend()}
-    >
-      <span>{submitting ? "发送中…" : submitLabel}</span>
-      <CornerDownLeft size={14} />
-    </button>
   </div>
 </div>
 
@@ -503,16 +540,14 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 12px 14px;
-    border-radius: var(--radius-lg);
-    background: var(--bg-surface);
-    box-shadow: var(--shadow-sm);
   }
 
   .composer-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    max-height: 5.5rem;
+    overflow: auto;
   }
 
   .context-chip {
@@ -537,20 +572,28 @@
   .composer-toolbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding: 4px;
+    border-radius: var(--radius-md);
+    background: var(--bg-well);
+  }
+
+  .composer-toolbar[hidden] {
+    display: none;
   }
 
   .format-tools,
   .right-tools {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 2px;
   }
 
   .tool-btn {
-    width: 30px;
-    height: 28px;
+    width: 36px;
+    height: 36px;
     border-radius: var(--radius-xs);
     display: inline-flex;
     align-items: center;
@@ -573,8 +616,8 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    height: 28px;
-    padding: 0 9px;
+    height: 36px;
+    padding: 0 10px;
     border-radius: var(--radius-pill);
     background: var(--bg-well);
     color: var(--ink-secondary);
@@ -595,58 +638,102 @@
     font-size: 12.5px;
   }
 
+  .composer-pill {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 4px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .composer-pill:focus-within {
+    outline: 1px solid var(--ring);
+  }
+
+  .format-toggle,
+  .send-btn {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-well);
+    color: var(--ink-secondary);
+  }
+
+  .format-toggle:hover:not(:disabled) {
+    background: var(--bg-well-hover);
+  }
+
+  .format-toggle[aria-expanded="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .send-btn:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .send-btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
   .editor-area {
     position: relative;
-    max-height: 150px;
-    overflow-y: auto;
-    padding: 4px 2px;
+    flex: 1;
+    min-width: 0;
+    max-height: min(8.5rem, 24dvh);
+    overflow: auto;
     font-size: 14px;
-    line-height: 1.65;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  .editor-area :global(.ProseMirror) {
+    min-height: 44px;
+    padding: 11px 0;
   }
 
   .composer-placeholder {
     position: absolute;
-    left: 2px;
-    top: 4px;
+    inset: 11px 0 auto;
     color: var(--ink-muted);
     pointer-events: none;
-    font-size: 13.5px;
   }
 
-  .composer-card.expanded .editor-area {
-    min-height: 220px;
-    max-height: 320px;
+  .expanded .editor-area {
+    max-height: min(17rem, 38dvh);
+  }
+
+  .expanded .editor-area :global(.ProseMirror),
+  .expanded .markdown-textarea {
+    min-height: min(11rem, 32dvh);
   }
 
   .markdown-textarea {
+    display: block;
     width: 100%;
-    min-height: 84px;
+    min-height: 4.5rem;
+    padding: 10px 0;
     font-family: var(--font-mono);
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.55;
     resize: vertical;
   }
 
-  .composer-card.expanded .markdown-textarea {
-    min-height: 200px;
-  }
+  @media (pointer: coarse) {
+    .tool-btn,
+    .mode-btn {
+      min-height: 44px;
+    }
 
-  .composer-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .shortcut-hint {
-    font-size: 11.5px;
-    color: var(--ink-muted);
-  }
-
-  :global(.send-btn) {
-    min-height: 34px !important;
-    padding: 0 14px !important;
-    font-size: 13px !important;
+    .tool-btn {
+      min-width: 44px;
+    }
   }
 
   .link-dialog {

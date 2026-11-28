@@ -4,7 +4,7 @@
 
 - `now`：继续拆分尚未交付的阅读交互和验证工具。
 - `change`：UI 重设计 → `docs/changes/ui-redesign.md`
-- `change`：继续阅读和书架布局 → `docs/changes/shelf-layout-and-resume.md`
+- `change`：笔记对话与编辑器 V2 → `docs/changes/conversation-editor-v2.md`
 - `previous`：`docs/changes/uiux-document-evidence-restructure.md`、`docs/changes/ui-constraint-ablation.md`。
-- `next`：先验证书架的继续阅读与布局偏好，再拆应用设置、阅读控件及翻页效果。完整阅读链路见 [Issue #1](https://github.com/weichzh/Atha/issues/1)，真实书库与跨端验收见 [Issue #2](https://github.com/weichzh/Atha/issues/2)；`H1-H4` 保持未决。
+- `next`：验证笔记对话与编辑器 V2，继续拆应用设置、Android 适配、阅读控件及翻页效果。完整阅读链路见 [Issue #1](https://github.com/weichzh/Atha/issues/1)，真实书库与跨端验收见 [Issue #2](https://github.com/weichzh/Atha/issues/2)；`H1-H4` 保持未决。
 - UI 重设计的 Context Bundle：`docs/changes/ui-redesign.md`、`docs/product/OVERVIEW.md`、`docs/codebase/READER-MOBILE-UI.md`、`docs/architecture/MESSAGE-READING.md`、`docs/agents/references.md`。
