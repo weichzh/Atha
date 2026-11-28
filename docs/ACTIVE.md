@@ -1,5 +1,6 @@
 # 当前工作
 
+- `change`：恢复 V2 书架、应用设置与阅读控件 → `docs/changes/restore-reader-chrome.md`
 - `change`：阅读正文的有序列表裁切与括号编号 → `docs/changes/reader-list-marker-clipping.md`
 
 后续验收在以下 Issue 跟进：

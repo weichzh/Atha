@@ -199,7 +199,7 @@
   @media (max-width: 899px) {
     .resume-dock {
       right: calc(16px + var(--safe-area-right));
-      bottom: calc(max(14px, var(--safe-area-bottom)) + 62px);
+      bottom: calc(76px + var(--safe-area-bottom));
     }
     .resume-bar {
       width: min(356px, calc(100vw - 32px - var(--safe-area-left) - var(--safe-area-right)));

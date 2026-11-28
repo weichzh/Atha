@@ -5,11 +5,15 @@
     Bookmark,
     ChevronLeft,
     ChevronRight,
+    Columns2,
+    Gauge,
     ListTree,
     Lightbulb,
     MessageSquare,
     Ellipsis,
+    Moon,
     Search,
+    Sun,
     Trash2,
     Type,
     X,
@@ -67,6 +71,11 @@
 
   let chromeOpen = $state(false);
   let quickActionsOpen = $state(false);
+  let progressOpen = $state(false);
+  let quickActionsTrigger = $state<HTMLButtonElement | null>(null);
+  let chapterTrigger = $state<HTMLButtonElement>();
+  let lastDayTheme = $state<"light" | "paper">("paper");
+  let changingTheme = $state(false);
   let runningChapter = $state<HTMLButtonElement>();
   let clockText = $state("");
   let batteryPercent = $state<number | null>(null);
@@ -147,12 +156,19 @@
     : engine.preferences.effective.theme === "system"
       ? systemDark ? "dark" : "light"
       : resolveEffectiveTheme(engine.preferences.effective.theme));
+
+  $effect(() => {
+    if (engine.firstScreenReady && (resolvedTheme === "light" || resolvedTheme === "paper")) {
+      lastDayTheme = resolvedTheme;
+    }
+  });
+
   let readerShell: HTMLElement;
   let readerRoot = $state<HTMLDivElement>();
   const minimalChrome = $derived(uiPrefs.state.readerChromeStyle === "minimal");
   const notesGestureAvailable = $derived(minimalChrome && uiPrefs.state.gestureSwipeUpNotes &&
     engine.preferences.book.readingMode === "paged");
-  const readerOverlayOpen = $derived(settingsOpen || directoryOpen || dictOpen ||
+  const readerOverlayOpen = $derived(progressOpen || settingsOpen || directoryOpen || dictOpen ||
     Boolean(engine.activeFootnote || engine.footnotePending || lightboxPayload || pendingDeleteRootId));
   const quiet = $derived(!entryBlocked && engine.firstScreenReady && !engine.error &&
     !chromeOpen && !readerOverlayOpen && notesMode === "closed");
@@ -370,6 +386,7 @@
 
   function hideChrome() {
     quickActionsOpen = false;
+    progressOpen = false;
     chromeOpen = false;
     scrubbingValue = null;
   }
@@ -424,6 +441,35 @@
     settingsOpen = true;
   }
 
+  function openProgress() {
+    quickActionsOpen = false;
+    progressOpen = true;
+  }
+
+  function finishProgress() {
+    scrubbingValue = null;
+    lastOverlayClosedAt = Date.now();
+  }
+
+  function useClassicChrome() {
+    quickActionsOpen = false;
+    uiPrefs.update({ readerChromeStyle: "classic" });
+    void tick().then(() => chapterTrigger?.focus({ preventScroll: true }));
+  }
+
+  async function toggleDayNight() {
+    if (changingTheme) return;
+    const theme = resolvedTheme === "dark" ? lastDayTheme : "dark";
+    changingTheme = true;
+    try {
+      await engine.updatePreferences("application", { theme });
+    } catch {
+      engine.showToast("未能切换阅读主题，请重试");
+    } finally {
+      changingTheme = false;
+    }
+  }
+
   function handleBackAction(source: BackSource): boolean {
     if (entryBlocked) return false;
     if (engine.activeFootnote && footnoteDialog) {
@@ -449,6 +495,9 @@
       lastOverlayClosedAt = Date.now();
     } else if (dictOpen) {
       dictOpen = false;
+    } else if (progressOpen) {
+      progressOpen = false;
+      finishProgress();
     } else if (quickActionsOpen) {
       quickActionsOpen = false;
     } else if (engine.selection) {
@@ -586,95 +635,137 @@
         {/if}
       </div>
 
+      {#snippet themeIcon(size: number)}
+        {#if resolvedTheme === "dark"}<Sun {size} />{:else}<Moon {size} />{/if}
+      {/snippet}
+
+      {#snippet progressControls(byChapter: boolean)}
+        <div class="scrub-row">
+          <button type="button" class="island-icon-btn" aria-label={byChapter ? "上一章" : "上一页"}
+            disabled={byChapter ? engine.sectionIndex <= 0 : !engine.canPrev}
+            onclick={() => void (byChapter ? engine.goToAdjacentSection(-1) : engine.previousPage())}>
+            <ChevronLeft size={20} />
+          </button>
+          <div class="scrubber-wrap">
+            {#if scrubbingValue !== null}
+              <div class="scrub-callout glass-popover tabular">{scrubbingValue}%</div>
+            {/if}
+            <Slider.Root type="single" min={0} max={100} step={1} value={displayPercent}
+              onValueChange={(v) => (scrubbingValue = v)}
+              onValueCommit={(v) => { scrubbingValue = null; void engine.goToProgressPercent(v); }}
+              class="atha-slider" aria-label="全书阅读进度">
+              <span class="atha-slider-track">
+                <Slider.Range class="atha-slider-range" />
+              </span>
+              <Slider.Thumb index={0} class="atha-slider-thumb" />
+            </Slider.Root>
+          </div>
+          <button type="button" class="island-icon-btn" aria-label={byChapter ? "下一章" : "下一页"}
+            disabled={byChapter ? engine.sectionIndex + 1 >= engine.sectionCount : !engine.canNext}
+            onclick={() => void (byChapter ? engine.goToAdjacentSection(1) : engine.nextPage())}>
+            <ChevronRight size={20} />
+          </button>
+        </div>
+      {/snippet}
+
+      {#snippet progressPanel()}
+        <Popover.ContentStatic class="reader-progress-panel glass-popover" aria-label="阅读进度"
+          onCloseAutoFocus={(event) => {
+            if (!minimalChrome) return;
+            event.preventDefault();
+            if (chromeOpen) quickActionsTrigger?.focus({ preventScroll: true });
+          }}>
+          <div class="progress-heading">
+            <strong>阅读进度</strong>
+            <button type="button" class="island-icon-btn" aria-label="关闭阅读进度"
+              onclick={() => { progressOpen = false; finishProgress(); }}><X size={18} /></button>
+          </div>
+          {@render progressControls(false)}
+          <div class="stats-strip tabular">
+            <span>{engine.progressPosition} <span class="dot-sep" aria-hidden="true">·</span> {engine.percent ?? 0}%</span>
+            <span>今日 {formatShortDuration(engine.stats.todayMs)}</span>
+            <span class="hide-xs">本书 {formatShortDuration(engine.stats.bookMs)}</span>
+            <span class="hide-xs">连续 {engine.stats.streakDays} 天</span>
+          </div>
+        </Popover.ContentStatic>
+      {/snippet}
+
       {#if chromeOpen}
         <div class="reader-controls" data-chrome={minimalChrome ? "minimal" : "classic"}>
           <header class="top-island glass-island">
             <button id="reader-back" type="button" class="island-btn" aria-label="返回书架" onclick={onBackToShelf}>
-              <ArrowLeft size={18} />
-              <span class="btn-text">书架</span>
+              <ArrowLeft size={21} /><span class="btn-text">书架</span>
             </button>
-            <button type="button" class="island-title" aria-label={`${engine.chapterLabel}，打开目录`}
-              onclick={() => openDirectory("toc")}>
+            <button type="button" class="island-title" bind:this={chapterTrigger}
+              aria-label={engine.chapterLabel + "，打开目录"} onclick={() => openDirectory("toc")}>
               <span class="island-chapter">{engine.chapterLabel}</span>
-              {#if !minimalChrome}<span class="island-book">{engine.bookTitle || book.title}</span>{/if}
+              <span class="island-book">{engine.bookTitle || book.title}</span>
             </button>
             <div class="island-right">
-              {#if !minimalChrome}
-                <button type="button" class="island-icon-btn" class:active-tint={engine.isBookmarked}
-                  aria-label={engine.isBookmarked ? "取消当前页书签" : "添加当前页书签"}
-                  aria-pressed={engine.isBookmarked} onclick={() => void engine.toggleBookmark()}>
-                  <Bookmark size={18} fill={engine.isBookmarked ? "currentColor" : "none"} />
-                </button>
-              {/if}
-              <button type="button" class="island-icon-btn" aria-label="目录与全书搜索" onclick={() => openDirectory("toc")}>
-                <ListTree size={18} />
-              </button>
               {#if minimalChrome}
                 <Popover.Root bind:open={quickActionsOpen} onOpenChange={(next) => {
                   if (!next) lastOverlayClosedAt = Date.now();
                 }}>
-                  <Popover.Trigger class="island-icon-btn" aria-label="更多阅读操作">
-                    <Ellipsis size={20} />
+                  <Popover.Trigger bind:ref={quickActionsTrigger} class="island-icon-btn" aria-label="更多阅读操作">
+                    <Ellipsis size={22} />
                   </Popover.Trigger>
-                  <Popover.Content sideOffset={8} align="end" class="reader-quick-actions glass-popover"
-                    aria-label="更多阅读操作">
-                    <button type="button" onclick={openNotesList}><MessageSquare size={17} />笔记与对话</button>
+                  <Popover.Content sideOffset={12} align="end" collisionPadding={12}
+                    class="reader-quick-actions glass-popover" aria-label="更多阅读操作"
+                    onCloseAutoFocus={(event) => {
+                      if (progressOpen || settingsOpen || !chromeOpen || !minimalChrome) event.preventDefault();
+                    }}>
+                    <button type="button" onclick={() => openDirectory("toc")}><ListTree size={18} />目录与搜索</button>
                     <button type="button" onclick={() => { quickActionsOpen = false; void engine.toggleBookmark(); }}>
-                      <Bookmark size={17} fill={engine.isBookmarked ? "currentColor" : "none"} />
+                      <Bookmark size={18} fill={engine.isBookmarked ? "currentColor" : "none"} />
                       {engine.isBookmarked ? "取消当前页书签" : "添加当前页书签"}
                     </button>
-                    <button type="button" onclick={openReaderSettings}><Type size={17} />排版与主题设置</button>
+                    <button type="button" onclick={openNotesList}><MessageSquare size={18} />笔记与对话</button>
+                    <button type="button" onclick={openProgress}><Gauge size={18} />阅读进度 <span class="quick-percent">{engine.percent ?? 0}%</span></button>
+                    <button type="button" disabled={changingTheme} onclick={() => void toggleDayNight()}>
+                      {@render themeIcon(18)}{resolvedTheme === "dark" ? "切换日间模式" : "切换夜间模式"}
+                    </button>
+                    <button type="button" onclick={openReaderSettings}><Type size={18} />排版与主题设置</button>
+                    <button type="button" class="quick-switch" onclick={useClassicChrome}><Columns2 size={18} />切换经典双栏模式</button>
                   </Popover.Content>
                 </Popover.Root>
               {:else}
-                <button type="button" class="island-icon-btn" class:active-tint={notesMode !== "closed"}
-                  aria-label="打开笔记与对话" onclick={openNotesList}>
-                  <MessageSquare size={18} />
-                  {#if engine.roots.length > 0}<span class="notes-badge tabular">{engine.roots.length}</span>{/if}
-                </button>
-                <button type="button" class="island-icon-btn" aria-label="排版与主题设置" onclick={openReaderSettings}>
-                  <Type size={18} />
+                <button type="button" class="island-icon-btn" class:active-tint={engine.isBookmarked}
+                  aria-label={engine.isBookmarked ? "取消当前页书签" : "添加当前页书签"}
+                  aria-pressed={engine.isBookmarked} onclick={() => void engine.toggleBookmark()}>
+                  <Bookmark size={21} fill={engine.isBookmarked ? "currentColor" : "none"} />
                 </button>
               {/if}
             </div>
           </header>
           <footer class="bottom-island glass-island">
-            <div class="scrub-row">
-              <button type="button" class="island-icon-btn" aria-label={minimalChrome ? "上一章" : "上一页"}
-                disabled={minimalChrome ? engine.sectionIndex <= 0 : !engine.canPrev}
-                onclick={() => void (minimalChrome ? engine.goToAdjacentSection(-1) : engine.previousPage())}>
-                <ChevronLeft size={18} />
-              </button>
-              <div class="scrubber-wrap">
-                {#if scrubbingValue !== null}
-                  <div class="scrub-callout glass-popover tabular">{scrubbingValue}%</div>
-                {/if}
-                <Slider.Root type="single" min={0} max={100} step={1} value={displayPercent}
-                  onValueChange={(v) => (scrubbingValue = v)}
-                  onValueCommit={(v) => { scrubbingValue = null; void engine.goToProgressPercent(v); }}
-                  class="atha-slider" aria-label="全书阅读进度">
-                  <span class="atha-slider-track"><Slider.Range class="atha-slider-range" /></span>
-                  <Slider.Thumb index={0} class="atha-slider-thumb" />
-                </Slider.Root>
-              </div>
-              <button type="button" class="island-icon-btn" aria-label={minimalChrome ? "下一章" : "下一页"}
-                disabled={minimalChrome ? engine.sectionIndex + 1 >= engine.sectionCount : !engine.canNext}
-                onclick={() => void (minimalChrome ? engine.goToAdjacentSection(1) : engine.nextPage())}>
-                <ChevronRight size={18} />
-              </button>
-            </div>
-            <div class="stats-strip tabular">
-              <span>{engine.progressPosition} <span class="dot-sep" aria-hidden="true">·</span> {engine.percent ?? 0}%</span>
+            <Popover.Root bind:open={progressOpen} onOpenChange={(next) => { if (!next) finishProgress(); }}>
               {#if minimalChrome}
-                {#if notesGestureAvailable}
-                  <span class="notes-hint">上滑打开笔记</span>
-                {/if}
+                {@render progressControls(true)}
+                <div class="stats-strip tabular">
+                  <span>{engine.progressPosition} <span class="dot-sep" aria-hidden="true">·</span> {engine.percent ?? 0}%</span>
+                  {#if notesGestureAvailable}<span class="notes-hint">上滑打开笔记</span>{/if}
+                </div>
               {:else}
-                <span class="hide-xs">今日 {formatShortDuration(engine.stats.todayMs)}</span>
-                <span class="hide-xs">本书 {formatShortDuration(engine.stats.bookMs)}</span>
-                <span class="hide-xs">连续 {engine.stats.streakDays} 天</span>
+                <div class="classic-dock-row">
+                  <button type="button" class="dock-action" aria-label="目录与全书搜索" onclick={() => openDirectory("toc")}>
+                    <ListTree size={21} /><span>目录</span>
+                  </button>
+                  <button type="button" class="dock-action" aria-label="打开笔记与对话" onclick={openNotesList}>
+                    <MessageSquare size={21} /><span>笔记</span>
+                    {#if engine.roots.length > 0}<span class="notes-badge tabular">{engine.roots.length}</span>{/if}
+                  </button>
+                  <Popover.Trigger class="dock-action" aria-label="进度"><Gauge size={21} /><span>进度</span></Popover.Trigger>
+                  <button type="button" class="dock-action" aria-label={resolvedTheme === "dark" ? "切换日间模式" : "切换夜间模式"}
+                    disabled={changingTheme} onclick={() => void toggleDayNight()}>
+                    {@render themeIcon(21)}<span>{resolvedTheme === "dark" ? "日间" : "夜间"}</span>
+                  </button>
+                  <button type="button" class="dock-action" aria-label="排版与主题设置" onclick={openReaderSettings}>
+                    <Type size={21} /><span>样式</span>
+                  </button>
+                </div>
               {/if}
-            </div>
+              {@render progressPanel()}
+            </Popover.Root>
           </footer>
         </div>
       {/if}
@@ -1250,6 +1341,7 @@
     align-items: center;
     gap: 4px;
     flex: none;
+    min-width: 44px;
   }
 
   .island-btn {
@@ -1327,7 +1419,9 @@
   .reader-controls :global(.reader-quick-actions) {
     padding: 6px;
     border-radius: var(--radius-md);
-    min-width: 172px;
+    width: min(252px, var(--bits-popover-content-available-width, 252px));
+    max-height: var(--bits-popover-content-available-height, 70dvh);
+    overflow: auto;
   }
 
   .reader-controls :global(.reader-quick-actions button) {
@@ -1339,11 +1433,25 @@
     padding: 0 10px;
     border-radius: var(--radius-xs);
     text-align: left;
-    white-space: nowrap;
   }
 
-  .reader-controls :global(.reader-quick-actions button:hover) {
+  .reader-controls :global(.reader-quick-actions button:not(:disabled):hover) {
     background: var(--bg-well);
+  }
+
+  .reader-controls :global(.reader-quick-actions button svg) {
+    flex: none;
+  }
+
+  .quick-percent {
+    margin-inline-start: auto;
+    color: var(--ink-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .quick-switch {
+    color: var(--accent);
+    box-shadow: inset 0 1px 0 var(--bg-well-active);
   }
 
   .island-chapter {
@@ -1378,6 +1486,61 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .classic-dock-row {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .classic-dock-row :global(.dock-action) {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 52px;
+    padding: 4px 0;
+    border-radius: var(--radius-md);
+    background: var(--bg-well);
+    color: var(--ink-secondary);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .classic-dock-row :global(.dock-action:not(:disabled):hover),
+  .classic-dock-row :global(.dock-action[aria-expanded="true"]) {
+    background: var(--bg-well-hover);
+    color: var(--ink-primary);
+  }
+
+  .reader-controls :global(.reader-progress-panel) {
+    position: absolute;
+    inset-inline: 0;
+    bottom: calc(100% + 8px);
+    width: min(440px, 100%);
+    max-height: calc(100dvh - var(--reader-head) - var(--reader-foot));
+    margin-inline: auto;
+    padding: 6px 12px 12px;
+    overflow: auto;
+    border-radius: var(--radius-md);
+  }
+
+  .progress-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-inline-start: 6px;
+    font-size: 13px;
+  }
+
+  .reader-controls :is(.island-btn, .island-title, .island-icon-btn):focus-visible,
+  .reader-controls :global(.dock-action:focus-visible),
+  .reader-controls :global(.reader-quick-actions button:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .scrub-row {

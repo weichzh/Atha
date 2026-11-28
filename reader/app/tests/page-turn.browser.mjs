@@ -43,8 +43,10 @@ async function mode(page, name) {
 
 async function advance(page, direction, renderer, button = false) {
   const before = await position(page);
-  if (button) await page.getByRole("button", { name: direction > 0 ? "下一页" : "上一页" }).click();
-  else await page.keyboard.press(direction > 0 ? "ArrowRight" : "ArrowLeft");
+  if (button) {
+    await page.getByRole("button", { name: "进度", exact: true }).click();
+    await page.getByRole("button", { name: direction > 0 ? "下一页" : "上一页" }).click();
+  } else await page.keyboard.press(direction > 0 ? "ArrowRight" : "ArrowLeft");
   if (renderer) {
     try {
       await stage(page, renderer).waitFor({ timeout: 3000 });
@@ -56,6 +58,10 @@ async function advance(page, direction, renderer, button = false) {
   }
   await page.waitForFunction((wanted) => new RegExp(`page ${wanted} / `).test(document.title), before + direction);
   if (!renderer) await settled(page);
+  if (button) {
+    await page.getByRole("button", { name: "关闭阅读进度" }).click();
+    await settled(page);
+  }
 }
 
 async function prepare(browser, base, { mobile = false, noGl = false, complex = false, paragraphs = 70, touch = mobile, reducedMotion = "no-preference", prefix = "", inspectClones = false } = {}) {

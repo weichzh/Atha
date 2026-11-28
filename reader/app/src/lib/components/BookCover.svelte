@@ -8,10 +8,11 @@
     index: number;
     percent?: number | null;
     compact?: boolean;
+    showFavorite?: boolean;
     coverRevision?: number;
   }
 
-  let { book, index, percent = null, compact = false, coverRevision = 0 }: Props = $props();
+  let { book, index, percent = null, compact = false, coverRevision = 0, showFavorite = true }: Props = $props();
 
   let imageLoaded = $state(false);
   let imageFailed = $state(false);
@@ -47,7 +48,7 @@
       </div>
     {/if}
 
-    {#if book.favorite}
+    {#if book.favorite && showFavorite}
       <span class="favorite-pip" aria-label="已收藏">
         <Heart size={11} fill="currentColor" strokeWidth={2} />
       </span>
