@@ -26,5 +26,6 @@ test("demo recent memory uses message identity for ties without changing nonempt
   const recent = [newest, ...[first, second].sort()];
   assert.deepEqual(await ids(""), recent);
   assert.deepEqual(await ids("\u0085\u3000"), recent);
+  assert.deepEqual(await ids("\uFEFF"), []);
   assert.deepEqual(await ids("同一查询"), [newest, second, first]);
 });

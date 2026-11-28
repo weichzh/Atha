@@ -462,7 +462,7 @@ const demoReadingMemoryClient: ReadingMemoryClient = {
       for (const msg of conv.messages) {
         if (msg.deleted) continue;
         const haystack = `${edition.title}\n${edition.authors.join(" ")}\n${root.source.selectedText}\n${msg.text}`.toLocaleLowerCase();
-        if (!q || haystack.includes(q)) {
+        if (recentQuery || (q.length > 0 && haystack.includes(q))) {
           hits.push({
             messageId: msg.id,
             rootMessageId: root.id,
