@@ -298,7 +298,10 @@ fn writes_fb2_gate_fixture() {
         .map(PathBuf::from)
         .map(|path| fs::canonicalize(path).expect("resolve FB2 gate output"))
         .unwrap_or_else(|| temporary.clone());
-    assert!(output.starts_with(&temporary), "FB2 gate output escaped .tmp");
+    assert!(
+        output.starts_with(&temporary),
+        "FB2 gate output escaped .tmp"
+    );
     let source = output.join("fb2-gate.fb2");
     let imports = output.join("fb2-gate-imports");
     if isolated.is_some() {
