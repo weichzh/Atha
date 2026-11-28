@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import argparse
+import os
 import re
 import subprocess
 import sys
@@ -87,6 +89,18 @@ def changed_files() -> list[str]:
         files.add(normalize(path))
 
     return sorted(files)
+
+
+def commit(ref: str) -> str:
+    return run_git(["rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"]).stdout.strip()
+
+
+def committed_paths(base: str, head: str) -> list[str]:
+    """Compare resolved commits; include both sides of a rename in the policy check."""
+    paths = subprocess.check_output(
+        ["git", "diff", "--no-renames", "--name-only", "-z", f"{base}...{head}", "--"]
+    )
+    return sorted(os.fsdecode(path) for path in paths.split(b"\0") if path)
 
 
 def has_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
@@ -216,14 +230,25 @@ def self_check() -> int:
 def main() -> int:
     if sys.argv[1:] == ["--self-check"]:
         return self_check()
-    if sys.argv[1:]:
-        print("Usage: doc_guard.py [--self-check]", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base", help="compare committed HEAD with this PR base")
+    parser.add_argument("--kind", choices=("fast", "change"), help="workflow path for a committed PR diff")
+    args = parser.parse_args()
+    if args.kind and not args.base:
+        parser.error("--kind requires --base")
 
     root = repo_root()
-    changed = changed_files()
+    if args.base:
+        if run_git(["status", "--porcelain", "--untracked-files=all"]).stdout:
+            parser.error("committed-diff mode needs a clean worktree")
+        try:
+            changed = committed_paths(commit(args.base), commit("HEAD"))
+        except subprocess.CalledProcessError:
+            parser.error("cannot compare the specified base with HEAD")
+    else:
+        changed = changed_files()
 
-    code_changed = any(is_code(path) for path in changed)
+    code_changed = any(is_code(path) or (args.base and path.startswith("reader/")) for path in changed)
     changes = active_changes(root)
 
     invalid_changes = [path for path in changes if not accepted_change(root, path)]
@@ -233,7 +258,7 @@ def main() -> int:
             print(f" - {path}")
         return 1
 
-    if code_changed and not any(path in changed for path in changes):
+    if code_changed and args.kind != "fast" and not any(path in changed for path in changes):
         print("BLOCKED: code changed without an updated accepted change.")
         print()
         print(f"Repository: {root}")
@@ -244,7 +269,8 @@ def main() -> int:
         print("Point docs/ACTIVE.md at a changed accepted/implemented docs/changes/*.md file.")
         return 1
 
-    print(f"doc_guard: ok ({'change' if code_changed else 'docs-only'})")
+    lane = (args.kind or "change") if code_changed else "docs-only"
+    print(f"doc_guard: ok ({lane})")
     return 0
 
 

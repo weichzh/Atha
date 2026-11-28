@@ -20,12 +20,14 @@ external_application=
 association_launch=0
 software_compositing=0
 cpu_painting=0
+shelf_only=0
 
 usage() {
   printf '%s\n' \
     'Usage: scripts/check-reader-linux.sh [options]' \
     '' \
     'Options:' \
+    '  --shelf                     Check the current shelf-to-reader round trip only.' \
     '  --formula-epub PATH          Add one private formula-heavy EPUB.' \
     '  --formula-metadata PATH      JSON sidecar with source_sha256 and entry.' \
     '  --minimum-formulas N         Required formula count (default: 1000).' \
@@ -54,6 +56,10 @@ need_value() {
 
 while (($#)); do
   case "$1" in
+    --shelf)
+      shelf_only=1
+      shift
+      ;;
     --formula-epub)
       need_value "$@"
       formula_epub=$2
@@ -126,6 +132,9 @@ if [[ -n $formula_epub || -n $formula_metadata ]]; then
 fi
 ((association_launch == 0)) || [[ -n $external_application ]] ||
   die '--association-launch requires --application'
+if ((shelf_only)) && [[ -n $formula_epub || $association_launch == 1 ]]; then
+  die '--shelf cannot be combined with the formula or file-association gates'
+fi
 
 resolve_input_file() {
   local value=$1 candidate
@@ -429,8 +438,12 @@ set_window_size() {
   session_id=$(jq -er '.value.sessionId' <<<"$response") ||
     die "tauri-driver returned no ${width}x${height} session"
 
+  local cards='.library-book-open'
+  if ((shelf_only)); then
+    cards='.shelf-catalog [data-shelf-open]'
+  fi
   wait_for_script \
-    'return { width: innerWidth, height: innerHeight, ready: document.readyState, library: Boolean(document.querySelector(".library-shell")), cards: document.querySelectorAll(".library-book-open").length };' \
+    "return { width: innerWidth, height: innerHeight, ready: document.readyState, library: Boolean(document.querySelector('.library-shell')), cards: document.querySelectorAll('$cards').length };" \
     ".width >= $((width - 2)) and .width <= $((width + 2)) and .height >= $((height - 64)) and .height <= $((height + 2)) and .ready == \"complete\" and .library == true and .cards == $expected_books" \
     "reader window did not reach ${width}x${height}" >/dev/null
   if [[ $was_reader == true ]]; then
@@ -698,6 +711,72 @@ button.focus({ preventScroll: true });
 button.click();
 return true;
 ' "$arguments") == true ]] || die "$label"
+}
+
+verify_current_shelf() {
+  local input='main[aria-label="书架"] input[type=search]'
+  local book='.shelf-catalog [data-shelf-open][title="Atha FB2 Gate"]'
+  local point fixture="$run_root/ShelfCheckSecond.txt"
+  set_window_size 360 760
+  wait_for_script '
+return { cards: document.querySelectorAll(".shelf-catalog [data-shelf-open]").length,
+  title: document.querySelector(".shelf-catalog [data-shelf-open]")?.title };' \
+    '.cards == 1 and .title == "Atha FB2 Gate"' 'current shelf did not load the public book' >/dev/null
+
+  printf '%s\n' 'Synthetic native bookshelf check.' >"$fixture"
+  printf '%s\n' "$fixture" 'ShelfCheckSecond' >>"$privacy_file"
+  fire_tauri_drag_event 'tauri://drag-drop' "$fixture" >/dev/null || die 'could not submit the isolated import'
+  wait_for_script '
+return { titles: [...document.querySelectorAll(".shelf-catalog [data-shelf-open]")].map(book => book.title).sort() };
+' '.titles == ["Atha FB2 Gate","ShelfCheckSecond"]' 'current shelf did not display the imported book' >/dev/null
+
+  webdriver_click_element 'button[aria-label="筛选藏书"]' || die 'could not open shelf filters'
+  webdriver_click_element '#shelf-fav-switch' || die 'could not enable the favorite filter'
+  wait_for_script '
+return { count: document.querySelectorAll(".shelf-catalog [data-shelf-open]").length,
+  empty: Boolean(document.querySelector(".empty-shelf")) };' \
+    '.count == 0 and .empty == true' 'favorite filter did not exclude both unstarred books' >/dev/null
+  webdriver_click_element '.filter-popover .filter-footer button' || die 'could not clear shelf filters'
+  webdriver_click_element 'button[aria-label="筛选藏书"]' || die 'could not close shelf filters'
+  webdriver_click_element 'button[aria-label="清单列表"]' || die 'could not switch to the shelf list'
+  [[ $(execute_sync '
+const sort = [...document.querySelectorAll("[aria-label=书架排序] .sort-chip")]
+  .find(button => button.textContent.trim() === "书名 Z–A");
+sort?.click();
+return Boolean(sort);') == true ]] || die 'could not select descending title order'
+  wait_for_script '
+return { titles: [...document.querySelectorAll(".book-list [data-shelf-open]")].map(book => book.title),
+  overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };' \
+    '.titles == ["ShelfCheckSecond","Atha FB2 Gate"] and .overflow == false' \
+    'current shelf list did not sort both books at the narrow width' >/dev/null
+  webdriver_send_keys "$input" 'Atha FB2 Gate' || die 'could not type the book query'
+  wait_for_script '
+return { titles: [...document.querySelectorAll(".book-list [data-shelf-open]")].map(book => book.title) };
+' '.titles == ["Atha FB2 Gate"]' 'shelf search did not isolate the public book' >/dev/null
+  webdriver_click_element "$book" || die 'could not open the search result'
+  wait_for_script '
+return { ready: document.querySelector(".reader-root")?.dataset.screenReady === "true",
+  opening: Boolean(document.querySelector(".opening-art, .opening-veil")),
+  error: Boolean(document.querySelector(".reader-route [role=alert]")) };' \
+    '.ready == true and .opening == false and .error == false' 'book did not reach its first reading screen' >/dev/null
+  point=$(execute_sync '
+const rect = document.querySelector(".reader").getBoundingClientRect();
+return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };') ||
+    die 'could not locate the reading surface'
+  perform_pointer_action "$point" tap || die 'could not reveal reader controls'
+  wait_for_script '
+return { visible: Boolean(document.querySelector("#reader-back")?.getClientRects().length),
+  book: document.querySelector(".island-book")?.textContent?.trim() };' \
+    '.visible == true and .book == "Atha FB2 Gate"' 'reader controls did not identify the selected book' >/dev/null
+  webdriver_click_element '#reader-back' || die 'could not return using the reader control'
+  wait_for_script '
+const result = document.querySelector(".book-list [data-shelf-open]");
+return { visible: Boolean(result?.getClientRects().length), title: result?.title,
+  query: document.querySelector("main[aria-label=书架] input[type=search]")?.value,
+  sort: document.querySelector("[aria-label=书架排序] .sort-chip[aria-pressed=true]")?.textContent.trim(),
+  focus: document.activeElement === result };' \
+    '.visible == true and .title == "Atha FB2 Gate" and .query == .title and .sort == "书名 Z–A" and .focus == true' \
+    'return did not restore search, sort, list, and focus' >/dev/null
 }
 
 click_book_menu_item() {
@@ -2361,8 +2440,10 @@ check_app_log_privacy() {
   ((log_count > 0)) || die 'AppLog privacy check found no log output'
 }
 
-say 'checking touch interaction ownership'
-mise exec -- node --test reader/web/interaction.test.mjs >&2
+if ((!shelf_only)); then
+  say 'checking touch interaction ownership'
+  mise exec -- node --test reader/web/interaction.test.mjs >&2
+fi
 
 if [[ -n $external_application ]]; then
   application=$(resolve_input_file "$external_application") || die 'candidate application does not exist'
@@ -2398,11 +2479,13 @@ public_boundary_entry=$(jq -er '.sections[1].href' "$public_manifest") ||
   die 'public FB2 manifest has no boundary section'
 memory_section=$(jq -er '.sections[2].id' "$public_manifest") ||
   die 'public FB2 manifest has no reading memory section'
-ATHA_READING_MEMORY_GATE_ROOT=$library_root \
-ATHA_READING_MEMORY_GATE_EDITION=$public_id \
-ATHA_READING_MEMORY_GATE_SECTION=$memory_section \
-  mise exec -- cargo test --locked -p atha-backend --test message_reading \
-    seeds_reading_memory_gui_fixture -- --ignored --exact >&2
+if ((!shelf_only)); then
+  ATHA_READING_MEMORY_GATE_ROOT=$library_root \
+  ATHA_READING_MEMORY_GATE_EDITION=$public_id \
+  ATHA_READING_MEMORY_GATE_SECTION=$memory_section \
+    mise exec -- cargo test --locked -p atha-backend --test message_reading \
+      seeds_reading_memory_gui_fixture -- --ignored --exact >&2
+fi
 printf '%s\n' "$repo_root/.tmp/fb2-gate.fb2" 'fb2-gate.fb2' >>"$privacy_file"
 printf '%s\n' \
   '公共记忆中的可跳转笔记' '公共记忆中的缺书笔记' \
@@ -2554,6 +2637,17 @@ jq -e --argjson books "$expected_books" '
   .books.ok == true and .books.count == $books
 ' <<<"$initial_commands" >/dev/null ||
   die "initial library commands failed (state: $(jq -c . <<<"$initial_commands"))"
+
+if ((shelf_only)); then
+  say 'verifying current native shelf and reader return'
+  verify_current_shelf
+  check_app_log_privacy
+  jq -n --arg browserVersion "$browser_version" --arg display "$gdk_backend" \
+    '{gate: "shelf", platform: "Linux", webDriverBrowserVersion: $browserVersion, displayBackend: $display,
+      import: "pass", favoriteFilter: "pass",
+      listSort: "pass", search: "pass", openFirstScreen: "pass", returnState: "pass", appLogPrivacy: "pass"}'
+  exit 0
+fi
 
 wait_for_script \
   'return { ready: document.readyState, cards: document.querySelectorAll(".library-book-open").length, href: location.href, status: document.querySelector(".library-status")?.textContent || null };' \

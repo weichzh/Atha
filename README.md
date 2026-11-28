@@ -10,13 +10,13 @@ Atha 是一个本地优先、以消息形式保存阅读反应的个人阅读系
 - `backend/atha-backend/`：后端库、书根边界、EPUB2 / EPUB3、CBZ、FB2 / FBZ、MOBI / AZW / AZW3、Markdown 与 TXT 导入、正式消息数据库；
 - `reader/app/`：Tauri 2、Svelte 5 应用壳和 production 前端构建；
 - `reader/web/`：不依赖前端框架的阅读内核；
-- `scripts/check-docs.sh`、`scripts/check-reader-linux.sh`：当前 Bash 文档门与 Linux GUI 阅读门；
+- `scripts/check-docs.sh`、`scripts/check-reader-linux.sh`：当前 Bash 文档门与 Linux GUI 验收入口；
 - `p0/`：独立实验，不进入根 workspace。
 
 ```bash
 bash scripts/check-docs.sh
 bash scripts/check-workflow.sh
-bash scripts/check-reader-linux.sh
+bash scripts/check-reader-linux.sh --shelf
 ```
 
 当前 Linux 与 PCT 开发入口只使用 Bash；旧 `.ps1` 仅保留为 Windows 历史兼容入口，不由当前门禁调用。
@@ -52,7 +52,7 @@ mise exec -- cargo build --workspace --locked
 
 Rust 版本继续由 `rust-toolchain.toml` 固定。Windows 开发机复制 `env/example.ps1` 为 `env/local.ps1`，并填写本机的 `cargo`、`cmake`、`ctest`、`node`、`pnpm` 和 `sqlite3` 路径；Android 开发还需填写 JDK、Android SDK 与 NDK 路径。`env/local.ps1` 已被 Git 忽略；检查脚本统一加载它，不依赖当前 Shell 的 `PATH`。Linux 测试主机的实时路径、SSH 别名与 GNOME Wayland 启动约定以用户级 `$CODEX_HOME/HOSTS.md` 为准，不写死在仓库。
 
-Tauri 阅读器的当前本地 GUI 检查入口是 `bash scripts/check-reader-linux.sh`。旧 `atha-reader-host` 暂时保留为 Wry/Tao 性能与安全基线，不是新的产品界面入口。
+Linux WebView 的书架往返检查用 `bash scripts/check-reader-linux.sh --shelf`。准备提审或发版时，按 [仓库流程](docs/agents/workflow.md) 选择其余检查。旧 `atha-reader-host` 暂时保留为 Wry/Tao 性能与安全基线，不是新的产品界面入口。
 
 Android 本地门槛固定 Node 24.1.0、JDK 21、NDK 28.2.13676358、compile / target SDK 36 与 min SDK 26。启动 API 36、x86_64、16 KiB 页面的 `Atha_API_36_16K` AVD 后运行：
 
@@ -64,7 +64,7 @@ ANDROID_NDK_HOME="$HOME/Android/Sdk/ndk/28.2.13676358" \
 mise exec -- pnpm --dir reader/app tauri android build --debug --target x86_64 --apk --ci
 ```
 
-PCT-AL10 候选使用 `bash scripts/check-pct-reader.sh build` 和 `verify`；获准真机更新时再以显式 serial 运行 `install --device <serial>`。该入口检查 arm64 APK、签名、宽泛存储权限、16 KiB ZIP / ELF 对齐、设备身份与防降级；功能与触摸体验仍由 Linux GUI 门和用户真机验收覆盖。
+PCT-AL10 候选使用 `bash scripts/check-pct-reader.sh build` 和 `verify`；获准真机更新时再以显式 serial 运行 `install --device <serial>`。该入口检查 arm64 APK、签名、宽泛存储权限、16 KiB ZIP / ELF 对齐、设备身份与防降级；Linux WebView 的功能检查与用户在真机上的功能和触摸验收分别记录。
 
 ## 项目入口
 
