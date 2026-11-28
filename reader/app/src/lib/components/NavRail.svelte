@@ -64,9 +64,9 @@
     padding: 20px 14px;
     border-radius: var(--radius-xl);
     background: var(--bg-glass);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    box-shadow: var(--shadow-island);
+    backdrop-filter: var(--shell-nav-backdrop, blur(24px) saturate(160%));
+    -webkit-backdrop-filter: var(--shell-nav-backdrop, blur(24px) saturate(160%));
+    box-shadow: var(--shell-nav-shadow, var(--shadow-island));
   }
 
   .nav-brand {
@@ -169,8 +169,8 @@
       padding: 6px;
       border-radius: var(--radius-pill);
       background: var(--bg-glass-strong);
-      backdrop-filter: blur(28px) saturate(180%);
-      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      backdrop-filter: var(--shell-nav-backdrop, blur(28px) saturate(180%));
+      -webkit-backdrop-filter: var(--shell-nav-backdrop, blur(28px) saturate(180%));
     }
 
     .nav-brand {
@@ -195,6 +195,16 @@
 
     .active-indicator {
       border-radius: var(--radius-pill);
+    }
+  }
+
+  @media (forced-colors: active) {
+    .nav-item.active {
+      color: Highlight;
+    }
+
+    .active-indicator {
+      border: 1px solid Highlight;
     }
   }
 </style>

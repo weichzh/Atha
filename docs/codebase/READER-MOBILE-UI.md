@@ -60,6 +60,7 @@ tauri://localhost/index.html?manifest=...&state=...（或打开书籍后切换�
 ## 手工调整入口
 
 - **颜色与动效 Token**：`reader/app/src/styles/tokens.css` 与 `book-theme.css`；`library.test.ts` 检查 `app.css` 等功能样式保持零硬编码颜色字面量；
+- **深色应用壳**：「黑曜石暗色」在书架、阅读记忆和设置使用石墨表面、暖铜强调和不透明导航；导航尺寸和阅读正文配色不随应用壳色板改变。
 - **应用壳与阅读外围 UI**：`reader/app/src/styles/app.css` 及对应组件 scoped `<style>`；
 - **书内正文排版**：`reader/app/src/styles/book-reader.css`（及静态模板回退 `reader/atha-reader.css`）；
 - **交互原语**：统一使用 `bits-ui@2.22.0`（Dialog / AlertDialog / Popover / Select / Slider / Switch）与 `@floating-ui/dom@1.8.0`、按需加载 Tiptap 与 CodeMirror 6，不引入 Tailwind CSS。
