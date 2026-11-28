@@ -281,6 +281,9 @@
       window.addEventListener("pointerdown", onOutsideBody, true);
       window.addEventListener("focusin", onOutsideBody, true);
     }
+    const selectionFrame = !android ? frameEl : null;
+    selectionFrame?.addEventListener("pointerdown", handleDesktopSelectionPress, true);
+    selectionFrame?.addEventListener("contextmenu", handleReaderContextMenu);
     window.addEventListener("pagehide", onPageHide);
 
     void (async () => {
@@ -312,6 +315,8 @@
       window.removeEventListener("resize", onResize);
       window.removeEventListener("pointerdown", onOutsideBody, true);
       window.removeEventListener("focusin", onOutsideBody, true);
+      selectionFrame?.removeEventListener("pointerdown", handleDesktopSelectionPress, true);
+      selectionFrame?.removeEventListener("contextmenu", handleReaderContextMenu);
       setNativeSelectionSuppressed(false);
       window.removeEventListener("pagehide", onPageHide);
     };
@@ -328,6 +333,22 @@
     const h = Math.floor(mins / 60);
     const m = mins % 60;
     return m ? `${h}时${m}分` : `${h}时`;
+  }
+
+  function handleDesktopSelectionPress(event: PointerEvent) {
+    if (!event.isPrimary || event.pointerType !== "mouse") return;
+    if (event.button === 2) {
+      // Keep the current selection; a secondary press must not make a new one.
+      event.preventDefault();
+    } else if (event.button === 0) {
+      engine.dismissStoredHighlightOutside(event.clientX, event.clientY);
+    }
+  }
+
+  function handleReaderContextMenu(event: MouseEvent) {
+    if (event instanceof PointerEvent && event.pointerType && event.pointerType !== "mouse") return;
+    event.preventDefault();
+    engine.openSelectionActionsAt(event.clientX, event.clientY);
   }
 
   async function handleLookupSelection() {

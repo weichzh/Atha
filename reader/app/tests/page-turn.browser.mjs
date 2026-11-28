@@ -337,7 +337,82 @@ async function verifyOddLongSpread(browser, base) {
   }
 }
 
+async function verifyDesktopSelection(browser, base) {
+  const { page, errors } = await prepare(browser, base, {
+    viewport: { width: 1500, height: 900 }, inspectClones: true, paragraphs: 93,
+  });
+  try {
+    await open(page, base);
+    const pill = page.locator(".selection-capsule");
+    const { line, blank } = await page.locator(".reader-content-host").evaluate(host => {
+      const book = host.shadowRoot.querySelector(".book");
+      const frame = host.closest(".reader-frame").getBoundingClientRect();
+      const paper = host.getBoundingClientRect();
+      const range = document.createRange();
+      for (const p of book.querySelectorAll("p")) {
+        const node = p.firstChild;
+        range.setStart(node, 2);
+        range.setEnd(node, 14);
+        const rect = range.getBoundingClientRect();
+        if (rect.left > frame.left + frame.width * 0.35 && rect.right < frame.left + frame.width * 0.65 &&
+          rect.top >= paper.top && rect.bottom <= paper.bottom && rect.width > 10) {
+          return { line: rect.toJSON(), blank: { x: frame.left + frame.width / 2, y: (frame.top + paper.top) / 2 } };
+        }
+      }
+      throw new Error("No text in the center click zone");
+    });
+    const x = line.left + line.width / 2;
+    const y = line.top + line.height / 2;
+    await page.evaluate(() => {
+      window.readerContextMenus = [];
+      window.addEventListener("contextmenu", event => window.readerContextMenus.push(event.defaultPrevented));
+    });
+
+    await page.mouse.click(blank.x, blank.y);
+    await page.locator(".reader-controls").waitFor();
+    assert.equal(await pill.count(), 0, "plain click must not open a selection toolbar");
+    await setToolbar(page, false);
+
+    await page.mouse.click(x, y, { button: "right" });
+    assert.equal(await pill.count(), 0, "right clicking unselected text must not create a selection");
+    const selectText = async () => {
+      await page.mouse.move(line.left + 1, y);
+      await page.mouse.down();
+      await page.mouse.move(line.right - 1, y, { steps: 8 });
+      await page.mouse.up();
+      await pill.getByRole("button", { name: "复制" }).waitFor();
+    };
+    await selectText();
+    await page.mouse.click(blank.x, blank.y);
+    await pill.waitFor({ state: "hidden" });
+    await selectText();
+    await page.mouse.click(x, y, { button: "right" });
+    await pill.getByRole("button", { name: "标注" }).click();
+    await page.getByText("已高亮原文", { exact: true }).waitFor();
+    await pill.waitFor({ state: "hidden" });
+
+    await page.mouse.click(x, y);
+    await pill.getByRole("button", { name: "删除" }).waitFor();
+    await page.mouse.click(blank.x, blank.y);
+    await pill.waitFor({ state: "hidden" });
+    await page.mouse.click(blank.x, blank.y, { button: "right" });
+    await page.waitForFunction(() => window.readerContextMenus.length === 3);
+    assert.deepEqual(await page.evaluate(() => window.readerContextMenus), [true, true, true],
+      "right clicks do not open WebView menus");
+    await pill.waitFor({ state: "hidden" });
+    assert.equal(await position(page), 1);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
 async function verifyTurns(browser, base) {
+  if (process.argv.includes("--selection-only")) {
+    await verifyDesktopSelection(browser, base);
+    console.log("Desktop selection and context menu passed.");
+    return;
+  }
   await verifyFacingPages(browser, base);
   if (process.argv.includes("--spread-only")) {
     console.log("Facing pages: curl, return, cancellation, resize and reduced motion passed.");

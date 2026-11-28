@@ -50,7 +50,8 @@ function scrollSwipeDirection(startY, endY, atStart, atEnd) {
 /**
  * @typedef {(phase: "move" | "end" | "cancel", deltaY: number) => void} VerticalSwipe
  * @param {{reader: any, content: any, navigation: any, pagination: any,
- *   onCenter: () => void, beginVerticalSwipe?: () => VerticalSwipe | undefined,
+ *   onCenter: (point: {clientX: number, clientY: number}, contentAction: boolean) => void,
+ *   beginVerticalSwipe?: () => VerticalSwipe | undefined,
  *   assert: (condition: boolean, code: string) => void, fail: (code: string) => void}} options
  */
 export function createInteraction({ reader, content, navigation, pagination, onCenter, beginVerticalSwipe, assert, fail }) {
@@ -348,6 +349,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
           : null,
       media,
       table,
+      contentAction: Boolean(media || structured || matchingPath(event, "svg")),
       overflow,
       dragEnabled: (event.pointerType || "touch") === "touch" || Boolean(media || structured),
       rect,
@@ -445,7 +447,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
       cancelVerticalSwipe(start);
       const deltaY = event.clientY - start.y;
       if (start.type !== "touch" && Math.hypot(event.clientX - start.x, deltaY) <= CLICK_DRIFT) {
-        onCenter();
+        onCenter(event, start.contentAction);
       }
       return;
     }
@@ -484,7 +486,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     } else if (ratio > 0.65) {
       suppressCompatibilityClick(event);
       run(1, kind);
-    } else if (!start.media && !start.table) onCenter();
+    } else if (!start.media && !start.table) onCenter(event, start.contentAction);
   }
 
   function onCompatibilityEventCapture(event) {
@@ -561,7 +563,7 @@ export function createInteraction({ reader, content, navigation, pagination, onC
     else if (
       performance.now() - start.startedAt < TOUCH_HOLD_MS &&
       Math.hypot(point.clientX - start.x, point.clientY - start.y) <= CLICK_DRIFT
-    ) onCenter();
+    ) onCenter(point, Boolean(matchingPath(event, "img[role='button'], table, pre, svg")));
   }
 
   function onTouchMove(event) {
