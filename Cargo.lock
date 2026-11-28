@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "atha-backend"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "boko",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "atha-reader-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "atha-backend",
  "atha-reader-host",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "atha-reader-host"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "atha-backend",
  "tao 0.36.0",
