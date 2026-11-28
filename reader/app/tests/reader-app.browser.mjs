@@ -852,6 +852,36 @@ async function run() {
     await page.waitForSelector(".book-card");
     await page.waitForTimeout(450);
 
+    const coverProgress = page.locator(".book-grid .progress-fill").first();
+    const progressMotion = await coverProgress.evaluate(async (fill) => {
+      const track = fill.parentElement;
+      const property = getComputedStyle(fill).transitionProperty;
+      const original = fill.style.getPropertyValue("--progress-percent");
+      const bar = track.getBoundingClientRect();
+      const fraction = () => (fill.getBoundingClientRect().right - bar.left) / bar.width;
+      const start = fraction();
+      const layoutWidth = fill.offsetWidth;
+
+      fill.style.setProperty("--progress-percent", "100%");
+      getComputedStyle(fill).transform;
+      await Promise.all(fill.getAnimations().map(animation => animation.finished));
+      const complete = fraction();
+      const trackUnchanged = track.getBoundingClientRect().width === bar.width &&
+        fill.offsetWidth === layoutWidth;
+
+      fill.style.setProperty("--progress-percent", original);
+      getComputedStyle(fill).transform;
+      await Promise.all(fill.getAnimations().map(animation => animation.finished));
+      return { property, expected: Number.parseFloat(original) / 100, start, complete, trackUnchanged };
+    });
+    assert.equal(progressMotion.property, "transform");
+    assert.ok(Math.abs(progressMotion.start - progressMotion.expected) < 0.002);
+    assert.ok(Math.abs(progressMotion.complete - 1) < 0.002);
+    assert.equal(progressMotion.trackUnchanged, true);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await coverProgress.evaluate(fill => getComputedStyle(fill).transitionDuration), "0s");
+    await page.emulateMedia({ reducedMotion: null });
+
     await assertNoHorizontalOverflow(page, "library-light-1440");
     await assertBorderless(page, [
       ".nav-shell",

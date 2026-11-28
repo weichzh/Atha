@@ -62,7 +62,7 @@
       aria-label={percent && percent > 0 ? `阅读进度 ${percent}%` : undefined}
     >
       {#if percent !== null && percent > 0}
-        <div class="progress-fill" style:width={`${Math.min(100, Math.max(4, percent))}%`}></div>
+        <div class="progress-fill" style:--progress-percent={`${Math.min(100, Math.max(4, percent))}%`}></div>
       {/if}
     </div>
   {/if}
@@ -198,9 +198,14 @@
   }
 
   .progress-fill {
+    width: 100%;
     height: 100%;
     border-radius: 999px;
     background: var(--accent);
-    transition: width 260ms var(--ease-smooth);
+    transform: translateX(calc(var(--progress-percent) - 100%));
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .progress-fill { transition: transform 260ms var(--ease-smooth); }
   }
 </style>
