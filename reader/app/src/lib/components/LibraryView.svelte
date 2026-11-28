@@ -3,7 +3,6 @@
   import {
     Check,
     CheckSquare,
-    ChevronDown,
     Filter,
     Heart,
     Image,
@@ -16,7 +15,7 @@
     Trash2,
     X,
   } from "@lucide/svelte";
-  import { Dialog, Popover, Select, Switch } from "bits-ui";
+  import { Dialog, Popover, Switch } from "bits-ui";
   import { onMount, tick } from "svelte";
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -97,7 +96,7 @@
   let sort = $state<ShelfSort>("title");
   let layout = $state<ShelfLayout>("grid");
   let filterPopoverOpen = $state(false);
-  let sortPopoverOpen = $state(false);
+  let searchInput = $state<HTMLInputElement>();
   let coverRevision = $state<Record<string, number>>({});
   let statusMessage = $state<string | null>(null);
 
@@ -146,9 +145,6 @@
   const favoriteLabel = $derived(selectedBooks.every((book) => book.favorite) ? "取消收藏" : "收藏");
   const facetSummary = $derived(shelfFacetOptions(entries, searchQuery, filters));
   const activeFilterCount = $derived(filterCount(filters));
-  const currentSortLabel = $derived(
-    shelfSorts.find(([value]) => value === sort)?.[1] ?? "书名 A–Z",
-  );
 
   let statusTimer: ReturnType<typeof setTimeout> | null = null;
   function notify(msg: string) {
@@ -291,15 +287,21 @@
         recentDrawerOpen = false;
         return true;
       }
-      if (!selecting) return false;
       if (batchBusy) return true;
-      if (confirmState.open || editDialogOpen || filterPopoverOpen || sortPopoverOpen) {
+      if (confirmState.open || editDialogOpen || filterPopoverOpen) {
         if (source === "escape") return false; // Let Bits UI dismiss its own top layer.
         if (confirmState.open) confirmState.open = false;
         else if (editDialogOpen) editDialogOpen = false;
-        else if (filterPopoverOpen) filterPopoverOpen = false;
-        else sortPopoverOpen = false;
+        else filterPopoverOpen = false;
         return true;
+      }
+      if (!selecting) {
+        if (source === "back" && (searchQuery || document.activeElement === searchInput)) {
+          searchQuery = "";
+          searchInput?.blur();
+          return true;
+        }
+        return false;
       }
       exitSelection(true);
       return true;
@@ -644,6 +646,10 @@
   <header class="shelf-header">
     <div class="header-titles">
       <h1>书架</h1>
+      <button type="button" class="accent-btn import-btn" onclick={handleImport}>
+        <Plus size={16} />
+        <span>导入</span>
+      </button>
     </div>
 
     <div class="find-bar">
@@ -652,8 +658,9 @@
         <input
           type="search"
           aria-label="搜索书名、作者、标签或系列"
-          placeholder="搜索书名、作者、标签或系列…"
+          placeholder="搜索藏书…"
           bind:value={searchQuery}
+          bind:this={searchInput}
         />
         {#if searchQuery}
           <button
@@ -669,9 +676,9 @@
 
       <div class="bar-controls">
         <Popover.Root bind:open={filterPopoverOpen}>
-          <Popover.Trigger class="pill-btn {activeFilterCount > 0 ? 'active-accent' : ''}">
+          <Popover.Trigger class="pill-btn filter-trigger {activeFilterCount > 0 ? 'active-accent' : ''}" aria-label="筛选藏书">
             <Filter size={15} />
-            <span>筛选</span>
+            <span class="filter-label">筛选</span>
             {#if activeFilterCount > 0}
               <span class="count-badge tabular">{activeFilterCount}</span>
             {/if}
@@ -731,63 +738,19 @@
           </Popover.Portal>
         </Popover.Root>
 
-        <Select.Root
-          type="single"
-          bind:open={sortPopoverOpen}
-          value={sort}
-          onValueChange={(value) => {
-            if (value) sort = value as ShelfSort;
-          }}
-          items={shelfSorts.map(([value, label]) => ({ value, label }))}
+        <button
+          type="button"
+          class="icon-btn shelf-layout-toggle"
+          aria-label={layout === "grid" ? "清单列表" : "封面网格"}
+          title={layout === "grid" ? "切换清单列表" : "切换封面网格"}
+          onclick={() => (layout = layout === "grid" ? "list" : "grid")}
         >
-          <Select.Trigger class="pill-btn sort-trigger" aria-label="排序方式">
-            <span>{currentSortLabel}</span>
-            <ChevronDown size={14} />
-          </Select.Trigger>
-          <Select.Portal>
-            <Select.Content sideOffset={8} align="end" class="glass-popover select-popover">
-              <Select.Viewport>
-                {#each shelfSorts as [value, label] (value)}
-                  <Select.Item {value} {label} class="select-item">
-                    {#snippet children({ selected })}
-                      <span>{label}</span>
-                      {#if selected}
-                        <Check size={14} />
-                      {/if}
-                    {/snippet}
-                  </Select.Item>
-                {/each}
-              </Select.Viewport>
-            </Select.Content>
-          </Select.Portal>
-        </Select.Root>
-
-        <div class="layout-segmented" role="group" aria-label="视图布局">
-          <button
-            type="button"
-            class="seg-btn"
-            class:active={layout === "grid"}
-            aria-label="封面网格"
-            aria-pressed={layout === "grid"}
-            onclick={() => (layout = "grid")}
-          >
-            <LayoutGrid size={15} />
-          </button>
-          <button
-            type="button"
-            class="seg-btn"
-            class:active={layout === "list"}
-            aria-label="清单列表"
-            aria-pressed={layout === "list"}
-            onclick={() => (layout = "list")}
-          >
-            <List size={15} />
-          </button>
-        </div>
+          {#if layout === "grid"}<List size={17} />{:else}<LayoutGrid size={17} />{/if}
+        </button>
 
         <button
           type="button"
-          class="pill-btn"
+          class="pill-btn select-trigger"
           class:active-accent={selecting}
           aria-pressed={selecting}
           disabled={loading || batchBusy}
@@ -798,11 +761,24 @@
           <span>{selecting ? "取消选择" : "选择"}</span>
         </button>
 
-        <button type="button" class="accent-btn import-btn" onclick={handleImport}>
-          <Plus size={16} />
-          <span>导入</span>
-        </button>
       </div>
+    </div>
+
+    <div class="sort-strip" role="group" aria-label="书架排序">
+      {#each shelfSorts as [value, label] (value)}
+        <button
+          type="button"
+          class="sort-chip"
+          aria-pressed={sort === value}
+          onclick={() => (sort = value)}
+        >{label}</button>
+      {/each}
+      <button
+        type="button"
+        class="sort-chip favorite-toggle"
+        aria-pressed={filters.favorite}
+        onclick={() => (filters = { ...filters, favorite: !filters.favorite })}
+      ><Heart size={14} /> 收藏</button>
     </div>
   </header>
 
@@ -1126,8 +1102,15 @@
   .shelf-header {
     display: flex;
     flex-direction: column;
-    gap: 22px;
-    margin-bottom: 24px;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .header-titles {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   .header-titles h1 {
@@ -1141,19 +1124,27 @@
 
   .find-bar {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .search-pill {
-    flex: 1 1 280px;
+    flex: 1;
     min-width: 0;
     display: flex;
     align-items: center;
     gap: 10px;
     height: 44px;
-    padding: 0 16px;
+    padding: 0 12px;
+  }
+
+  .search-pill:focus-within {
+    background: var(--bg-well-hover);
+    box-shadow: none;
+  }
+
+  .search-pill input:focus-visible {
+    outline-offset: 2px;
   }
 
   .search-pill :global(.search-icon) {
@@ -1188,10 +1179,50 @@
 
   .bar-controls {
     display: flex;
-    flex-wrap: wrap;
+    flex: none;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
+
+  .bar-controls :global(.filter-trigger),
+  .shelf-layout-toggle,
+  .select-trigger,
+  .import-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .shelf-layout-toggle {
+    background: var(--bg-well);
+  }
+
+  .sort-strip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 2px 2px 4px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .sort-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    min-height: 44px;
+    padding: 0 11px;
+    border-radius: var(--radius-pill);
+    color: var(--ink-secondary);
+    font-size: 14px;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+
+  .sort-chip:hover { background: var(--bg-well); }
+  .sort-chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
   :global(.pill-btn.active-accent) {
     background: var(--accent-soft);
@@ -1212,30 +1243,6 @@
     font-weight: 600;
   }
 
-  .layout-segmented {
-    display: inline-flex;
-    padding: 3px;
-    border-radius: var(--radius-pill);
-    background: var(--bg-well);
-    gap: 2px;
-  }
-
-  .seg-btn {
-    width: 34px;
-    height: 30px;
-    border-radius: var(--radius-pill);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--ink-secondary);
-    transition: background-color 180ms var(--ease-smooth), color 180ms var(--ease-smooth);
-  }
-
-  .seg-btn.active {
-    background: var(--bg-pill-active);
-    color: var(--ink-primary);
-    box-shadow: var(--shadow-xs);
-  }
 
   .active-conditions {
     display: flex;
@@ -1693,28 +1700,6 @@
     justify-content: flex-end;
   }
 
-  :global(.select-popover) {
-    z-index: 65;
-    min-width: 170px;
-    padding: 6px;
-    border-radius: var(--radius-md);
-  }
-
-  :global(.select-item) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 9px 12px;
-    border-radius: var(--radius-xs);
-    font-size: 13.5px;
-    cursor: pointer;
-    color: var(--ink-primary);
-  }
-
-  :global(.select-item[data-highlighted]) {
-    background: var(--bg-well);
-  }
-
   .edit-dialog {
     left: 50%;
     top: 50%;
@@ -1790,6 +1775,31 @@
     .header-titles h1 {
       font-size: 26px;
     }
+
+    .bar-controls :global(.filter-trigger) {
+      position: relative;
+      padding: 0 8px;
+    }
+
+    .filter-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+
+    .bar-controls .count-badge {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      min-width: 14px;
+      height: 14px;
+      padding: 0 2px;
+      font-size: 9px;
+    }
+
+    .select-trigger { padding: 0 10px; }
 
     .book-grid {
       grid-template-columns: repeat(var(--shelf-mobile-cols), minmax(0, 1fr));
