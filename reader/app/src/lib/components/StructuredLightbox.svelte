@@ -6,10 +6,11 @@
 
   interface Props {
     payload: LightboxPayload | null;
+    colorScheme: "light" | "dark";
     onClose: () => void;
   }
 
-  let { payload, onClose }: Props = $props();
+  let { payload, colorScheme, onClose }: Props = $props();
 </script>
 
 <svelte:window onkeydown={(e) => payload && e.key === "Escape" && onClose()} />
@@ -35,7 +36,7 @@
           <X size={18} />
         </button>
       </div>
-      <div class="lightbox-stage">
+      <div class="lightbox-stage" style:color-scheme={colorScheme}>
         {@html payload.html}
       </div>
     </div>

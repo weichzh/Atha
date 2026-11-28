@@ -124,7 +124,15 @@ export function createReaderPreferences({
   frame,
   onSync,
 }: {
-  content: { book: HTMLElement; setStyles: (styles: { sourceStyles: boolean; userStylesEnabled: boolean; userStylesheet: string }) => void };
+  content: {
+    book: HTMLElement;
+    setStyles: (styles: {
+      sourceStyles: boolean;
+      userStylesEnabled: boolean;
+      userStylesheet: string;
+      colorScheme: "light" | "dark" | null;
+    }) => void;
+  };
   reader: HTMLElement;
   host: HTMLElement;
   frame: HTMLElement;
@@ -195,6 +203,7 @@ export function createReaderPreferences({
       sourceStyles: effective.sourceStyles,
       userStylesEnabled: effective.userStylesEnabled,
       userStylesheet: combinedUserCss(effective.styleModules),
+      colorScheme: effective.theme === "system" ? null : resolvedTheme === "dark" ? "dark" : "light",
     });
 
     const snap = snapshot();
