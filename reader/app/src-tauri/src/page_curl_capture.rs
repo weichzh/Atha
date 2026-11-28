@@ -131,6 +131,14 @@ pub(crate) fn install(window: &WebviewWindow) -> tauri::Result<()> {
         let Some(container) = view.parent().and_downcast::<gtk::Box>() else {
             return;
         };
+        let Some(toplevel) = container.parent().and_downcast::<gtk::Window>() else {
+            return;
+        };
+        // This window has only the reader WebView. If GTK supplies any other
+        // content (for example a native menu), leave the layout untouched.
+        if container.children().len() != 1 {
+            return;
+        }
         let overlay = gtk::Overlay::new();
         let widget = gtk::DrawingArea::new();
         widget.set_halign(gtk::Align::Fill);
@@ -163,13 +171,19 @@ pub(crate) fn install(window: &WebviewWindow) -> tauri::Result<()> {
             }
             glib::Propagation::Proceed
         });
-        // Set up once, before the reader can ask for pixels.
+        // Replace, rather than nest in, the content box. Tauri's GTK mouse
+        // and touch handlers expect the WebView's grandparent to be a Window.
+        let had_focus = view.has_focus();
         container.remove(&view);
+        toplevel.remove(&container);
         overlay.add(&view);
-        container.pack_start(&overlay, true, true, 0);
+        toplevel.add(&overlay);
         view.show();
         overlay.show();
         widget.hide();
+        if had_focus {
+            view.grab_focus();
+        }
         let layer = Layer { widget, turn };
         let on_navigation = layer.clone();
         view.connect_load_changed(move |_, event| {
